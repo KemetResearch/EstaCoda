@@ -39,7 +39,9 @@ Every channel object supports:
         "minInitialChars": 24,
         "cursor": "▌",
         "maxFloodStrikes": 2,
-        "cleanupFailedAttempts": true
+        "cleanupFailedAttempts": true,
+        "transport": "edit",
+        "freshFinalAfterSeconds": 0
       },
       "busyPolicy": "queue",
       "queueDepth": 5
@@ -78,6 +80,8 @@ Tool boundaries seal the current streamed Telegram message. Later provider token
 | `channels.telegram.streaming.cursor` | `"▌"` | Temporary cursor appended to live partial messages and removed on finalize, abort, or segment seal. |
 | `channels.telegram.streaming.maxFloodStrikes` | `2` | Active-handle Telegram flood-control degradation limit. Reaching the limit forces final fallback for that turn. |
 | `channels.telegram.streaming.cleanupFailedAttempts` | `true` | Whether failed or fallback provider attempts delete or neutralize provisional streamed messages before final fallback. |
+| `channels.telegram.streaming.transport` | `"edit"` | Streaming transport. `"edit"` uses ordinary message edits. `"draft"` uses Telegram draft previews in DMs only when supported by the Bot API. `"auto"` selects draft previews for DMs when supported and edit streaming otherwise. |
+| `channels.telegram.streaming.freshFinalAfterSeconds` | `0` | Fresh-final delay in seconds. `0` disables fresh-final delivery. A positive value sends the completed answer as a fresh message after a preview has been visible that many seconds, then deletes the preview best-effort. |
 
 Operational constraints:
 
@@ -86,6 +90,7 @@ Operational constraints:
 - Streaming requires the gateway turn's abort signal.
 - Partial stream edits use lightweight HTML escaping, not final Telegram formatting.
 - Final delivery still uses normal authoritative Telegram formatting and chunking.
+- Draft previews and rich message delivery depend on Telegram and Bot API support. Rich delivery is opportunistic and falls back to normal Telegram formatting when unsupported, too long, or ambiguous.
 - Telegram flood control or oversized escaped partial payloads degrade only the active stream handle and require final fallback. Future turns are not globally disabled.
 
 Failure and rollback behavior:

@@ -469,7 +469,9 @@ Channel adapter configuration. See [Channel Configuration](../user-guide/channel
         "minInitialChars": 24,
         "cursor": "▌",
         "maxFloodStrikes": 2,
-        "cleanupFailedAttempts": true
+        "cleanupFailedAttempts": true,
+        "transport": "edit",
+        "freshFinalAfterSeconds": 0
       },
       "busyPolicy": "reject",
       "queueDepth": 3
@@ -482,16 +484,18 @@ Guided Telegram setup stores the bot token in the selected profile `.env` under 
 
 Telegram streaming is configured under `channels.telegram.streaming`. It is disabled by default and affects Telegram delivery only. It does not change session state, memory, approvals, tool execution, artifacts, or final `response.text`.
 
-| Setting | Default | Notes |
-|---|---:|---|
-| `channels.telegram.streaming.enabled` | `false` | Opt-in gate for Telegram streaming. |
-| `channels.telegram.streaming.editIntervalMs` | `750` | Coalescing interval for Telegram partial edits. |
-| `channels.telegram.streaming.minInitialChars` | `24` | Visible filtered character threshold before first partial send. |
-| `channels.telegram.streaming.cursor` | `"▌"` | Temporary live cursor appended to partial messages. |
-| `channels.telegram.streaming.maxFloodStrikes` | `2` | Active-turn flood-control degradation limit. |
-| `channels.telegram.streaming.cleanupFailedAttempts` | `true` | Delete or neutralize provisional streamed messages after provider failure/fallback. |
+| Setting | Type / allowed values | Default | Notes |
+|---|---|---:|---|
+| `channels.telegram.streaming.enabled` | `boolean` | `false` | Opt-in gate for Telegram streaming. |
+| `channels.telegram.streaming.editIntervalMs` | non-negative integer | `750` | Coalescing interval for Telegram partial edits. |
+| `channels.telegram.streaming.minInitialChars` | non-negative integer | `24` | Visible filtered character threshold before first partial send. |
+| `channels.telegram.streaming.cursor` | `string` | `"▌"` | Temporary live cursor appended to partial messages. |
+| `channels.telegram.streaming.maxFloodStrikes` | non-negative integer | `2` | Active-turn flood-control degradation limit. |
+| `channels.telegram.streaming.cleanupFailedAttempts` | `boolean` | `true` | Delete or neutralize provisional streamed messages after provider failure/fallback. |
+| `channels.telegram.streaming.transport` | `"auto"`, `"edit"`, or `"draft"` | `"edit"` | `"edit"` uses ordinary message edits. `"draft"` uses Telegram draft previews in DMs only when supported by the Bot API. `"auto"` selects draft previews for DMs when supported and edit streaming otherwise. |
+| `channels.telegram.streaming.freshFinalAfterSeconds` | non-negative integer | `0` | `0` disables fresh-final delivery. A positive value sends the completed answer as a fresh message after a preview has been visible that many seconds, then deletes the preview best-effort. |
 
-`DeliveryRouter` disables Telegram streaming in v1. Partial streaming uses lightweight HTML escaping; final delivery uses normal Telegram formatting. Flood control, oversized partial payloads, approval boundaries, artifact boundaries, or final edit failures force normal final text fallback for the active turn only.
+`DeliveryRouter` disables Telegram streaming in v1. Partial streaming uses lightweight HTML escaping; final delivery uses normal Telegram formatting. Draft previews and rich message delivery depend on Telegram and Bot API support. Rich message delivery is opportunistic and falls back to normal Telegram formatting when unsupported, too long, or ambiguous. Flood control, oversized partial payloads, approval boundaries, artifact boundaries, or final edit failures force normal final text fallback for the active turn only. Streaming remains delivery UX only; final `response.text` remains authoritative.
 
 ## Secret handling
 

@@ -124,7 +124,9 @@ streamed text -> tool progress -> streamed continuation -> final edit
         "minInitialChars": 24,
         "cursor": "▌",
         "maxFloodStrikes": 2,
-        "cleanupFailedAttempts": true
+        "cleanupFailedAttempts": true,
+        "transport": "edit",
+        "freshFinalAfterSeconds": 0
       }
     }
   }
@@ -139,6 +141,15 @@ streamed text -> tool progress -> streamed continuation -> final edit
 | `channels.telegram.streaming.cursor` | `"▌"` | مؤشر مؤقت يُلحق بالرسائل الجزئية أثناء البث. |
 | `channels.telegram.streaming.maxFloodStrikes` | `2` | حد تدهور flood-control لمقبض البث النشط. |
 | `channels.telegram.streaming.cleanupFailedAttempts` | `true` | يحذف أو يحيد الرسائل المبثوثة المؤقتة بعد فشل المزود أو fallback. |
+| `channels.telegram.streaming.transport` | `"edit"` | وضع التوصيل. يستخدم `"edit"` تعديلات الرسائل العادية. يستخدم `"draft"` معاينات مسودات Telegram في الرسائل المباشرة فقط عندما يدعمها Bot API. يختار `"auto"` معاينات المسودات للرسائل المباشرة عند دعمها، وإلا يستخدم edit streaming. |
+| `channels.telegram.streaming.freshFinalAfterSeconds` | `0` | القيمة `0` تعطل fresh-final delivery. القيمة الموجبة ترسل الرد المكتمل كرسالة جديدة بعد ظهور المعاينة لذلك العدد من الثواني، ثم تحذف المعاينة best-effort. |
+
+أوضاع التوصيل:
+
+- `edit` هو الافتراضي. يبث عبر إرسال رسالة Telegram ثم تعديلها عند وصول نص إضافي.
+- `draft` يستخدم معاينات مسودات Telegram للرسائل المباشرة فقط عندما يدعم Bot API عمليات المسودات. إذا لم يتوفر دعم المسودات، يرجع التوصيل إلى edit streaming.
+- `auto` يحاول استخدام معاينات المسودات للرسائل المباشرة عند دعمها ويستخدم edit streaming في غير ذلك.
+- rich message delivery انتهازي. يعتمد على دعم Telegram وBot API ويرجع إلى تنسيق Telegram العادي عندما يكون غير مدعوم، أو طويلًا جدًا، أو ملتبسًا.
 
 الحدود التشغيلية:
 
@@ -146,12 +157,12 @@ streamed text -> tool progress -> streamed continuation -> final edit
 - `DeliveryRouter` يعطل البث في v1.
 - يتطلب البث إشارة إلغاء دور من البوابة.
 - تستخدم تعديلات البث الجزئية HTML escaping خفيفًا، وليس تنسيق Telegram النهائي.
-- التوصيل النهائي ما زال يستخدم تنسيق Telegram وتقسيمه العاديين.
+- التوصيل النهائي ما زال يستخدم تنسيق Telegram وتقسيمه العاديين إلا إذا نجح rich delivery الانتهازي.
 - flood control أو الحمولات الجزئية الكبيرة تفرض fallback للنص النهائي لذلك الدور فقط. لا تُعطل أدوار بث Telegram المستقبلية عالميًا.
 
 أنماط الفشل والرجوع:
 
-- تنظيف provider fallback أو provider failure يحذف الرسالة المبثوثة المؤقتة الحالية عندما يمكن ذلك، أو يحيدها إذا فشل الحذف.
+- تنظيف provider fallback أو provider failure يحذف الرسالة المبثوثة المؤقتة الحالية عندما يمكن ذلك، أو يحيدها إذا فشل الحذف. حذف المعاينة بعد fresh-final delivery هو أيضًا best-effort.
 - حدود الموافقة والمنتجات تفرض fallback للنص النهائي العادي لأن ترتيب التوصيل يصبح ملتبسًا.
 - الإلغاء يوقف مقبض البث ويزيل المؤشر عندما يمكن ذلك. فشل التنظيف لا يغير نتيجة الإلغاء.
 - لا يُتخطى النص النهائي المكرر إلا عندما ينجح التوصيل النهائي عبر البث ولا توجد حدود موافقة أو منتجات.

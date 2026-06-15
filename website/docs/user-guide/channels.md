@@ -124,7 +124,9 @@ Configure it under `channels.telegram.streaming`:
         "minInitialChars": 24,
         "cursor": "▌",
         "maxFloodStrikes": 2,
-        "cleanupFailedAttempts": true
+        "cleanupFailedAttempts": true,
+        "transport": "edit",
+        "freshFinalAfterSeconds": 0
       }
     }
   }
@@ -139,6 +141,15 @@ Configure it under `channels.telegram.streaming`:
 | `channels.telegram.streaming.cursor` | `"▌"` | Temporary cursor appended to live partial messages. |
 | `channels.telegram.streaming.maxFloodStrikes` | `2` | Active-handle Telegram flood-control degradation limit. |
 | `channels.telegram.streaming.cleanupFailedAttempts` | `true` | Deletes or neutralizes provisional streamed messages after failed or fallback provider attempts. |
+| `channels.telegram.streaming.transport` | `"edit"` | Delivery mode. `"edit"` uses ordinary message edits. `"draft"` uses Telegram draft previews in DMs only when supported by the Bot API. `"auto"` selects draft previews for DMs when supported and edit streaming otherwise. |
+| `channels.telegram.streaming.freshFinalAfterSeconds` | `0` | `0` disables fresh-final delivery. A positive value sends the completed answer as a fresh message after a preview has been visible that many seconds, then deletes the preview best-effort. |
+
+Delivery modes:
+
+- `edit` is the default. It streams by sending a Telegram message and editing it as more text arrives.
+- `draft` uses Telegram draft previews for DMs only when the Bot API supports draft operations. If draft support is unavailable, delivery falls back to edit streaming.
+- `auto` attempts draft previews for DMs when supported and uses edit streaming elsewhere.
+- Rich message delivery is opportunistic. It depends on Telegram and Bot API support and falls back to normal Telegram formatting when unsupported, too long, or ambiguous.
 
 Operational boundaries:
 
@@ -146,12 +157,12 @@ Operational boundaries:
 - `DeliveryRouter` disables streaming in v1.
 - Streaming requires the gateway turn's abort signal.
 - Partial stream edits use lightweight HTML escaping, not final Telegram formatting.
-- Final delivery still uses normal Telegram formatting and chunking.
+- Final delivery still uses normal Telegram formatting and chunking unless opportunistic rich delivery succeeds.
 - Flood control or oversized partial payloads force fallback for the active turn only. Future Telegram streaming turns are not globally disabled.
 
 Failure behavior and rollback:
 
-- Provider fallback or failure cleanup deletes the current provisional streamed message when possible, or neutralizes it if deletion fails.
+- Provider fallback or failure cleanup deletes the current provisional streamed message when possible, or neutralizes it if deletion fails. Preview deletion after fresh-final delivery is also best-effort.
 - Approval and artifact boundaries force normal final text fallback because the delivery order is ambiguous.
 - Cancellation aborts the stream handle and removes the cursor when possible. Cleanup failure does not change the cancellation outcome.
 - Duplicate final text is skipped only when final stream delivery succeeds and no approval or artifact boundary exists.
