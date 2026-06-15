@@ -486,7 +486,7 @@ describe("loadRuntimeConfig auxiliaryModels", () => {
     await mkdir(dirname(profileConfigPath(workspace)), { recursive: true });
     const configPath = profileConfigPath(workspace);
     await writeFile(configPath, JSON.stringify({
-      model: { provider: "local", id: "hermes-local" },
+      model: { provider: "local", id: "local-test-model" },
       auxiliaryModels: {
         assessor: { provider: "auto", enabled: true }
       }
@@ -513,7 +513,7 @@ describe("loadRuntimeConfig auxiliaryModels", () => {
       contextWindowTokens: 128_000,
       enabled: true
     });
-    expect(saved.model).toEqual({ provider: "local", id: "hermes-local" });
+    expect(saved.model).toEqual({ provider: "local", id: "local-test-model" });
   });
 
   it("setupAuxiliaryModelConfig preserves unrelated auxiliary slots", async () => {
@@ -523,7 +523,7 @@ describe("loadRuntimeConfig auxiliaryModels", () => {
     await writeFile(configPath, JSON.stringify({
       model: {
         provider: "local",
-        id: "hermes-local",
+        id: "local-test-model",
         fallbacks: [{ provider: "openai", id: "gpt-5.5" }]
       },
       auxiliaryModels: {
@@ -549,7 +549,7 @@ describe("loadRuntimeConfig auxiliaryModels", () => {
     expect(saved.auxiliaryModels.memory_compaction).toEqual({ provider: "openai", id: "gpt-5.5", enabled: true });
     expect(saved.model).toEqual({
       provider: "local",
-      id: "hermes-local",
+      id: "local-test-model",
       fallbacks: [{ provider: "openai", id: "gpt-5.5" }]
     });
     expect(saved.browser).toEqual({ backend: "local-cdp" });
