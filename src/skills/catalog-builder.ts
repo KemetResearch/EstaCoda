@@ -95,7 +95,7 @@ export async function buildSkillsCatalog(
   options: BuildSkillsCatalogOptions = {}
 ): Promise<BuildSkillsCatalogResult> {
   const repoRoot = path.resolve(options.repoRoot ?? process.cwd());
-  const generatedAt = options.generatedAt ?? new Date().toISOString();
+  const requestedGeneratedAt = options.generatedAt ?? new Date().toISOString();
   const sourcesPath = path.resolve(repoRoot, options.sourcesPath ?? "registries/skills.sources.json");
   const outputDir = path.resolve(repoRoot, options.outputDir ?? "website/static/api");
   const warnings: string[] = [];
@@ -104,16 +104,30 @@ export async function buildSkillsCatalog(
   const skills = await collectSkills({ repoRoot, sources, warnings });
   skills.sort(compareSkills);
 
-  const catalog: SkillsCatalog = {
-    schemaVersion: 1,
-    generatedAt,
-    skills
-  };
-  const meta = buildCatalogMeta(skills, generatedAt);
   const outputPaths = {
     skills: path.join(outputDir, "skills.json"),
     meta: path.join(outputDir, "skills-meta.json")
   };
+  const nextCatalog: SkillsCatalog = {
+    schemaVersion: 1,
+    generatedAt: requestedGeneratedAt,
+    skills
+  };
+  const nextMeta = buildCatalogMeta(skills, requestedGeneratedAt);
+  const generatedAt = options.writeOutput === false
+    ? requestedGeneratedAt
+    : await resolveGeneratedAtForWrite({
+      outputPaths,
+      nextCatalog,
+      nextMeta,
+      fallbackGeneratedAt: requestedGeneratedAt
+    });
+  const catalog: SkillsCatalog = generatedAt === requestedGeneratedAt
+    ? nextCatalog
+    : { ...nextCatalog, generatedAt };
+  const meta = generatedAt === requestedGeneratedAt
+    ? nextMeta
+    : buildCatalogMeta(skills, generatedAt);
 
   if (options.writeOutput !== false) {
     await mkdir(outputDir, { recursive: true });
@@ -122,6 +136,50 @@ export async function buildSkillsCatalog(
   }
 
   return { catalog, meta, warnings, outputPaths };
+}
+
+async function resolveGeneratedAtForWrite(args: {
+  outputPaths: BuildSkillsCatalogResult["outputPaths"];
+  nextCatalog: SkillsCatalog;
+  nextMeta: SkillsCatalogMeta;
+  fallbackGeneratedAt: string;
+}): Promise<string> {
+  const [existingCatalog, existingMeta] = await Promise.all([
+    readExistingJson(args.outputPaths.skills),
+    readExistingJson(args.outputPaths.meta)
+  ]);
+
+  if (
+    isRecord(existingCatalog) &&
+    isRecord(existingMeta) &&
+    typeof existingCatalog.generatedAt === "string" &&
+    semanticJsonEqual(existingCatalog, args.nextCatalog) &&
+    semanticJsonEqual(existingMeta, args.nextMeta)
+  ) {
+    return existingCatalog.generatedAt;
+  }
+
+  return args.fallbackGeneratedAt;
+}
+
+async function readExistingJson(filePath: string): Promise<unknown> {
+  try {
+    return JSON.parse(await readFile(filePath, "utf8"));
+  } catch {
+    return undefined;
+  }
+}
+
+function semanticJsonEqual(a: unknown, b: unknown): boolean {
+  return JSON.stringify(withoutGeneratedAt(a)) === JSON.stringify(withoutGeneratedAt(b));
+}
+
+function withoutGeneratedAt(value: unknown): unknown {
+  if (!isRecord(value)) {
+    return value;
+  }
+  const { generatedAt: _generatedAt, ...rest } = value;
+  return rest;
 }
 
 export function extractJsonFrontmatter(markdown: string, filePath: string): ParsedSkillFile {
