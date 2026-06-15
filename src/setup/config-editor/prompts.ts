@@ -3,7 +3,7 @@ import { promptForApiKeyInput } from "../../cli/secret-prompt.js";
 import type { BrowserBackendKind, BrowserCloudProviderKind } from "../../contracts/browser.js";
 import type { AuxiliaryModelTask, ModelProfile } from "../../contracts/provider.js";
 import type { SecurityApprovalMode } from "../../contracts/security.js";
-import type { ImageGenerationProvider, SttProvider, TtsProvider } from "../../config/runtime-config.js";
+import type { BrowserEngineKind, ImageGenerationProvider, SttProvider, TtsProvider } from "../../config/runtime-config.js";
 import type { ModelFallbackConfig } from "../../config/runtime-config.js";
 import type { ModelCandidate, ProviderCandidate } from "../../providers/provider-model-selection-flow.js";
 import type { SkillAutonomy } from "../../skills/skill-learning.js";
@@ -41,13 +41,17 @@ export type IncompleteTelegramCapabilityAction = "retry" | "skip" | "unchanged";
 
 export type CredentialReuseChoice = "existing" | "new";
 
-export type BrowserModeChoice =
+type BrowserSetupModeChoice =
   | "local-supervised"
   | "existing-cdp"
   | "browserbase"
   | "disabled";
 
-const promptedBrowserModes = new WeakMap<object, BrowserModeChoice>();
+export type BrowserModeChoice =
+  | "recommended"
+  | BrowserSetupModeChoice;
+
+const promptedBrowserModes = new WeakMap<object, BrowserSetupModeChoice>();
 
 export type FallbackRouteChoice =
   | {
@@ -1058,6 +1062,7 @@ export async function promptBrowserCapability(
     readonly launchCommand?: string;
     readonly autoLaunch?: boolean;
     readonly supervised?: boolean;
+    readonly engine?: BrowserEngineKind;
     readonly hybridRouting?: boolean;
     readonly cloudFallback?: boolean;
     readonly cloudSpendApproved?: boolean;
@@ -1073,6 +1078,7 @@ export async function promptBrowserCapability(
   readonly launchCommand?: string;
   readonly autoLaunch: boolean;
   readonly supervised?: boolean;
+  readonly engine?: BrowserEngineKind;
   readonly hybridRouting?: boolean;
   readonly cloudFallback?: boolean;
   readonly cloudSpendApproved?: boolean;
@@ -1081,6 +1087,12 @@ export async function promptBrowserCapability(
     title: setupCopyText(locale, "setupEditor.prompt.browser.mode.title"),
     message: `${setupCopyText(locale, "setupEditor.prompt.browser.mode.body")}\n`,
     choices: [
+      {
+        id: "browser-recommended",
+        label: setupCopyText(locale, "setupEditor.prompt.browser.mode.recommended"),
+        description: setupCopyText(locale, "setupEditor.prompt.browser.mode.recommended.description"),
+        value: "recommended" as const,
+      },
       {
         id: "browser-local-supervised",
         label: setupCopyText(locale, "setupEditor.prompt.browser.mode.localSupervised"),
@@ -1106,8 +1118,20 @@ export async function promptBrowserCapability(
         value: "disabled" as const,
       },
     ],
-    defaultValue: browserModeFromCurrent(current),
+    defaultValue: isRecommendedBrowserConfig(current) ? "recommended" : browserModeFromCurrent(current),
   });
+
+  if (mode === "recommended") {
+    return browserCapabilityWithMode({
+      backend: "local-cdp",
+      autoLaunch: true,
+      supervised: true,
+      engine: "cdp",
+      launchArgs: [],
+      chromeFlags: [],
+      hybridRouting: false,
+    }, "local-supervised");
+  }
 
   if (mode === "disabled") {
     return browserCapabilityWithMode({
@@ -1213,14 +1237,14 @@ export async function promptBrowserCapability(
     launchCommand: current.launchCommand,
     autoLaunch,
     supervised: true,
-  }, mode);
+  }, "local-supervised");
 }
 
-export function promptedBrowserCapabilityMode(values: object): BrowserModeChoice | undefined {
+export function promptedBrowserCapabilityMode(values: object): BrowserSetupModeChoice | undefined {
   return promptedBrowserModes.get(values);
 }
 
-function browserCapabilityWithMode<T extends object>(values: T, mode: BrowserModeChoice): T {
+function browserCapabilityWithMode<T extends object>(values: T, mode: BrowserSetupModeChoice): T {
   promptedBrowserModes.set(values, mode);
   return values;
 }
@@ -1233,13 +1257,33 @@ function browserModeFromCurrent(current: {
   readonly cloudProvider?: BrowserCloudProviderKind;
   readonly autoLaunch?: boolean;
   readonly cdpUrl?: string;
-}): BrowserModeChoice {
+}): BrowserSetupModeChoice {
   if (current.backend === "unconfigured") return "disabled";
   if (current.backend === "browserbase" || current.cloudProvider === "browserbase") return "browserbase";
   if (current.backend === "local-cdp" && current.autoLaunch !== true && current.cdpUrl !== undefined && current.cdpUrl.trim().length > 0) {
     return "existing-cdp";
   }
   return "local-supervised";
+}
+
+function isRecommendedBrowserConfig(current: {
+  readonly backend?: BrowserBackendKind;
+  readonly autoLaunch?: boolean;
+  readonly supervised?: boolean;
+  readonly cdpUrl?: string;
+  readonly launchExecutable?: string;
+  readonly launchArgs?: readonly string[];
+  readonly chromeFlags?: readonly string[];
+  readonly engine?: BrowserEngineKind;
+}): boolean {
+  return current.backend === "local-cdp" &&
+    current.autoLaunch === true &&
+    current.supervised === true &&
+    current.cdpUrl === undefined &&
+    current.launchExecutable === undefined &&
+    (current.launchArgs === undefined || current.launchArgs.length === 0) &&
+    (current.chromeFlags === undefined || current.chromeFlags.length === 0) &&
+    (current.engine === undefined || current.engine === "cdp");
 }
 
 function optionalTrimmedString(value: string): string | undefined {

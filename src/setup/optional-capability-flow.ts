@@ -2,6 +2,7 @@ import type { BrowserBackendKind, BrowserCloudProviderKind } from "../contracts/
 import type { ProviderId } from "../contracts/provider.js";
 import type {
   EstaCodaConfig,
+  BrowserEngineKind,
   ImageGenerationProvider,
   SttProvider,
   TtsProvider,
@@ -143,6 +144,7 @@ export function setupModuleContextFromConfig(
           chromeFlags: stringArrayValue(browser.chromeFlags),
           autoLaunch: booleanValue(browser.autoLaunch),
           supervised: booleanValue(browser.supervised),
+          engine: browserEngineValue(browser.engine),
           hybridRouting: booleanValue(browser.hybridRouting),
           cloudFallback: booleanValue(browser.cloudFallback),
           cloudSpendApproved: booleanValue(browser.cloudSpendApproved),
@@ -625,4 +627,8 @@ function browserBackendValue(value: unknown): BrowserBackendKind | undefined {
 
 function browserCloudProviderValue(value: unknown): BrowserCloudProviderKind | undefined {
   return typeof value === "string" && value.trim().length > 0 ? value as BrowserCloudProviderKind : undefined;
+}
+
+function browserEngineValue(value: unknown): BrowserEngineKind | undefined {
+  return value === "cdp" || value === "agent-browser" || value === "auto" ? value : undefined;
 }

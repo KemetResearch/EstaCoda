@@ -299,6 +299,8 @@ const SETUP_EDITOR_KEYS = [
   "setupEditor.prompt.vision.useGateway",
   "setupEditor.prompt.browser.mode.title",
   "setupEditor.prompt.browser.mode.body",
+  "setupEditor.prompt.browser.mode.recommended",
+  "setupEditor.prompt.browser.mode.recommended.description",
   "setupEditor.prompt.browser.mode.localSupervised",
   "setupEditor.prompt.browser.mode.localSupervised.description",
   "setupEditor.prompt.browser.mode.existingCdp",
@@ -700,6 +702,17 @@ describe("setup copy", () => {
     expect(rawSetupCopy("en", "setupEditor.review.confirm.description")).toBe("Update your EstaCoda configuration");
     expect(rawSetupCopy("en", "setupEditor.review.cancel")).toBe("Cancel");
     expect(rawSetupCopy("en", "setupEditor.review.cancel.description")).toBe("Keep your existing configuration unchanged.");
+  });
+
+  it("defines setup editor browser configuration prompt copy", () => {
+    expect(rawSetupCopy("en", "setupEditor.prompt.browser.mode.title")).toBe("Browser configuration");
+    expect(rawSetupCopy("ar", "setupEditor.prompt.browser.mode.title")).toBe("إعداد المتصفح");
+    expect(rawSetupCopy("ar", "setupEditor.prompt.browser.mode.recommended")).toBe("إعداد المتصفح الموصى به");
+    expect(rawSetupCopy("ar", "setupEditor.prompt.browser.mode.recommended.description")).toBe(
+      "يشغّل Chrome محلياً وتلقائياً تحت إشراف EstaCoda، مع إعدادات آمنة مناسبة لمعظم المستخدمين."
+    );
+    expect(resolveSetupCopy("ar", "setupEditor.prompt.browser.mode.recommended.description")).toContain(isolateLtr("Chrome"));
+    expect(resolveSetupCopy("ar", "setupEditor.prompt.browser.mode.recommended.description")).toContain(isolateLtr("EstaCoda"));
   });
 
   it("describes managed local STT as the normal onboarding path", () => {

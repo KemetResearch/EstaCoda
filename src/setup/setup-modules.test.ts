@@ -193,6 +193,7 @@ describe("setup modules", () => {
         hybridRouting: true,
         cloudFallback: true,
         cloudSpendApproved: false,
+        engine: "cdp",
       },
     }))[0];
     const disabledDraft = browserSetupModule.toDrafts(context({
@@ -209,6 +210,7 @@ describe("setup modules", () => {
       hybridRouting: true,
       cloudFallback: true,
       cloudSpendApproved: false,
+      engine: "cdp",
       autoLaunchRequested: false,
       autoLaunchWillRunNow: false,
     });

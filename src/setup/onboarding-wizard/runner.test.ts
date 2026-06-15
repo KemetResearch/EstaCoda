@@ -1487,11 +1487,47 @@ describe("runFirstRunSetup", () => {
 
     expect(result.completed).toBe(true);
     expect(seenOptions[resolveSetupCopy("en", "setupEditor.prompt.browser.mode.title")]).toEqual([
+      "Recommended browser setup",
       "Local supervised browser",
       "Existing CDP browser",
       "Browserbase cloud browser",
       "Disable browser tools",
     ]);
+  });
+
+  it("maps recommended browser setup through onboarding to flat config fields", async () => {
+    const result = await runFirstRunSetup({
+      homeDir: tempDir,
+      workspaceRoot,
+      prompt: fakePrompt(browserPromptOverrides(
+        resolveSetupCopy("en", "setupEditor.prompt.browser.mode.recommended")
+      )),
+      flowEngine: flowEngine(),
+      applyExecutor: reviewedExecutor(tempDir, workspaceRoot),
+    });
+    const config = await readProfileConfig(tempDir) as {
+      browser?: {
+        backend?: string;
+        supervised?: boolean;
+        autoLaunch?: boolean;
+        engine?: string;
+        launchArgs?: string[];
+        chromeFlags?: string[];
+        hybridRouting?: boolean;
+      };
+    };
+
+    expect(result.completed).toBe(true);
+    expect(result.wizardState.optionalCapabilities?.browser).toBe("configured");
+    expect(config.browser).toEqual(expect.objectContaining({
+      backend: "local-cdp",
+      supervised: true,
+      autoLaunch: true,
+      engine: "cdp",
+      launchArgs: [],
+      chromeFlags: [],
+      hybridRouting: false,
+    }));
   });
 
   it("maps local supervised browser setup through onboarding to flat config fields", async () => {
