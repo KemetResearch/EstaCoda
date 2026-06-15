@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { FasterWhisperWorkerClient, defaultFasterWhisperWorkerPath } from "./stt-local-whisper.js";
+import { resolveTestPythonBinary } from "../test/test-python.js";
 
 async function jsWorker(source: string): Promise<string> {
   const dir = await mkdtemp(join(tmpdir(), "estacoda-fw-worker-test-"));
@@ -257,6 +258,7 @@ describe("FasterWhisperWorkerClient", () => {
 describe("bundled faster-whisper Python worker", () => {
   it("reports unimportable faster-whisper through probe", async () => {
     const client = new FasterWhisperWorkerClient({
+      pythonBinary: await resolveTestPythonBinary(),
       workerPath: defaultFasterWhisperWorkerPath(),
       timeoutMs: 5_000,
       env: { PYTHONPATH: "" }
@@ -273,6 +275,7 @@ describe("bundled faster-whisper Python worker", () => {
     const dir = await mkdtemp(join(tmpdir(), "estacoda-fw-pythonpath-"));
     await writeFile(join(dir, "faster_whisper.py"), "class WhisperModel: pass\n", "utf8");
     const client = new FasterWhisperWorkerClient({
+      pythonBinary: await resolveTestPythonBinary(),
       workerPath: defaultFasterWhisperWorkerPath(),
       timeoutMs: 5_000,
       env: { PYTHONPATH: dir }

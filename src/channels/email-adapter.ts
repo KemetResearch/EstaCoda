@@ -494,7 +494,8 @@ export class EmailAdapter implements ChannelAdapter {
     const { spawn } = await import("node:child_process");
 
     return new Promise<T>((resolve, reject) => {
-      const child = spawn(this.#pythonBinary, [this.#workerPath], {
+      const child = spawn(this.#pythonBinary, ["-u", this.#workerPath], {
+        env: { ...process.env, PYTHONUNBUFFERED: "1" },
         stdio: ["pipe", "pipe", "pipe"]
       });
 

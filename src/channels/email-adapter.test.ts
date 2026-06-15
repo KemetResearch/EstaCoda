@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { EmailAdapter } from "./email-adapter.js";
 import { buildAdapterCapability } from "./adapter-capability.js";
 import { AdapterRegistry } from "./adapter-registry.js";
+import { resolveTestPythonBinary } from "../test/test-python.js";
 import type { ChannelMessage } from "../contracts/channel.js";
 import type { LoadedRuntimeConfig } from "../config/runtime-config.js";
 
@@ -12,11 +13,13 @@ describe("EmailAdapter", () => {
   let tmpDir: string;
   let mediaRoot: string;
   let workerPath: string;
+  let pythonBinary: string;
 
   beforeEach(async () => {
     tmpDir = await mkdtemp(join(tmpdir(), "estacoda-email-test-"));
     mediaRoot = join(tmpDir, "media");
     workerPath = join(tmpDir, "mock_email_worker.py");
+    pythonBinary = await resolveTestPythonBinary();
   });
 
   afterEach(async () => {
@@ -40,6 +43,7 @@ describe("EmailAdapter", () => {
       pollIntervalSeconds: 1,
       mediaRoot,
       workerPath,
+      pythonBinary,
       ...options
     });
   }
@@ -390,11 +394,13 @@ describe("EmailAdapter Phase 4 features", () => {
   let tmpDir: string;
   let mediaRoot: string;
   let workerPath: string;
+  let pythonBinary: string;
 
   beforeEach(async () => {
     tmpDir = await mkdtemp(join(tmpdir(), "estacoda-email-test-"));
     mediaRoot = join(tmpDir, "media");
     workerPath = join(tmpDir, "mock_email_worker.py");
+    pythonBinary = await resolveTestPythonBinary();
   });
 
   afterEach(async () => {
@@ -418,6 +424,7 @@ describe("EmailAdapter Phase 4 features", () => {
       pollIntervalSeconds: 1,
       mediaRoot,
       workerPath,
+      pythonBinary,
       ...options
     });
   }

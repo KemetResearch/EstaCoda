@@ -16,6 +16,7 @@ export type ExecuteCodeToolOptions = {
   sessionId: string | (() => string);
   trustedWorkspace: () => Promise<boolean>;
   allowedTools?: string[];
+  pythonBinary?: string;
 };
 
 const DEFAULT_ALLOWED_TOOLS = new Set([
@@ -63,6 +64,7 @@ export function createExecuteCodeTool(options: ExecuteCodeToolOptions): Register
         input: asRecord(input.input),
         timeoutMs: boundedNumber(input.timeoutMs, 5_000, 1, 30_000),
         maxOutputChars: boundedNumber(input.maxOutputChars, 12_000, 1_000, 48_000),
+        pythonBinary: options.pythonBinary ?? "python3",
         workspaceRoot: options.workspaceRoot,
         allowedTools,
         executeTool: async (tool, toolInput) => {
@@ -139,6 +141,7 @@ type RunCodeOptions = {
   input: Record<string, unknown>;
   timeoutMs: number;
   maxOutputChars: number;
+  pythonBinary: string;
   workspaceRoot: string;
   allowedTools: Set<string>;
   executeTool(tool: string, input: Record<string, unknown>): Promise<ToolResult>;
@@ -158,7 +161,7 @@ async function runCode(options: RunCodeOptions): Promise<ToolResult> {
     childEnv["ESTACODA_INPUT_JSON"] = JSON.stringify(options.input);
     childEnv["ESTACODA_ALLOWED_TOOLS_JSON"] = JSON.stringify([...options.allowedTools].sort());
 
-    const child = spawn("python3", [scriptPath], {
+    const child = spawn(options.pythonBinary, ["-u", scriptPath], {
       cwd: options.workspaceRoot,
       env: childEnv,
       stdio: ["pipe", "pipe", "pipe"]

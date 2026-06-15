@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { createExecuteCodeTool } from "./execute-code-tool.js";
+import { resolveTestPythonBinary } from "../test/test-python.js";
 import type { SessionDB } from "../contracts/session.js";
 import type { ToolExecutor } from "./tool-executor.js";
 import type { TrajectoryRecorder } from "../trajectory/trajectory-recorder.js";
@@ -66,10 +67,11 @@ describe("execute_code environment isolation", () => {
       trajectoryRecorder: {} as unknown as TrajectoryRecorder,
       sessionId: "test-session",
       trustedWorkspace: async () => true,
-      allowedTools: []
+      allowedTools: [],
+      pythonBinary: await resolveTestPythonBinary()
     });
 
-    return await tool.run({ code, input });
+    return await tool.run({ code, input, timeoutMs: 1_000 });
   }
 
   it("blocks ESTACODA_SECRET_PROBE from subprocess", async () => {

@@ -2,6 +2,7 @@ import { mkdtempSync, rmSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { spawn } from "node:child_process";
+import { once } from "node:events";
 import type { SmokeCase } from "../smoke-case.js";
 import { runGatewayStop } from "../../cli/gateway-commands.js";
 import { writeGatewayPid } from "../../gateway/pid-file.js";
@@ -14,6 +15,19 @@ function spawnDecoy(script: string, interpreter?: string[]): ReturnType<typeof s
     detached: false,
     stdio: "ignore",
   });
+}
+
+async function spawnReadyDecoy(script: string): Promise<ReturnType<typeof spawn>> {
+  const child = spawn(process.execPath, ["-e", script], {
+    detached: false,
+    stdio: ["ignore", "pipe", "ignore"],
+  });
+  child.stdout.setEncoding("utf8");
+  const [chunk] = await once(child.stdout, "data") as [string];
+  if (!chunk.includes("ready")) {
+    throw new Error(`Decoy did not report ready: ${chunk}`);
+  }
+  return child;
 }
 
 function waitForPid(child: ReturnType<typeof spawn>): Promise<number> {
@@ -77,13 +91,10 @@ export const gateway_stop_case: SmokeCase = {
       }
 
       // Test 2: Force stop (process ignores SIGTERM)
-      const child2 = spawnDecoy(
-        "import signal, time; signal.signal(signal.SIGTERM, signal.SIG_IGN); time.sleep(60)",
-        ["python3", "-c"]
+      const child2 = await spawnReadyDecoy(
+        "process.on('SIGTERM', () => {}); process.stdout.write('ready\\n'); setInterval(() => {}, 1000);"
       );
       const pid2 = await waitForPid(child2);
-      // Allow Python to fully initialize signal handler
-      await new Promise((r) => setTimeout(r, 150));
 
       await writeGatewayPid(profilePaths, { pid: pid2, startedAt: new Date().toISOString(), version: "0.0.1", profileId });
       await writeGatewayState(profilePaths, { lifecycle: "running", startedAt: new Date().toISOString(), pid: pid2, version: "0.0.1", profileId });
