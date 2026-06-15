@@ -1952,7 +1952,7 @@ function normalizeSttConfig(value: EstaCodaConfig["stt"]): LoadedRuntimeConfig["
     enabled: value?.enabled ?? true,
     local: {
       model: value?.local?.model ?? "base",
-      command: value?.local?.command ?? process.env.HERMES_LOCAL_STT_COMMAND,
+      command: value?.local?.command ?? process.env.ESTACODA_LOCAL_STT_COMMAND,
       engine,
       pythonBinary: value?.local?.pythonBinary ?? value?.local?.python_binary,
       normalizeWithFfmpeg: value?.local?.normalizeWithFfmpeg ?? value?.local?.normalize_with_ffmpeg ?? true,
