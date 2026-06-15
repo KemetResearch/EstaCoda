@@ -204,7 +204,7 @@ export class FasterWhisperWorkerClient {
     this.#starting = new Promise<void>((resolve) => {
       const child = spawn(this.#pythonBinary, [this.#workerPath], {
         cwd: this.#cwd,
-        env: this.#env === undefined ? process.env : { ...process.env, ...this.#env },
+        env: { ...process.env, PYTHONUNBUFFERED: "1", ...this.#env },
         detached: process.platform !== "win32",
         stdio: ["pipe", "pipe", "pipe"]
       });

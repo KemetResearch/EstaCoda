@@ -3,6 +3,7 @@ import { chmod, mkdtemp, rm, stat, writeFile, mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { spawn } from "node:child_process";
+import { once } from "node:events";
 import { stopGateway, signalGateway } from "./supervisor-lifecycle.js";
 import { writeGatewayPid, readGatewayPid } from "./pid-file.js";
 import { writeGatewayState, readGatewayState } from "./supervisor-state.js";
@@ -44,6 +45,20 @@ describe("supervisor-lifecycle", () => {
       stdio: "ignore",
     });
     children.push(child);
+    return child;
+  }
+
+  async function spawnReadyDecoy(script: string): Promise<ReturnType<typeof spawn>> {
+    const child = spawn(process.execPath, ["-e", script], {
+      detached: false,
+      stdio: ["ignore", "pipe", "ignore"],
+    });
+    children.push(child);
+    child.stdout.setEncoding("utf8");
+    const [chunk] = await once(child.stdout, "data") as [string];
+    if (!chunk.includes("ready")) {
+      throw new Error(`Decoy did not report ready: ${chunk}`);
+    }
     return child;
   }
 
@@ -226,14 +241,10 @@ describe("supervisor-lifecycle", () => {
     });
 
     it("times out on SIGTERM without force and preserves files", async () => {
-      // Use Python to ignore SIGTERM (Bun may exit on SIGTERM even with handler)
-      const child = spawnDecoy(
-        "import signal, time; signal.signal(signal.SIGTERM, signal.SIG_IGN); time.sleep(60)",
-        ["python3", "-c"]
+      const child = await spawnReadyDecoy(
+        "process.on('SIGTERM', () => {}); process.stdout.write('ready\\n'); setInterval(() => {}, 1000);"
       );
       const pid = await waitForChildPid(child);
-      // Allow Python to fully initialize signal handler before we test
-      await new Promise((r) => setTimeout(r, 150));
 
       await writeGatewayPid(tmpDir, { pid, startedAt: new Date().toISOString(), version: "0.0.1" });
       await writeGatewayState(tmpDir, { lifecycle: "running", startedAt: new Date().toISOString(), pid, version: "0.0.1" });
@@ -253,13 +264,10 @@ describe("supervisor-lifecycle", () => {
     });
 
     it("forces SIGKILL when --force is set and cleans up files", async () => {
-      const child = spawnDecoy(
-        "import signal, time; signal.signal(signal.SIGTERM, signal.SIG_IGN); time.sleep(60)",
-        ["python3", "-c"]
+      const child = await spawnReadyDecoy(
+        "process.on('SIGTERM', () => {}); process.stdout.write('ready\\n'); setInterval(() => {}, 1000);"
       );
       const pid = await waitForChildPid(child);
-      // Allow Python to fully initialize signal handler
-      await new Promise((r) => setTimeout(r, 150));
 
       await writeGatewayPid(tmpDir, { pid, startedAt: new Date().toISOString(), version: "0.0.1" });
       await writeGatewayState(tmpDir, { lifecycle: "running", startedAt: new Date().toISOString(), pid, version: "0.0.1" });
@@ -288,13 +296,10 @@ describe("supervisor-lifecycle", () => {
 
     it("sends signal to a running process", async () => {
       const markerPath = join(tmpDir, "signal-marker.txt");
-      const child = spawnDecoy(
-        `import signal, time, os; signal.signal(signal.SIGUSR1, lambda s,f: open('${markerPath}','w').write('ok') or os._exit(0)); time.sleep(60)`,
-        ["python3", "-c"]
+      const child = await spawnReadyDecoy(
+        `process.on('SIGUSR1', () => { require('node:fs').writeFileSync(${JSON.stringify(markerPath)}, 'ok'); process.exit(0); }); process.stdout.write('ready\\n'); setInterval(() => {}, 1000);`
       );
       const pid = await waitForChildPid(child);
-      // Allow Python to fully initialize signal handler
-      await new Promise((r) => setTimeout(r, 150));
 
       await writeGatewayPid(tmpDir, { pid, startedAt: new Date().toISOString(), version: "0.0.1" });
 
