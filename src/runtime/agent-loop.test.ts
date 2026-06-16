@@ -19,7 +19,8 @@ import { MemoryPromptContextBuilder } from "../memory/memory-prompt-context-buil
 import { MemoryRecallOrchestrator } from "../memory/memory-recall-orchestrator.js";
 import { LocalMemoryProvider } from "../memory/local-memory-provider.js";
 import { MemoryPromotionStore } from "../memory/memory-promotion-store.js";
-import { MemoryStore } from "../memory/memory-store.js";
+import { resolveProjectFactPromotion, resolveUserPreferencePromotion } from "../memory/memory-promotion.js";
+import { MemoryBudgetOverflowError, MemoryStore } from "../memory/memory-store.js";
 import { TrajectoryRecorder } from "../trajectory/trajectory-recorder.js";
 import { RunRecorder } from "./run-recorder.js";
 import { AgentLoop } from "./agent-loop.js";
@@ -33,9 +34,26 @@ import type { ToolPlanRunner } from "./tool-plan-runner.js";
 import { createSessionRuntimeContext } from "./session-runtime-context.js";
 import { normalizeSessionCompressionConfig, type SessionCompressionConfig } from "../config/runtime-config.js";
 
+const memoryPromotionMocks = vi.hoisted(() => ({
+  resolveUserPreferencePromotion: vi.fn(),
+  resolveProjectFactPromotion: vi.fn()
+}));
+
+vi.mock("../memory/memory-promotion.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../memory/memory-promotion.js")>();
+  memoryPromotionMocks.resolveUserPreferencePromotion.mockImplementation(actual.resolveUserPreferencePromotion);
+  memoryPromotionMocks.resolveProjectFactPromotion.mockImplementation(actual.resolveProjectFactPromotion);
+  return {
+    ...actual,
+    resolveUserPreferencePromotion: memoryPromotionMocks.resolveUserPreferencePromotion,
+    resolveProjectFactPromotion: memoryPromotionMocks.resolveProjectFactPromotion
+  };
+});
+
 const tempDirs: string[] = [];
 
 afterEach(async () => {
+  vi.clearAllMocks();
   while (tempDirs.length > 0) {
     await rm(tempDirs.pop()!, { recursive: true, force: true });
   }
@@ -173,6 +191,28 @@ function failedProviderExecution(): ProviderExecutionResult {
     ],
     toolCalls: []
   };
+}
+
+function memoryBudgetOverflow(kind: "USER.md" | "MEMORY.md"): MemoryBudgetOverflowError {
+  return new MemoryBudgetOverflowError({
+    code: "memory-budget-overflow",
+    kind,
+    source: "test",
+    chars: 10,
+    maxChars: 5,
+    overflowChars: 5,
+    pressure: {
+      kind,
+      source: "test",
+      chars: 10,
+      maxChars: 5,
+      ratio: 2,
+      percent: 200,
+      state: "overflow",
+      remainingChars: 0,
+      overflowChars: 5
+    }
+  });
 }
 
 const securityPolicy: SecurityPolicy = {
@@ -1206,6 +1246,196 @@ describe("AgentLoop provider availability gating", () => {
     expect(runInput.userText).toContain("Latest interrupted-turn resume note:");
     expect(runInput.userText).toContain("I prefer concise replies");
     expect(conclude).not.toHaveBeenCalled();
+  });
+
+  it("attempts preference and project fact promotion independently", async () => {
+    vi.mocked(resolveUserPreferencePromotion).mockResolvedValueOnce({
+      kind: "conclusion",
+      conclusion: {
+        id: "memory-preference-test",
+        kind: "user-preference",
+        content: "Prefer concise replies.",
+        confidence: 0.9,
+        source: "repeated-user-input",
+        occurrences: 2,
+        sourceSessionIds: ["root-a", "root-b"]
+      }
+    });
+    vi.mocked(resolveProjectFactPromotion).mockResolvedValueOnce({
+      kind: "conclusion",
+      conclusion: {
+        id: "memory-project-fact-test",
+        kind: "project-fact",
+        content: "Project uses TypeScript.",
+        confidence: 0.9,
+        source: "repeated-user-input",
+        occurrences: 2,
+        sourceSessionIds: ["root-c", "root-d"]
+      }
+    });
+    const memoryProvider: MemoryProvider = {
+      id: "recording-memory",
+      async context() {
+        return { text: "", usage: [] };
+      },
+      async search() {
+        return [];
+      },
+      async conclude() {},
+      async recordSkillOutcome() {}
+    };
+    const { loop, sessionDb, sessionId } = await createAgentLoop({
+      canRunProvider: false,
+      runSkillPlaybook: vi.fn(async () => [execution]),
+      memoryProvider
+    });
+
+    await loop.handle({
+      text: "promotion input",
+      channel: "cli",
+      trustedWorkspace: true
+    });
+
+    expect(resolveUserPreferencePromotion).toHaveBeenCalledWith(expect.objectContaining({
+      currentUserText: "promotion input"
+    }));
+    expect(resolveProjectFactPromotion).toHaveBeenCalledWith(expect.objectContaining({
+      currentUserText: "promotion input"
+    }));
+    const events = await sessionDb.listEvents(sessionId);
+    expect(events).toContainEqual(expect.objectContaining({
+      kind: "memory-conclusion",
+      conclusion: expect.objectContaining({ kind: "user-preference" })
+    }));
+    expect(events).toContainEqual(expect.objectContaining({
+      kind: "memory-conclusion",
+      conclusion: expect.objectContaining({ kind: "project-fact" })
+    }));
+  });
+
+  it("keeps project fact promotion eligible when user preference promotion overflows", async () => {
+    vi.mocked(resolveUserPreferencePromotion).mockRejectedValueOnce(memoryBudgetOverflow("USER.md"));
+    vi.mocked(resolveProjectFactPromotion).mockResolvedValueOnce({
+      kind: "conclusion",
+      conclusion: {
+        id: "memory-project-fact-after-preference-overflow",
+        kind: "project-fact",
+        content: "Project uses TypeScript.",
+        confidence: 0.9,
+        source: "repeated-user-input",
+        occurrences: 2,
+        sourceSessionIds: ["root-a", "root-b"]
+      }
+    });
+    const memoryProvider: MemoryProvider = {
+      id: "recording-memory",
+      async context() {
+        return { text: "", usage: [] };
+      },
+      async search() {
+        return [];
+      },
+      async conclude() {},
+      async recordSkillOutcome() {}
+    };
+    const { loop, sessionDb, sessionId } = await createAgentLoop({
+      canRunProvider: false,
+      runSkillPlaybook: vi.fn(async () => [execution]),
+      memoryProvider
+    });
+
+    await loop.handle({
+      text: "promotion input",
+      channel: "cli",
+      trustedWorkspace: true
+    });
+
+    const events = await sessionDb.listEvents(sessionId);
+    expect(events).toContainEqual(expect.objectContaining({
+      kind: "memory-promotion-failed",
+      targetFile: "USER.md",
+      conclusionKind: "user-preference"
+    }));
+    expect(events).toContainEqual(expect.objectContaining({
+      kind: "memory-conclusion",
+      conclusion: expect.objectContaining({ kind: "project-fact" })
+    }));
+  });
+
+  it("keeps successful user preference promotion when project fact promotion overflows", async () => {
+    vi.mocked(resolveUserPreferencePromotion).mockResolvedValueOnce({
+      kind: "conclusion",
+      conclusion: {
+        id: "memory-preference-before-project-overflow",
+        kind: "user-preference",
+        content: "Prefer concise replies.",
+        confidence: 0.9,
+        source: "repeated-user-input",
+        occurrences: 2,
+        sourceSessionIds: ["root-a", "root-b"]
+      }
+    });
+    vi.mocked(resolveProjectFactPromotion).mockRejectedValueOnce(memoryBudgetOverflow("MEMORY.md"));
+    const memoryProvider: MemoryProvider = {
+      id: "recording-memory",
+      async context() {
+        return { text: "", usage: [] };
+      },
+      async search() {
+        return [];
+      },
+      async conclude() {},
+      async recordSkillOutcome() {}
+    };
+    const { loop, sessionDb, sessionId } = await createAgentLoop({
+      canRunProvider: false,
+      runSkillPlaybook: vi.fn(async () => [execution]),
+      memoryProvider
+    });
+
+    await loop.handle({
+      text: "promotion input",
+      channel: "cli",
+      trustedWorkspace: true
+    });
+
+    const events = await sessionDb.listEvents(sessionId);
+    expect(events).toContainEqual(expect.objectContaining({
+      kind: "memory-conclusion",
+      conclusion: expect.objectContaining({ kind: "user-preference" })
+    }));
+    expect(events).toContainEqual(expect.objectContaining({
+      kind: "memory-promotion-failed",
+      targetFile: "MEMORY.md",
+      conclusionKind: "project-fact"
+    }));
+  });
+
+  it("keeps unexpected project fact promotion errors fatal", async () => {
+    vi.mocked(resolveUserPreferencePromotion).mockResolvedValueOnce(undefined);
+    vi.mocked(resolveProjectFactPromotion).mockRejectedValueOnce(new Error("unexpected project promotion failure"));
+    const memoryProvider: MemoryProvider = {
+      id: "failing-project-memory",
+      async context() {
+        return { text: "", usage: [] };
+      },
+      async search() {
+        return [];
+      },
+      async conclude() {},
+      async recordSkillOutcome() {}
+    };
+    const { loop } = await createAgentLoop({
+      canRunProvider: false,
+      runSkillPlaybook: vi.fn(async () => [execution]),
+      memoryProvider
+    });
+
+    await expect(loop.handle({
+      text: "promotion input",
+      channel: "cli",
+      trustedWorkspace: true
+    })).rejects.toThrow("unexpected project promotion failure");
   });
 
   it("keeps the turn successful when repeated preference promotion overflows memory", async () => {

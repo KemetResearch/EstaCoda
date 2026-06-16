@@ -1036,7 +1036,6 @@ export class AgentLoop {
         targetFile: "USER.md",
         conclusionKind: "user-preference"
       });
-      return;
     }
 
     if (preferenceResult?.kind === "conclusion") {
@@ -1059,10 +1058,6 @@ export class AgentLoop {
         provider: this.#memoryProvider.id,
         conclusion
       });
-      return;
-    }
-    if (preferenceResult?.kind === "forgotten") {
-      return;
     }
 
     let projectFactResult: Awaited<ReturnType<typeof resolveProjectFactPromotion>> | undefined;
