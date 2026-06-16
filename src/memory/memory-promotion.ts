@@ -54,7 +54,7 @@ export async function resolveUserPreferencePromotion(options: {
   }
 
   const matchingSessionIds = new Set<string>();
-  const matches = await options.sessionDb.search(currentPreference.content, {
+  const matches = await options.sessionDb.search(searchQueryForPreference(currentPreference), {
     profileId: options.profileId,
     limit: 50,
     rootSessionsOnly: true
@@ -163,6 +163,8 @@ export async function resolveProjectFactPromotion(options: {
 type PreferenceCandidate = {
   key: string;
   content: string;
+  category?: string;
+  value?: string;
 };
 
 function firstDetectedCandidate(
@@ -270,22 +272,28 @@ function detectUserPreference(text: string): PreferenceCandidate | undefined {
     return verbosity;
   }
 
-  const patterns: Array<{
+  const canonicalPatterns: Array<{
     regex: RegExp;
-    render: (value: string) => string;
+    category: string;
   }> = [
     {
       regex: /^(?:i\s+)?prefer\s+(.+)$/iu,
-      render: (value) => `Prefer ${value}`
+      category: "prefer"
     },
     {
       regex: /^(?:please\s+)?use\s+(.+?)\s+by\s+default$/iu,
-      render: (value) => `Use ${value} by default`
+      category: "prefer"
     },
     {
       regex: /^(?:please\s+)?default\s+to\s+(.+)$/iu,
-      render: (value) => `Default to ${value}`
-    },
+      category: "prefer"
+    }
+  ];
+  const nonCanonicalPatterns: Array<{
+    regex: RegExp;
+    render: (value: string) => string;
+    category?: string;
+  }> = [
     {
       regex: /^(?:please\s+)?always\s+use\s+(.+)$/iu,
       render: (value) => `Always use ${value}`
@@ -296,7 +304,21 @@ function detectUserPreference(text: string): PreferenceCandidate | undefined {
     }
   ];
 
-  for (const pattern of patterns) {
+  for (const pattern of canonicalPatterns) {
+    const match = normalized.match(pattern.regex);
+    const captured = match?.[1]?.trim().replace(/[.?!]+$/u, "");
+
+    if (captured === undefined || captured.length === 0) {
+      continue;
+    }
+
+    const canonical = canonicalPreference(pattern.category, captured);
+    if (canonical !== undefined) {
+      return canonical;
+    }
+  }
+
+  for (const pattern of nonCanonicalPatterns) {
     const match = normalized.match(pattern.regex);
     const captured = match?.[1]?.trim().replace(/[.?!]+$/u, "");
 
@@ -307,11 +329,35 @@ function detectUserPreference(text: string): PreferenceCandidate | undefined {
     const content = `${pattern.render(captured)}.`;
     return {
       key: content.toLowerCase(),
-      content
+      content,
+      category: pattern.category,
+      value: captured
     };
   }
 
   return undefined;
+}
+
+function canonicalPreference(category: string, value: string): PreferenceCandidate | undefined {
+  const normalizedValue = normalizePreferenceValue(value);
+  if (normalizedValue.length === 0) {
+    return undefined;
+  }
+  const content = `Prefer ${normalizedValue}.`;
+  return {
+    key: `${category}:${normalizedValue.toLowerCase()}`,
+    content,
+    category,
+    value: normalizedValue
+  };
+}
+
+function normalizePreferenceValue(value: string): string {
+  return stripTrailingPunctuation(value).replace(/\s+/gu, " ").trim();
+}
+
+function searchQueryForPreference(candidate: PreferenceCandidate): string {
+  return candidate.value ?? candidate.content;
 }
 
 function detectProjectFact(text: string): PreferenceCandidate | undefined {
@@ -368,6 +414,7 @@ function detectProjectFact(text: string): PreferenceCandidate | undefined {
 }
 
 function detectVerbosityPreference(normalized: string): PreferenceCandidate | undefined {
+  const statement = stripTrailingPunctuation(normalized);
   const concisePatterns = [
     /^(?:i\s+)?prefer\s+concise(?:\s+telegram)?\s+repl(?:y|ies)$/iu,
     /^please\s+keep\s+repl(?:y|ies)\s+concise$/iu,
@@ -381,14 +428,14 @@ function detectVerbosityPreference(normalized: string): PreferenceCandidate | un
     /^(?:please\s+)?use\s+detailed\s+repl(?:y|ies)$/iu
   ];
 
-  if (concisePatterns.some((pattern) => pattern.test(normalized))) {
+  if (concisePatterns.some((pattern) => pattern.test(statement))) {
     return {
       key: "prefer concise replies.",
       content: "Prefer concise replies."
     };
   }
 
-  if (detailedPatterns.some((pattern) => pattern.test(normalized))) {
+  if (detailedPatterns.some((pattern) => pattern.test(statement))) {
     return {
       key: "prefer detailed replies.",
       content: "Prefer detailed replies."

@@ -326,6 +326,76 @@ describe("memory hardening evals", () => {
     ]);
   });
 
+  it("counts deterministic preference variants toward one canonical promotion", async () => {
+    const root = await makeTempDir();
+    const db = new InMemorySessionDB();
+    const store = new MemoryStore();
+    const promotionStore = new MemoryPromotionStore({ path: join(root, "promotions.json") });
+    const provider = new LocalMemoryProvider({ store, promotionStore });
+
+    await seedSession(db, "canonical-root-a", "default", ["I prefer TypeScript"]);
+    await seedSession(db, "canonical-root-b", "default", ["Default to TypeScript"]);
+
+    await resolveUserPreferencePromotion({
+      profileId: "default",
+      currentUserText: "Use TypeScript by default",
+      sessionDb: db,
+      memoryProvider: provider
+    });
+
+    expect(store.read("USER.md")).toContain("Prefer TypeScript.");
+    expect(await promotionStore.list()).toEqual([
+      expect.objectContaining({
+        kind: "user-preference",
+        content: "Prefer TypeScript.",
+        occurrences: 2,
+        sourceSessionIds: expect.arrayContaining(["canonical-root-a", "canonical-root-b"])
+      })
+    ]);
+  });
+
+  it("strengthens an existing canonical promotion instead of creating duplicate variant records", async () => {
+    const root = await makeTempDir();
+    const db = new InMemorySessionDB();
+    const store = new MemoryStore();
+    const promotionStore = new MemoryPromotionStore({ path: join(root, "promotions.json") });
+    const provider = new LocalMemoryProvider({ store, promotionStore });
+
+    await seedSession(db, "canonical-strengthen-a", "default", ["I prefer TypeScript"]);
+    await seedSession(db, "canonical-strengthen-b", "default", ["Default to TypeScript"]);
+
+    await resolveUserPreferencePromotion({
+      profileId: "default",
+      currentUserText: "Use TypeScript by default",
+      sessionDb: db,
+      memoryProvider: provider
+    });
+
+    await seedSession(db, "canonical-strengthen-c", "default", ["Use TypeScript by default"]);
+    await resolveUserPreferencePromotion({
+      profileId: "default",
+      currentUserText: "Prefer TypeScript",
+      sessionDb: db,
+      memoryProvider: provider
+    });
+
+    const records = await promotionStore.list();
+    expect(records).toHaveLength(1);
+    expect(records).toEqual([
+      expect.objectContaining({
+        kind: "user-preference",
+        content: "Prefer TypeScript.",
+        occurrences: 3,
+        sourceSessionIds: expect.arrayContaining([
+          "canonical-strengthen-a",
+          "canonical-strengthen-b",
+          "canonical-strengthen-c"
+        ])
+      })
+    ]);
+    expect(store.read("USER.md").match(/Prefer TypeScript\./gu)).toHaveLength(1);
+  });
+
   it("promotes preference and project fact from compound direct user statements", async () => {
     const root = await makeTempDir();
     const db = new InMemorySessionDB();

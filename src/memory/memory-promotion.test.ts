@@ -10,11 +10,14 @@ describe("memory promotion deterministic detectors", () => {
   it.each([
     ["I prefer TypeScript", "Prefer TypeScript."],
     ["Prefer TypeScript.", "Prefer TypeScript."],
-    ["please use pnpm by default", "Use pnpm by default."],
-    ["default to TypeScript", "Default to TypeScript."],
+    ["please use pnpm by default", "Prefer pnpm."],
+    ["use TypeScript by default", "Prefer TypeScript."],
+    ["please use TypeScript by default", "Prefer TypeScript."],
+    ["default to TypeScript", "Prefer TypeScript."],
     ["always use strict mode", "Always use strict mode."],
     ["we want pnpm by default", "Want pnpm by default."],
     ["I prefer concise replies", "Prefer concise replies."],
+    ["Prefer detailed replies.", "Prefer detailed replies."],
     ["give me detailed replies", "Prefer detailed replies."]
   ])("accepts direct user preference form %j", (input, expected) => {
     expect(__detectUserPreferenceForTest(input)).toBe(expected);
@@ -32,6 +35,8 @@ describe("memory promotion deterministic detectors", () => {
     "I'd prefer TypeScript",
     "I like TypeScript",
     "Switch to TypeScript",
+    "It would be nice if TypeScript",
+    "Maybe use TypeScript",
     "",
     "   \n\t  ",
     "remember this",
