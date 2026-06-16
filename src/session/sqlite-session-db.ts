@@ -8,6 +8,7 @@ import type {
   SessionModelOverride,
   SessionRecord,
   SessionRole,
+  SessionSearchOptions,
   SessionSearchResult
 } from "../contracts/session.js";
 import type { ChannelKind } from "../contracts/channel.js";
@@ -400,7 +401,7 @@ export class SQLiteSessionDB implements SessionDB, TrajectoryStore {
       .map((row) => JSON.parse(row.event_json) as SessionEvent);
   }
 
-  async search(query: string, options: { profileId?: string; limit?: number } = {}): Promise<SessionSearchResult[]> {
+  async search(query: string, options: SessionSearchOptions = {}): Promise<SessionSearchResult[]> {
     const match = toFtsQuery(query);
 
     if (match === "") {
@@ -408,50 +409,37 @@ export class SQLiteSessionDB implements SessionDB, TrajectoryStore {
     }
 
     const limit = options.limit ?? 10;
-    const rows =
-      options.profileId === undefined
-        ? this.#db
-            .query<SearchRow>(
-              `select
-                m.*,
-                s.profile_id as session_profile_id,
-                s.title as session_title,
-                s.created_at as session_created_at,
-                s.updated_at as session_updated_at,
-                s.parent_session_id as session_parent_session_id,
-                s.ended_at as session_ended_at,
-                s.end_reason as session_end_reason,
-                s.metadata_json as session_metadata_json,
-                bm25(messages_fts) as rank
-              from messages_fts
-              join messages m on m.rowid = messages_fts.rowid
-              join sessions s on s.id = m.session_id
-              where messages_fts match ?
-              order by rank asc
-              limit ?`
-            )
-            .all(match, limit)
-        : this.#db
-            .query<SearchRow>(
-              `select
-                m.*,
-                s.profile_id as session_profile_id,
-                s.title as session_title,
-                s.created_at as session_created_at,
-                s.updated_at as session_updated_at,
-                s.parent_session_id as session_parent_session_id,
-                s.ended_at as session_ended_at,
-                s.end_reason as session_end_reason,
-                s.metadata_json as session_metadata_json,
-                bm25(messages_fts) as rank
-              from messages_fts
-              join messages m on m.rowid = messages_fts.rowid
-              join sessions s on s.id = m.session_id
-              where messages_fts match ? and s.profile_id = ?
-              order by rank asc
-              limit ?`
-            )
-            .all(match, options.profileId, limit);
+    const conditions = ["messages_fts match ?"];
+    const parameters: Array<string | number> = [match];
+    if (options.profileId !== undefined) {
+      conditions.push("s.profile_id = ?");
+      parameters.push(options.profileId);
+    }
+    if (options.rootSessionsOnly === true) {
+      conditions.push("s.parent_session_id is null");
+    }
+    parameters.push(limit);
+    const rows = this.#db
+      .query<SearchRow>(
+        `select
+          m.*,
+          s.profile_id as session_profile_id,
+          s.title as session_title,
+          s.created_at as session_created_at,
+          s.updated_at as session_updated_at,
+          s.parent_session_id as session_parent_session_id,
+          s.ended_at as session_ended_at,
+          s.end_reason as session_end_reason,
+          s.metadata_json as session_metadata_json,
+          bm25(messages_fts) as rank
+        from messages_fts
+        join messages m on m.rowid = messages_fts.rowid
+        join sessions s on s.id = m.session_id
+        where ${conditions.join(" and ")}
+        order by rank asc
+        limit ?`
+      )
+      .all(...parameters);
 
     return rows.map((row) => ({
       session: {

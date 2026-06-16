@@ -64,6 +64,41 @@ describe("InMemorySessionDB", () => {
     }));
   });
 
+  it("keeps child sessions searchable by default and filters them when root sessions are requested", async () => {
+    const db = new InMemorySessionDB();
+    await db.createSession({ id: "root-session", profileId: "profile" });
+    await db.createSession({ id: "child-session", profileId: "profile", parentSessionId: "root-session" });
+    await db.createSession({ id: "other-profile-root", profileId: "other" });
+    await db.appendMessage({
+      id: "root-message",
+      sessionId: "root-session",
+      role: "user",
+      content: "rootonly searchable marker"
+    });
+    await db.appendMessage({
+      id: "child-message",
+      sessionId: "child-session",
+      role: "user",
+      content: "rootonly searchable marker"
+    });
+    await db.appendMessage({
+      id: "other-message",
+      sessionId: "other-profile-root",
+      role: "user",
+      content: "rootonly searchable marker"
+    });
+
+    const defaultResults = await db.search("rootonly searchable", { profileId: "profile", limit: 10 });
+    expect(defaultResults.map((result) => result.session.id).sort()).toEqual(["child-session", "root-session"]);
+
+    const rootOnlyResults = await db.search("rootonly searchable", {
+      profileId: "profile",
+      rootSessionsOnly: true,
+      limit: 10
+    });
+    expect(rootOnlyResults.map((result) => result.session.id)).toEqual(["root-session"]);
+  });
+
   it("marks sessions ended without deleting messages and keeps the first end reason", async () => {
     const times = [
       "2030-01-01T00:00:00.000Z",

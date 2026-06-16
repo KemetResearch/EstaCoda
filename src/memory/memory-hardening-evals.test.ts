@@ -260,6 +260,72 @@ describe("memory hardening evals", () => {
     expect(JSON.stringify(await promotionStore.list())).not.toContain("private chain");
   });
 
+  it("does not promote repeated preferences when the only corroborating evidence is from a child session", async () => {
+    const root = await makeTempDir();
+    const db = new InMemorySessionDB();
+    const store = new MemoryStore();
+    const promotionStore = new MemoryPromotionStore({ path: join(root, "promotions.json") });
+    const provider = new LocalMemoryProvider({ store, promotionStore });
+    const preference = "I prefer concise replies";
+
+    await db.createSession({ id: "current-root-session", profileId: "default" });
+    await db.appendMessage({
+      id: "current-root-message",
+      sessionId: "current-root-session",
+      role: "user",
+      content: preference
+    });
+    await db.createSession({
+      id: "child-evidence-session",
+      profileId: "default",
+      parentSessionId: "current-root-session"
+    });
+    await db.appendMessage({
+      id: "child-evidence-message",
+      sessionId: "child-evidence-session",
+      role: "user",
+      content: preference
+    });
+
+    await expect(resolveUserPreferencePromotion({
+      profileId: "default",
+      currentUserText: preference,
+      sessionDb: db,
+      memoryProvider: provider
+    })).resolves.toBeUndefined();
+
+    expect(store.read("USER.md")).toBe("");
+    expect(await promotionStore.list()).toEqual([]);
+  });
+
+  it("promotes repeated preferences from two separate root sessions", async () => {
+    const root = await makeTempDir();
+    const db = new InMemorySessionDB();
+    const store = new MemoryStore();
+    const promotionStore = new MemoryPromotionStore({ path: join(root, "promotions.json") });
+    const provider = new LocalMemoryProvider({ store, promotionStore });
+    const preference = "I prefer concise replies";
+
+    await seedSession(db, "current-root-session", "default", [preference]);
+    await seedSession(db, "previous-root-session", "default", [preference]);
+
+    await resolveUserPreferencePromotion({
+      profileId: "default",
+      currentUserText: preference,
+      sessionDb: db,
+      memoryProvider: provider
+    });
+
+    expect(store.read("USER.md")).toContain("Prefer concise replies.");
+    expect(await promotionStore.list()).toEqual([
+      expect.objectContaining({
+        kind: "user-preference",
+        content: "Prefer concise replies.",
+        sourceSessionIds: expect.arrayContaining(["current-root-session", "previous-root-session"])
+      })
+    ]);
+  });
+
   it("does not resurrect manually deleted markdown from stale promotion metadata", async () => {
     const root = await makeTempDir();
     const store = new MemoryStore();

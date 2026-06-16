@@ -46,7 +46,8 @@ export async function resolveUserPreferencePromotion(options: {
   const matchingSessionIds = new Set<string>();
   const matches = await options.sessionDb.search(currentPreference.content, {
     profileId: options.profileId,
-    limit: 50
+    limit: 50,
+    rootSessionsOnly: true
   });
 
   for (const match of matches) {
@@ -102,7 +103,8 @@ export async function resolveProjectFactPromotion(options: {
   const matchingSessionIds = new Set<string>();
   const matches = await options.sessionDb.search(currentFact.content, {
     profileId: options.profileId,
-    limit: 50
+    limit: 50,
+    rootSessionsOnly: true
   });
 
   for (const match of matches) {
