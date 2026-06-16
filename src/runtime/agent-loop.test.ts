@@ -1085,6 +1085,129 @@ describe("AgentLoop provider availability gating", () => {
     expect(runInput.memoryPromptContext?.diagnostics?.warnings).toContain("session fallback-session: auxiliary session_search failed; used deterministic snippets");
   });
 
+  it("does not promote preferences from resume notes", async () => {
+    const conclude = vi.fn(async () => {});
+    const memoryProvider: MemoryProvider = {
+      id: "recording-memory",
+      async context() {
+        return { text: "", usage: [] };
+      },
+      async search() {
+        return [];
+      },
+      conclude,
+      async recordSkillOutcome() {}
+    };
+    const { loop, sessionDb, sessionId } = await createAgentLoop({
+      canRunProvider: true,
+      runSkillPlaybook: vi.fn(async () => []),
+      providerExecution: successfulProviderExecution("done"),
+      memoryProvider
+    });
+    await sessionDb.createSession({ id: "previous-concise-session", profileId: "default" });
+    await sessionDb.appendMessage({
+      sessionId: "previous-concise-session",
+      role: "user",
+      content: "I prefer concise replies"
+    });
+    await sessionDb.appendEvent(sessionId, {
+      kind: "agent-cancelled",
+      reason: "test resume note",
+      resumeNote: "I prefer concise replies"
+    });
+
+    await loop.handle({
+      text: "resume",
+      channel: "cli",
+      trustedWorkspace: true
+    });
+
+    expect(conclude).not.toHaveBeenCalled();
+  });
+
+  it("still promotes repeated preferences from normal direct user input", async () => {
+    const conclude = vi.fn(async () => {});
+    const memoryProvider: MemoryProvider = {
+      id: "recording-memory",
+      async context() {
+        return { text: "", usage: [] };
+      },
+      async search() {
+        return [];
+      },
+      conclude,
+      async recordSkillOutcome() {}
+    };
+    const { loop, sessionDb } = await createAgentLoop({
+      canRunProvider: true,
+      runSkillPlaybook: vi.fn(async () => []),
+      providerExecution: successfulProviderExecution("done"),
+      memoryProvider
+    });
+    await sessionDb.createSession({ id: "previous-direct-concise-session", profileId: "default" });
+    await sessionDb.appendMessage({
+      sessionId: "previous-direct-concise-session",
+      role: "user",
+      content: "I prefer concise replies"
+    });
+
+    await loop.handle({
+      text: "I prefer concise replies",
+      channel: "cli",
+      trustedWorkspace: true
+    });
+
+    expect(conclude).toHaveBeenCalledWith(expect.objectContaining({
+      kind: "user-preference",
+      content: "Prefer concise replies.",
+      source: "repeated-user-input",
+      occurrences: 2
+    }));
+  });
+
+  it("uses direct resume input for promotion while preserving effective text for run behavior", async () => {
+    const conclude = vi.fn(async () => {});
+    const memoryProvider: MemoryProvider = {
+      id: "recording-memory",
+      async context() {
+        return { text: "", usage: [] };
+      },
+      async search() {
+        return [];
+      },
+      conclude,
+      async recordSkillOutcome() {}
+    };
+    const { loop, providerTurnLoop, sessionDb, sessionId } = await createAgentLoop({
+      canRunProvider: true,
+      runSkillPlaybook: vi.fn(async () => []),
+      providerExecution: successfulProviderExecution("done"),
+      memoryProvider
+    });
+    await sessionDb.createSession({ id: "previous-scaffold-concise-session", profileId: "default" });
+    await sessionDb.appendMessage({
+      sessionId: "previous-scaffold-concise-session",
+      role: "user",
+      content: "I prefer concise replies"
+    });
+    await sessionDb.appendEvent(sessionId, {
+      kind: "agent-cancelled",
+      reason: "test resume note",
+      resumeNote: "I prefer concise replies"
+    });
+
+    await loop.handle({
+      text: "continue",
+      channel: "cli",
+      trustedWorkspace: true
+    });
+
+    const runInput = vi.mocked(providerTurnLoop.run).mock.calls[0]?.[0] as { userText?: string };
+    expect(runInput.userText).toContain("Latest interrupted-turn resume note:");
+    expect(runInput.userText).toContain("I prefer concise replies");
+    expect(conclude).not.toHaveBeenCalled();
+  });
+
   it("keeps the turn successful when repeated preference promotion overflows memory", async () => {
     const root = await makeTempDir();
     const store = new MemoryStore({ budgets: [{ kind: "USER.md", maxChars: 5 }] });

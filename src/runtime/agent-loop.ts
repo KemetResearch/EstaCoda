@@ -828,7 +828,7 @@ export class AgentLoop {
       text: response.text
     });
 
-    await this.#promoteRepeatedPreferences(effectiveText, userInputEvent.id);
+    await this.#promoteRepeatedPreferences(input.text, userInputEvent.id);
 
     return await this.#completeAndReturn(response, outcomeFromResponse(response));
   }
