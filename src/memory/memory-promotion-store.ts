@@ -230,6 +230,7 @@ export class MemoryPromotionStore {
   #findActiveConflict(category: string, nextContent: string): MemoryPromotionRecord | undefined {
     return [...this.#records.values()].find((record) =>
       record.active &&
+      record.kind === "user-preference" &&
       record.content !== nextContent &&
       classifyPreferenceCategory(record.content) === category
     );
@@ -303,14 +304,20 @@ function normalizeContentKey(content: string): string {
 
 function classifyPreferenceCategory(content: string): string | undefined {
   const normalized = normalizeContentKey(content);
-  if (normalized.includes("concise") && normalized.includes("repl")) {
+  if (/^prefer (?:concise|detailed|brief) replies\.$/u.test(normalized)) {
     return "reply-verbosity";
   }
-  if (normalized.includes("detailed") && normalized.includes("repl")) {
-    return "reply-verbosity";
+  if (/^prefer (?:npm|pnpm|yarn|bun)\.$/u.test(normalized)) {
+    return "package-manager";
   }
-  if (normalized.includes("brief") && normalized.includes("repl")) {
-    return "reply-verbosity";
+  if (/^prefer (?:npm|pnpm|yarn|bun) test\.$/u.test(normalized)) {
+    return "test-command";
+  }
+  if (/^prefer (?:typescript|javascript)\.$/u.test(normalized)) {
+    return "language-default";
+  }
+  if (/^always use (?:strict mode|semicolons|tabs|spaces)\.$/u.test(normalized)) {
+    return "code-style";
   }
   return undefined;
 }

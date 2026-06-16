@@ -7,6 +7,7 @@ import type {
   SessionMessage,
   SessionModelOverride,
   SessionRecord,
+  SessionSearchOptions,
   SessionSearchResult
 } from "../contracts/session.js";
 import type { FailureRecord } from "../contracts/failure.js";
@@ -182,7 +183,7 @@ export class InMemorySessionDB implements SessionDB {
     return (this.#events.get(sessionId) ?? []).map((event) => structuredClone(event));
   }
 
-  async search(query: string, options: { profileId?: string; limit?: number } = {}): Promise<SessionSearchResult[]> {
+  async search(query: string, options: SessionSearchOptions = {}): Promise<SessionSearchResult[]> {
     const terms = tokenizeSearchTerms(query);
 
     if (terms.length === 0) {
@@ -193,6 +194,9 @@ export class InMemorySessionDB implements SessionDB {
 
     for (const session of this.#sessions.values()) {
       if (options.profileId !== undefined && session.profileId !== options.profileId) {
+        continue;
+      }
+      if (options.rootSessionsOnly === true && session.parentSessionId !== undefined) {
         continue;
       }
 

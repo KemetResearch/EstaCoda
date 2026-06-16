@@ -112,6 +112,45 @@ describe("SQLiteSessionDB", () => {
     }
   });
 
+  it("keeps child sessions searchable by default and filters them when root sessions are requested", async () => {
+    const db = new SQLiteSessionDB({ path: dbPath });
+    try {
+      await db.createSession({ id: "root-session", profileId: "default" });
+      await db.createSession({ id: "child-session", profileId: "default", parentSessionId: "root-session" });
+      await db.createSession({ id: "other-profile-root", profileId: "other" });
+      await db.appendMessage({
+        id: "root-message",
+        sessionId: "root-session",
+        role: "user",
+        content: "rootonly searchable marker"
+      });
+      await db.appendMessage({
+        id: "child-message",
+        sessionId: "child-session",
+        role: "user",
+        content: "rootonly searchable marker"
+      });
+      await db.appendMessage({
+        id: "other-message",
+        sessionId: "other-profile-root",
+        role: "user",
+        content: "rootonly searchable marker"
+      });
+
+      const defaultResults = await db.search("rootonly searchable", { profileId: "default", limit: 10 });
+      expect(defaultResults.map((result) => result.session.id).sort()).toEqual(["child-session", "root-session"]);
+
+      const rootOnlyResults = await db.search("rootonly searchable", {
+        profileId: "default",
+        rootSessionsOnly: true,
+        limit: 10
+      });
+      expect(rootOnlyResults.map((result) => result.session.id)).toEqual(["root-session"]);
+    } finally {
+      db.close();
+    }
+  });
+
   it("migrates existing session DBs without ended columns", async () => {
     const legacy = openDefaultSQLiteDatabase({ path: dbPath });
     try {

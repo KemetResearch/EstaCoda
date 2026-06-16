@@ -17,6 +17,14 @@ export type ProjectFactPromotionResult = {
   conclusion: MemoryConclusion;
 };
 
+type PromotionStatementCandidate = {
+  text: string;
+  source: "direct-user-input";
+  index: number;
+};
+
+const MAX_PROMOTION_STATEMENT_CANDIDATES = 8;
+
 export async function resolveUserPreferencePromotion(options: {
   profileId: string;
   currentUserText: string;
@@ -25,28 +33,31 @@ export async function resolveUserPreferencePromotion(options: {
   sourceTrajectoryId?: string;
   sourceEventId?: string;
 }): Promise<UserPreferencePromotionResult | undefined> {
-  const currentUserText = sanitizeMemoryLearningText(options.currentUserText);
-  const forgottenContent = detectForgetPreference(currentUserText);
-  if (forgottenContent !== undefined && options.memoryProvider.forgetPromotion !== undefined) {
-    const forgotten = await options.memoryProvider.forgetPromotion(forgottenContent);
-    if (forgotten !== undefined) {
-      return {
-        kind: "forgotten",
-        content: forgotten.content
-      };
+  const currentCandidates = extractPromotionStatementCandidates(options.currentUserText);
+  for (const currentCandidate of currentCandidates) {
+    const forgottenContent = detectForgetPreference(currentCandidate.text);
+    if (forgottenContent !== undefined && options.memoryProvider.forgetPromotion !== undefined) {
+      const forgotten = await options.memoryProvider.forgetPromotion(forgottenContent);
+      if (forgotten !== undefined) {
+        return {
+          kind: "forgotten",
+          content: forgotten.content
+        };
+      }
     }
   }
 
-  const currentPreference = detectUserPreference(currentUserText);
+  const currentPreference = firstDetectedCandidate(currentCandidates, detectUserPreference);
 
   if (currentPreference === undefined) {
     return undefined;
   }
 
   const matchingSessionIds = new Set<string>();
-  const matches = await options.sessionDb.search(currentPreference.content, {
+  const matches = await options.sessionDb.search(searchQueryForPreference(currentPreference), {
     profileId: options.profileId,
-    limit: 50
+    limit: 50,
+    rootSessionsOnly: true
   });
 
   for (const match of matches) {
@@ -54,7 +65,10 @@ export async function resolveUserPreferencePromotion(options: {
       continue;
     }
 
-    const candidate = detectUserPreference(sanitizeMemoryLearningText(match.message.content));
+    const candidate = firstDetectedCandidate(
+      extractPromotionStatementCandidates(match.message.content),
+      detectUserPreference
+    );
     if (candidate?.key === currentPreference.key) {
       matchingSessionIds.add(match.session.id);
     }
@@ -92,8 +106,10 @@ export async function resolveProjectFactPromotion(options: {
   sourceTrajectoryId?: string;
   sourceEventId?: string;
 }): Promise<ProjectFactPromotionResult | undefined> {
-  const currentUserText = sanitizeMemoryLearningText(options.currentUserText);
-  const currentFact = detectProjectFact(currentUserText);
+  const currentFact = firstDetectedCandidate(
+    extractPromotionStatementCandidates(options.currentUserText),
+    detectProjectFact
+  );
 
   if (currentFact === undefined) {
     return undefined;
@@ -102,7 +118,8 @@ export async function resolveProjectFactPromotion(options: {
   const matchingSessionIds = new Set<string>();
   const matches = await options.sessionDb.search(currentFact.content, {
     profileId: options.profileId,
-    limit: 50
+    limit: 50,
+    rootSessionsOnly: true
   });
 
   for (const match of matches) {
@@ -110,7 +127,10 @@ export async function resolveProjectFactPromotion(options: {
       continue;
     }
 
-    const candidate = detectProjectFact(sanitizeMemoryLearningText(match.message.content));
+    const candidate = firstDetectedCandidate(
+      extractPromotionStatementCandidates(match.message.content),
+      detectProjectFact
+    );
     if (candidate?.key === currentFact.key) {
       matchingSessionIds.add(match.session.id);
     }
@@ -143,7 +163,133 @@ export async function resolveProjectFactPromotion(options: {
 type PreferenceCandidate = {
   key: string;
   content: string;
+  category?: PreferenceConflictCategory;
+  value?: string;
 };
+
+type PreferenceConflictCategory =
+  | "reply-verbosity"
+  | "language-default"
+  | "test-command"
+  | "package-manager"
+  | "code-style";
+
+function firstDetectedCandidate(
+  candidates: readonly PromotionStatementCandidate[],
+  detect: (text: string) => PreferenceCandidate | undefined
+): PreferenceCandidate | undefined {
+  for (const candidate of candidates) {
+    const detected = detect(candidate.text);
+    if (detected !== undefined) {
+      return detected;
+    }
+  }
+  return undefined;
+}
+
+function extractPromotionStatementCandidates(text: string): PromotionStatementCandidate[] {
+  const sanitized = sanitizeMemoryLearningText(text);
+  const withoutCodeBlocks = stripFencedCodeBlocks(sanitized);
+  const statements = splitDirectStatements(withoutCodeBlocks);
+  const candidates: PromotionStatementCandidate[] = [];
+
+  for (const statement of statements) {
+    if (hasInvisibleOrBidiControl(statement)) {
+      continue;
+    }
+    if (hasQuotedOrBacktickedSpan(statement)) {
+      continue;
+    }
+    const normalized = normalize(statement);
+    if (normalized.length === 0 || isAmbiguousPromotionStatement(normalized)) {
+      continue;
+    }
+    candidates.push({
+      text: normalized,
+      source: "direct-user-input",
+      index: candidates.length
+    });
+    if (candidates.length >= MAX_PROMOTION_STATEMENT_CANDIDATES) {
+      break;
+    }
+  }
+
+  return candidates;
+}
+
+function stripFencedCodeBlocks(text: string): string {
+  return text.replace(/```[\s\S]*?```/gu, "\n");
+}
+
+function hasInvisibleOrBidiControl(text: string): boolean {
+  return /[\u200b\u200c\u200d\u200e\u200f\ufeff\u202a-\u202e\u2066-\u2069]/u.test(text);
+}
+
+function hasQuotedOrBacktickedSpan(text: string): boolean {
+  if (/["`‘’“”„‟‹›«»]/u.test(text)) {
+    return true;
+  }
+
+  for (let index = 0; index < text.length; index += 1) {
+    if (text[index] !== "'") {
+      continue;
+    }
+    const previous = text[index - 1] ?? "";
+    const next = text[index + 1] ?? "";
+    if (/[A-Za-z]/u.test(previous) && /[A-Za-z]/u.test(next)) {
+      continue;
+    }
+    return true;
+  }
+
+  return false;
+}
+
+function splitDirectStatements(text: string): string[] {
+  const statements: string[] = [];
+  let current = "";
+
+  for (let index = 0; index < text.length; index += 1) {
+    const character = text[index] ?? "";
+    current += character;
+
+    if (character === "\n") {
+      pushStatement(statements, current);
+      current = "";
+      continue;
+    }
+
+    if (!/[.?!]/u.test(character)) {
+      continue;
+    }
+
+    const next = text[index + 1];
+    if (next === undefined || /\s/u.test(next)) {
+      pushStatement(statements, current);
+      current = "";
+    }
+  }
+
+  pushStatement(statements, current);
+  return statements;
+}
+
+function pushStatement(statements: string[], statement: string): void {
+  const trimmed = statement.trim();
+  if (trimmed.length > 0) {
+    statements.push(trimmed);
+  }
+}
+
+function isAmbiguousPromotionStatement(statement: string): boolean {
+  if (statement.length > 180) {
+    return true;
+  }
+  if (statement.split(/\s+/u).length > 24) {
+    return true;
+  }
+  return /^(?:agent note|assistant note|tool output|earlier assistant said|the attached resume says|please summarize this)\b|^(?:ملاحظة الوكيل|السيرة تقول|قال المساعد سابقاً|قال المساعد سابقا|لخّص هذا|لخص هذا)\b/iu.test(statement);
+}
 
 function detectUserPreference(text: string): PreferenceCandidate | undefined {
   const normalized = normalize(text);
@@ -156,25 +302,45 @@ function detectUserPreference(text: string): PreferenceCandidate | undefined {
     return verbosity;
   }
 
-  const patterns: Array<{
+  const arabicPreference = detectArabicUserPreference(normalized);
+  if (arabicPreference !== undefined) {
+    return arabicPreference;
+  }
+
+  const canonicalPatterns: Array<{
     regex: RegExp;
-    render: (value: string) => string;
   }> = [
     {
-      regex: /^(?:i\s+)?prefer\s+(.+)$/iu,
-      render: (value) => `Prefer ${value}`
+      regex: /^(?:i\s+)?prefer\s+(.+)$/iu
     },
     {
-      regex: /^(?:please\s+)?use\s+(.+?)\s+by\s+default$/iu,
-      render: (value) => `Use ${value} by default`
+      regex: /^i['’]d\s+prefer\s+(.+)$/iu
     },
     {
-      regex: /^(?:please\s+)?default\s+to\s+(.+)$/iu,
-      render: (value) => `Default to ${value}`
+      regex: /^my\s+preference\s+is\s+(.+)$/iu
     },
+    {
+      regex: /^we\s+prefer\s+(.+)$/iu
+    },
+    {
+      regex: /^(?:please\s+)?use\s+(.+?)\s+by\s+default$/iu
+    },
+    {
+      regex: /^(?:please\s+)?default\s+to\s+(.+)$/iu
+    },
+    {
+      regex: /^please\s+switch\s+to\s+(.+?)\s+by\s+default$/iu
+    }
+  ];
+  const nonCanonicalPatterns: Array<{
+    regex: RegExp;
+    render: (value: string) => string;
+    category?: (value: string) => PreferenceConflictCategory | undefined;
+  }> = [
     {
       regex: /^(?:please\s+)?always\s+use\s+(.+)$/iu,
-      render: (value) => `Always use ${value}`
+      render: (value) => `Always use ${value}`,
+      category: derivePreferenceConflictCategory
     },
     {
       regex: /^(?:we\s+)?want\s+(.+?)\s+by\s+default$/iu,
@@ -182,7 +348,21 @@ function detectUserPreference(text: string): PreferenceCandidate | undefined {
     }
   ];
 
-  for (const pattern of patterns) {
+  for (const pattern of canonicalPatterns) {
+    const match = normalized.match(pattern.regex);
+    const captured = match?.[1]?.trim().replace(/[.?!]+$/u, "");
+
+    if (captured === undefined || captured.length === 0) {
+      continue;
+    }
+
+    const canonical = canonicalPreference(captured);
+    if (canonical !== undefined) {
+      return canonical;
+    }
+  }
+
+  for (const pattern of nonCanonicalPatterns) {
     const match = normalized.match(pattern.regex);
     const captured = match?.[1]?.trim().replace(/[.?!]+$/u, "");
 
@@ -193,11 +373,123 @@ function detectUserPreference(text: string): PreferenceCandidate | undefined {
     const content = `${pattern.render(captured)}.`;
     return {
       key: content.toLowerCase(),
-      content
+      content,
+      category: pattern.category?.(captured),
+      value: captured
     };
   }
 
   return undefined;
+}
+
+function detectArabicUserPreference(normalized: string): PreferenceCandidate | undefined {
+  const concisePatterns = [
+    /^خلّي\s+الردود\s+مختصرة$/u,
+    /^خلي\s+الردود\s+مختصرة$/u
+  ];
+  const detailedPatterns = [
+    /^خلّي\s+الردود\s+مفصلة$/u,
+    /^خلي\s+الردود\s+مفصلة$/u
+  ];
+
+  if (concisePatterns.some((pattern) => pattern.test(stripTrailingPunctuation(normalized)))) {
+    return {
+      key: "prefer concise replies.",
+      content: "Prefer concise replies.",
+      category: "reply-verbosity",
+      value: "الردود مختصرة"
+    };
+  }
+
+  if (detailedPatterns.some((pattern) => pattern.test(stripTrailingPunctuation(normalized)))) {
+    return {
+      key: "prefer detailed replies.",
+      content: "Prefer detailed replies.",
+      category: "reply-verbosity",
+      value: "الردود مفصلة"
+    };
+  }
+
+  const canonicalPatterns = [
+    /^(?:أفضل|أفضّل|افضل)\s+(.+)$/u,
+    /^استخدم\s+(.+?)\s+(?:افتراضياً|افتراضيا|كافتراضي)$/u
+  ];
+
+  for (const pattern of canonicalPatterns) {
+    const match = normalized.match(pattern);
+    const captured = match?.[1]?.trim().replace(/[.?!]+$/u, "");
+    if (captured === undefined || !isTechnicalPreferenceValue(captured)) {
+      continue;
+    }
+    return canonicalPreference(captured);
+  }
+
+  return undefined;
+}
+
+function isTechnicalPreferenceValue(value: string): boolean {
+  const normalizedValue = normalizePreferenceValue(value);
+  if (!/^[A-Za-z0-9_~./-]+(?:\s+[A-Za-z0-9_~./-]+)*$/u.test(normalizedValue)) {
+    return false;
+  }
+
+  const lowerValue = normalizedValue.toLowerCase();
+  if (/^(?:typescript|javascript)$/u.test(lowerValue)) {
+    return true;
+  }
+  if (/^(?:npm|pnpm|yarn|bun)(?:\s+[A-Za-z0-9_~./-]+)*$/u.test(normalizedValue)) {
+    return true;
+  }
+  if (/^[A-Z][A-Z0-9_]{2,}$/u.test(normalizedValue)) {
+    return true;
+  }
+  if (/^(?:~\/|\.\/|\.\.\/|\/)[A-Za-z0-9_~./-]+$/u.test(normalizedValue)) {
+    return true;
+  }
+  return /^[A-Za-z]+-\d+(?:\.\d+)*$/u.test(normalizedValue);
+}
+
+function canonicalPreference(value: string): PreferenceCandidate | undefined {
+  const normalizedValue = normalizePreferenceValue(value);
+  if (normalizedValue.length === 0) {
+    return undefined;
+  }
+  const category = derivePreferenceConflictCategory(normalizedValue);
+  const content = `Prefer ${normalizedValue}.`;
+  return {
+    key: `${category ?? "prefer"}:${normalizedValue.toLowerCase()}`,
+    content,
+    category,
+    value: normalizedValue
+  };
+}
+
+function normalizePreferenceValue(value: string): string {
+  return stripTrailingPunctuation(value).replace(/\s+/gu, " ").trim();
+}
+
+function derivePreferenceConflictCategory(value: string): PreferenceConflictCategory | undefined {
+  const normalized = value.toLowerCase();
+  if (/^(?:concise|detailed|brief)(?: telegram)? repl(?:y|ies)$/u.test(normalized)) {
+    return "reply-verbosity";
+  }
+  if (/^(?:npm|pnpm|yarn|bun)$/u.test(normalized)) {
+    return "package-manager";
+  }
+  if (/^(?:npm|pnpm|yarn|bun) test$/u.test(normalized)) {
+    return "test-command";
+  }
+  if (/^(?:typescript|javascript)$/u.test(normalized)) {
+    return "language-default";
+  }
+  if (/^(?:strict mode|semicolons|tabs|spaces)$/u.test(normalized)) {
+    return "code-style";
+  }
+  return undefined;
+}
+
+function searchQueryForPreference(candidate: PreferenceCandidate): string {
+  return candidate.value ?? candidate.content;
 }
 
 function detectProjectFact(text: string): PreferenceCandidate | undefined {
@@ -254,6 +546,7 @@ function detectProjectFact(text: string): PreferenceCandidate | undefined {
 }
 
 function detectVerbosityPreference(normalized: string): PreferenceCandidate | undefined {
+  const statement = stripTrailingPunctuation(normalized);
   const concisePatterns = [
     /^(?:i\s+)?prefer\s+concise(?:\s+telegram)?\s+repl(?:y|ies)$/iu,
     /^please\s+keep\s+repl(?:y|ies)\s+concise$/iu,
@@ -267,17 +560,21 @@ function detectVerbosityPreference(normalized: string): PreferenceCandidate | un
     /^(?:please\s+)?use\s+detailed\s+repl(?:y|ies)$/iu
   ];
 
-  if (concisePatterns.some((pattern) => pattern.test(normalized))) {
+  if (concisePatterns.some((pattern) => pattern.test(statement))) {
     return {
       key: "prefer concise replies.",
-      content: "Prefer concise replies."
+      content: "Prefer concise replies.",
+      category: "reply-verbosity",
+      value: "concise replies"
     };
   }
 
-  if (detailedPatterns.some((pattern) => pattern.test(normalized))) {
+  if (detailedPatterns.some((pattern) => pattern.test(statement))) {
     return {
       key: "prefer detailed replies.",
-      content: "Prefer detailed replies."
+      content: "Prefer detailed replies.",
+      category: "reply-verbosity",
+      value: "detailed replies"
     };
   }
 
@@ -340,4 +637,12 @@ export function __detectForgetPreferenceForTest(text: string): string | undefine
 
 export function __detectProjectFactForTest(text: string): string | undefined {
   return detectProjectFact(text)?.content;
+}
+
+export function __detectUserPreferenceCandidateForTest(text: string): PreferenceCandidate | undefined {
+  return detectUserPreference(text);
+}
+
+export function __extractPromotionStatementCandidatesForTest(text: string): PromotionStatementCandidate[] {
+  return extractPromotionStatementCandidates(text);
 }

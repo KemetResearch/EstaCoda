@@ -828,7 +828,7 @@ export class AgentLoop {
       text: response.text
     });
 
-    await this.#promoteRepeatedPreferences(effectiveText, userInputEvent.id);
+    await this.#promoteRepeatedPreferences(input.text, userInputEvent.id);
 
     return await this.#completeAndReturn(response, outcomeFromResponse(response));
   }
@@ -1036,7 +1036,6 @@ export class AgentLoop {
         targetFile: "USER.md",
         conclusionKind: "user-preference"
       });
-      return;
     }
 
     if (preferenceResult?.kind === "conclusion") {
@@ -1059,10 +1058,6 @@ export class AgentLoop {
         provider: this.#memoryProvider.id,
         conclusion
       });
-      return;
-    }
-    if (preferenceResult?.kind === "forgotten") {
-      return;
     }
 
     let projectFactResult: Awaited<ReturnType<typeof resolveProjectFactPromotion>> | undefined;

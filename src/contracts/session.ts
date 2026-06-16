@@ -596,6 +596,12 @@ export type SessionSearchResult = {
   score: number;
 };
 
+export type SessionSearchOptions = {
+  profileId?: string;
+  limit?: number;
+  rootSessionsOnly?: boolean;
+};
+
 export type CreateSessionInput = {
   id?: string;
   profileId: string;
@@ -638,6 +644,6 @@ export type SessionDB = {
   appendEvent(sessionId: string, event: SessionEvent): Promise<void>;
   listMessages(sessionId: string): Promise<SessionMessage[]>;
   listEvents(sessionId: string): Promise<SessionEvent[]>;
-  search(query: string, options?: { profileId?: string; limit?: number }): Promise<SessionSearchResult[]>;
+  search(query: string, options?: SessionSearchOptions): Promise<SessionSearchResult[]>;
   saveFailure?(record: FailureRecord): Promise<void>;
 };
