@@ -2,17 +2,75 @@
 
 # EstaCoda
 
-The first open-source agentic harness built in the Middle East, designed for governed self-evolution.
+[العربية](./README.ar.md)
 
-EstaCoda is a terminal-native runtime that executes tools, preserves durable sessions across channels, and improves its own harness through operator-approved proposals. It does not silently mutate itself. Every proposed change carries evidence, a hypothesis, and a rollback path.
+Open-source runtime for Agent Evolution — the first of its kind built in the Arab world.
 
-It runs on macOS, Linux, Docker, and WSL2. It does not require a cloud account or a dashboard.
+EstaCoda is a terminal-native AI agent that gets better from real work. It uses tools, remembers across sessions, runs through messaging channels, schedules recurring jobs, and turns repeated execution patterns into reusable skills and workflows.
+
+Bring your own model. Run it locally, on a server, through Docker, or from WSL2. Use it from the terminal, Telegram, WhatsApp, or experimental Discord.
+
+EstaCoda is built with Arabic as a first-class operating language, including shaped, bidirectional Arabic rendering for terminal workflows.
+
+When EstaCoda proposes changes to its own harness, they stay reviewable: evidence, hypothesis, approval, and rollback — not silent mutation.
+
+Built by Kemet Research.
+
+---
+
+## Why EstaCoda
+
+| If you want... | EstaCoda gives you... |
+|---|---|
+| An agent that improves over time | Skills, memory, workflows, and reviewable improvement proposals based on real execution patterns. |
+| A real operator terminal | CLI sessions with tool execution, approvals, profile state, durable history, and shaped bidirectional Arabic rendering. |
+| An agent that follows you | CLI, Telegram, and WhatsApp, with experimental Discord support. |
+| Work that runs without babysitting | Cron jobs and durable workflows that can run unattended and deliver results back to you. |
+| Model freedom | OpenRouter, Kimi, DeepSeek, OpenAI, Google, local/self-hosted endpoints, and other configured providers. |
+| More than chat | Web research, browser automation, hosted voice providers, image generation, files, shell commands, and tool workflows. |
+| Power without mystery mutation | Explicit proposals, evidence, approval, rollback, and hard safety boundaries. |
+
+---
+
+## The Agent Evolution Loop
+
+1. Give EstaCoda real work.
+2. It uses tools, memory, skills, browser automation, shell commands, scheduled jobs, and channel delivery as needed.
+3. When a useful pattern repeats, it can propose a reusable skill, workflow, or harness improvement.
+4. You review the evidence, approve the change, revise it, or reject it.
+5. Future sessions start with more useful context and reusable capability than the last one.
+
+---
+
+## Example Uses
+
+```text
+"Every morning, check my orders, supplier emails, and delivery issues. Send me a Telegram summary in Arabic with anything that needs action."
+
+"Monitor customer messages from Telegram and email, group them by issue, and draft replies in Arabic and English."
+
+"Compare payment gateways for an online store selling across Egypt, Saudi Arabia, and the UAE. Check pricing, settlement times, local support, and integration effort."
+
+"Watch competitor websites and social pages across the GCC, Egypt, and Jordan. Summarize new products, pricing changes, and campaigns every Sunday."
+
+"Track this GitHub repo and tell me what changed before our weekly release meeting. Turn the release checklist into a reusable workflow."
+
+"Research packaging suppliers in Cairo, Riyadh, Casablanca, and Dubai. Compare minimum order quantities, lead times, and estimated cost."
+
+"Prepare a weekly sales follow-up list from my email threads. Separate hot leads, blocked deals, and people who need a reminder."
+
+"Watch property listings in Riyadh, Cairo, Amman, and Dubai. Alert me when prices change or a comparable unit appears."
+
+"Track tenders and procurement announcements in my sector. Summarize relevant opportunities and deadlines each week."
+
+"Research cafés, clinics, or boutiques launching new branches in my city. Build a short partnership or sales prospect list."
+```
 
 ---
 
 ## Quick Install
 
-macOS, Linux, WSL2, Termux:
+macOS, Linux, WSL2, and Termux:
 
 ```bash
 curl -fsSL https://estacoda.kemetresearch.com/install.sh | bash
@@ -20,19 +78,170 @@ curl -fsSL https://estacoda.kemetresearch.com/install.sh | bash
 
 The installer creates a managed-source install, symlinks a wrapper to `~/.local/bin/estacoda`, and adds PATH to your shell rc if needed. After installation, reload your shell or open a new terminal.
 
+For the full setup flow, see the [Quickstart](https://estacoda.kemetresearch.com/docs/getting-started/quickstart).
+
 ---
 
 ## First Run
 
 ```bash
-estacoda init    # create default profile and state directories
-estacoda setup   # configure provider, model, security mode, optional channels
-estacoda         # start a session
+estacoda init    # create the default profile and state directories
+estacoda setup   # configure provider, model, security mode, and optional channels
+estacoda         # start an interactive session
 ```
 
-`estacoda setup` walks through provider selection, API key storage, security mode, and optional capabilities. Review the proposed configuration before anything is written. Setup is read-only until you approve it.
+`estacoda setup` walks through provider selection, API key storage, security mode, and optional capabilities. It shows the proposed configuration before anything is written.
 
-For the full quickstart, see the [documentation site](https://estacoda.kemetresearch.com/docs/getting-started/quickstart).
+---
+
+## Common Commands
+
+```bash
+estacoda                       # start a terminal session
+estacoda init                  # initialize profile and state directories
+estacoda setup                 # run the interactive setup wizard
+estacoda update                # update using the current install method
+estacoda update --check        # check for updates without modifying files
+estacoda uninstall             # remove install code and wrappers; keep user data
+estacoda uninstall --purge     # remove install code and user data
+estacoda whatsapp              # start the WhatsApp setup wizard
+```
+
+For the full command surface, see [CLI Commands](https://estacoda.kemetresearch.com/docs/reference/cli-commands).
+
+---
+
+## Capability and Maturity
+
+EstaCoda distinguishes between live-proven, configurable, experimental, and emerging functionality. The root README gives the short version; the docs contain the full setup and troubleshooting details.
+
+### LLM Providers
+
+| Provider | Maturity |
+|---|---|
+| OpenAI | Live-proven |
+| Kimi | Live-proven |
+| DeepSeek | Live-proven |
+| OpenRouter | Live-proven |
+| Google | Configurable |
+| Local / self-hosted | Supported through local OpenAI-compatible endpoints |
+
+Custom OpenAI-compatible providers work with an explicit `baseUrl`. Additional providers are available through configuration, with more coming soon.
+
+### Channels
+
+| Channel | Maturity |
+|---|---|
+| CLI | Supported direct interaction surface |
+| Telegram | Live-proven |
+| WhatsApp | Live-proven |
+| Discord | Experimental |
+
+WhatsApp uses an isolated Baileys bridge under `scripts/whatsapp-bridge/`. The bridge dependencies are managed separately and are not part of the root pnpm workspace. See the channel docs for setup, authorization, pairing, and delivery behavior.
+
+### Other Capabilities
+
+| Capability | Status |
+|---|---|
+| Arabic terminal support | Supported with shaped, bidirectional Arabic rendering for terminal workflows. |
+| Browser automation | Local CDP is supported, including supervised Chrome/Chromium auto-launch. Browserbase is implemented behind explicit cloud spend approval. |
+| Web research | Guarded built-in fetch/extraction is supported. Additional search providers are registered but not all are live-supported. |
+| Voice | Hosted TTS and hosted STT are supported. Local STT defaults to managed faster-whisper under `~/.estacoda/python-env`. |
+| Image generation | FAL and BytePlus/Seedream are supported. |
+| Cron scheduling | Supported. |
+| Workflow durable execution | Supported. |
+| Skills | Supported. |
+| Memory | Supported. |
+
+---
+
+## Supported Platforms
+
+| Platform | Status |
+|---|---|
+| macOS 11+ | Supported |
+| Linux | Supported; validated on Ubuntu 22.04+ and Debian 12+ |
+| Docker | Supported in Docker-capable environments |
+| WSL2 | Best-effort; voice/microphone and systemd user services may have edge cases |
+| Termux | Best-effort; resolves `$PREFIX/bin` layout, not a primary validation target |
+| Native Windows | Unsupported |
+
+---
+
+## Requirements
+
+### Core requirements
+
+- Node.js >= 22.18.0
+- pnpm via Corepack or equivalent
+- Git
+- POSIX shell
+
+### Optional by install path or feature
+
+- Docker for container usage
+- Homebrew for the Homebrew install path
+- ffmpeg for some media and voice delivery flows
+
+---
+
+## State and Profiles
+
+EstaCoda stores user state under `~/.estacoda/`.
+
+| State | Contents |
+|---|---|
+| Global state | Active profile, trust records, sessions database, update cache |
+| Profile state | Configuration, credentials, memory files, skills, cron jobs, gateway settings, logs |
+
+The active profile is selected in:
+
+```bash
+~/.estacoda/active-profile.json
+```
+
+Profiles own their configuration, credentials, memory, gateway state, and logs.
+
+See [State and Files](https://estacoda.kemetresearch.com/docs/reference/state-and-files) for the full state model.
+
+---
+
+## Safety Boundaries
+
+EstaCoda is designed for powerful agent workflows, but it keeps high-impact changes explicit.
+
+- Setup shows the proposed configuration before writing it.
+- Hard safety blocks remain active in all security modes.
+- `open` mode is not “security off.”
+- Updates mutate only install locations owned by the selected install method.
+- Managed installs require installer ownership stamps before removing install code.
+- User data is preserved by default during uninstall.
+- Harness improvements require reviewable proposals rather than silent self-mutation.
+
+See [Security and Approvals](https://estacoda.kemetresearch.com/docs/user-guide/security-and-approvals) for the full model.
+
+---
+
+## Documentation
+
+All documentation lives at [estacoda.kemetresearch.com/docs](https://estacoda.kemetresearch.com/docs/).
+
+| Section | What's Covered |
+|---|---|
+| [Quickstart](https://estacoda.kemetresearch.com/docs/getting-started/quickstart) | Install, setup, and first session |
+| [Installation](https://estacoda.kemetresearch.com/docs/getting-started/installation) | Install paths and OS support |
+| [Updating](https://estacoda.kemetresearch.com/docs/getting-started/updating) | Update commands, routing, and safety |
+| [Uninstall](https://estacoda.kemetresearch.com/docs/getting-started/uninstall) | Removal behavior and data boundaries |
+| [CLI Usage](https://estacoda.kemetresearch.com/docs/user-guide/cli) | Commands, sessions, profiles |
+| [Providers](https://estacoda.kemetresearch.com/docs/user-guide/providers) | Provider setup, maturity, and routing |
+| [Channels](https://estacoda.kemetresearch.com/docs/user-guide/channels) | Telegram, WhatsApp, Discord |
+| [Gateway](https://estacoda.kemetresearch.com/docs/user-guide/gateway) | Service mode, diagnostics, approvals |
+| [Skills](https://estacoda.kemetresearch.com/docs/user-guide/skills) | Loading, evolution, and proposals |
+| [Memory](https://estacoda.kemetresearch.com/docs/user-guide/memory) | Profile memory, promotion, and limits |
+| [Security and Approvals](https://estacoda.kemetresearch.com/docs/user-guide/security-and-approvals) | Modes, trust boundaries, and hard blocks |
+| [Configuration](https://estacoda.kemetresearch.com/docs/reference/configuration) | Config file reference |
+| [CLI Commands](https://estacoda.kemetresearch.com/docs/reference/cli-commands) | Full command and flag reference |
+| [Troubleshooting](https://estacoda.kemetresearch.com/docs/reference/troubleshooting) | Common failures and recovery |
 
 ---
 
@@ -44,146 +253,62 @@ cd EstaCoda
 ./scripts/setup-estacoda.sh
 ```
 
-The setup script installs dependencies, builds the project, and offers to symlink a local wrapper. This creates a manual-source install. Run `estacoda init` and `estacoda setup` after the script finishes.
+The setup script installs dependencies, builds the project, and offers to symlink a local wrapper. This creates a manual-source install.
+
+After setup:
+
+```bash
+estacoda init
+estacoda setup
+estacoda
+```
+
+Before opening a pull request, run the project validation commands documented in [CONTRIBUTING.md](./CONTRIBUTING.md).
 
 ---
 
-## Update
+## Updating
 
 ```bash
 estacoda update
 ```
 
-Updates follow the install method:
+Update behavior follows the install method:
 
-- **managed-source** (curl installer): guarded git pull, dependency reinstall, build, and validation. Automatic rollback on build failure.
-- **manual-source** (git clone): check and advise only. No self-mutation.
-- **Homebrew**: routes to `brew upgrade`.
-- **Docker**: routes to `docker pull`.
-- **npm**: routes to `npm install -g estacoda@latest` once published.
+| Install method | Behavior |
+|---|---|
+| managed-source | Guarded git pull, dependency reinstall, build, validation, and rollback on build failure |
+| manual-source | Check and advise only; no self-mutation |
+| Homebrew | Routes to `brew upgrade` |
+| Docker | Routes to `docker pull` |
+| npm | Routes to `npm install -g estacoda@latest` once published |
 
-`estacoda update --check` reports availability without modifying files. `estacoda update --yes` applies without interactive confirmation where safe. `estacoda update --gateway` runs in non-interactive service mode.
-
-Startup update checks are enabled by default: non-blocking background prefetch with a six-hour cache. They run only in interactive CLI sessions and fail silently on network errors.
-
-See [Updating](https://estacoda.kemetresearch.com/docs/getting-started/updating) for the full command surface and safety boundaries.
-
----
-
-## Uninstall
+Useful flags:
 
 ```bash
-estacoda uninstall              # remove install code and wrappers; keep user data
-estacoda uninstall --purge --yes # also remove user data
+estacoda update --check    # report availability without modifying files
+estacoda update --yes      # apply without interactive confirmation where safe
+estacoda update --gateway  # run in non-interactive service mode
 ```
 
-Default uninstall preserves `~/.estacoda`. Managed-source directories are removed only when a valid installer stamp proves ownership. Manual-source checkouts are preserved. Package-manager and container installs are routed to their respective tools rather than self-mutated.
+Startup update checks are enabled by default. They run as non-blocking background prefetches in interactive CLI sessions, use a six-hour cache, and fail silently on network errors.
+
+See [Updating](https://estacoda.kemetresearch.com/docs/getting-started/updating) for the full update surface.
+
+---
+
+## Uninstalling
+
+```bash
+estacoda uninstall               # remove install code and wrappers; keep user data
+estacoda uninstall --purge --yes  # also remove user data
+```
+
+Default uninstall preserves `~/.estacoda`.
+
+Managed-source directories are removed only when a valid installer stamp proves ownership. Manual-source checkouts are preserved. Package-manager and container installs are routed to their respective tools rather than self-mutated.
 
 See [Uninstall](https://estacoda.kemetresearch.com/docs/getting-started/uninstall) for method-specific behavior and ownership rules.
-
----
-
-## Supported Platforms
-
-| Platform | Status |
-|---|---|
-| macOS 11+ | Supported |
-| Linux (systemd, glibc) | Supported — validated on Ubuntu 22.04+ and Debian 12+ |
-| Docker | Supported — any Docker-capable environment |
-| WSL2 | Best-effort — voice/microphone and systemd user services have edge cases |
-| Termux | Best-effort — resolves `$PREFIX/bin` layout; not a primary validation target |
-| Native Windows | Unsupported |
-
----
-
-## Runtime Requirements
-
-- **Node.js >= 22.18.0**
-- **pnpm** via Corepack or equivalent
-- **Git** (for source install and update flows)
-- **POSIX shell** (for curl installer and setup scripts)
-- **Docker** (for container usage)
-- **Homebrew** (for Homebrew install path)
-
----
-
-## Capability and Maturity
-
-### LLM Providers
-
-| Provider | Maturity |
-|---|---|
-| OpenAI | Live-proven |
-| Kimi | Live-proven |
-| DeepSeek | Live-proven |
-| OpenRouter | Live-proven |
-| Codex | Implemented — public setup path via `estacoda model setup codex`; excluded from the Onboarding Wizard by design |
-| Google | Configurable |
-| Anthropic | Catalog-known, not runnable in this build |
-| MiniMax | Catalog-known, not runnable in this build |
-| Nous | Catalog-known, not runnable in this build |
-
-Custom OpenAI-compatible providers work with an explicit `baseUrl`.
-
-### Channels
-
-| Channel | Maturity |
-|---|---|
-| CLI | Supported direct interaction surface |
-| Telegram | Live-proven |
-| Discord | Present, not live-proven |
-| Email | Present, not live-proven |
-| WhatsApp | Experimental-only — gated behind `experimental: true` |
-
-WhatsApp is optional, experimental, and backed by the unofficial Baileys linked-device API. Transport dependencies are isolated under `scripts/whatsapp-bridge/` so the root runtime does not install or import Baileys or `@hapi/boom`. The bridge package is managed separately with its own `package-lock.json` and is not part of the root pnpm workspace.
-
-Run `estacoda whatsapp` to start the WhatsApp setup wizard. The wizard uses QR-only device pairing, asks before installing the isolated bridge dependencies, and leaves the channel pairing-pending if no allowed WhatsApp users are configured yet. WhatsApp user authorization codes are one-time, expire after 10 minutes, and are stored only as salted hashes in profile-local state. WhatsApp normal text turns use a short debounce window so rapid messages from the same chat/sender become one turn; commands, approvals, auth, stops, and media bypass it. WhatsApp replies are final-only: progress becomes best-effort typing presence, while final text, media, and voice-hinted audio are delivered after the turn completes. Voice bubbles require `ffmpeg`; without it, EstaCoda falls back to normal audio.
-
-### Other Capabilities
-
-- **Browser automation**: local CDP is supported, including supervised Chrome/Chromium auto-launch. Browserbase is implemented behind explicit cloud spend approval. browser-use, Firecrawl, and Camofox remain registered deferred providers.
-- **Web research**: guarded built-in fetch/extraction is supported. Firecrawl, Parallel, Tavily, Exa, SearXNG, Brave, and DDGS are registered but not live-supported.
-- **Voice**: hosted TTS (OpenAI, ElevenLabs, MiniMax, Gemini, xAI) and hosted STT (OpenAI, Groq, xAI) are supported. Local STT defaults to managed faster-whisper under `~/.estacoda/python-env`; command-mode local STT remains an explicit `stt.local.engine: "command"` opt-in. Local TTS and Mistral voice remain deferred.
-- **Image generation**: FAL and BytePlus/Seedream are supported.
-- **Cron scheduling**, **Workflow durable execution**, **skills**, and **memory** are supported.
-
----
-
-## State and Safety
-
-EstaCoda stores user state under `~/.estacoda/`:
-
-- Global state: active profile, trust records, sessions database, update cache.
-- Profile state: configuration, credentials, memory files, skills, cron jobs, gateway settings, logs.
-
-Profiles own their configuration, credentials, memory, gateway state, and logs. The active profile is selected in `~/.estacoda/active-profile.json`.
-
-Hard safety blocks remain active in all security modes. `open` mode is not "security off." Updates and uninstall obey ownership boundaries: managed installs mutate only stamped directories, and user data is never destroyed by default.
-
-See [State and Files](https://estacoda.kemetresearch.com/docs/reference/state-and-files) and [Security and Approvals](https://estacoda.kemetresearch.com/docs/user-guide/security-and-approvals) for the full model.
-
----
-
-## Documentation
-
-All documentation lives at [estacoda.kemetresearch.com/docs](https://estacoda.kemetresearch.com/docs/):
-
-| Section | What's Covered |
-|---|---|
-| [Quickstart](https://estacoda.kemetresearch.com/docs/getting-started/quickstart) | Install, setup, and first session |
-| [Installation](https://estacoda.kemetresearch.com/docs/getting-started/installation) | All install paths and OS support |
-| [Updating](https://estacoda.kemetresearch.com/docs/getting-started/updating) | Update commands, routing, and safety |
-| [Uninstall](https://estacoda.kemetresearch.com/docs/getting-started/uninstall) | Removal behavior and data boundaries |
-| [CLI Usage](https://estacoda.kemetresearch.com/docs/user-guide/cli) | Commands, sessions, profiles |
-| [Providers](https://estacoda.kemetresearch.com/docs/user-guide/providers) | Setup, maturity, and routing |
-| [Channels](https://estacoda.kemetresearch.com/docs/user-guide/channels) | Telegram, Discord, Email, WhatsApp |
-| [Gateway](https://estacoda.kemetresearch.com/docs/user-guide/gateway) | Service mode, diagnostics, approvals |
-| [Skills](https://estacoda.kemetresearch.com/docs/user-guide/skills) | Loading, evolution, and proposals |
-| [Memory](https://estacoda.kemetresearch.com/docs/user-guide/memory) | Profile memory, promotion, and limits |
-| [Security and Approvals](https://estacoda.kemetresearch.com/docs/user-guide/security-and-approvals) | Modes, trust boundaries, and hard blocks |
-| [Configuration](https://estacoda.kemetresearch.com/docs/reference/configuration) | Config file reference |
-| [CLI Commands](https://estacoda.kemetresearch.com/docs/reference/cli-commands) | Full command and flag reference |
-| [Troubleshooting](https://estacoda.kemetresearch.com/docs/reference/troubleshooting) | Common failures and recovery |
 
 ---
 
@@ -191,6 +316,12 @@ All documentation lives at [estacoda.kemetresearch.com/docs](https://estacoda.ke
 
 See [CONTRIBUTING.md](./CONTRIBUTING.md) for development setup, branch workflow, validation commands, and contribution rules.
 
+See [AGENTS.md](./AGENTS.md) for guidance when using AI coding assistants with this codebase.
+
 See [SECURITY.md](./SECURITY.md) for the security model, vulnerability reporting process, and supported versions.
 
-See [AGENTS.md](./AGENTS.md) for guidance when using AI coding assistants with this codebase.
+---
+
+## License
+
+Apache License 2.0 — see [LICENSE](./LICENSE).
