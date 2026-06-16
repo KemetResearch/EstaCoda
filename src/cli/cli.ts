@@ -61,6 +61,7 @@ import { resolveAllAuxiliaryRoutes } from "../providers/auxiliary-model-resolver
 import { getAuxiliaryInFlight, getAuxiliaryQueued } from "../providers/auxiliary-executor.js";
 import { runCronCommand } from "../cron/cron-command.js";
 import { createRuntimeCronRunner, tickCron } from "../cron/cron-runner.js";
+import { createIsolatedCronRuntime, type CronRuntimeFactory } from "../cron/cron-runtime-factory.js";
 import { CronStore } from "../cron/cron-store.js";
 import { CronExecutionStore } from "../cron/cron-execution-store.js";
 import { SQLiteSessionDB } from "../session/sqlite-session-db.js";
@@ -199,6 +200,7 @@ export type CliOptions = {
   providerFetch?: ProviderFetchLike;
   imageGenerationFetch?: ImageGenerationFetchLike;
   runtime?: Runtime;
+  cronRuntimeFactory?: CronRuntimeFactory;
   modelsDevOptions?: ModelsDevRegistryOptions;
   profileContextGenerator?: ProfileContextGenerator;
   output?: { write(chunk: string): void };
@@ -2853,6 +2855,7 @@ async function cron(options: CliOptions, args: string[]): Promise<CliCommandResu
   const store = new CronStore({ homeDir: options.homeDir });
   const executionStoreHandle = await tryCreateExecutionStore(options);
   const executionStore = executionStoreHandle?.store;
+  const profileId = selectedProfileId(options);
   try {
     const result = await runCronCommand({
       args,
@@ -2866,9 +2869,16 @@ async function cron(options: CliOptions, args: string[]): Promise<CliCommandResu
           const results = await tickCron({
             store,
             runner: createRuntimeCronRunner({
-              runtimeFactory: async () => options.runtime!,
+              runtimeFactory: async (_job, context) => createIsolatedCronRuntime({
+                context,
+                workspaceRoot: options.workspaceRoot,
+                homeDir: options.homeDir,
+                profileId,
+                sessionDb: options.runtime?.sessionDb,
+                createRuntime: options.cronRuntimeFactory
+              }),
               wrapResponse: true,
-              disposeRuntime: false,
+              disposeRuntime: true,
               workspaceRoot: options.workspaceRoot
             }),
             executionStore: executionStore ?? undefined,

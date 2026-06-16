@@ -1,4 +1,5 @@
 import { spawn } from "node:child_process";
+import { randomUUID } from "node:crypto";
 import { mkdir, open, readFile, realpath, rm } from "node:fs/promises";
 import { dirname, extname, isAbsolute, join, relative, resolve } from "node:path";
 import type { ChannelSessionKey } from "../contracts/channel.js";
@@ -42,12 +43,23 @@ export type CronRunResult = {
   deliveryResults: Map<string, { success: boolean; error?: string }>;
   failureClass?: string;
   executionId?: string;
+  sessionId?: string;
+  trajectoryId?: string;
   skipped?: boolean;
   lockStale?: boolean;
 };
 
+export type CronRunContext = {
+  executionId?: string;
+  sessionId: string;
+  scheduledAt?: Date;
+};
+
 export type CronRunner = {
-  runJob(job: CronJob, executionId?: string): Promise<CronRunResult>;
+  runJob(
+    job: CronJob,
+    context?: Pick<CronRunContext, "executionId" | "scheduledAt">
+  ): Promise<CronRunResult>;
 };
 
 type CronScriptResult = {
@@ -94,8 +106,8 @@ export async function tickCron(input: TickCronInput): Promise<CronRunResult[]> {
 
         // Create execution record
         let executionId: string | undefined;
+        const scheduledAt = job.nextRunAt !== undefined ? new Date(job.nextRunAt) : undefined;
         if (input.executionStore !== undefined) {
-          const scheduledAt = job.nextRunAt !== undefined ? new Date(job.nextRunAt) : undefined;
           const record = await input.executionStore.create({ jobId: job.id, scheduledAt });
           executionId = record.id;
         }
@@ -104,7 +116,7 @@ export async function tickCron(input: TickCronInput): Promise<CronRunResult[]> {
         await input.store.advanceNextRun(job.id, input.now);
 
         try {
-          const result = await input.runner.runJob(job, executionId);
+          const result = await input.runner.runJob(job, { executionId, scheduledAt });
           const enriched: CronRunResult = { ...result, executionId, lockStale: lockResult.stale };
 
           // Complete execution record
@@ -114,7 +126,9 @@ export async function tickCron(input: TickCronInput): Promise<CronRunResult[]> {
               outputSummary: enriched.output.slice(0, 2000),
               deliveryResults: enriched.deliveryResults,
               failureClass: enriched.failureClass,
-              failureMessage: enriched.failureClass !== undefined ? enriched.output.slice(0, 2000) : undefined
+              failureMessage: enriched.failureClass !== undefined ? enriched.output.slice(0, 2000) : undefined,
+              sessionId: enriched.sessionId,
+              trajectoryId: enriched.trajectoryId
             });
           }
 
@@ -193,14 +207,15 @@ export async function tickCron(input: TickCronInput): Promise<CronRunResult[]> {
 }
 
 export function createRuntimeCronRunner(input: {
-  runtimeFactory: (job: CronJob) => Promise<Runtime>;
+  runtimeFactory: (job: CronJob, context: CronRunContext) => Promise<Runtime>;
   deliver?: (job: CronJob, content: string) => Promise<CronDeliveryResult>;
   wrapResponse?: boolean;
   disposeRuntime?: boolean;
   workspaceRoot?: string;
 }): CronRunner {
   return {
-    async runJob(job, executionId) {
+    async runJob(job, runInput) {
+      const executionId = runInput?.executionId;
       const scriptResult = job.script === undefined
         ? undefined
         : await runCronScript(job, input.workspaceRoot);
@@ -223,7 +238,16 @@ export function createRuntimeCronRunner(input: {
         };
       }
 
-      const runtime = await input.runtimeFactory(job);
+      const runContext: CronRunContext = {
+        executionId,
+        sessionId: `cron-${job.id}-${randomUUID()}`,
+        scheduledAt: runInput?.scheduledAt
+      };
+      const runtime = await input.runtimeFactory(job, runContext);
+      const runtimeEvidence = () => ({
+        sessionId: runtime.sessionId,
+        trajectoryId: runtime.trajectoryId
+      });
       try {
         const response = await runtime.handle({
           text: buildCronPrompt(job, scriptResult),
@@ -241,7 +265,8 @@ export function createRuntimeCronRunner(input: {
             delivered: false,
             deliveryResults: new Map(),
             failureClass: failure.class,
-            executionId
+            executionId,
+            ...runtimeEvidence()
           };
         }
         const content = formatCronOutput(job, response.text, input.wrapResponse ?? true);
@@ -256,7 +281,8 @@ export function createRuntimeCronRunner(input: {
           output: content,
           delivered: deliveryResult.success,
           deliveryResults: deliveryResult.perTarget,
-          executionId
+          executionId,
+          ...runtimeEvidence()
         };
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
@@ -273,7 +299,8 @@ export function createRuntimeCronRunner(input: {
           delivered: deliveryResult.success,
           deliveryResults: deliveryResult.perTarget,
           failureClass: failure.class,
-          executionId
+          executionId,
+          ...runtimeEvidence()
         };
       } finally {
         if (input.disposeRuntime !== false) {

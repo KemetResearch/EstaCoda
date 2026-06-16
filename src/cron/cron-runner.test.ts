@@ -56,6 +56,8 @@ function fakeCronJob(): CronJob {
 
 function fakeRuntime(text: string) {
   return {
+    sessionId: "cron-runtime-session",
+    trajectoryId: "cron-runtime-trajectory",
     handle: vi.fn(async () => ({ text })),
     dispose: vi.fn(async () => undefined)
   };
@@ -81,7 +83,7 @@ describe("createRuntimeCronRunner", () => {
       deliver
     });
 
-    const result = await runner.runJob(job, "exec-empty");
+    const result = await runner.runJob(job, { executionId: "exec-empty" });
 
     expect(result.ok).toBe(false);
     expect(result.delivered).toBe(false);
@@ -102,7 +104,7 @@ describe("createRuntimeCronRunner", () => {
       deliver
     });
 
-    const result = await runner.runJob(job, "exec-ok");
+    const result = await runner.runJob(job, { executionId: "exec-ok" });
 
     expect(result.ok).toBe(true);
     expect(result.delivered).toBe(true);
@@ -120,7 +122,7 @@ describe("createRuntimeCronRunner", () => {
       deliver
     });
 
-    const result = await runner.runJob(job, "exec-silent");
+    const result = await runner.runJob(job, { executionId: "exec-silent" });
 
     expect(result.ok).toBe(true);
     expect(result.delivered).toBe(true);
@@ -141,7 +143,7 @@ describe("createRuntimeCronRunner", () => {
       wrapResponse: false
     });
 
-    const result = await runner.runJob(job, "exec-script");
+    const result = await runner.runJob(job, { executionId: "exec-script" });
 
     expect(result.ok).toBe(true);
     expect(runtimeFactory).toHaveBeenCalledTimes(1);
@@ -152,6 +154,24 @@ describe("createRuntimeCronRunner", () => {
     expect(runtime.handle).toHaveBeenCalledWith(expect.objectContaining({
       text: expect.stringContaining("script-ok")
     }));
+  });
+
+  it("passes cron run context to runtime creation", async () => {
+    const job = fakeCronJob();
+    const runtime = fakeRuntime("Cron completed.");
+    const runtimeFactory = vi.fn(async () => runtime as never);
+    const runner = createRuntimeCronRunner({
+      runtimeFactory
+    });
+    const scheduledAt = new Date("2030-01-01T00:00:00Z");
+
+    await runner.runJob(job, { executionId: "exec-context", scheduledAt });
+
+    expect(runtimeFactory).toHaveBeenCalledWith(job, {
+      executionId: "exec-context",
+      sessionId: expect.stringMatching(/^cron-cron-test-runtime-/u),
+      scheduledAt
+    });
   });
 
   it("keeps attached skills as labels only in the current cron prompt", () => {
@@ -234,7 +254,7 @@ describe("tickCron with execution store and job lock", () => {
     expect(history[0].jobId).toBe(results[0].job.id);
   });
 
-  it("currently completes runner-backed executions without session or trajectory linkage", async () => {
+  it("completes runner-backed executions with runtime session and trajectory linkage", async () => {
     await store.create({
       name: "Evidence baseline job",
       schedule: "* * * * *",
@@ -262,8 +282,43 @@ describe("tickCron with execution store and job lock", () => {
 
     const [record] = await executionStore.list();
     expect(record?.status).toBe("success");
-    expect(record?.sessionId).toBeUndefined();
-    expect(record?.trajectoryId).toBeUndefined();
+    expect(record?.sessionId).toBe("cron-session-baseline");
+    expect(record?.trajectoryId).toBe("trajectory-baseline");
+  });
+
+  it("records runtime session and trajectory linkage when runtime handling fails", async () => {
+    await store.create({
+      name: "Evidence failure job",
+      schedule: "* * * * *",
+      prompt: "hello",
+      delivery: "local"
+    });
+    const runtime = {
+      ...fakeRuntime("unused"),
+      sessionId: "cron-session-failed",
+      trajectoryId: "trajectory-failed",
+      handle: vi.fn(async () => {
+        throw new Error("model failed");
+      })
+    };
+    const runner = createRuntimeCronRunner({
+      runtimeFactory: vi.fn(async () => runtime as never),
+      wrapResponse: false
+    });
+
+    const now = new Date("2030-01-01T00:00:00Z");
+    await tickCron({
+      store,
+      runner,
+      executionStore,
+      jobLock: createFileCronJobLock({ lockDir, staleTimeoutMs: 60_000 }),
+      now
+    });
+
+    const [record] = await executionStore.list();
+    expect(record?.status).toBe("failed");
+    expect(record?.sessionId).toBe("cron-session-failed");
+    expect(record?.trajectoryId).toBe("trajectory-failed");
   });
 
   it("records execution history for a failed job", async () => {

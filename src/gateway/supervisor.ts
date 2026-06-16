@@ -1,5 +1,5 @@
 import { appendFile, mkdir, unlink } from "node:fs/promises";
-import { randomUUID, createHash } from "node:crypto";
+import { createHash } from "node:crypto";
 import { dirname, join } from "node:path";
 import { resolveHomeDir } from "../config/home-dir.js";
 import { addWhatsAppAllowedUser, loadRuntimeConfig, consumeTelegramPairingCode } from "../config/runtime-config.js";
@@ -1369,7 +1369,7 @@ export async function runGatewaySupervisor(options: GatewaySupervisorOptions): P
           },
           disposeRuntime: true,
           workspaceRoot: options.workspaceRoot,
-          runtimeFactory: async (job) => {
+          runtimeFactory: async (_job, context) => {
             const latestConfig = await loadConfig();
             return createRuntime(buildGatewayCronRuntimeOptions({
               latestConfig,
@@ -1377,7 +1377,7 @@ export async function runGatewaySupervisor(options: GatewaySupervisorOptions): P
               homeDir,
               profileId,
               sessionDb,
-              sessionId: `cron-${job.id}-${randomUUID()}`,
+              sessionId: context.sessionId,
             }));
           },
         }),

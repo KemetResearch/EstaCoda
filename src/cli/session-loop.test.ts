@@ -133,6 +133,7 @@ function createMockRuntime(overrides: Partial<Runtime> = {}): Runtime {
     dispose: async () => {},
     sessionDb,
     sessionId: "test-session",
+    trajectoryId: "test-trajectory",
   };
   return { ...runtime, ...overrides };
 }
@@ -952,7 +953,7 @@ describe("runSessionLoop — user prompt rail behavior", () => {
 });
 
 describe("handleSlashCommand cron", () => {
-  it("currently reuses the interactive runtime for /cron tick", async () => {
+  it("creates an isolated runtime for /cron tick and disposes it", async () => {
     const tmpHome = await mkdtemp(join(tmpdir(), "estacoda-session-cron-"));
     const oldHome = process.env.HOME;
     const oldEstacodaHome = process.env.ESTACODA_HOME;
@@ -966,11 +967,23 @@ describe("handleSlashCommand cron", () => {
         prompt: "run me"
       });
       await store.requestRun(job.id);
-      const handle = vi.fn(async () => ({
+      const interactiveHandle = vi.fn(async () => ({
         ...mockResponse(),
-        text: "cron reused interactive runtime"
+        text: "interactive runtime should not run"
       }));
-      const runtime = createMockRuntime({ handle });
+      const cronHandle = vi.fn(async () => ({
+        ...mockResponse(),
+        text: "cron isolated runtime"
+      }));
+      const cronDispose = vi.fn(async () => undefined);
+      const runtime = createMockRuntime({ handle: interactiveHandle });
+      const cronRuntimeFactory = vi.fn(async (runtimeOptions) => createMockRuntime({
+        sessionId: runtimeOptions.sessionId,
+        trajectoryId: "cron-trajectory",
+        handle: cronHandle,
+        dispose: cronDispose,
+        sessionDb: runtimeOptions.sessionDb ?? new InMemorySessionDB()
+      }));
       const outputChunks: string[] = [];
 
       const handled = await handleSlashCommand({
@@ -983,11 +996,23 @@ describe("handleSlashCommand cron", () => {
           }
         } as NodeJS.WritableStream,
         renderer: { render: renderPlain },
-        workspaceRoot: tmpHome
+        workspaceRoot: tmpHome,
+        homeDir: tmpHome,
+        cronRuntimeFactory
       });
 
       expect(handled).toBe(false);
-      expect(handle).toHaveBeenCalledTimes(1);
+      expect(interactiveHandle).not.toHaveBeenCalled();
+      expect(cronHandle).toHaveBeenCalledTimes(1);
+      expect(cronDispose).toHaveBeenCalledTimes(1);
+      expect(cronRuntimeFactory).toHaveBeenCalledTimes(1);
+      const runtimeOptions = cronRuntimeFactory.mock.calls[0]?.[0];
+      expect(runtimeOptions).toEqual(expect.objectContaining({
+        disableCronTools: true,
+        sessionId: expect.stringMatching(/^cron-/u)
+      }));
+      expect(runtimeOptions?.disabledToolsets).toEqual(["cron", "messaging", "clarify"]);
+      expect(runtimeOptions?.sessionDb).toBe(runtime.sessionDb);
       expect(outputChunks.join("")).toContain("Cron tick complete. Ran 1 job(s).");
     } finally {
       if (oldHome === undefined) {

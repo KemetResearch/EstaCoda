@@ -15,6 +15,7 @@ import {
 } from "../providers/model-switch-resolver.js";
 import { runCronCommand } from "../cron/cron-command.js";
 import { createRuntimeCronRunner, tickCron } from "../cron/cron-runner.js";
+import { createIsolatedCronRuntime, type CronRuntimeFactory } from "../cron/cron-runtime-factory.js";
 import { CronStore } from "../cron/cron-store.js";
 import { storeCapabilitySecret, type SetupNeededMetadata } from "../capabilities/capability-setup.js";
 import { defaultImageModel } from "../contracts/image-generation.js";
@@ -75,6 +76,7 @@ export type SessionLoopOptions = {
   now?: () => number;
   workspaceRoot?: string;
   homeDir?: string;
+  cronRuntimeFactory?: CronRuntimeFactory;
   locale?: import("../contracts/ui.js").UiLocale;
   showResponseProgress?: boolean;
   capabilities?: TerminalCapabilities;
@@ -588,6 +590,7 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
           prompt,
           workspaceRoot: options.workspaceRoot,
           homeDir: options.homeDir,
+          cronRuntimeFactory: options.cronRuntimeFactory,
           onSessionCompacted: ({ postTokens }) => applyCompactionRailReset(postTokens)
         });
 
@@ -1422,6 +1425,7 @@ export async function handleSlashCommand(input: {
   };
   workspaceRoot?: string;
   homeDir?: string;
+  cronRuntimeFactory?: CronRuntimeFactory;
   onSessionCompacted?: (result: { readonly postTokens: number }) => void;
 }): Promise<boolean | { runtime: Runtime; notice: (runtime: Runtime) => string }> {
   const [command = "", ...args] = input.text.slice(1).trim().split(/\s+/u);
@@ -1580,6 +1584,7 @@ export async function handleSlashCommand(input: {
     }
     case "cron": {
       const store = new CronStore();
+      const profileId = await runtimeProfileId(input.runtime);
       const result = await runCronCommand({
         args,
         store,
@@ -1587,9 +1592,16 @@ export async function handleSlashCommand(input: {
           const results = await tickCron({
             store,
             runner: createRuntimeCronRunner({
-              runtimeFactory: async () => input.runtime,
+              runtimeFactory: async (_job, context) => createIsolatedCronRuntime({
+                context,
+                workspaceRoot: input.workspaceRoot ?? process.cwd(),
+                homeDir: input.homeDir,
+                profileId,
+                sessionDb: input.runtime.sessionDb,
+                createRuntime: input.cronRuntimeFactory
+              }),
               wrapResponse: true,
-              disposeRuntime: false,
+              disposeRuntime: true,
               workspaceRoot: input.workspaceRoot
             })
           });

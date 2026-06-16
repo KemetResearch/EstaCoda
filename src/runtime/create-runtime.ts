@@ -259,6 +259,7 @@ export type Runtime = {
   dispose(): Promise<void>;
   sessionDb: SessionDB;
   sessionId: string;
+  readonly trajectoryId: string | undefined;
   consumeSessionRotation?(): { originalSessionId: string; activeSessionId: string } | undefined;
 
   // Workflow module v0.8 integration (available when SQLiteSessionDB is used)
@@ -902,6 +903,9 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
     },
     get sessionId() {
       return sessionRuntimeContext.currentSessionId();
+    },
+    get trajectoryId() {
+      return agentLoop.trajectoryId;
     },
     consumeSessionRotation() {
       const activeSessionId = sessionRuntimeContext.currentSessionId();

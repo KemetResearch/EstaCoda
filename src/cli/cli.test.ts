@@ -97,7 +97,7 @@ describe("runCliCommand cron dispatch", () => {
     await rm(tempDir, { recursive: true, force: true });
   });
 
-  it("currently reuses options.runtime for top-level estacoda cron tick", async () => {
+  it("creates an isolated runtime for top-level estacoda cron tick", async () => {
     const store = new CronStore({ homeDir: tempDir });
     const job = await store.create({
       name: "CLI tick baseline",
@@ -105,25 +105,46 @@ describe("runCliCommand cron dispatch", () => {
       prompt: "run me"
     });
     await store.requestRun(job.id);
-    const handle = vi.fn(async () => ({ text: "cron reused runtime" }));
+    const interactiveHandle = vi.fn(async () => ({ text: "interactive runtime should not run" }));
+    const cronHandle = vi.fn(async () => ({ text: "cron isolated runtime" }));
+    const cronDispose = vi.fn(async () => undefined);
     const runtime = {
-      handle,
+      handle: interactiveHandle,
       dispose: vi.fn(async () => undefined),
       sessionDb: new InMemorySessionDB(),
-      sessionId: "interactive-runtime"
+      sessionId: "interactive-runtime",
+      trajectoryId: "interactive-trajectory"
     } as unknown as Runtime;
+    const cronRuntimeFactory = vi.fn(async (runtimeOptions) => ({
+      handle: cronHandle,
+      dispose: cronDispose,
+      sessionDb: runtimeOptions.sessionDb ?? new InMemorySessionDB(),
+      sessionId: runtimeOptions.sessionId,
+      trajectoryId: "cron-trajectory"
+    }) as unknown as Runtime);
 
     const result = await runCliCommand({
       argv: ["cron", "tick"],
       workspaceRoot: tempDir,
       homeDir: tempDir,
-      runtime
+      runtime,
+      cronRuntimeFactory
     });
 
     expect(result.handled).toBe(true);
     expect(result.exitCode).toBe(0);
     expect(result.output).toContain("Cron tick complete. Ran 1 job(s).");
-    expect(handle).toHaveBeenCalledTimes(1);
+    expect(interactiveHandle).not.toHaveBeenCalled();
+    expect(cronHandle).toHaveBeenCalledTimes(1);
+    expect(cronDispose).toHaveBeenCalledTimes(1);
+    expect(cronRuntimeFactory).toHaveBeenCalledTimes(1);
+    const runtimeOptions = cronRuntimeFactory.mock.calls[0]?.[0];
+    expect(runtimeOptions).toEqual(expect.objectContaining({
+      disableCronTools: true,
+      sessionId: expect.stringMatching(/^cron-/u)
+    }));
+    expect(runtimeOptions?.disabledToolsets).toEqual(["cron", "messaging", "clarify"]);
+    expect(runtimeOptions?.sessionDb).toBe(runtime.sessionDb);
   });
 });
 
