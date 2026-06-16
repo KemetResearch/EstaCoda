@@ -15,6 +15,8 @@ import {
   buildCronUsageErrorViewModel,
   buildCronUnknownCommandViewModel,
 } from "./cron-view-models.js";
+import { validateCronRuntimeControls } from "./cron-runtime-validation.js";
+import type { LoadedRuntimeConfig } from "../config/runtime-config.js";
 
 export type CronRenderer = (viewModel: ViewModel) => string;
 
@@ -26,6 +28,10 @@ export async function runCronCommand(
     tick?: () => Promise<string>;
     origin?: CronJob["origin"];
     defaultDelivery?: string;
+    runtimeControls?: {
+      config: LoadedRuntimeConfig;
+      availableToolsets: () => string[];
+    };
   },
   renderer: CronRenderer = renderPlain
 ): Promise<{ ok: boolean; output: string }> {
@@ -57,8 +63,16 @@ export async function runCronCommand(
     if (contextError !== undefined) {
       return { ok: false, output: renderer(buildCronUsageErrorViewModel({ message: contextError })) };
     }
+    const controls = await validateParsedRuntimeControls(input.runtimeControls, {
+      modelOverride: parsed.modelOverride,
+      enabledToolsets: parsed.enabledToolsets
+    });
+    if (!controls.ok) {
+      return { ok: false, output: renderer(buildCronUsageErrorViewModel({ message: controls.message })) };
+    }
     const job = await input.store.create({
       ...parsed,
+      ...controls.normalized,
       schedule: parsed.schedule,
       prompt: parsed.prompt,
       origin: input.origin
@@ -127,6 +141,14 @@ export async function runCronCommand(
     if (contextError !== undefined) {
       return { ok: false, output: renderer(buildCronUsageErrorViewModel({ message: contextError })) };
     }
+    const controls = await validateParsedRuntimeControls(input.runtimeControls, {
+      modelOverride: patch.modelOverride,
+      enabledToolsets: patch.enabledToolsets
+    });
+    if (!controls.ok) {
+      return { ok: false, output: renderer(buildCronUsageErrorViewModel({ message: controls.message })) };
+    }
+    Object.assign(patch, controls.normalized);
     const job = await input.store.update(id, patch);
     return job === undefined
       ? { ok: false, output: renderer(buildCronNotFoundViewModel({ id })) }
@@ -147,6 +169,16 @@ export async function runCronCommand(
   return { ok: false, output: renderer(viewModel) };
 }
 
+export function cronCommandNeedsRuntimeControlValidation(args: readonly string[]): boolean {
+  const [command, ...rest] = args;
+  const resolved = command !== undefined ? commandRegistry.resolveSubcommand("cron", command) : undefined;
+  const canonical = resolved?.name ?? command;
+  if (canonical !== "add" && canonical !== "edit") {
+    return false;
+  }
+  return rest.some((arg) => arg === "--model" || arg === "--provider" || arg === "--toolset");
+}
+
 function parseCronAddArgs(args: string[]): {
   schedule?: string;
   prompt?: string;
@@ -159,6 +191,8 @@ function parseCronAddArgs(args: string[]): {
   repeat?: number;
   noAgent?: boolean;
   contextFrom?: string[];
+  modelOverride?: CronJob["modelOverride"];
+  enabledToolsets?: string[];
 } {
   const positional: string[] = [];
   const parsed: ReturnType<typeof parseCronAddArgs> = { skills: [], scriptArgs: [] };
@@ -190,6 +224,15 @@ function parseCronAddArgs(args: string[]): {
       parsed.noAgent = undefined;
     } else if (arg === "--context-from") {
       if (next !== undefined) parsed.contextFrom = [...(parsed.contextFrom ?? []), next];
+      index += 1;
+    } else if (arg === "--model") {
+      if (next !== undefined) parsed.modelOverride = { ...(parsed.modelOverride ?? {}), model: next };
+      index += 1;
+    } else if (arg === "--provider") {
+      if (next !== undefined) parsed.modelOverride = { ...(parsed.modelOverride ?? { model: "" }), provider: next };
+      index += 1;
+    } else if (arg === "--toolset") {
+      if (next !== undefined) parsed.enabledToolsets = [...(parsed.enabledToolsets ?? []), next];
       index += 1;
     } else if (arg === "--script-arg") {
       if (next !== undefined) parsed.scriptArgs?.push(next);
@@ -227,6 +270,8 @@ function parseCronEditArgs(args: string[], currentSkills: string[]): {
   repeat?: number;
   noAgent?: boolean;
   contextFrom?: string[];
+  modelOverride?: CronJob["modelOverride"];
+  enabledToolsets?: string[];
 } {
   const parsed: ReturnType<typeof parseCronEditArgs> = {};
   let skills = [...currentSkills];
@@ -259,6 +304,19 @@ function parseCronEditArgs(args: string[], currentSkills: string[]): {
       index += 1;
     } else if (arg === "--clear-context-from") {
       parsed.contextFrom = [];
+    } else if (arg === "--model") {
+      if (next !== undefined) parsed.modelOverride = { ...(parsed.modelOverride ?? {}), model: next };
+      index += 1;
+    } else if (arg === "--provider") {
+      if (next !== undefined) parsed.modelOverride = { ...(parsed.modelOverride ?? { model: "" }), provider: next };
+      index += 1;
+    } else if (arg === "--clear-model") {
+      parsed.modelOverride = undefined;
+    } else if (arg === "--toolset") {
+      parsed.enabledToolsets = [...(parsed.enabledToolsets ?? []), next].filter((value): value is string => value !== undefined);
+      index += 1;
+    } else if (arg === "--clear-toolsets") {
+      parsed.enabledToolsets = [];
     } else if (arg === "--script-arg") {
       parsed.scriptArgs = [...(parsed.scriptArgs ?? []), next].filter((value): value is string => value !== undefined);
       index += 1;
@@ -298,6 +356,26 @@ function parseCronEditArgs(args: string[], currentSkills: string[]): {
   }
 
   return parsed;
+}
+
+async function validateParsedRuntimeControls(
+  runtimeControls: { config: LoadedRuntimeConfig; availableToolsets: () => string[] } | undefined,
+  controls: { modelOverride?: CronJob["modelOverride"]; enabledToolsets?: string[] }
+): Promise<{ ok: true; normalized: typeof controls } | { ok: false; message: string }> {
+  if (controls.modelOverride === undefined && controls.enabledToolsets === undefined) {
+    return { ok: true, normalized: {} };
+  }
+  if (controls.modelOverride === undefined && controls.enabledToolsets !== undefined && controls.enabledToolsets.length === 0) {
+    return { ok: true, normalized: { enabledToolsets: [] } };
+  }
+  if (runtimeControls === undefined) {
+    return { ok: false, message: "Cron model/toolset controls require runtime config validation." };
+  }
+  return validateCronRuntimeControls({
+    ...controls,
+    config: runtimeControls.config,
+    availableToolsets: runtimeControls.availableToolsets
+  });
 }
 
 async function validateContextFrom(store: CronStore, jobIds: string[] | undefined): Promise<string | undefined> {

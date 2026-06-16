@@ -3,10 +3,13 @@ import { loadRuntimeConfig } from "../config/runtime-config.js";
 import { createRuntime, type Runtime, type RuntimeOptions } from "../runtime/create-runtime.js";
 import { resolveTokens } from "../theme/token-resolver.js";
 import type { CronRunContext } from "./cron-runner.js";
+import type { CronJob } from "./cron-store.js";
+import { CRON_FORCED_DISABLED_TOOLSETS, resolveCronModelRoute } from "./cron-runtime-validation.js";
 
 export type CronRuntimeFactory = (options: RuntimeOptions) => Promise<Runtime>;
 
 export async function createIsolatedCronRuntime(input: {
+  job: CronJob;
   context: CronRunContext;
   workspaceRoot: string;
   homeDir?: string;
@@ -20,11 +23,12 @@ export async function createIsolatedCronRuntime(input: {
     profileId: input.profileId
   });
   const factory = input.createRuntime ?? createRuntime;
+  const primaryModelRoute = await resolveCronModelRoute({ job: input.job, latestConfig });
 
   return factory({
     tokens: resolveTokens("standard", "dark", "kemetBlue"),
-    model: latestConfig.model,
-    primaryModelRoute: latestConfig.primaryModelRoute,
+    model: primaryModelRoute?.profile ?? latestConfig.model,
+    primaryModelRoute,
     modelFallbackRoutes: latestConfig.modelFallbackRoutes,
     workspaceRoot: input.workspaceRoot,
     homeDir: input.homeDir,
@@ -64,6 +68,7 @@ export async function createIsolatedCronRuntime(input: {
     securityAssessor: latestConfig.security.assessor,
     workspaceTrusted: true,
     disableCronTools: true,
-    disabledToolsets: ["cron", "messaging", "clarify"],
+    disabledToolsets: [...CRON_FORCED_DISABLED_TOOLSETS],
+    enabledToolsets: input.job.enabledToolsets,
   });
 }

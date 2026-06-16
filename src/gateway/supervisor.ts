@@ -21,6 +21,8 @@ import { resolveAuxiliaryModelRoute } from "../providers/auxiliary-model-resolve
 import { resolveEffectiveSessionModelOverride } from "../providers/model-switch-resolver.js";
 import { SessionCompressionService } from "../prompt/session-compression-service.js";
 import { createRuntime, type Runtime, type RuntimeOptions } from "../runtime/create-runtime.js";
+import type { CronJob } from "../cron/cron-store.js";
+import { CRON_FORCED_DISABLED_TOOLSETS, resolveCronModelRoute } from "../cron/cron-runtime-validation.js";
 import { RuntimeCache } from "../runtime/runtime-cache.js";
 import { computeRuntimeFingerprint, stableJsonHash, type RuntimeFingerprint } from "../runtime/runtime-fingerprint.js";
 import { SQLiteSessionDB } from "../session/sqlite-session-db.js";
@@ -102,16 +104,74 @@ export type GatewaySupervisorOptions = GatewayRunOptions & {
   drainTimeoutMs?: number;
 };
 
-export function buildGatewayCronRuntimeOptions(input: {
+type GatewayCronRuntimeBaseInput = {
   latestConfig: LoadedRuntimeConfig;
   workspaceRoot: string;
   homeDir: string;
   profileId: string;
   sessionDb: SQLiteSessionDB;
   sessionId: string;
-}): RuntimeOptions {
+};
+
+export function buildGatewayCronRuntimeOptions(input: GatewayCronRuntimeBaseInput): RuntimeOptions;
+export function buildGatewayCronRuntimeOptions(input: GatewayCronRuntimeBaseInput & { job: CronJob }): Promise<RuntimeOptions>;
+export function buildGatewayCronRuntimeOptions(input: GatewayCronRuntimeBaseInput & { job?: CronJob }): Promise<RuntimeOptions> | RuntimeOptions {
   const { latestConfig } = input;
-  return {
+  const build = async (): Promise<RuntimeOptions> => {
+    const primaryModelRoute = input.job === undefined
+      ? latestConfig.primaryModelRoute
+      : await resolveCronModelRoute({ job: input.job, latestConfig });
+    return {
+    tokens: resolveTokens("standard", "dark", "kemetBlue"),
+    model: primaryModelRoute?.profile ?? latestConfig.model,
+    primaryModelRoute,
+    modelFallbackRoutes: latestConfig.modelFallbackRoutes,
+    workspaceRoot: input.workspaceRoot,
+    homeDir: input.homeDir,
+    sessionId: input.sessionId,
+    profileId: input.profileId,
+    sessionDb: input.sessionDb,
+    externalSkillRoots: latestConfig.skills.externalDirs,
+    skillAutonomy: latestConfig.skills.autonomy,
+    skillConfig: latestConfig.skills.config,
+    ui: latestConfig.ui,
+    agentProfile: latestConfig.profile,
+    providerRegistry: latestConfig.providerRegistry,
+    providerConfigs: latestConfig.config.providers,
+    auxiliaryModels: latestConfig.auxiliaryModels,
+    compression: latestConfig.compression,
+    externalMemory: latestConfig.externalMemory,
+    mcpServers: latestConfig.mcp.servers,
+    imageGen: latestConfig.imageGen,
+    tts: latestConfig.tts,
+    stt: latestConfig.stt,
+    securityMode: latestConfig.security.approvalMode,
+    securityAssessor: {
+      ...latestConfig.security.assessor,
+      providerExecutor: new ProviderExecutor({
+        registry: latestConfig.providerRegistry,
+      }),
+    },
+    browser: latestConfig.browser,
+    telegramReady: latestConfig.channels.telegram.ready,
+    enableWebNetwork: latestConfig.web.enableNetwork,
+    webMaxContentChars: latestConfig.web.maxContentChars,
+    webConfig: {
+      backend: latestConfig.web.backend,
+      searchBackend: latestConfig.web.searchBackend,
+      extractBackend: latestConfig.web.extractBackend,
+      crawlBackend: latestConfig.web.crawlBackend
+    },
+    securityConfig: {
+      allowPrivateUrls: latestConfig.security.allowPrivateUrls,
+      websiteBlocklist: latestConfig.security.websiteBlocklist
+    },
+    disableCronTools: true,
+    disabledToolsets: [...CRON_FORCED_DISABLED_TOOLSETS],
+    enabledToolsets: input.job?.enabledToolsets,
+  };
+  };
+  return input.job === undefined ? {
     tokens: resolveTokens("standard", "dark", "kemetBlue"),
     model: latestConfig.model,
     primaryModelRoute: latestConfig.primaryModelRoute,
@@ -157,8 +217,8 @@ export function buildGatewayCronRuntimeOptions(input: {
       websiteBlocklist: latestConfig.security.websiteBlocklist
     },
     disableCronTools: true,
-    disabledToolsets: ["cron", "messaging", "clarify"],
-  };
+    disabledToolsets: [...CRON_FORCED_DISABLED_TOOLSETS],
+  } : build();
 }
 
 async function buildGatewaySecurityAssessorConfig(
@@ -1370,10 +1430,11 @@ export async function runGatewaySupervisor(options: GatewaySupervisorOptions): P
           disposeRuntime: true,
           workspaceRoot: options.workspaceRoot,
           store: cronStore,
-          runtimeFactory: async (_job, context) => {
+          runtimeFactory: async (job, context) => {
             const latestConfig = await loadConfig();
-            return createRuntime(buildGatewayCronRuntimeOptions({
+            return createRuntime(await buildGatewayCronRuntimeOptions({
               latestConfig,
+              job,
               workspaceRoot: options.workspaceRoot,
               homeDir,
               profileId,

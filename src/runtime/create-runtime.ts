@@ -58,6 +58,7 @@ import { SkillRegistry } from "../skills/skill-registry.js";
 import { SkillEvolutionStore } from "../skills/skill-evolution.js";
 import { ChangeManifestStore } from "../skills/change-manifest-store.js";
 import { SkillLearningManager, type SkillAutonomy } from "../skills/skill-learning.js";
+import { availableToolsetsFromTools } from "../cron/cron-runtime-validation.js";
 
 // Workflow module v0.8 imports
 import { SQLiteWorkflowStore } from "../workflow/sqlite-workflow-store.js";
@@ -167,6 +168,7 @@ export type RuntimeOptions = {
   cronStore?: CronStore;
   disableCronTools?: boolean;
   disabledToolsets?: ToolsetName[];
+  enabledToolsets?: ToolsetName[];
   delegationConfig?: DelegationConfig;
   workspaceFsAdapter?: WorkspaceFsAdapter;
   sessionMetadata?: Record<string, unknown>;
@@ -693,6 +695,23 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
       providerOrder: [options.model.provider]
     }
   };
+  let registeredCronToolsets: string[] = [];
+  const cronRuntimeControls = {
+    config: {
+      model: options.model,
+      primaryModelRoute: options.primaryModelRoute ?? mainRoute,
+      modelFallbackRoutes: options.modelFallbackRoutes ?? [],
+      providerRegistry,
+      config: {
+        providers: options.providerConfigs ?? {},
+        model: {
+          provider: options.primaryModelRoute?.provider ?? options.model.provider,
+          id: options.primaryModelRoute?.id ?? options.model.id
+        }
+      }
+    } as unknown as LoadedRuntimeConfig,
+    availableToolsets: () => registeredCronToolsets
+  };
   const builder = new AgentLoopBuilder({
     substrate: {
       workspaceRoot,
@@ -749,6 +768,10 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
       trustStore,
       cronStore,
       disableCronTools: options.disableCronTools,
+      cronRuntimeControls,
+      setAvailableToolsets: (toolsets) => {
+        registeredCronToolsets = toolsets;
+      },
       contextReferenceExpander,
       projectContext,
       channelMediaRoot,
@@ -818,7 +841,28 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
       parentVisibleTools: () => toolRegistry.list()
     }),
     trustedWorkspace: async () => activeTrustedWorkspace || await trustStore.isTrusted(workspaceRoot),
-    disabledToolsets: options.disabledToolsets
+    disabledToolsets: options.disabledToolsets,
+    toolRegistryFilter: options.enabledToolsets === undefined
+      ? undefined
+      : ({ registry, availableTools }) => {
+          const allowed = new Set(options.enabledToolsets);
+          const strippedTools: Array<{ name: string; reasons: string[] }> = [];
+          const effectiveAllowedTools: string[] = [];
+          for (const tool of availableTools) {
+            if (tool.toolsets.some((toolset) => allowed.has(toolset))) {
+              effectiveAllowedTools.push(tool.name);
+            } else {
+              registry.unregister(tool.name);
+              strippedTools.push({ name: tool.name, reasons: ["toolset-not-enabled"] });
+            }
+          }
+          return {
+            effectiveAllowedTools,
+            effectiveAllowedToolsets: availableToolsetsFromTools(availableTools).filter((toolset) => allowed.has(toolset)),
+            strippedTools,
+            blockedTools: []
+          };
+        }
   });
   const {
     agentLoop,

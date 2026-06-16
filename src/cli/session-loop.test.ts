@@ -953,6 +953,48 @@ describe("runSessionLoop — user prompt rail behavior", () => {
 });
 
 describe("handleSlashCommand cron", () => {
+  it("runs /cron list without loading runtime config", async () => {
+    const tmpHome = await mkdtemp(join(tmpdir(), "estacoda-session-cron-list-"));
+    const oldHome = process.env.HOME;
+    const oldEstacodaHome = process.env.ESTACODA_HOME;
+    try {
+      process.env.HOME = tmpHome;
+      delete process.env.ESTACODA_HOME;
+      const profilePaths = resolveProfileStateHome({ homeDir: tmpHome, profileId: "broken" });
+      await mkdir(profilePaths.configPath, { recursive: true });
+      const outputChunks: string[] = [];
+
+      const handled = await handleSlashCommand({
+        text: "/cron list",
+        runtime: createMockRuntime(),
+        output: {
+          write(chunk: string | Uint8Array): boolean {
+            outputChunks.push(String(chunk));
+            return true;
+          }
+        } as NodeJS.WritableStream,
+        renderer: { render: renderPlain },
+        workspaceRoot: tmpHome,
+        homeDir: tmpHome
+      });
+
+      expect(handled).toBe(false);
+      expect(outputChunks.join("")).toContain("No cron jobs configured");
+    } finally {
+      if (oldHome === undefined) {
+        delete process.env.HOME;
+      } else {
+        process.env.HOME = oldHome;
+      }
+      if (oldEstacodaHome === undefined) {
+        delete process.env.ESTACODA_HOME;
+      } else {
+        process.env.ESTACODA_HOME = oldEstacodaHome;
+      }
+      await rm(tmpHome, { recursive: true, force: true });
+    }
+  });
+
   it("creates an isolated runtime for /cron tick and disposes it", async () => {
     const tmpHome = await mkdtemp(join(tmpdir(), "estacoda-session-cron-"));
     const oldHome = process.env.HOME;

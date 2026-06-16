@@ -13,9 +13,10 @@ import {
   resolveEffectiveSessionModelOverride,
   resolveModelSwitchRequest
 } from "../providers/model-switch-resolver.js";
-import { runCronCommand } from "../cron/cron-command.js";
+import { cronCommandNeedsRuntimeControlValidation, runCronCommand } from "../cron/cron-command.js";
 import { createRuntimeCronRunner, tickCron } from "../cron/cron-runner.js";
 import { createIsolatedCronRuntime, type CronRuntimeFactory } from "../cron/cron-runtime-factory.js";
+import { availableToolsetsFromTools } from "../cron/cron-runtime-validation.js";
 import { CronStore } from "../cron/cron-store.js";
 import { storeCapabilitySecret, type SetupNeededMetadata } from "../capabilities/capability-setup.js";
 import { defaultImageModel } from "../contracts/image-generation.js";
@@ -1585,15 +1586,29 @@ export async function handleSlashCommand(input: {
     case "cron": {
       const store = new CronStore();
       const profileId = await runtimeProfileId(input.runtime);
+      const runtimeConfig = cronCommandNeedsRuntimeControlValidation(args)
+        ? await loadRuntimeConfig({
+            workspaceRoot: input.workspaceRoot ?? process.cwd(),
+            homeDir: input.homeDir,
+            profileId
+          })
+        : undefined;
       const result = await runCronCommand({
         args,
         store,
+        runtimeControls: runtimeConfig === undefined
+          ? undefined
+          : {
+              config: runtimeConfig,
+              availableToolsets: () => availableToolsetsFromTools(input.runtime.tools())
+            },
         tick: async () => {
           const results = await tickCron({
             store,
             runner: createRuntimeCronRunner({
               store,
-              runtimeFactory: async (_job, context) => createIsolatedCronRuntime({
+              runtimeFactory: async (job, context) => createIsolatedCronRuntime({
+                job,
                 context,
                 workspaceRoot: input.workspaceRoot ?? process.cwd(),
                 homeDir: input.homeDir,

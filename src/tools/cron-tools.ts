@@ -2,6 +2,8 @@ import type { RegisteredTool, RuntimeToolProvider } from "../contracts/tool.js";
 import { CronStore } from "../cron/cron-store.js";
 import { renderPlain } from "../ui/renderers/plain-renderer.js";
 import { buildCronListViewModel, buildCronActionViewModel, buildCronNotFoundViewModel } from "../cron/cron-view-models.js";
+import { validateCronRuntimeControls } from "../cron/cron-runtime-validation.js";
+import type { LoadedRuntimeConfig } from "../config/runtime-config.js";
 
 type CronjobToolInput = {
   action?: "create" | "list" | "update" | "pause" | "resume" | "run" | "remove";
@@ -16,6 +18,9 @@ type CronjobToolInput = {
   noAgent?: boolean;
   context_from?: string[];
   contextFrom?: string[];
+  model?: { provider?: string; model: string } | string;
+  enabled_toolsets?: string[];
+  enabledToolsets?: string[];
   schedule?: string;
   name?: string;
   skill?: string;
@@ -27,7 +32,13 @@ type CronjobToolInput = {
   repeat?: number;
 };
 
-export function createCronTools(options: { store: CronStore }): RegisteredTool[] {
+export function createCronTools(options: {
+  store: CronStore;
+  runtimeControls?: {
+    config: LoadedRuntimeConfig;
+    availableToolsets: () => string[];
+  };
+}): RegisteredTool[] {
   return [{
     name: "cronjob",
     description: "Create and manage scheduled EstaCoda tasks.",
@@ -45,6 +56,21 @@ export function createCronTools(options: { store: CronStore }): RegisteredTool[]
         noAgent: { type: "boolean" },
         context_from: { type: "array", items: { type: "string" } },
         contextFrom: { type: "array", items: { type: "string" } },
+        model: {
+          oneOf: [
+            { type: "string" },
+            {
+              type: "object",
+              properties: {
+                provider: { type: "string" },
+                model: { type: "string" }
+              },
+              required: ["model"]
+            }
+          ]
+        },
+        enabled_toolsets: { type: "array", items: { type: "string" } },
+        enabledToolsets: { type: "array", items: { type: "string" } },
         schedule: { type: "string" },
         name: { type: "string" },
         skill: { type: "string" },
@@ -78,6 +104,10 @@ export function createCronTools(options: { store: CronStore }): RegisteredTool[]
         if (contextError !== undefined) {
           return { ok: false, content: contextError };
         }
+        const controls = await validateToolRuntimeControls(options.runtimeControls, input);
+        if (!controls.ok) {
+          return { ok: false, content: controls.message };
+        }
         const job = await options.store.create({
           prompt: input.prompt,
           script: input.script,
@@ -85,6 +115,8 @@ export function createCronTools(options: { store: CronStore }): RegisteredTool[]
           scriptTimeoutMs: input.script_timeout_ms,
           noAgent: input.no_agent ?? input.noAgent,
           contextFrom,
+          modelOverride: controls.normalized.modelOverride,
+          enabledToolsets: controls.normalized.enabledToolsets,
           schedule: input.schedule,
           name: input.name,
           skills: normalizeSkills(input),
@@ -113,6 +145,8 @@ export function createCronTools(options: { store: CronStore }): RegisteredTool[]
           name: input.name,
           noAgent: input.no_agent ?? input.noAgent,
           contextFrom: normalizeContextFrom(input),
+          modelOverride: normalizeModelOverrideInput(input),
+          enabledToolsets: input.enabledToolsets ?? input.enabled_toolsets,
           skills: resolveUpdatedSkills(existing.skills, input),
           delivery: input.delivery,
           repeat: input.repeat
@@ -128,6 +162,14 @@ export function createCronTools(options: { store: CronStore }): RegisteredTool[]
         if (contextError !== undefined) {
           return { ok: false, content: contextError };
         }
+        const controls = await validateToolRuntimeControls(options.runtimeControls, {
+          model: patch.modelOverride as CronjobToolInput["model"],
+          enabledToolsets: patch.enabledToolsets as string[] | undefined
+        });
+        if (!controls.ok) {
+          return { ok: false, content: controls.message };
+        }
+        Object.assign(patch, controls.normalized);
         const scriptPatch = input.clear_script === true
           ? { script: undefined, scriptArgs: [], scriptTimeoutMs: undefined }
           : {
@@ -163,7 +205,7 @@ export const cronToolProvider: RuntimeToolProvider = {
     if (ctx.disableCronTools === true) {
       return [];
     }
-    return createCronTools({ store: ctx.cronStore });
+    return createCronTools({ store: ctx.cronStore, runtimeControls: ctx.cronRuntimeControls });
   }
 };
 
@@ -192,6 +234,36 @@ function resolveUpdatedSkills(current: string[], input: CronjobToolInput): strin
 
 function normalizeContextFrom(input: CronjobToolInput): string[] | undefined {
   return input.contextFrom ?? input.context_from;
+}
+
+function normalizeModelOverrideInput(input: CronjobToolInput): { provider?: string; model: string } | undefined {
+  if (input.model === undefined) {
+    return undefined;
+  }
+  return typeof input.model === "string" ? { model: input.model } : input.model;
+}
+
+async function validateToolRuntimeControls(
+  runtimeControls: { config: LoadedRuntimeConfig; availableToolsets: () => string[] } | undefined,
+  input: Pick<CronjobToolInput, "model" | "enabled_toolsets" | "enabledToolsets">
+): Promise<{ ok: true; normalized: { modelOverride?: { provider?: string; model: string }; enabledToolsets?: string[] } } | { ok: false; message: string }> {
+  const modelOverride = normalizeModelOverrideInput(input);
+  const enabledToolsets = input.enabledToolsets ?? input.enabled_toolsets;
+  if (modelOverride === undefined && enabledToolsets === undefined) {
+    return { ok: true, normalized: {} };
+  }
+  if (modelOverride === undefined && enabledToolsets !== undefined && enabledToolsets.length === 0) {
+    return { ok: true, normalized: { enabledToolsets: [] } };
+  }
+  if (runtimeControls === undefined) {
+    return { ok: false, message: "cronjob model/toolset controls require runtime config validation." };
+  }
+  return validateCronRuntimeControls({
+    modelOverride,
+    enabledToolsets,
+    config: runtimeControls.config,
+    availableToolsets: runtimeControls.availableToolsets
+  });
 }
 
 async function validateContextFrom(store: CronStore, jobIds: string[] | undefined): Promise<string | undefined> {

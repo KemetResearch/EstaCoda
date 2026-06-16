@@ -12,6 +12,7 @@ import type { LoadedRuntimeConfig } from "../config/runtime-config.js";
 import type { ArtifactStore } from "../artifacts/artifact-store.js";
 import type { ContextReferenceExpander } from "../context/context-reference-expander.js";
 import type { CronStore } from "../cron/cron-store.js";
+import { availableToolsetsFromTools } from "../cron/cron-runtime-validation.js";
 import type { DelegationConfig } from "../contracts/delegation.js";
 import { DEFAULT_DELEGATION_CONFIG } from "../config/delegation-defaults.js";
 import type { DelegationManager } from "../delegation/delegation-manager.js";
@@ -143,6 +144,8 @@ export type AgentLoopRuntimeSubstrate = {
   trustStore: WorkspaceTrustStore;
   cronStore: CronStore;
   disableCronTools?: boolean;
+  cronRuntimeControls?: RuntimeToolContext["cronRuntimeControls"];
+  setAvailableToolsets?: (toolsets: string[]) => void;
   contextReferenceExpander: ContextReferenceExpander;
   projectContext: ProjectContextSnapshot;
   channelMediaRoot?: string;
@@ -256,7 +259,8 @@ export class AgentLoopBuilder {
       profileId: substrate.profileId,
       cronStore: substrate.cronStore,
       trustStore: substrate.trustStore,
-      disableCronTools: substrate.disableCronTools
+      disableCronTools: substrate.disableCronTools,
+      cronRuntimeControls: substrate.cronRuntimeControls
     });
     const sessionServiceInput = {
       sessionId: input.sessionId,
@@ -403,16 +407,19 @@ export class AgentLoopBuilder {
     });
 
     let providerToolAvailability = await toolRegistry.snapshot();
+    substrate.setAvailableToolsets?.(availableToolsetsFromTools(providerToolAvailability.available));
     const toolFilterResult = input.toolRegistryFilter?.({
       registry: toolRegistry,
       availableTools: providerToolAvailability.available
     });
     if (toolFilterResult !== undefined) {
       providerToolAvailability = await toolRegistry.snapshot();
+      substrate.setAvailableToolsets?.(availableToolsetsFromTools(providerToolAvailability.available));
     }
     applyDisabledToolsets(toolRegistry, providerToolAvailability.available, input.disabledToolsets);
     if (input.disabledToolsets !== undefined && input.disabledToolsets.length > 0) {
       providerToolAvailability = await toolRegistry.snapshot();
+      substrate.setAvailableToolsets?.(availableToolsetsFromTools(providerToolAvailability.available));
     }
     const providerToolSchemaCatalog = buildProviderToolSchemaCatalog({
       tools: providerToolAvailability.available
@@ -632,7 +639,8 @@ function buildRuntimeToolContext(input: RuntimeToolContext): RuntimeToolContext 
     profileId: input.profileId,
     cronStore: input.cronStore,
     trustStore: input.trustStore,
-    disableCronTools: input.disableCronTools
+    disableCronTools: input.disableCronTools,
+    cronRuntimeControls: input.cronRuntimeControls
   };
 }
 

@@ -5,6 +5,10 @@ export type RuntimeToolContext = {
   cronStore: import("../cron/cron-store.js").CronStore;
   trustStore: import("../security/workspace-trust-store.js").WorkspaceTrustStore;
   disableCronTools?: boolean;
+  cronRuntimeControls?: {
+    config: import("../config/runtime-config.js").LoadedRuntimeConfig;
+    availableToolsets: () => string[];
+  };
 };
 
 export type SessionToolContext = {

@@ -238,6 +238,33 @@ describe("createRuntimeCronRunner", () => {
     expect(result.output).not.toContain("secret-value");
   });
 
+  it("noAgent with persisted model and tool controls remains runtime-free", async () => {
+    const scriptPath = join(tmpDir, "controlled-watchdog.sh");
+    await writeFile(scriptPath, "printf 'all good\\n'", "utf8");
+    const runtimeFactory = vi.fn(async () => fakeRuntime("unused") as never);
+    const deliver = vi.fn(async () => ({ success: true, perTarget: new Map([["local", { success: true }]]) }));
+    const runner = createRuntimeCronRunner({
+      runtimeFactory,
+      deliver,
+      workspaceRoot: tmpDir,
+      wrapResponse: false
+    });
+
+    const result = await runner.runJob({
+      ...fakeCronJob(),
+      noAgent: true,
+      script: "controlled-watchdog.sh",
+      modelOverride: { provider: "local", model: "cron-local" },
+      enabledToolsets: ["files"]
+    }, { executionId: "exec-no-agent-controls" });
+
+    expect(result.ok).toBe(true);
+    expect(result.sessionId).toBeUndefined();
+    expect(result.trajectoryId).toBeUndefined();
+    expect(runtimeFactory).not.toHaveBeenCalled();
+    expect(deliver).toHaveBeenCalledTimes(1);
+  });
+
   it("noAgent with empty stdout is silent success", async () => {
     const scriptPath = join(tmpDir, "empty.sh");
     await writeFile(scriptPath, "true\n", "utf8");
@@ -496,6 +523,44 @@ describe("tickCron with execution store and job lock", () => {
     expect(history.length).toBe(1);
     expect(history[0].status).toBe("success");
     expect(history[0].jobId).toBe(results[0].job.id);
+  });
+
+  it("records no-agent model and tool controlled jobs without fake runtime evidence", async () => {
+    const scriptPath = join(tmpDir, "no-agent-controls.sh");
+    await writeFile(scriptPath, "printf 'runtime free\\n'", "utf8");
+    const job = await store.create({
+      name: "No-agent controls",
+      schedule: "* * * * *",
+      prompt: "watch",
+      script: "no-agent-controls.sh",
+      noAgent: true,
+      modelOverride: { provider: "local", model: "cron-local" },
+      enabledToolsets: ["files"],
+      delivery: "local"
+    });
+    await store.requestRun(job.id);
+    const runtimeFactory = vi.fn(async () => fakeRuntime("unused") as never);
+    const runner = createRuntimeCronRunner({
+      runtimeFactory,
+      workspaceRoot: tmpDir,
+      wrapResponse: false
+    });
+
+    const results = await tickCron({
+      store,
+      runner,
+      executionStore,
+      jobLock: createFileCronJobLock({ lockDir, staleTimeoutMs: 60_000 }),
+      now: new Date("2030-01-01T00:00:00Z")
+    });
+
+    expect(results).toHaveLength(1);
+    expect(results[0].ok).toBe(true);
+    expect(runtimeFactory).not.toHaveBeenCalled();
+    const history = await executionStore.list();
+    expect(history).toHaveLength(1);
+    expect(history[0].sessionId).toBeUndefined();
+    expect(history[0].trajectoryId).toBeUndefined();
   });
 
   it("blocks legacy persisted jobs with unsafe prompts at runtime", async () => {

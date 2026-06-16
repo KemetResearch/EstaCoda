@@ -59,9 +59,10 @@ import {
 import type { ModelProfile, ResolvedAuxiliaryRoute, ProviderId } from "../contracts/provider.js";
 import { resolveAllAuxiliaryRoutes } from "../providers/auxiliary-model-resolver.js";
 import { getAuxiliaryInFlight, getAuxiliaryQueued } from "../providers/auxiliary-executor.js";
-import { runCronCommand } from "../cron/cron-command.js";
+import { cronCommandNeedsRuntimeControlValidation, runCronCommand } from "../cron/cron-command.js";
 import { createRuntimeCronRunner, tickCron } from "../cron/cron-runner.js";
 import { createIsolatedCronRuntime, type CronRuntimeFactory } from "../cron/cron-runtime-factory.js";
+import { availableToolsetsFromTools } from "../cron/cron-runtime-validation.js";
 import { CronStore } from "../cron/cron-store.js";
 import { CronExecutionStore } from "../cron/cron-execution-store.js";
 import { SQLiteSessionDB } from "../session/sqlite-session-db.js";
@@ -2856,11 +2857,24 @@ async function cron(options: CliOptions, args: string[]): Promise<CliCommandResu
   const executionStoreHandle = await tryCreateExecutionStore(options);
   const executionStore = executionStoreHandle?.store;
   const profileId = selectedProfileId(options);
+  const runtimeConfig = cronCommandNeedsRuntimeControlValidation(args)
+    ? await loadRuntimeConfig({
+        workspaceRoot: options.workspaceRoot,
+        homeDir: options.homeDir,
+        profileId
+      })
+    : undefined;
   try {
     const result = await runCronCommand({
       args,
       store,
       executionStore: executionStore ?? undefined,
+      runtimeControls: runtimeConfig === undefined
+        ? undefined
+        : {
+            config: runtimeConfig,
+            availableToolsets: () => availableToolsetsFromTools(options.runtime?.tools() ?? options.tools ?? [])
+          },
       tick: options.runtime === undefined
         ? undefined
         : async () => {
@@ -2870,7 +2884,8 @@ async function cron(options: CliOptions, args: string[]): Promise<CliCommandResu
             store,
             runner: createRuntimeCronRunner({
               store,
-              runtimeFactory: async (_job, context) => createIsolatedCronRuntime({
+              runtimeFactory: async (job, context) => createIsolatedCronRuntime({
+                job,
                 context,
                 workspaceRoot: options.workspaceRoot,
                 homeDir: options.homeDir,

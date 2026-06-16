@@ -88,7 +88,7 @@ describe("CronStore", () => {
     })).rejects.toThrow("Cron prompt blocked");
   });
 
-  it("normalizes and persists noAgent and contextFrom", async () => {
+  it("normalizes and persists noAgent, contextFrom, modelOverride, and enabledToolsets", async () => {
     const upstream = await store.create({
       name: "Upstream",
       prompt: "Collect data",
@@ -100,13 +100,17 @@ describe("CronStore", () => {
       schedule: "1h",
       script: "watchdog.sh",
       noAgent: true,
-      contextFrom: [upstream.id]
+      contextFrom: [upstream.id],
+      modelOverride: { provider: "local", model: "local-cron" },
+      enabledToolsets: ["web", "files", "web"]
     });
 
     const reloaded = await new CronStore({ homeDir: tmpDir }).get(job.id);
 
     expect(reloaded?.noAgent).toBe(true);
     expect(reloaded?.contextFrom).toEqual([upstream.id]);
+    expect(reloaded?.modelOverride).toEqual({ provider: "local", model: "local-cron" });
+    expect(reloaded?.enabledToolsets).toEqual(["web", "files"]);
   });
 
   it("rejects noAgent jobs without scripts on create and update", async () => {
@@ -144,6 +148,22 @@ describe("CronStore", () => {
     const [job] = await store.list();
 
     expect(job?.contextFrom).toBeUndefined();
+  });
+
+  it("rejects invalid modelOverride and enabledToolsets shapes", async () => {
+    await expect(store.create({
+      name: "Bad model",
+      prompt: "Check data",
+      schedule: "1h",
+      modelOverride: { model: "" }
+    })).rejects.toThrow("Cron modelOverride must include a model string");
+
+    await expect(store.create({
+      name: "Bad toolsets",
+      prompt: "Check data",
+      schedule: "1h",
+      enabledToolsets: ["web", 1] as never
+    })).rejects.toThrow("Cron enabledToolsets must be an array");
   });
 });
 

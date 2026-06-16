@@ -1774,9 +1774,16 @@ describe("createRuntime MCP trust gating", () => {
               "add_skill",
               "clear_script",
               "clear_skills",
+              "contextFrom",
+              "context_from",
               "delivery",
+              "enabledToolsets",
+              "enabled_toolsets",
               "job_id",
+              "model",
               "name",
+              "noAgent",
+              "no_agent",
               "prompt",
               "remove_skill",
               "repeat",
@@ -2540,6 +2547,58 @@ describe("createRuntime MCP trust gating", () => {
 
     try {
       expect(runtime.tools().map((tool) => tool.name)).not.toContain("terminal.run");
+      await expect(runtime.executeTool?.({
+        tool: "terminal.run",
+        toolInput: { command: "echo hidden" }
+      })).resolves.toBeUndefined();
+    } finally {
+      await runtime.dispose();
+    }
+  });
+
+  it("rejects cron tool controls for toolsets removed by runtime disabledToolsets", async () => {
+    const options = await minimalRuntimeOptions();
+    const runtime = await createRuntime({
+      ...options,
+      disabledToolsets: ["shell-write"]
+    });
+
+    try {
+      await runtime.trustWorkspace?.();
+      expect(runtime.tools().map((tool) => tool.name)).not.toContain("terminal.run");
+      const execution = await runtime.executeTool?.({
+        tool: "cronjob",
+        toolInput: {
+          action: "create",
+          prompt: "Check the status",
+          schedule: "1h",
+          enabled_toolsets: ["shell-write"]
+        }
+      });
+
+      expect(execution?.result).toMatchObject({
+        ok: false
+      });
+      expect(execution?.result?.content).toContain("Unknown cron toolset: shell-write");
+      const availableToolsets = execution?.result?.content.split("Available toolsets: ")[1]?.split(", ") ?? [];
+      expect(availableToolsets).not.toContain("shell-write");
+    } finally {
+      await runtime.dispose();
+    }
+  });
+
+  it("filters runtime tools to enabled registered toolsets", async () => {
+    const options = await minimalRuntimeOptions();
+    const runtime = await createRuntime({
+      ...options,
+      enabledToolsets: ["files"]
+    });
+
+    try {
+      const toolNames = runtime.tools().map((tool) => tool.name);
+      expect(toolNames).toContain("file.read");
+      expect(toolNames).not.toContain("terminal.run");
+      expect(toolNames).not.toContain("web.extract");
       await expect(runtime.executeTool?.({
         tool: "terminal.run",
         toolInput: { command: "echo hidden" }

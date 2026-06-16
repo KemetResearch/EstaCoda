@@ -7,6 +7,9 @@ import { CronStore } from "./cron-store.js";
 import { CronExecutionStore } from "./cron-execution-store.js";
 import { openDefaultSQLiteDatabase } from "../storage/factory.js";
 import { createCronTools } from "../tools/cron-tools.js";
+import { ProviderRegistry } from "../providers/provider-registry.js";
+import type { LoadedRuntimeConfig } from "../config/runtime-config.js";
+import type { ModelProfile, ProviderAdapter } from "../contracts/provider.js";
 
 async function makeTempDir(): Promise<string> {
   return mkdtemp(join(tmpdir(), "estacoda-cron-cmd-test-"));
@@ -35,6 +38,47 @@ async function setupExecutionStore(homeDir: string): Promise<CronExecutionStore>
     )
   `);
   return new CronExecutionStore({ db });
+}
+
+function fakeRuntimeControls(): { config: LoadedRuntimeConfig; availableToolsets: () => string[] } {
+  const model: ModelProfile = {
+    provider: "local",
+    id: "main-local",
+    contextWindowTokens: 128_000,
+    supportsTools: true,
+    supportsVision: false,
+    supportsStructuredOutput: true
+  };
+  const cronModel: ModelProfile = { ...model, id: "cron-local" };
+  const registry = new ProviderRegistry();
+  registry.register({
+    id: "local",
+    name: "Local",
+    executable: true,
+    health: () => ({ available: true }),
+    listModels: () => [model, cronModel],
+    complete: async () => ({
+      ok: true,
+      content: "ok",
+      model: "main-local",
+      provider: "local"
+    })
+  } satisfies ProviderAdapter);
+  return {
+    availableToolsets: () => ["core", "web", "files", "memory"],
+    config: ({
+      model,
+      primaryModelRoute: { provider: "local", id: "main-local", profile: model, authMethod: "none" },
+      modelFallbackRoutes: [],
+      providerRegistry: registry,
+      config: {
+        providers: {
+          local: { authMethod: "none", models: ["main-local", "cron-local"], enableNetwork: true }
+        },
+        model: { provider: "local", id: "main-local" }
+      }
+    } as unknown) as LoadedRuntimeConfig
+  };
 }
 
 describe("runCronCommand", () => {
@@ -96,6 +140,95 @@ describe("runCronCommand", () => {
     expect(updated?.contextFrom).toEqual([]);
   });
 
+  it("edits basic fields without runtime-control validation", async () => {
+    const job = await store.create({ name: "plain", schedule: "1h", prompt: "check" });
+
+    const edit = await runCronCommand({
+      args: ["edit", job.id, "--name", "renamed", "--prompt", "updated"],
+      store,
+      executionStore
+    });
+
+    expect(edit.ok).toBe(true);
+    const updated = await store.get(job.id);
+    expect(updated?.name).toBe("renamed");
+    expect(updated?.prompt).toBe("updated");
+  });
+
+  it("adds edits and clears modelOverride and enabledToolsets", async () => {
+    const runtimeControls = fakeRuntimeControls();
+    const result = await runCronCommand({
+      args: [
+        "add",
+        "--name", "controlled",
+        "--schedule", "1h",
+        "--command", "check",
+        "--model", "cron-local",
+        "--toolset", "web",
+        "--toolset", "files"
+      ],
+      store,
+      executionStore,
+      runtimeControls
+    });
+
+    expect(result.ok).toBe(true);
+    const [job] = (await store.list()).filter((entry) => entry.name === "controlled");
+    expect(job?.modelOverride).toEqual({ provider: "local", model: "cron-local" });
+    expect(job?.enabledToolsets).toEqual(["web", "files"]);
+
+    const edit = await runCronCommand({
+      args: ["edit", job!.id, "--clear-model", "--clear-toolsets"],
+      store,
+      executionStore,
+      runtimeControls
+    });
+    expect(edit.ok).toBe(true);
+    const updated = await store.get(job!.id);
+    expect(updated?.modelOverride).toBeUndefined();
+    expect(updated?.enabledToolsets).toEqual([]);
+  });
+
+  it("rejects invalid model and forbidden or unknown toolsets before persistence", async () => {
+    const runtimeControls = fakeRuntimeControls();
+    const invalidModel = await runCronCommand({
+      args: ["add", "--schedule", "1h", "--command", "check", "--provider", "missing-provider", "--model", "missing"],
+      store,
+      executionStore,
+      runtimeControls
+    });
+    expect(invalidModel.ok).toBe(false);
+    expect(invalidModel.output).toContain("Invalid cron model override");
+
+    const forbidden = await runCronCommand({
+      args: ["add", "--schedule", "1h", "--command", "check", "--toolset", "cron"],
+      store,
+      executionStore,
+      runtimeControls
+    });
+    expect(forbidden.ok).toBe(false);
+    expect(forbidden.output).toContain("cannot enable the cron toolset");
+
+    const unknown = await runCronCommand({
+      args: ["add", "--schedule", "1h", "--command", "check", "--toolset", "unknown"],
+      store,
+      executionStore,
+      runtimeControls
+    });
+    expect(unknown.ok).toBe(false);
+    expect(unknown.output).toContain("Unknown cron toolset: unknown");
+
+    const staleHardCodedToolset = await runCronCommand({
+      args: ["add", "--schedule", "1h", "--command", "check", "--toolset", "dangerous"],
+      store,
+      executionStore,
+      runtimeControls
+    });
+    expect(staleHardCodedToolset.ok).toBe(false);
+    expect(staleHardCodedToolset.output).toContain("Unknown cron toolset: dangerous");
+    expect(await store.list()).toHaveLength(0);
+  });
+
   it("rejects unknown contextFrom ids before persistence", async () => {
     const result = await runCronCommand({
       args: ["add", "--schedule", "1h", "--command", "check", "--context-from", "missing"],
@@ -139,8 +272,8 @@ describe("runCronCommand", () => {
     });
   });
 
-  it("cronjob tool round-trips noAgent, skills, and contextFrom", async () => {
-    const [tool] = createCronTools({ store });
+  it("cronjob tool round-trips noAgent, skills, contextFrom, model, and enabled toolsets", async () => {
+    const [tool] = createCronTools({ store, runtimeControls: fakeRuntimeControls() });
     const upstream = await store.create({ name: "upstream", schedule: "1h", prompt: "collect" });
 
     const created = await tool!.run({
@@ -150,7 +283,9 @@ describe("runCronCommand", () => {
       script: "watch.sh",
       no_agent: true,
       skills: ["watch"],
-      context_from: [upstream.id]
+      context_from: [upstream.id],
+      model: { model: "cron-local" },
+      enabled_toolsets: ["web"]
     });
 
     expect(created.ok).toBe(true);
@@ -158,6 +293,8 @@ describe("runCronCommand", () => {
     expect(job?.noAgent).toBe(true);
     expect(job?.skills).toEqual(["watch"]);
     expect(job?.contextFrom).toEqual([upstream.id]);
+    expect(job?.modelOverride).toEqual({ provider: "local", model: "cron-local" });
+    expect(job?.enabledToolsets).toEqual(["web"]);
   });
 
   it("delegates cron tick to the supplied tick callback", async () => {

@@ -14,6 +14,11 @@ export type CronJob = {
   prompt: string;
   noAgent?: boolean;
   contextFrom?: string[];
+  modelOverride?: {
+    provider?: string;
+    model: string;
+  };
+  enabledToolsets?: string[];
   script?: string;
   scriptArgs?: string[];
   scriptTimeoutMs?: number;
@@ -79,6 +84,8 @@ export class CronStore {
     scriptTimeoutMs?: number;
     noAgent?: boolean;
     contextFrom?: string[];
+    modelOverride?: CronJob["modelOverride"];
+    enabledToolsets?: string[];
     skills?: string[];
     delivery?: CronDelivery;
     repeat?: number;
@@ -94,6 +101,8 @@ export class CronStore {
       prompt: input.prompt,
       ...(input.noAgent === true ? { noAgent: true } : {}),
       ...(input.contextFrom === undefined ? {} : { contextFrom: input.contextFrom }),
+      ...(input.modelOverride === undefined ? {} : { modelOverride: input.modelOverride }),
+      ...(input.enabledToolsets === undefined ? {} : { enabledToolsets: input.enabledToolsets }),
       script: input.script,
       scriptArgs: input.scriptArgs,
       scriptTimeoutMs: input.scriptTimeoutMs,
@@ -113,7 +122,7 @@ export class CronStore {
     return structuredClone(job);
   }
 
-  async update(id: string, patch: Partial<Pick<CronJob, "name" | "prompt" | "noAgent" | "contextFrom" | "script" | "scriptArgs" | "scriptTimeoutMs" | "schedule" | "skills" | "delivery" | "repeat">>): Promise<CronJob | undefined> {
+  async update(id: string, patch: Partial<Pick<CronJob, "name" | "prompt" | "noAgent" | "contextFrom" | "modelOverride" | "enabledToolsets" | "script" | "scriptArgs" | "scriptTimeoutMs" | "schedule" | "skills" | "delivery" | "repeat">>): Promise<CronJob | undefined> {
     if (patch.prompt !== undefined) {
       assertCronPromptSafe(patch.prompt);
     }
@@ -387,12 +396,24 @@ function normalizeJob(job: CronJob): CronJob {
   } else {
     delete normalized.contextFrom;
   }
+  if (isCronModelOverride(job.modelOverride)) {
+    normalized.modelOverride = normalizeCronModelOverride(job.modelOverride);
+  } else {
+    delete normalized.modelOverride;
+  }
+  if (Array.isArray(job.enabledToolsets)) {
+    normalized.enabledToolsets = normalizeStringList(job.enabledToolsets);
+  } else {
+    delete normalized.enabledToolsets;
+  }
   return normalized;
 }
 
 function validateCronJobShape(input: {
   noAgent?: boolean;
   contextFrom?: unknown;
+  modelOverride?: unknown;
+  enabledToolsets?: unknown;
   script?: string;
 }): void {
   if (input.noAgent === true && (input.script === undefined || input.script.trim().length === 0)) {
@@ -404,6 +425,36 @@ function validateCronJobShape(input: {
   if (Array.isArray(input.contextFrom) && input.contextFrom.some((value) => typeof value !== "string")) {
     throw new Error("Cron contextFrom must be an array of job ids.");
   }
+  if (input.modelOverride !== undefined && !isCronModelOverride(input.modelOverride)) {
+    throw new Error("Cron modelOverride must include a model string and optional provider string.");
+  }
+  if (input.enabledToolsets !== undefined && !Array.isArray(input.enabledToolsets)) {
+    throw new Error("Cron enabledToolsets must be an array of toolset names.");
+  }
+  if (Array.isArray(input.enabledToolsets) && input.enabledToolsets.some((value: unknown) => typeof value !== "string")) {
+    throw new Error("Cron enabledToolsets must be an array of toolset names.");
+  }
+}
+
+function isCronModelOverride(value: unknown): value is NonNullable<CronJob["modelOverride"]> {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    return false;
+  }
+  const record = value as Record<string, unknown>;
+  return typeof record.model === "string" &&
+    record.model.trim().length > 0 &&
+    (record.provider === undefined || typeof record.provider === "string");
+}
+
+function normalizeCronModelOverride(value: NonNullable<CronJob["modelOverride"]>): NonNullable<CronJob["modelOverride"]> {
+  return {
+    ...(value.provider === undefined || value.provider.trim().length === 0 ? {} : { provider: value.provider.trim() }),
+    model: value.model.trim()
+  };
+}
+
+function normalizeStringList(values: string[]): string[] {
+  return [...new Set(values.map((value) => value.trim()).filter((value) => value.length > 0))];
 }
 
 function summarizePrompt(prompt: string): string {

@@ -1,4 +1,4 @@
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -7,6 +7,7 @@ import type { Prompt } from "./readline-prompt.js";
 import { CronStore } from "../cron/cron-store.js";
 import { InMemorySessionDB } from "../session/in-memory-session-db.js";
 import type { Runtime } from "../runtime/create-runtime.js";
+import { resolveProfileStateHome } from "../config/profile-home.js";
 
 const readlineMock = vi.hoisted(() => ({
   prompt: vi.fn(),
@@ -145,6 +146,22 @@ describe("runCliCommand cron dispatch", () => {
     }));
     expect(runtimeOptions?.disabledToolsets).toEqual(["cron", "messaging", "clarify"]);
     expect(runtimeOptions?.sessionDb).toBe(runtime.sessionDb);
+  });
+
+  it("runs read-only cron list without loading runtime config", async () => {
+    const profilePaths = resolveProfileStateHome({ homeDir: tempDir, profileId: "broken" });
+    await mkdir(profilePaths.configPath, { recursive: true });
+
+    const result = await runCliCommand({
+      argv: ["cron", "list"],
+      workspaceRoot: tempDir,
+      homeDir: tempDir,
+      profileId: "broken"
+    });
+
+    expect(result.handled).toBe(true);
+    expect(result.exitCode).toBe(0);
+    expect(result.output).toContain("No cron jobs configured");
   });
 });
 
