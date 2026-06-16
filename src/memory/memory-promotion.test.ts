@@ -10,11 +10,15 @@ import {
 describe("memory promotion deterministic detectors", () => {
   it.each([
     ["I prefer TypeScript", "Prefer TypeScript."],
+    ["I'd prefer TypeScript", "Prefer TypeScript."],
+    ["My preference is TypeScript", "Prefer TypeScript."],
+    ["We prefer TypeScript", "Prefer TypeScript."],
     ["Prefer TypeScript.", "Prefer TypeScript."],
     ["please use pnpm by default", "Prefer pnpm."],
     ["use TypeScript by default", "Prefer TypeScript."],
     ["please use TypeScript by default", "Prefer TypeScript."],
     ["default to TypeScript", "Prefer TypeScript."],
+    ["Please switch to TypeScript by default", "Prefer TypeScript."],
     ["always use strict mode", "Always use strict mode."],
     ["we want pnpm by default", "Want pnpm by default."],
     ["I prefer concise replies", "Prefer concise replies."],
@@ -34,8 +38,12 @@ describe("memory promotion deterministic detectors", () => {
 
   it.each([
     ["I prefer TypeScript", "language-default", "TypeScript", "language-default:typescript"],
+    ["I'd prefer TypeScript", "language-default", "TypeScript", "language-default:typescript"],
+    ["My preference is TypeScript", "language-default", "TypeScript", "language-default:typescript"],
+    ["We prefer TypeScript", "language-default", "TypeScript", "language-default:typescript"],
     ["Default to TypeScript", "language-default", "TypeScript", "language-default:typescript"],
     ["Use TypeScript by default", "language-default", "TypeScript", "language-default:typescript"],
+    ["Please switch to TypeScript by default", "language-default", "TypeScript", "language-default:typescript"],
     ["I prefer pnpm", "package-manager", "pnpm", "package-manager:pnpm"],
     ["I prefer pnpm test", "test-command", "pnpm test", "test-command:pnpm test"],
     ["always use strict mode", "code-style", "strict mode", "always use strict mode."]
@@ -64,11 +72,14 @@ describe("memory promotion deterministic detectors", () => {
   });
 
   it.each([
-    "I'd prefer TypeScript",
     "I like TypeScript",
     "Switch to TypeScript",
     "It would be nice if TypeScript",
     "Maybe use TypeScript",
+    "Could you use TypeScript",
+    "Can we use TypeScript",
+    "For this one, use TypeScript",
+    "Try TypeScript",
     "",
     "   \n\t  ",
     "remember this",
@@ -109,6 +120,31 @@ describe("memory promotion deterministic detectors", () => {
         index: 1
       }
     ]);
+  });
+
+  it("extracts direct preference candidates that use contractions", () => {
+    expect(__extractPromotionStatementCandidatesForTest("I'd prefer TypeScript.")).toEqual([
+      {
+        text: "I'd prefer TypeScript.",
+        source: "direct-user-input",
+        index: 0
+      }
+    ]);
+  });
+
+  it.each([
+    "My preference is ‘TypeScript’",
+    "Please switch to ‘TypeScript’ by default",
+    "My preference is “TypeScript”",
+    "Please switch to “TypeScript” by default",
+    "My preference is „TypeScript‟",
+    "Please switch to „TypeScript‟ by default",
+    "My preference is ‹TypeScript›",
+    "Please switch to ‹TypeScript› by default",
+    "My preference is «TypeScript»",
+    "Please switch to «TypeScript» by default"
+  ])("does not extract typographic quoted promotion candidates from %j", (input) => {
+    expect(__extractPromotionStatementCandidatesForTest(input)).toEqual([]);
   });
 
   it("extracts newline-separated direct statement candidates", () => {

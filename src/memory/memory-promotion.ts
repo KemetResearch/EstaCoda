@@ -219,7 +219,23 @@ function stripFencedCodeBlocks(text: string): string {
 }
 
 function hasQuotedOrBacktickedSpan(text: string): boolean {
-  return /["'`]/u.test(text);
+  if (/["`‘’“”„‟‹›«»]/u.test(text)) {
+    return true;
+  }
+
+  for (let index = 0; index < text.length; index += 1) {
+    if (text[index] !== "'") {
+      continue;
+    }
+    const previous = text[index - 1] ?? "";
+    const next = text[index + 1] ?? "";
+    if (/[A-Za-z]/u.test(previous) && /[A-Za-z]/u.test(next)) {
+      continue;
+    }
+    return true;
+  }
+
+  return false;
 }
 
 function splitDirectStatements(text: string): string[] {
@@ -286,10 +302,22 @@ function detectUserPreference(text: string): PreferenceCandidate | undefined {
       regex: /^(?:i\s+)?prefer\s+(.+)$/iu
     },
     {
+      regex: /^i['’]d\s+prefer\s+(.+)$/iu
+    },
+    {
+      regex: /^my\s+preference\s+is\s+(.+)$/iu
+    },
+    {
+      regex: /^we\s+prefer\s+(.+)$/iu
+    },
+    {
       regex: /^(?:please\s+)?use\s+(.+?)\s+by\s+default$/iu
     },
     {
       regex: /^(?:please\s+)?default\s+to\s+(.+)$/iu
+    },
+    {
+      regex: /^please\s+switch\s+to\s+(.+?)\s+by\s+default$/iu
     }
   ];
   const nonCanonicalPatterns: Array<{
