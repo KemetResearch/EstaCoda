@@ -10,6 +10,11 @@ import type { CronJobLock } from "./cron-lock.js";
 import type { CronJob } from "./cron-store.js";
 import { CronStore } from "./cron-store.js";
 import {
+  assessCronAssembledPromptSafety,
+  assessCronUserPromptSafety,
+  redactCronDataContext
+} from "./cron-safety.js";
+import {
   HookRegistry,
   type GatewayHookEventName,
   type GatewayHookPayloadByName,
@@ -216,13 +221,25 @@ export function createRuntimeCronRunner(input: {
   return {
     async runJob(job, runInput) {
       const executionId = runInput?.executionId;
+      const userPromptAssessment = assessCronUserPromptSafety(job.prompt);
+      if (!userPromptAssessment.ok) {
+        return blockedCronRunResult({
+          job,
+          executionId,
+          message: `Cron job blocked: ${userPromptAssessment.issues.join(", ")}`
+        });
+      }
+
       const scriptResult = job.script === undefined
         ? undefined
         : await runCronScript(job, input.workspaceRoot);
+      const redactedScriptResult = scriptResult === undefined
+        ? undefined
+        : redactCronScriptResult(scriptResult);
 
-      if (scriptResult !== undefined && !scriptResult.ok) {
-        const classified = classifyCronScriptFailure(scriptResult.summary, scriptResult.timedOut);
-        const content = formatCronOutput(job, `Cron script failed: ${scriptResult.summary}\n\n${renderScriptResult(scriptResult)}`, input.wrapResponse ?? true);
+      if (redactedScriptResult !== undefined && !redactedScriptResult.ok) {
+        const classified = classifyCronScriptFailure(redactedScriptResult.summary, redactedScriptResult.timedOut);
+        const content = formatCronOutput(job, `Cron script failed: ${redactedScriptResult.summary}\n\n${renderScriptResult(redactedScriptResult)}`, input.wrapResponse ?? true);
         const rawDelivery = await input.deliver?.(job, content);
         const deliveryResult: CronDeliveryResult = typeof rawDelivery === "boolean"
           ? { success: rawDelivery, perTarget: new Map() }
@@ -238,6 +255,23 @@ export function createRuntimeCronRunner(input: {
         };
       }
 
+      const assembledPrompt = buildCronPrompt(job, redactedScriptResult);
+      const assembledAssessment = assessCronAssembledPromptSafety({
+        assembled: assembledPrompt,
+        userPrompt: job.prompt,
+        includesSkillContent: false,
+        includesDataContext: false,
+        includesScriptOutput: redactedScriptResult !== undefined
+      });
+      if (!assembledAssessment.ok) {
+        return blockedCronRunResult({
+          job,
+          executionId,
+          message: `Cron assembled prompt blocked: ${assembledAssessment.issues.join(", ")}`
+        });
+      }
+      const promptText = assembledAssessment.sanitizedText ?? assembledPrompt;
+
       const runContext: CronRunContext = {
         executionId,
         sessionId: `cron-${job.id}-${randomUUID()}`,
@@ -250,7 +284,7 @@ export function createRuntimeCronRunner(input: {
       });
       try {
         const response = await runtime.handle({
-          text: buildCronPrompt(job, scriptResult),
+          text: promptText,
           channel: "cli",
           trustedWorkspace: true
         });
@@ -308,6 +342,22 @@ export function createRuntimeCronRunner(input: {
         }
       }
     }
+  };
+}
+
+function blockedCronRunResult(input: {
+  job: CronJob;
+  executionId?: string;
+  message: string;
+}): CronRunResult {
+  return {
+    job: input.job,
+    ok: false,
+    output: input.message,
+    delivered: false,
+    deliveryResults: new Map(),
+    failureClass: "runtime_error",
+    executionId: input.executionId
   };
 }
 
@@ -551,6 +601,15 @@ function renderScriptResult(result: CronScriptResult): string {
     "stderr:",
     result.stderr.trim().length === 0 ? "(empty)" : result.stderr.trim()
   ].filter((line) => line !== undefined).join("\n");
+}
+
+function redactCronScriptResult(result: CronScriptResult): CronScriptResult {
+  return {
+    ...result,
+    summary: redactCronDataContext(result.summary),
+    stdout: redactCronDataContext(result.stdout),
+    stderr: redactCronDataContext(result.stderr)
+  };
 }
 
 function appendBounded(current: string, chunk: string): string {
