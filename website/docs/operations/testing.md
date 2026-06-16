@@ -1,14 +1,18 @@
 ---
 title: Testing
-description: Validation layers, smoke tests, eval fixtures, and operator checks.
+description: Validation commands, smoke coverage, release checks, and operator evidence.
 sidebar_position: 1
 ---
 
 # Testing
 
-EstaCoda ships with a layered validation stack. The authoritative gate is the Vitest unit-test suite. Smoke tests serve as the integration safety net. Eval fixtures detect deterministic regressions. Runtime import and ESM audits catch packaging mistakes before they reach users.
+EstaCoda uses layered validation. Unit tests are the authoritative code gate, smoke tests cover cross-subsystem behavior, eval fixtures catch deterministic agent regressions, and package/install validators check the artifacts users actually run.
 
-Run validation in this order:
+The commands below are grounded in `package.json`, `vitest.node.config.ts`, `src/smoke.ts`, `src/smoke/cases/`, `scripts/run-eval-fixtures.ts`, and the validation scripts under `scripts/`.
+
+## Core validation lane
+
+Run this lane before declaring a normal code change ready:
 
 ```bash
 pnpm run typecheck
@@ -20,35 +24,69 @@ pnpm run audit:esm
 pnpm run smoke:dist
 ```
 
-Do not skip `typecheck`. Type errors can pass tests while breaking builds.
+What each command proves:
 
-## Validation layers
+| Command | Source | What it checks |
+|---|---|---|
+| `pnpm run typecheck` | `tsc --noEmit` | TypeScript compiles without emitting output. |
+| `pnpm run test` | `vitest run --config vitest.node.config.ts` | Node/Vitest unit tests under `src/**/*.test.ts`. |
+| `pnpm run smoke` | `node --import tsx src/smoke.ts` | Source-mode integration smoke with mocked providers/adapters. |
+| `pnpm run build` | `tsc -p tsconfig.build.json` after `clean:dist` | Production `dist/` output builds. |
+| `pnpm run audit:runtime-imports` | `scripts/audit-runtime-imports.mjs` | Runtime import graph sanity before shipping. |
+| `pnpm run audit:esm` | `scripts/audit-esm.mjs dist` | ESM packaging correctness in built output. |
+| `pnpm run smoke:dist` | `node dist/smoke.js` | Built-output smoke. This is the final artifact sanity check. |
 
-| Command | What it checks | When to run |
-|---------|---------------|-------------|
-| `pnpm run typecheck` | TypeScript compilation with zero errors | Before every commit |
-| `pnpm run test` | Vitest unit-test suite | Before every PR |
-| `pnpm run smoke` | Source-mode integration smoke | Before every PR |
-| `pnpm run build` | Production `dist/` compilation | Before release candidate |
-| `pnpm run audit:runtime-imports` | Runtime import graph sanity | After structural moves |
-| `pnpm run audit:esm` | ESM packaging correctness | After build changes |
-| `pnpm run smoke:dist` | Built-output smoke | Before release candidate |
-| `pnpm run eval:fixtures` | 27 deterministic eval fixtures | After logic changes |
+Do not skip `typecheck`. Type errors can pass runtime tests and still break the build.
 
-`pnpm run smoke:dist` is the final gate. If it fails, the built artifact is broken.
+## Validation by change type
+
+Use targeted lanes to reduce feedback time, then run the core validation lane before merge or release.
+
+| Change type | Run |
+|---|---|
+| Most TypeScript/runtime changes | `pnpm run typecheck`, `pnpm run test` |
+| Cross-subsystem runtime behavior | `pnpm run smoke`, then `pnpm run smoke:dist` after build |
+| Agent/eval logic | `pnpm run eval:fixtures` |
+| Provider routing, reasoning, continuation, or message normalization | `pnpm run provider:hardening` plus targeted Vitest tests for the touched provider/runtime files |
+| Install/update behavior | `pnpm run validate:install`, `pnpm run validate:source-install` |
+| Uninstall behavior | `pnpm run validate:uninstall` |
+| npm/package readiness | `pnpm run verify:local-bin`, `pnpm run pack:dry-run`, `pnpm run verify:package-bin` |
+| Docker handoff | `pnpm run validate:docker` |
+| Homebrew handoff | `pnpm run validate:homebrew` |
+| Skills catalog changes | `pnpm run skills:catalog`, then inspect generated website API output |
+| Docs-only changes | `git diff --check`; build the Docusaurus site when sidebars, links, frontmatter, or i18n files change |
 
 ## Smoke tests
 
-**Entrypoint:** `src/smoke.ts`
-**Runner:** `src/smoke/smoke-runner.ts`
-**Cases:** `src/smoke/cases/*.ts`
-**Legacy baseline:** `src/smoke/_legacy.ts` (assertions preserved)
+Smoke tests are the integration safety net. They exercise product flows with mocked providers and adapters, so they are fast and deterministic. They do not prove live API behavior.
 
-Smoke covers cross-subsystem behavior with mocked providers and adapters. It does not call live APIs.
+**Entrypoint:** `src/smoke.ts`
+
+**Runner:** `src/smoke/smoke-runner.ts`
+
+**Cases:** `src/smoke/cases/*.ts`
+
+Current smoke cases include:
+
+- bare launch
+- init lifecycle
+- update dry run
+- pack lifecycle
+- bundled skill sync
+- corrupt skill usage recovery
+- evolution lifecycle and evolution safety
+- delegation MVP
+- gateway stop behavior
+- WhatsApp support
+
+Useful smoke commands:
 
 ```bash
 # All cases
 pnpm run smoke
+
+# List cases
+pnpm run smoke --list
 
 # By tag
 pnpm run smoke --tag skills
@@ -57,123 +95,57 @@ pnpm run smoke --tag memory
 # By case ID
 pnpm run smoke --id corrupt-skill-usage
 
-# List cases
-pnpm run smoke --list
-
 # Fail fast + JSON
 pnpm run smoke --fail-fast --json
 ```
 
-### What smoke covers
+### What smoke does not prove
 
-- Provider normalization and routing
-- Tool-call recovery and continuation
-- Browser backend basics
-- Image generation (FAL, BytePlus/Seedream)
-- Voice (TTS, STT)
-- Telegram progress, approvals, attachments, session lifecycle
-- Skill execution, mutation, evolution
-- Memory promotion, provenance, selective rendering, deactivation, safety-file protection
-- Security policy and hard floor
-- Cron create/list/edit/tick
-- MCP discovery and reload
-- ACP basic flow
-- Context expansion and prompt packing
-- Artifact handling
-- Trajectory persistence and failure classification
-- Trace CLI commands
-- Eval runner and fixtures
-- Golden flow comparison
-- Change manifest state transitions
-- Code dependency graph: forward/reverse/affected lookup, summary, cache invalidation
-- Workflow: state transitions, locking, migration, atomicity, engine lifecycle, restart recovery, command/control, event summaries
+Smoke tests mock or simulate several external surfaces. Treat these as testing boundaries, not product limitations:
 
-### What smoke does not cover
+- Real provider calls
+- Real Telegram or WhatsApp gateway sessions
+- Real browser automation against a live browser service
+- Real MCP server execution
+- Real voice/image provider output
+- Real microphone capture, live Discord voice sessions, and first-run faster-whisper downloads
 
-- Real provider execution (mocked)
-- Real Telegram gateway (mocked adapter)
-- Real browser automation (mock backend)
-- Real MCP server execution (mocked)
-- Real voice/image generation (mocked responses)
-- Real Discord voice-channel sessions, microphone input, live voice providers, live faster-whisper model downloads
-
-Smoke limitations are not product limitations. They are testing boundaries.
+Live behavior still needs operator validation when a change touches a live provider, channel, browser backend, voice path, installer, update path, or package artifact.
 
 ## Eval fixtures
 
-27 deterministic fixtures run with `pnpm run eval:fixtures`.
-
-**Base runtime (3):**
-- `provider-text-response` — Provider returns text without tool calls
-- `tool-security-block` — Dangerous command blocked by security policy
-- `missing-tool-failure` — Unregistered tool returns undefined
-
-**Memory (4):**
-- `memory-promotion-provenance` — Promotion carries provenance metadata
-- `memory-deactivate-suppresses` — Deactivated memory suppressed from context
-- `memory-selective-renders` — Selective renderer respects fallback rules
-- `memory-safety-files-protected` — Safety files cannot be deactivated
-
-**Code dependency graph (5):**
-- `knowledge-forward-deps` — Forward dependency lookup
-- `knowledge-reverse-deps` — Reverse dependency lookup
-- `knowledge-affected-files` — Transitive affected-file lookup
-- `knowledge-graph-summary` — Graph summary counts
-- `knowledge-cache-invalidates` — Cache invalidates on source change
-
-**Evolution (6):**
-- `manifest-creation-from-observation` — Observation creates ChangeManifest
-- `skill-proposal-manifest-bridge` — `skill.propose_patch` creates manifest
-- `user-correction-recording` — User correction recorded as event
-- `tool-description-proposal` — Tool description manifest skeleton
-- `routing-metadata-proposal` — Routing metadata manifest skeleton
-- `evolution-export-shape` — Export dataset matches schema
-
-**Workflow foundation (5):**
-- `workflow-run-state-transitions` — Workflow run and step state transitions
-- `workflow-locking` — Lock acquire, release, heartbeat, stale recovery
-- `workflow-migration` — Schema migration
-- `workflow-store-atomicity` — Atomic transitions and round-trip integrity
-- `workflow-engine-lifecycle` — Engine workflow run and step lifecycle
-
-**Workflow engine (1):**
-- `workflow-restart-recovery` — Restart recovery marks stale workflow runs interrupted
-
-**Operator control plane (1):**
-- `workflow-command-control` — Dispatcher routes and validates slash commands
-
-**Workflow Event Summaries (1):**
-- `workflow-event-summary` — Manual, automatic, boundary safety, preservation
-
-**Workflow Integration (1):**
-- `workflow-integration` — System integration: adapter, CLI bridge, runtime wiring
-
-## Diagnostic CLI tools
+Run the default eval fixture corpus with:
 
 ```bash
-# Inspect execution history
-estacoda trace list [--session <id>] [--limit <n>]
-estacoda trace dump <trajectory-id> [--raw]
-estacoda trace timeline <trajectory-id> [--raw]
-estacoda trace failures <trajectory-id>
-
-# Run eval fixtures
-estacoda eval [fixture-id]
+pnpm run eval:fixtures
 ```
 
-These are runtime inspection tools, not replacements for unit tests.
-
-## Targeted test practices
-
-Run the full stack before structural changes. Run targeted suites for subsystem work.
+Run one fixture by ID with:
 
 ```bash
-# Voice subsystem only
-pnpm exec vitest run src/tools/voice-tools.test.ts src/tools/tts-providers.test.ts src/tools/stt-providers.test.ts
-pnpm exec vitest run src/channels/voice-transcription.test.ts src/gateway/voice-state.test.ts
+pnpm run eval:fixtures -- <fixture-id>
 ```
 
-Provider finalization and reasoning hygiene checks:
+The default corpus is defined in `src/eval/fixtures/index.ts` and currently covers:
+
+- Base runtime behavior
+- Tool security and missing-tool failure classification
+- Memory promotion, deactivation, selective rendering, and safety-file protection
+- Code dependency graph lookup and cache invalidation
+- Agent Evolution manifests, proposals, user-correction capture, routing metadata, routing baseline, and export shape
+- Workflow run state, locking, migration, store atomicity, engine lifecycle, restart recovery, command control, event summaries, and integration
+
+Prefer category descriptions in docs over hard-coding fixture counts. Fixture IDs change as the eval corpus grows.
+
+## Provider and reasoning checks
+
+For provider hardening, start with:
+
+```bash
+pnpm run provider:hardening
+```
+
+When changing provider streaming, tool-call planning, reasoning extraction, continuation, prompt compression, or transcript consumers, also run the focused tests that match the touched subsystem. Common examples:
 
 ```bash
 pnpm exec vitest run src/providers/provider-executor-fallback.test.ts
@@ -185,22 +157,33 @@ pnpm exec vitest run src/providers/provider-message-normalizer.test.ts
 pnpm exec vitest run src/runtime/provider-turn-loop.test.ts
 pnpm exec vitest run src/runtime/agent-loop.test.ts
 pnpm exec vitest run src/prompt/semantic-compressor.test.ts
-pnpm exec vitest run src/memory/local-memory-provider.test.ts
-pnpm exec vitest run src/skills/skill-learning.test.ts
-pnpm exec vitest run src/skills/skill-evolution.test.ts
-pnpm exec vitest run src/evolution/export-format.test.ts
 ```
 
-Inspect these failure modes before changing provider runtime behavior:
+Inspect these failure modes before accepting provider-runtime changes:
 
-- `incomplete-stream` stays a failure or uses fallback; it must not become a final assistant answer
-- length-truncated tool calls retry once or refuse; the first truncated attempt must not reach planning or execution
-- malformed finalized tool JSON stays a tool-planning error
-- reasoning-only responses use the visible-answer retry path without displaying raw reasoning
-- length-truncated visible text continuation persists one final assistant message and no synthetic continuation messages
-- summary, memory, skill, and export tests strip reasoning while preserving ordinary visible prose
+- `incomplete-stream` stays a failure or uses fallback; it must not become a final assistant answer.
+- Length-truncated tool calls retry once or refuse safely; the first truncated attempt must not reach planning or execution.
+- Malformed finalized tool JSON remains a tool-planning error.
+- Reasoning-only responses use the visible-answer retry path without exposing raw reasoning.
+- Length-truncated visible text continuation persists one final assistant message and no synthetic continuation messages.
+- Summaries, memory, skills, and export traces strip raw reasoning while preserving ordinary visible prose.
 
-Manual inspection path:
+## Diagnostic CLI tools
+
+These commands inspect runtime evidence. They are not replacements for tests.
+
+```bash
+# Inspect execution history
+estacoda trace list [--session <id>] [--limit <n>]
+estacoda trace dump <trajectory-id> [--raw]
+estacoda trace timeline <trajectory-id> [--raw]
+estacoda trace failures <trajectory-id>
+
+# Run eval fixtures from the CLI
+estacoda eval [fixture-id]
+```
+
+For manual inspection after a local turn:
 
 ```bash
 pnpm run dev
@@ -208,18 +191,65 @@ estacoda trace list --limit 5
 estacoda trace dump <trajectory-id> --raw
 ```
 
-Raw reasoning, `reasoning_content`, `reasoning_details`, discarded truncated tool arguments, and synthetic continuation/prefill messages should not appear in persisted session-visible messages, runtime/session events, summaries, memory files, skill records, or export traces. Safe finish reason, usage, `reasoningMetadata`, truncation status, and continuation status may appear.
+Raw reasoning, `reasoning_content`, `reasoning_details`, discarded truncated tool arguments, and synthetic continuation/prefill messages should not appear in persisted session-visible messages, runtime/session events, summaries, memory files, skill records, or export traces. Safe metadata such as finish reason, usage, `reasoningMetadata`, truncation status, and continuation status may appear.
 
-Provider, Discord voice, and faster-whisper tests use mocks where optional packages or live services are absent. Live provider calls, real Discord voice, microphone capture, and first-run model downloads are operator integration tests, not base CI requirements.
+## Install, update, package, and uninstall validation
+
+The release surface is not only TypeScript. Installer, updater, package, and handoff scripts have their own gates:
+
+```bash
+pnpm run verify:local-bin
+pnpm run pack:dry-run
+pnpm run verify:package-bin
+pnpm run validate:install
+pnpm run validate:source-install
+pnpm run validate:uninstall
+pnpm run validate:docker
+pnpm run validate:homebrew
+```
+
+Use these when touching:
+
+- `package.json`, package metadata, `bin`, or `files`
+- `scripts/install.sh`, `scripts/setup-estacoda.sh`, `scripts/uninstall.sh`, or `scripts/estacoda-wrapper.sh`
+- update routing or managed-source behavior
+- Docker, Homebrew, npm, or source-install documentation
+- WhatsApp bridge packaging boundaries
+
+`verify-package-bin.sh` also checks that the npm tarball includes required runtime files and excludes source, website, test, node_modules, and secret/state paths.
+
+## Manual operator validation
+
+Mocks keep CI deterministic, but some behaviors must be checked live before calling them live-proven:
+
+- Provider calls against the target model/provider
+- Telegram and WhatsApp gateway sessions
+- Browserbase or live browser sessions
+- Hosted TTS/STT and first-run local STT model download
+- Microphone capture and Discord voice paths
+- Docker/Homebrew/npm install paths in clean environments
+- Arabic terminal rendering in real terminal workflows
+
+Capture evidence with:
+
+- command output
+- logs and trace IDs
+- screenshots for UI or terminal rendering issues
+- exact provider/channel/config used
+- reproduction steps for failures
 
 ## Recommended practice
 
 1. Run `pnpm run typecheck` first.
-2. Run `pnpm run test`, `pnpm run smoke`, and `pnpm run smoke:dist` before declaring success.
-3. For live behavior, run manual operator validation.
-4. Capture failures with screenshots, logs, and reproduction steps.
+2. Run targeted tests for the subsystem you changed.
+3. Run the core validation lane before declaring success.
+4. Run install/package validators when touching release surfaces.
+5. Run live operator validation when changing live providers, channels, browser, voice, installer, or Arabic terminal behavior.
+6. Capture failures with logs, traces, screenshots, and reproduction steps.
 
 ## Related docs
 
 - [Known Issues](./known-issues.md) — limitations that affect testing scope
 - [Gateway Operations](./gateway-operations.md) — operator commands for diagnostics
+- [Update Operations](./update-operations.md) — update behavior and recovery
+- [Backups and State](./backups-and-state.md) — state to protect before destructive tests
