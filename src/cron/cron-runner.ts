@@ -15,6 +15,7 @@ import {
   assessCronUserPromptSafety,
   redactCronDataContext
 } from "./cron-safety.js";
+import { resolveCronWorkdir } from "./cron-workdir.js";
 import {
   HookRegistry,
   type GatewayHookEventName,
@@ -59,6 +60,8 @@ export type CronRunContext = {
   executionId?: string;
   sessionId: string;
   scheduledAt?: Date;
+  workspaceRoot?: string;
+  trustedWorkspace?: boolean;
 };
 
 export type CronRunner = {
@@ -236,6 +239,8 @@ export function createRuntimeCronRunner(input: {
   wrapResponse?: boolean;
   disposeRuntime?: boolean;
   workspaceRoot?: string;
+  allowedWorkdirRoots?: string[];
+  isWorkspaceTrusted?: (path: string) => Promise<boolean>;
 }): CronRunner {
   return {
     async runJob(job, runInput) {
@@ -248,10 +253,23 @@ export function createRuntimeCronRunner(input: {
           message: `Cron job blocked: ${userPromptAssessment.issues.join(", ")}`
         });
       }
+      const workdir = await resolveCronWorkdir({
+        requestedWorkdir: job.workdir,
+        defaultWorkspaceRoot: input.workspaceRoot ?? process.cwd(),
+        allowedRoots: input.allowedWorkdirRoots ?? (input.workspaceRoot === undefined ? [process.cwd()] : [input.workspaceRoot]),
+        isWorkspaceTrusted: input.isWorkspaceTrusted ?? (async () => false)
+      });
+      if (!workdir.ok) {
+        return blockedCronRunResult({
+          job,
+          executionId,
+          message: `Cron workdir blocked: ${workdir.message}`
+        });
+      }
 
       const scriptResult = job.script === undefined
         ? undefined
-        : await runCronScript(job, input.workspaceRoot);
+        : await runCronScript(job, workdir.workdir);
       const redactedScriptResult = scriptResult === undefined
         ? undefined
         : redactCronScriptResult(scriptResult);
@@ -294,7 +312,9 @@ export function createRuntimeCronRunner(input: {
       const runContext: CronRunContext = {
         executionId,
         sessionId: `cron-${job.id}-${randomUUID()}`,
-        scheduledAt: runInput?.scheduledAt
+        scheduledAt: runInput?.scheduledAt,
+        workspaceRoot: workdir.workdir,
+        trustedWorkspace: workdir.trustedWorkspace
       };
       let runtime: Runtime | undefined;
       const skillResolver = input.resolveSkills ?? (job.skills.length === 0
@@ -340,7 +360,7 @@ export function createRuntimeCronRunner(input: {
         const response = await activeRuntime.handle({
           text: promptText,
           channel: "cli",
-          trustedWorkspace: true
+          trustedWorkspace: workdir.trustedWorkspace
         });
         if (response.text.trim().length === 0) {
           const message = "Agent completed but produced empty response (model error, timeout, or misconfiguration)";

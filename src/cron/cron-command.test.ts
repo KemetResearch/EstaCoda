@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { mkdtemp, rm, mkdir } from "node:fs/promises";
+import { mkdtemp, rm, mkdir, realpath } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { runCronCommand } from "./cron-command.js";
@@ -78,6 +78,14 @@ function fakeRuntimeControls(): { config: LoadedRuntimeConfig; availableToolsets
         model: { provider: "local", id: "main-local" }
       }
     } as unknown) as LoadedRuntimeConfig
+  };
+}
+
+function fakeWorkdirControls(workspaceRoot: string, trusted = true) {
+  return {
+    defaultWorkspaceRoot: workspaceRoot,
+    allowedRoots: [workspaceRoot],
+    isWorkspaceTrusted: async () => trusted
   };
 }
 
@@ -189,6 +197,48 @@ describe("runCronCommand", () => {
     expect(updated?.enabledToolsets).toEqual([]);
   });
 
+  it("adds edits and clears workdir after workspace validation", async () => {
+    const workdir = join(tmpDir, "workspace");
+    const otherWorkdir = join(workdir, "reports");
+    await mkdir(otherWorkdir, { recursive: true });
+    const otherWorkdirReal = await realpath(otherWorkdir);
+    const result = await runCronCommand({
+      args: ["add", "--name", "workdir", "--schedule", "1h", "--command", "check", "--workdir", otherWorkdir],
+      store,
+      executionStore,
+      workdirControls: fakeWorkdirControls(workdir)
+    });
+
+    expect(result.ok).toBe(true);
+    const [job] = (await store.list()).filter((entry) => entry.name === "workdir");
+    expect(job?.workdir).toBe(otherWorkdirReal);
+
+    const edit = await runCronCommand({
+      args: ["edit", job!.id, "--clear-workdir"],
+      store,
+      executionStore,
+      workdirControls: fakeWorkdirControls(workdir)
+    });
+    expect(edit.ok).toBe(true);
+    const updated = await store.get(job!.id);
+    expect(updated?.workdir).toBeUndefined();
+  });
+
+  it("rejects invalid workdir before persistence", async () => {
+    const workspaceRoot = join(tmpDir, "workspace");
+    await mkdir(workspaceRoot, { recursive: true });
+    const result = await runCronCommand({
+      args: ["add", "--schedule", "1h", "--command", "check", "--workdir", "relative"],
+      store,
+      executionStore,
+      workdirControls: fakeWorkdirControls(workspaceRoot)
+    });
+
+    expect(result.ok).toBe(false);
+    expect(result.output).toContain("Cron workdir must be an absolute path");
+    expect(await store.list()).toHaveLength(0);
+  });
+
   it("rejects invalid model and forbidden or unknown toolsets before persistence", async () => {
     const runtimeControls = fakeRuntimeControls();
     const invalidModel = await runCronCommand({
@@ -272,8 +322,15 @@ describe("runCronCommand", () => {
     });
   });
 
-  it("cronjob tool round-trips noAgent, skills, contextFrom, model, and enabled toolsets", async () => {
-    const [tool] = createCronTools({ store, runtimeControls: fakeRuntimeControls() });
+  it("cronjob tool round-trips noAgent, skills, contextFrom, model, enabled toolsets, and workdir", async () => {
+    const workdir = join(tmpDir, "tool-workdir");
+    await mkdir(workdir, { recursive: true });
+    const workdirReal = await realpath(workdir);
+    const [tool] = createCronTools({
+      store,
+      runtimeControls: fakeRuntimeControls(),
+      workdirControls: fakeWorkdirControls(tmpDir)
+    });
     const upstream = await store.create({ name: "upstream", schedule: "1h", prompt: "collect" });
 
     const created = await tool!.run({
@@ -285,7 +342,8 @@ describe("runCronCommand", () => {
       skills: ["watch"],
       context_from: [upstream.id],
       model: { model: "cron-local" },
-      enabled_toolsets: ["web"]
+      enabled_toolsets: ["web"],
+      workdir
     });
 
     expect(created.ok).toBe(true);
@@ -295,6 +353,7 @@ describe("runCronCommand", () => {
     expect(job?.contextFrom).toEqual([upstream.id]);
     expect(job?.modelOverride).toEqual({ provider: "local", model: "cron-local" });
     expect(job?.enabledToolsets).toEqual(["web"]);
+    expect(job?.workdir).toBe(workdirReal);
   });
 
   it("delegates cron tick to the supplied tick callback", async () => {

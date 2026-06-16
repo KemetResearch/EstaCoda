@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { mkdtempSync, rmSync } from "node:fs";
-import { mkdir, writeFile } from "node:fs/promises";
+import { mkdir, realpath, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { CronStore } from "./cron-store.js";
@@ -339,8 +339,89 @@ describe("createRuntimeCronRunner", () => {
     expect(runtimeFactory).toHaveBeenCalledWith(job, {
       executionId: "exec-context",
       sessionId: expect.stringMatching(/^cron-cron-test-runtime-/u),
-      scheduledAt
+      scheduledAt,
+      workspaceRoot: expect.any(String),
+      trustedWorkspace: false
     });
+  });
+
+  it("passes resolved workdir and trust to runtime creation and handle", async () => {
+    const workdir = join(tmpDir, "trusted-workdir");
+    await mkdir(workdir, { recursive: true });
+    const workdirReal = await realpath(workdir);
+    const job = { ...fakeCronJob(), workdir };
+    const runtime = fakeRuntime("Cron completed.");
+    const runtimeFactory = vi.fn(async () => runtime as never);
+    const runner = createRuntimeCronRunner({
+      runtimeFactory,
+      workspaceRoot: tmpDir,
+      allowedWorkdirRoots: [tmpDir],
+      isWorkspaceTrusted: async (path) => path === workdirReal,
+      wrapResponse: false
+    });
+
+    const result = await runner.runJob(job, { executionId: "exec-workdir" });
+
+    expect(result.ok).toBe(true);
+    expect(runtimeFactory).toHaveBeenCalledWith(job, expect.objectContaining({
+      workspaceRoot: workdirReal,
+      trustedWorkspace: true
+    }));
+    expect(runtime.handle).toHaveBeenCalledWith(expect.objectContaining({
+      trustedWorkspace: true
+    }));
+  });
+
+  it("noAgent with workdir runs script in the effective workspace and does not call runtime", async () => {
+    const workdir = join(tmpDir, "job-workdir");
+    await mkdir(workdir, { recursive: true });
+    await writeFile(join(workdir, "cwd.sh"), "pwd\n", "utf8");
+    const runtimeFactory = vi.fn(async () => fakeRuntime("unused") as never);
+    const deliver = vi.fn(async () => ({ success: true, perTarget: new Map([["local", { success: true }]]) }));
+    const runner = createRuntimeCronRunner({
+      runtimeFactory,
+      deliver,
+      workspaceRoot: tmpDir,
+      allowedWorkdirRoots: [tmpDir],
+      isWorkspaceTrusted: async () => true,
+      wrapResponse: false
+    });
+
+    const result = await runner.runJob({
+      ...fakeCronJob(),
+      noAgent: true,
+      script: "cwd.sh",
+      workdir
+    }, { executionId: "exec-no-agent-workdir" });
+
+    expect(result.ok).toBe(true);
+    expect(result.output).toContain(workdir);
+    expect(runtimeFactory).not.toHaveBeenCalled();
+  });
+
+  it("rejects script paths that escape the effective workdir", async () => {
+    const workdir = join(tmpDir, "job-workdir");
+    await mkdir(workdir, { recursive: true });
+    await writeFile(join(tmpDir, "escape.sh"), "printf 'escaped\\n'", "utf8");
+    const runtimeFactory = vi.fn(async () => fakeRuntime("unused") as never);
+    const runner = createRuntimeCronRunner({
+      runtimeFactory,
+      workspaceRoot: tmpDir,
+      allowedWorkdirRoots: [tmpDir],
+      isWorkspaceTrusted: async () => true,
+      wrapResponse: false
+    });
+
+    const result = await runner.runJob({
+      ...fakeCronJob(),
+      noAgent: true,
+      script: "../escape.sh",
+      workdir
+    }, { executionId: "exec-script-escape" });
+
+    expect(result.ok).toBe(false);
+    expect(result.output).toContain("script path must stay inside the active workspace");
+    expect(runtimeFactory).not.toHaveBeenCalled();
   });
 
   it("injects latest upstream output in requested order with redaction and truncation", async () => {

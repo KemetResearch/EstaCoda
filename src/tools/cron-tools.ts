@@ -3,6 +3,7 @@ import { CronStore } from "../cron/cron-store.js";
 import { renderPlain } from "../ui/renderers/plain-renderer.js";
 import { buildCronListViewModel, buildCronActionViewModel, buildCronNotFoundViewModel } from "../cron/cron-view-models.js";
 import { validateCronRuntimeControls } from "../cron/cron-runtime-validation.js";
+import { resolveCronWorkdir } from "../cron/cron-workdir.js";
 import type { LoadedRuntimeConfig } from "../config/runtime-config.js";
 
 type CronjobToolInput = {
@@ -21,6 +22,7 @@ type CronjobToolInput = {
   model?: { provider?: string; model: string } | string;
   enabled_toolsets?: string[];
   enabledToolsets?: string[];
+  workdir?: string;
   schedule?: string;
   name?: string;
   skill?: string;
@@ -37,6 +39,11 @@ export function createCronTools(options: {
   runtimeControls?: {
     config: LoadedRuntimeConfig;
     availableToolsets: () => string[];
+  };
+  workdirControls?: {
+    defaultWorkspaceRoot: string;
+    allowedRoots: string[];
+    isWorkspaceTrusted: (path: string) => Promise<boolean>;
   };
 }): RegisteredTool[] {
   return [{
@@ -71,6 +78,7 @@ export function createCronTools(options: {
         },
         enabled_toolsets: { type: "array", items: { type: "string" } },
         enabledToolsets: { type: "array", items: { type: "string" } },
+        workdir: { type: "string" },
         schedule: { type: "string" },
         name: { type: "string" },
         skill: { type: "string" },
@@ -108,6 +116,10 @@ export function createCronTools(options: {
         if (!controls.ok) {
           return { ok: false, content: controls.message };
         }
+        const workdir = await validateToolWorkdir(options.workdirControls, input.workdir);
+        if (!workdir.ok) {
+          return { ok: false, content: workdir.message };
+        }
         const job = await options.store.create({
           prompt: input.prompt,
           script: input.script,
@@ -117,6 +129,7 @@ export function createCronTools(options: {
           contextFrom,
           modelOverride: controls.normalized.modelOverride,
           enabledToolsets: controls.normalized.enabledToolsets,
+          workdir: workdir.normalized.workdir,
           schedule: input.schedule,
           name: input.name,
           skills: normalizeSkills(input),
@@ -147,6 +160,7 @@ export function createCronTools(options: {
           contextFrom: normalizeContextFrom(input),
           modelOverride: normalizeModelOverrideInput(input),
           enabledToolsets: input.enabledToolsets ?? input.enabled_toolsets,
+          workdir: input.workdir,
           skills: resolveUpdatedSkills(existing.skills, input),
           delivery: input.delivery,
           repeat: input.repeat
@@ -169,7 +183,12 @@ export function createCronTools(options: {
         if (!controls.ok) {
           return { ok: false, content: controls.message };
         }
+        const workdir = await validateToolWorkdir(options.workdirControls, patch.workdir as string | undefined);
+        if (!workdir.ok) {
+          return { ok: false, content: workdir.message };
+        }
         Object.assign(patch, controls.normalized);
+        Object.assign(patch, workdir.normalized);
         const scriptPatch = input.clear_script === true
           ? { script: undefined, scriptArgs: [], scriptTimeoutMs: undefined }
           : {
@@ -205,7 +224,15 @@ export const cronToolProvider: RuntimeToolProvider = {
     if (ctx.disableCronTools === true) {
       return [];
     }
-    return createCronTools({ store: ctx.cronStore, runtimeControls: ctx.cronRuntimeControls });
+    return createCronTools({
+      store: ctx.cronStore,
+      runtimeControls: ctx.cronRuntimeControls,
+      workdirControls: {
+        defaultWorkspaceRoot: ctx.workspaceRoot,
+        allowedRoots: [ctx.workspaceRoot],
+        isWorkspaceTrusted: (path) => ctx.trustStore.isTrusted(path)
+      }
+    });
   }
 };
 
@@ -264,6 +291,30 @@ async function validateToolRuntimeControls(
     config: runtimeControls.config,
     availableToolsets: runtimeControls.availableToolsets
   });
+}
+
+async function validateToolWorkdir(
+  workdirControls: {
+    defaultWorkspaceRoot: string;
+    allowedRoots: string[];
+    isWorkspaceTrusted: (path: string) => Promise<boolean>;
+  } | undefined,
+  workdir: string | undefined
+): Promise<{ ok: true; normalized: { workdir?: string } } | { ok: false; message: string }> {
+  if (workdir === undefined) {
+    return { ok: true, normalized: {} };
+  }
+  if (workdirControls === undefined) {
+    return { ok: false, message: "cronjob workdir requires workspace trust validation context." };
+  }
+  const resolved = await resolveCronWorkdir({
+    requestedWorkdir: workdir,
+    ...workdirControls
+  });
+  if (!resolved.ok) {
+    return { ok: false, message: resolved.message };
+  }
+  return { ok: true, normalized: { workdir: resolved.workdir } };
 }
 
 async function validateContextFrom(store: CronStore, jobIds: string[] | undefined): Promise<string | undefined> {

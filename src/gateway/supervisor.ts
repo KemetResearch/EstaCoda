@@ -111,6 +111,7 @@ type GatewayCronRuntimeBaseInput = {
   profileId: string;
   sessionDb: SQLiteSessionDB;
   sessionId: string;
+  workspaceTrusted?: boolean;
 };
 
 export function buildGatewayCronRuntimeOptions(input: GatewayCronRuntimeBaseInput): RuntimeOptions;
@@ -169,6 +170,7 @@ export function buildGatewayCronRuntimeOptions(input: GatewayCronRuntimeBaseInpu
     disableCronTools: true,
     disabledToolsets: [...CRON_FORCED_DISABLED_TOOLSETS],
     enabledToolsets: input.job?.enabledToolsets,
+    workspaceTrusted: input.workspaceTrusted ?? false,
   };
   };
   return input.job === undefined ? {
@@ -218,6 +220,7 @@ export function buildGatewayCronRuntimeOptions(input: GatewayCronRuntimeBaseInpu
     },
     disableCronTools: true,
     disabledToolsets: [...CRON_FORCED_DISABLED_TOOLSETS],
+    workspaceTrusted: input.workspaceTrusted ?? true,
   } : build();
 }
 
@@ -1429,17 +1432,20 @@ export async function runGatewaySupervisor(options: GatewaySupervisorOptions): P
           },
           disposeRuntime: true,
           workspaceRoot: options.workspaceRoot,
+          allowedWorkdirRoots: [options.workspaceRoot],
+          isWorkspaceTrusted: (path) => trustStore.isTrusted(path),
           store: cronStore,
           runtimeFactory: async (job, context) => {
             const latestConfig = await loadConfig();
             return createRuntime(await buildGatewayCronRuntimeOptions({
               latestConfig,
               job,
-              workspaceRoot: options.workspaceRoot,
+              workspaceRoot: context.workspaceRoot ?? options.workspaceRoot,
               homeDir,
               profileId,
               sessionDb,
               sessionId: context.sessionId,
+              workspaceTrusted: context.trustedWorkspace
             }));
           },
         }),

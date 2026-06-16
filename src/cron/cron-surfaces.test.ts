@@ -232,6 +232,15 @@ describe("Cron surfaces — current capability labels", () => {
     expect(output).toContain("Mode: no-agent");
     expect(output).toContain("Context from: cron-upstream");
   });
+
+  it("renders configured workdir as a capability label", () => {
+    const output = renderPlain(buildCronJobDetailViewModel({
+      job: fakeCronJob({ workdir: "/workspace/reports" }),
+      executions: [],
+    }));
+
+    expect(output).toContain("Workdir: /workspace/reports");
+  });
 });
 
 describe("Cron surfaces — execution history", () => {

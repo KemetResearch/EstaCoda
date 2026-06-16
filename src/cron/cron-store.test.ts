@@ -88,7 +88,7 @@ describe("CronStore", () => {
     })).rejects.toThrow("Cron prompt blocked");
   });
 
-  it("normalizes and persists noAgent, contextFrom, modelOverride, and enabledToolsets", async () => {
+  it("normalizes and persists noAgent, contextFrom, modelOverride, enabledToolsets, and workdir", async () => {
     const upstream = await store.create({
       name: "Upstream",
       prompt: "Collect data",
@@ -102,7 +102,8 @@ describe("CronStore", () => {
       noAgent: true,
       contextFrom: [upstream.id],
       modelOverride: { provider: "local", model: "local-cron" },
-      enabledToolsets: ["web", "files", "web"]
+      enabledToolsets: ["web", "files", "web"],
+      workdir: "  /tmp/cron-workdir  "
     });
 
     const reloaded = await new CronStore({ homeDir: tmpDir }).get(job.id);
@@ -111,6 +112,7 @@ describe("CronStore", () => {
     expect(reloaded?.contextFrom).toEqual([upstream.id]);
     expect(reloaded?.modelOverride).toEqual({ provider: "local", model: "local-cron" });
     expect(reloaded?.enabledToolsets).toEqual(["web", "files"]);
+    expect(reloaded?.workdir).toBe("/tmp/cron-workdir");
   });
 
   it("rejects noAgent jobs without scripts on create and update", async () => {
@@ -164,6 +166,13 @@ describe("CronStore", () => {
       schedule: "1h",
       enabledToolsets: ["web", 1] as never
     })).rejects.toThrow("Cron enabledToolsets must be an array");
+
+    await expect(store.create({
+      name: "Bad workdir",
+      prompt: "Check data",
+      schedule: "1h",
+      workdir: "" as never
+    })).rejects.toThrow("Cron workdir must be a non-empty string");
   });
 });
 

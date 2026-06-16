@@ -17,8 +17,9 @@ export async function createIsolatedCronRuntime(input: {
   sessionDb?: SessionDB;
   createRuntime?: CronRuntimeFactory;
 }): Promise<Runtime> {
+  const effectiveWorkspaceRoot = input.context.workspaceRoot ?? input.workspaceRoot;
   const latestConfig = await loadRuntimeConfig({
-    workspaceRoot: input.workspaceRoot,
+    workspaceRoot: effectiveWorkspaceRoot,
     homeDir: input.homeDir,
     profileId: input.profileId
   });
@@ -30,7 +31,7 @@ export async function createIsolatedCronRuntime(input: {
     model: primaryModelRoute?.profile ?? latestConfig.model,
     primaryModelRoute,
     modelFallbackRoutes: latestConfig.modelFallbackRoutes,
-    workspaceRoot: input.workspaceRoot,
+    workspaceRoot: effectiveWorkspaceRoot,
     homeDir: input.homeDir,
     profileId: input.profileId,
     sessionId: input.context.sessionId,
@@ -66,7 +67,7 @@ export async function createIsolatedCronRuntime(input: {
     },
     securityMode: latestConfig.security.approvalMode,
     securityAssessor: latestConfig.security.assessor,
-    workspaceTrusted: true,
+    workspaceTrusted: input.context.trustedWorkspace ?? false,
     disableCronTools: true,
     disabledToolsets: [...CRON_FORCED_DISABLED_TOOLSETS],
     enabledToolsets: input.job.enabledToolsets,

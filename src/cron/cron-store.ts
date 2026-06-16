@@ -19,6 +19,7 @@ export type CronJob = {
     model: string;
   };
   enabledToolsets?: string[];
+  workdir?: string;
   script?: string;
   scriptArgs?: string[];
   scriptTimeoutMs?: number;
@@ -86,6 +87,7 @@ export class CronStore {
     contextFrom?: string[];
     modelOverride?: CronJob["modelOverride"];
     enabledToolsets?: string[];
+    workdir?: string;
     skills?: string[];
     delivery?: CronDelivery;
     repeat?: number;
@@ -103,6 +105,7 @@ export class CronStore {
       ...(input.contextFrom === undefined ? {} : { contextFrom: input.contextFrom }),
       ...(input.modelOverride === undefined ? {} : { modelOverride: input.modelOverride }),
       ...(input.enabledToolsets === undefined ? {} : { enabledToolsets: input.enabledToolsets }),
+      ...(input.workdir === undefined ? {} : { workdir: input.workdir }),
       script: input.script,
       scriptArgs: input.scriptArgs,
       scriptTimeoutMs: input.scriptTimeoutMs,
@@ -122,7 +125,7 @@ export class CronStore {
     return structuredClone(job);
   }
 
-  async update(id: string, patch: Partial<Pick<CronJob, "name" | "prompt" | "noAgent" | "contextFrom" | "modelOverride" | "enabledToolsets" | "script" | "scriptArgs" | "scriptTimeoutMs" | "schedule" | "skills" | "delivery" | "repeat">>): Promise<CronJob | undefined> {
+  async update(id: string, patch: Partial<Pick<CronJob, "name" | "prompt" | "noAgent" | "contextFrom" | "modelOverride" | "enabledToolsets" | "workdir" | "script" | "scriptArgs" | "scriptTimeoutMs" | "schedule" | "skills" | "delivery" | "repeat">>): Promise<CronJob | undefined> {
     if (patch.prompt !== undefined) {
       assertCronPromptSafe(patch.prompt);
     }
@@ -406,6 +409,11 @@ function normalizeJob(job: CronJob): CronJob {
   } else {
     delete normalized.enabledToolsets;
   }
+  if (typeof job.workdir === "string" && job.workdir.trim().length > 0) {
+    normalized.workdir = job.workdir.trim();
+  } else {
+    delete normalized.workdir;
+  }
   return normalized;
 }
 
@@ -414,6 +422,7 @@ function validateCronJobShape(input: {
   contextFrom?: unknown;
   modelOverride?: unknown;
   enabledToolsets?: unknown;
+  workdir?: unknown;
   script?: string;
 }): void {
   if (input.noAgent === true && (input.script === undefined || input.script.trim().length === 0)) {
@@ -433,6 +442,9 @@ function validateCronJobShape(input: {
   }
   if (Array.isArray(input.enabledToolsets) && input.enabledToolsets.some((value: unknown) => typeof value !== "string")) {
     throw new Error("Cron enabledToolsets must be an array of toolset names.");
+  }
+  if (input.workdir !== undefined && (typeof input.workdir !== "string" || input.workdir.trim().length === 0)) {
+    throw new Error("Cron workdir must be a non-empty string.");
   }
 }
 

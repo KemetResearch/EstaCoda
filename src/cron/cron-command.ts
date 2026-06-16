@@ -16,6 +16,7 @@ import {
   buildCronUnknownCommandViewModel,
 } from "./cron-view-models.js";
 import { validateCronRuntimeControls } from "./cron-runtime-validation.js";
+import { resolveCronWorkdir } from "./cron-workdir.js";
 import type { LoadedRuntimeConfig } from "../config/runtime-config.js";
 
 export type CronRenderer = (viewModel: ViewModel) => string;
@@ -31,6 +32,11 @@ export async function runCronCommand(
     runtimeControls?: {
       config: LoadedRuntimeConfig;
       availableToolsets: () => string[];
+    };
+    workdirControls?: {
+      defaultWorkspaceRoot: string;
+      allowedRoots: string[];
+      isWorkspaceTrusted: (path: string) => Promise<boolean>;
     };
   },
   renderer: CronRenderer = renderPlain
@@ -70,9 +76,14 @@ export async function runCronCommand(
     if (!controls.ok) {
       return { ok: false, output: renderer(buildCronUsageErrorViewModel({ message: controls.message })) };
     }
+    const workdir = await validateParsedWorkdir(input.workdirControls, parsed.workdir);
+    if (!workdir.ok) {
+      return { ok: false, output: renderer(buildCronUsageErrorViewModel({ message: workdir.message })) };
+    }
     const job = await input.store.create({
       ...parsed,
       ...controls.normalized,
+      ...workdir.normalized,
       schedule: parsed.schedule,
       prompt: parsed.prompt,
       origin: input.origin
@@ -148,7 +159,12 @@ export async function runCronCommand(
     if (!controls.ok) {
       return { ok: false, output: renderer(buildCronUsageErrorViewModel({ message: controls.message })) };
     }
+    const workdir = await validateParsedWorkdir(input.workdirControls, "workdir" in patch ? patch.workdir : undefined);
+    if (!workdir.ok) {
+      return { ok: false, output: renderer(buildCronUsageErrorViewModel({ message: workdir.message })) };
+    }
     Object.assign(patch, controls.normalized);
+    Object.assign(patch, workdir.normalized);
     const job = await input.store.update(id, patch);
     return job === undefined
       ? { ok: false, output: renderer(buildCronNotFoundViewModel({ id })) }
@@ -179,6 +195,16 @@ export function cronCommandNeedsRuntimeControlValidation(args: readonly string[]
   return rest.some((arg) => arg === "--model" || arg === "--provider" || arg === "--toolset");
 }
 
+export function cronCommandNeedsWorkdirValidation(args: readonly string[]): boolean {
+  const [command, ...rest] = args;
+  const resolved = command !== undefined ? commandRegistry.resolveSubcommand("cron", command) : undefined;
+  const canonical = resolved?.name ?? command;
+  if (canonical !== "add" && canonical !== "edit") {
+    return false;
+  }
+  return rest.some((arg) => arg === "--workdir");
+}
+
 function parseCronAddArgs(args: string[]): {
   schedule?: string;
   prompt?: string;
@@ -193,6 +219,7 @@ function parseCronAddArgs(args: string[]): {
   contextFrom?: string[];
   modelOverride?: CronJob["modelOverride"];
   enabledToolsets?: string[];
+  workdir?: string;
 } {
   const positional: string[] = [];
   const parsed: ReturnType<typeof parseCronAddArgs> = { skills: [], scriptArgs: [] };
@@ -234,6 +261,9 @@ function parseCronAddArgs(args: string[]): {
     } else if (arg === "--toolset") {
       if (next !== undefined) parsed.enabledToolsets = [...(parsed.enabledToolsets ?? []), next];
       index += 1;
+    } else if (arg === "--workdir") {
+      parsed.workdir = next ?? "";
+      index += 1;
     } else if (arg === "--script-arg") {
       if (next !== undefined) parsed.scriptArgs?.push(next);
       index += 1;
@@ -272,6 +302,7 @@ function parseCronEditArgs(args: string[], currentSkills: string[]): {
   contextFrom?: string[];
   modelOverride?: CronJob["modelOverride"];
   enabledToolsets?: string[];
+  workdir?: string;
 } {
   const parsed: ReturnType<typeof parseCronEditArgs> = {};
   let skills = [...currentSkills];
@@ -317,6 +348,11 @@ function parseCronEditArgs(args: string[], currentSkills: string[]): {
       index += 1;
     } else if (arg === "--clear-toolsets") {
       parsed.enabledToolsets = [];
+    } else if (arg === "--workdir") {
+      parsed.workdir = next ?? "";
+      index += 1;
+    } else if (arg === "--clear-workdir") {
+      parsed.workdir = undefined;
     } else if (arg === "--script-arg") {
       parsed.scriptArgs = [...(parsed.scriptArgs ?? []), next].filter((value): value is string => value !== undefined);
       index += 1;
@@ -356,6 +392,30 @@ function parseCronEditArgs(args: string[], currentSkills: string[]): {
   }
 
   return parsed;
+}
+
+async function validateParsedWorkdir(
+  workdirControls: {
+    defaultWorkspaceRoot: string;
+    allowedRoots: string[];
+    isWorkspaceTrusted: (path: string) => Promise<boolean>;
+  } | undefined,
+  workdir: string | undefined
+): Promise<{ ok: true; normalized: { workdir?: string } } | { ok: false; message: string }> {
+  if (workdir === undefined) {
+    return { ok: true, normalized: {} };
+  }
+  if (workdirControls === undefined) {
+    return { ok: false, message: "Cron workdir requires workspace trust validation context." };
+  }
+  const resolved = await resolveCronWorkdir({
+    requestedWorkdir: workdir,
+    ...workdirControls
+  });
+  if (!resolved.ok) {
+    return { ok: false, message: resolved.message };
+  }
+  return { ok: true, normalized: { workdir: resolved.workdir } };
 }
 
 async function validateParsedRuntimeControls(

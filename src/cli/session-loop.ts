@@ -13,11 +13,12 @@ import {
   resolveEffectiveSessionModelOverride,
   resolveModelSwitchRequest
 } from "../providers/model-switch-resolver.js";
-import { cronCommandNeedsRuntimeControlValidation, runCronCommand } from "../cron/cron-command.js";
+import { cronCommandNeedsRuntimeControlValidation, cronCommandNeedsWorkdirValidation, runCronCommand } from "../cron/cron-command.js";
 import { createRuntimeCronRunner, tickCron } from "../cron/cron-runner.js";
 import { createIsolatedCronRuntime, type CronRuntimeFactory } from "../cron/cron-runtime-factory.js";
 import { availableToolsetsFromTools } from "../cron/cron-runtime-validation.js";
 import { CronStore } from "../cron/cron-store.js";
+import { WorkspaceTrustStore } from "../security/workspace-trust-store.js";
 import { storeCapabilitySecret, type SetupNeededMetadata } from "../capabilities/capability-setup.js";
 import { defaultImageModel } from "../contracts/image-generation.js";
 import { createReadlinePrompt, type Prompt, type PromptOptions, type PromptSpecialKeyControl } from "./readline-prompt.js";
@@ -1593,6 +1594,14 @@ export async function handleSlashCommand(input: {
             profileId
           })
         : undefined;
+      const defaultWorkspaceRoot = input.workspaceRoot ?? process.cwd();
+      const workdirControls = cronCommandNeedsWorkdirValidation(args)
+        ? {
+            defaultWorkspaceRoot,
+            allowedRoots: [defaultWorkspaceRoot],
+            isWorkspaceTrusted: (path: string) => new WorkspaceTrustStore({ homeDir: input.homeDir }).isTrusted(path)
+          }
+        : undefined;
       const result = await runCronCommand({
         args,
         store,
@@ -1602,7 +1611,9 @@ export async function handleSlashCommand(input: {
               config: runtimeConfig,
               availableToolsets: () => availableToolsetsFromTools(input.runtime.tools())
             },
+        workdirControls,
         tick: async () => {
+          const trustStore = new WorkspaceTrustStore({ homeDir: input.homeDir });
           const results = await tickCron({
             store,
             runner: createRuntimeCronRunner({
@@ -1610,7 +1621,7 @@ export async function handleSlashCommand(input: {
               runtimeFactory: async (job, context) => createIsolatedCronRuntime({
                 job,
                 context,
-                workspaceRoot: input.workspaceRoot ?? process.cwd(),
+                workspaceRoot: defaultWorkspaceRoot,
                 homeDir: input.homeDir,
                 profileId,
                 sessionDb: input.runtime.sessionDb,
@@ -1618,7 +1629,9 @@ export async function handleSlashCommand(input: {
               }),
               wrapResponse: true,
               disposeRuntime: true,
-              workspaceRoot: input.workspaceRoot
+              workspaceRoot: defaultWorkspaceRoot,
+              allowedWorkdirRoots: [defaultWorkspaceRoot],
+              isWorkspaceTrusted: (path) => trustStore.isTrusted(path)
             })
           });
           return results.length === 0
