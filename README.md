@@ -8,7 +8,7 @@ Open-source runtime for Agent Evolution — the first of its kind built in the A
 
 EstaCoda is a terminal-native AI agent that gets better from real work. It uses tools, remembers across sessions, runs through messaging channels, schedules recurring jobs, and turns repeated execution patterns into reusable skills and workflows.
 
-Bring your own model. Run it locally, on a server, through Docker, or from WSL2. Use it from the terminal, Telegram, WhatsApp, or experimental Discord.
+Bring your own model. Run it locally, on a server, through Docker, or from WSL2. Use it from the terminal, Telegram, and WhatsApp, with more channels coming soon.
 
 EstaCoda is built with Arabic as a first-class operating language, including shaped, bidirectional Arabic rendering for terminal workflows.
 
@@ -24,7 +24,7 @@ Built by Kemet Research.
 |---|---|
 | An agent that improves over time | Skills, memory, workflows, and reviewable improvement proposals based on real execution patterns. |
 | A real operator terminal | CLI sessions with tool execution, approvals, profile state, durable history, and shaped bidirectional Arabic rendering. |
-| An agent that follows you | CLI, Telegram, and WhatsApp, with experimental Discord support. |
+| An agent that follows you | CLI, Telegram, and WhatsApp today, with more channels on the way. |
 | Work that runs without babysitting | Cron jobs and durable workflows that can run unattended and deliver results back to you. |
 | Model freedom | OpenRouter, Kimi, DeepSeek, OpenAI, Google, local/self-hosted endpoints, and other configured providers. |
 | More than chat | Web research, browser automation, hosted voice providers, image generation, files, shell commands, and tool workflows. |
@@ -132,10 +132,10 @@ Custom OpenAI-compatible providers work with an explicit `baseUrl`. Additional p
 
 | Channel | Maturity |
 |---|---|
-| CLI | Supported direct interaction surface |
+| CLI | Primary |
 | Telegram | Live-proven |
 | WhatsApp | Live-proven |
-| Discord | Experimental |
+| More channels | Coming soon |
 
 WhatsApp uses an isolated Baileys bridge under `scripts/whatsapp-bridge/`. The bridge dependencies are managed separately and are not part of the root pnpm workspace. See the channel docs for setup, authorization, pairing, and delivery behavior.
 
@@ -234,7 +234,7 @@ All documentation lives at [estacoda.kemetresearch.com/docs](https://estacoda.ke
 | [Uninstall](https://estacoda.kemetresearch.com/docs/getting-started/uninstall) | Removal behavior and data boundaries |
 | [CLI Usage](https://estacoda.kemetresearch.com/docs/user-guide/cli) | Commands, sessions, profiles |
 | [Providers](https://estacoda.kemetresearch.com/docs/user-guide/providers) | Provider setup, maturity, and routing |
-| [Channels](https://estacoda.kemetresearch.com/docs/user-guide/channels) | Telegram, WhatsApp, Discord |
+| [Channels](https://estacoda.kemetresearch.com/docs/user-guide/channels) | Telegram, WhatsApp, and channel setup |
 | [Gateway](https://estacoda.kemetresearch.com/docs/user-guide/gateway) | Service mode, diagnostics, approvals |
 | [Skills](https://estacoda.kemetresearch.com/docs/user-guide/skills) | Loading, evolution, and proposals |
 | [Memory](https://estacoda.kemetresearch.com/docs/user-guide/memory) | Profile memory, promotion, and limits |
