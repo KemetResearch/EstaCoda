@@ -23,7 +23,17 @@ describe("memory promotion deterministic detectors", () => {
     ["we want pnpm by default", "Want pnpm by default."],
     ["I prefer concise replies", "Prefer concise replies."],
     ["Prefer detailed replies.", "Prefer detailed replies."],
-    ["give me detailed replies", "Prefer detailed replies."]
+    ["give me detailed replies", "Prefer detailed replies."],
+    ["أفضل TypeScript", "Prefer TypeScript."],
+    ["أفضّل TypeScript", "Prefer TypeScript."],
+    ["افضل TypeScript", "Prefer TypeScript."],
+    ["استخدم pnpm افتراضياً", "Prefer pnpm."],
+    ["استخدم pnpm افتراضيا", "Prefer pnpm."],
+    ["استخدم pnpm كافتراضي", "Prefer pnpm."],
+    ["خلّي الردود مختصرة", "Prefer concise replies."],
+    ["خلي الردود مختصرة", "Prefer concise replies."],
+    ["خلّي الردود مفصلة", "Prefer detailed replies."],
+    ["خلي الردود مفصلة", "Prefer detailed replies."]
   ])("accepts direct user preference form %j", (input, expected) => {
     expect(__detectUserPreferenceForTest(input)).toBe(expected);
   });
@@ -44,8 +54,12 @@ describe("memory promotion deterministic detectors", () => {
     ["Default to TypeScript", "language-default", "TypeScript", "language-default:typescript"],
     ["Use TypeScript by default", "language-default", "TypeScript", "language-default:typescript"],
     ["Please switch to TypeScript by default", "language-default", "TypeScript", "language-default:typescript"],
+    ["أفضل TypeScript", "language-default", "TypeScript", "language-default:typescript"],
+    ["أفضّل TypeScript", "language-default", "TypeScript", "language-default:typescript"],
     ["I prefer pnpm", "package-manager", "pnpm", "package-manager:pnpm"],
+    ["استخدم pnpm افتراضياً", "package-manager", "pnpm", "package-manager:pnpm"],
     ["I prefer pnpm test", "test-command", "pnpm test", "test-command:pnpm test"],
+    ["استخدم pnpm test افتراضياً", "test-command", "pnpm test", "test-command:pnpm test"],
     ["always use strict mode", "code-style", "strict mode", "always use strict mode."]
   ])("derives deterministic preference category data for %j", (input, category, value, key) => {
     expect(__detectUserPreferenceCandidateForTest(input)).toMatchObject({
@@ -72,6 +86,15 @@ describe("memory promotion deterministic detectors", () => {
   });
 
   it.each([
+    ["استخدم pnpm test افتراضياً", "Prefer pnpm test."],
+    ["استخدم OPENAI_API_KEY كافتراضي", "Prefer OPENAI_API_KEY."],
+    ["استخدم ~/.estacoda/foo كافتراضي", "Prefer ~/.estacoda/foo."],
+    ["أفضل GPT-5", "Prefer GPT-5."]
+  ])("preserves mixed Arabic technical token preference value for %j", (input, expected) => {
+    expect(__detectUserPreferenceForTest(input)).toBe(expected);
+  });
+
+  it.each([
     "I like TypeScript",
     "Switch to TypeScript",
     "It would be nice if TypeScript",
@@ -84,6 +107,10 @@ describe("memory promotion deterministic detectors", () => {
     "   \n\t  ",
     "remember this",
     "أفضل الردود المختصرة",
+    "أفضل لغة آمنة",
+    "أفضل safe language",
+    "استخدم الردود كافتراضي",
+    "استخدم careful release notes كافتراضي",
     "For the next release notes, I prefer TypeScript but only inside this quoted example paragraph."
   ])("rejects unsupported or incidental user preference form %j", (input) => {
     expect(__detectUserPreferenceForTest(input)).toBeUndefined();
@@ -93,7 +120,12 @@ describe("memory promotion deterministic detectors", () => {
     "Please summarize this: \"I prefer concise replies.\"",
     "The attached resume says: \"I prefer concise replies.\"",
     "Agent note: I prefer concise replies.",
-    "Earlier assistant said: \"User prefers concise replies.\""
+    "Earlier assistant said: \"User prefers concise replies.\"",
+    "لخّص هذا: \"أفضل TypeScript\"",
+    "لخّص هذا: «أفضل TypeScript»",
+    "ملاحظة الوكيل: أفضل TypeScript",
+    "السيرة تقول: أفضل TypeScript",
+    "قال المساعد سابقاً: المستخدم يفضل TypeScript"
   ])("rejects delegated or quoted preference form %j", (input) => {
     expect(__detectUserPreferenceForTest(input)).toBeUndefined();
   });
@@ -168,7 +200,12 @@ describe("memory promotion deterministic detectors", () => {
     "Please summarize this: \"I prefer concise replies.\"",
     "The attached resume says: \"I prefer concise replies.\"",
     "Agent note: I prefer concise replies.",
-    "Earlier assistant said: \"User prefers concise replies.\""
+    "Earlier assistant said: \"User prefers concise replies.\"",
+    "لخّص هذا: \"أفضل TypeScript\"",
+    "لخّص هذا: «أفضل TypeScript»",
+    "ملاحظة الوكيل: أفضل TypeScript",
+    "السيرة تقول: أفضل TypeScript",
+    "قال المساعد سابقاً: المستخدم يفضل TypeScript"
   ])("does not extract delegated or quoted promotion candidates from %j", (input) => {
     const candidates = __extractPromotionStatementCandidatesForTest(input);
 
@@ -182,6 +219,7 @@ describe("memory promotion deterministic detectors", () => {
     expect(__extractPromotionStatementCandidatesForTest([
       "```text",
       "I prefer concise replies.",
+      "أفضل TypeScript.",
       "Project uses TypeScript.",
       "```"
     ].join("\n"))).toEqual([]);
@@ -209,6 +247,34 @@ describe("memory promotion deterministic detectors", () => {
     );
 
     expect(candidates).toEqual([]);
+  });
+
+  it("skips long incidental Arabic paragraphs that contain preference-like phrases", () => {
+    const candidates = __extractPromotionStatementCandidatesForTest(
+      "في تقرير طويل عن مقابلات المستخدمين وملاحظات الفريق، وردت عبارة أفضل TypeScript كمثال داخل سياق بحثي وليس كتفضيل دائم أو إعداد افتراضي للمشروع أو الجلسات القادمة."
+    );
+
+    expect(candidates).toEqual([]);
+  });
+
+  it.each([
+    ["U+200B", "\u200b"],
+    ["U+200C", "\u200c"],
+    ["U+200D", "\u200d"],
+    ["U+200E", "\u200e"],
+    ["U+200F", "\u200f"],
+    ["U+FEFF", "\ufeff"],
+    ["U+202A", "\u202a"],
+    ["U+202B", "\u202b"],
+    ["U+202C", "\u202c"],
+    ["U+202D", "\u202d"],
+    ["U+202E", "\u202e"],
+    ["U+2066", "\u2066"],
+    ["U+2067", "\u2067"],
+    ["U+2068", "\u2068"],
+    ["U+2069", "\u2069"]
+  ])("does not extract candidates containing bidi/invisible control %s", (_label, control) => {
+    expect(__extractPromotionStatementCandidatesForTest(`أفضل ${control}TypeScript`)).toEqual([]);
   });
 
   it("bounds direct statement candidate extraction", () => {

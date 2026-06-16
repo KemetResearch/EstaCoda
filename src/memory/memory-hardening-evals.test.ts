@@ -455,6 +455,133 @@ describe("memory hardening evals", () => {
     expect(await promotionStore.list()).toEqual([]);
   });
 
+  it("promotes direct Arabic preference phrases while preserving technical tokens", async () => {
+    const root = await makeTempDir();
+    const db = new InMemorySessionDB();
+    const store = new MemoryStore();
+    const promotionStore = new MemoryPromotionStore({ path: join(root, "promotions.json") });
+    const provider = new LocalMemoryProvider({ store, promotionStore });
+
+    await seedSession(db, "arabic-root-a", "default", ["أفضل TypeScript"]);
+    await seedSession(db, "arabic-root-b", "default", ["أفضّل TypeScript"]);
+
+    await resolveUserPreferencePromotion({
+      profileId: "default",
+      currentUserText: "افضل TypeScript",
+      sessionDb: db,
+      memoryProvider: provider
+    });
+
+    expect(store.read("USER.md")).toContain("Prefer TypeScript.");
+    expect(await promotionStore.list()).toEqual([
+      expect.objectContaining({
+        kind: "user-preference",
+        content: "Prefer TypeScript.",
+        sourceSessionIds: expect.arrayContaining(["arabic-root-a", "arabic-root-b"])
+      })
+    ]);
+  });
+
+  it("promotes Arabic default syntax with technical command tokens intact", async () => {
+    const root = await makeTempDir();
+    const db = new InMemorySessionDB();
+    const store = new MemoryStore();
+    const promotionStore = new MemoryPromotionStore({ path: join(root, "promotions.json") });
+    const provider = new LocalMemoryProvider({ store, promotionStore });
+
+    await seedSession(db, "arabic-command-a", "default", ["استخدم pnpm test افتراضياً"]);
+    await seedSession(db, "arabic-command-b", "default", ["استخدم pnpm test افتراضيا"]);
+
+    await resolveUserPreferencePromotion({
+      profileId: "default",
+      currentUserText: "استخدم pnpm test كافتراضي",
+      sessionDb: db,
+      memoryProvider: provider
+    });
+
+    expect(store.read("USER.md")).toContain("Prefer pnpm test.");
+    expect(await promotionStore.list()).toEqual([
+      expect.objectContaining({
+        kind: "user-preference",
+        content: "Prefer pnpm test.",
+        sourceSessionIds: expect.arrayContaining(["arabic-command-a", "arabic-command-b"])
+      })
+    ]);
+  });
+
+  it("promotes explicit Arabic reply verbosity preferences", async () => {
+    const root = await makeTempDir();
+    const db = new InMemorySessionDB();
+    const store = new MemoryStore();
+    const promotionStore = new MemoryPromotionStore({ path: join(root, "promotions.json") });
+    const provider = new LocalMemoryProvider({ store, promotionStore });
+
+    await seedSession(db, "arabic-concise-a", "default", ["خلّي الردود مختصرة"]);
+    await seedSession(db, "arabic-concise-b", "default", ["خلي الردود مختصرة"]);
+
+    await resolveUserPreferencePromotion({
+      profileId: "default",
+      currentUserText: "خلّي الردود مختصرة",
+      sessionDb: db,
+      memoryProvider: provider
+    });
+
+    expect(store.read("USER.md")).toContain("Prefer concise replies.");
+    expect(await promotionStore.list()).toEqual([
+      expect.objectContaining({
+        kind: "user-preference",
+        content: "Prefer concise replies.",
+        sourceSessionIds: expect.arrayContaining(["arabic-concise-a", "arabic-concise-b"])
+      })
+    ]);
+  });
+
+  it("strips hidden reasoning before promoting Arabic preferences", async () => {
+    const root = await makeTempDir();
+    const db = new InMemorySessionDB();
+    const store = new MemoryStore();
+    const promotionStore = new MemoryPromotionStore({ path: join(root, "promotions.json") });
+    const provider = new LocalMemoryProvider({ store, promotionStore });
+    const hiddenPreference = "<think>private chain</think>أفضل TypeScript";
+
+    await seedSession(db, "arabic-reasoning-a", "default", [hiddenPreference]);
+    await seedSession(db, "arabic-reasoning-b", "default", [hiddenPreference]);
+
+    await resolveUserPreferencePromotion({
+      profileId: "default",
+      currentUserText: hiddenPreference,
+      sessionDb: db,
+      memoryProvider: provider
+    });
+
+    expect(store.read("USER.md")).toContain("Prefer TypeScript.");
+    expect(store.read("USER.md")).not.toContain("private chain");
+    expect(JSON.stringify(await promotionStore.list())).not.toContain("private chain");
+  });
+
+  it("rejects secret-looking Arabic preferences without promoting or rendering the secret", async () => {
+    const root = await makeTempDir();
+    const db = new InMemorySessionDB();
+    const store = new MemoryStore();
+    const promotionStore = new MemoryPromotionStore({ path: join(root, "promotions.json") });
+    const provider = new LocalMemoryProvider({ store, promotionStore });
+    const secretText = "استخدم OPENAI_API_KEY كافتراضي";
+
+    await seedSession(db, "arabic-secret-a", "default", [secretText]);
+    await seedSession(db, "arabic-secret-b", "default", [secretText]);
+
+    await expect(resolveUserPreferencePromotion({
+      profileId: "default",
+      currentUserText: secretText,
+      sessionDb: db,
+      memoryProvider: provider
+    })).rejects.toThrow("Memory content rejected");
+
+    expect(store.read("USER.md")).toBe("");
+    expect(await promotionStore.list()).toEqual([]);
+    expect(JSON.stringify(await new MemoryPromptContextBuilder({ store, promotionStore }).build())).not.toContain("OPENAI_API_KEY");
+  });
+
   it("supersedes conflicting package-manager defaults without broad substring matching", async () => {
     const root = await makeTempDir();
     const store = new MemoryStore();

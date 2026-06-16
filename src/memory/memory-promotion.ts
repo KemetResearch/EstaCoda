@@ -194,6 +194,9 @@ function extractPromotionStatementCandidates(text: string): PromotionStatementCa
   const candidates: PromotionStatementCandidate[] = [];
 
   for (const statement of statements) {
+    if (hasInvisibleOrBidiControl(statement)) {
+      continue;
+    }
     if (hasQuotedOrBacktickedSpan(statement)) {
       continue;
     }
@@ -216,6 +219,10 @@ function extractPromotionStatementCandidates(text: string): PromotionStatementCa
 
 function stripFencedCodeBlocks(text: string): string {
   return text.replace(/```[\s\S]*?```/gu, "\n");
+}
+
+function hasInvisibleOrBidiControl(text: string): boolean {
+  return /[\u200b\u200c\u200d\u200e\u200f\ufeff\u202a-\u202e\u2066-\u2069]/u.test(text);
 }
 
 function hasQuotedOrBacktickedSpan(text: string): boolean {
@@ -281,7 +288,7 @@ function isAmbiguousPromotionStatement(statement: string): boolean {
   if (statement.split(/\s+/u).length > 24) {
     return true;
   }
-  return /^(?:agent note|assistant note|tool output|earlier assistant said|the attached resume says|please summarize this)\b/iu.test(statement);
+  return /^(?:agent note|assistant note|tool output|earlier assistant said|the attached resume says|please summarize this)\b|^(?:ملاحظة الوكيل|السيرة تقول|قال المساعد سابقاً|قال المساعد سابقا|لخّص هذا|لخص هذا)\b/iu.test(statement);
 }
 
 function detectUserPreference(text: string): PreferenceCandidate | undefined {
@@ -293,6 +300,11 @@ function detectUserPreference(text: string): PreferenceCandidate | undefined {
   const verbosity = detectVerbosityPreference(normalized);
   if (verbosity !== undefined) {
     return verbosity;
+  }
+
+  const arabicPreference = detectArabicUserPreference(normalized);
+  if (arabicPreference !== undefined) {
+    return arabicPreference;
   }
 
   const canonicalPatterns: Array<{
@@ -368,6 +380,73 @@ function detectUserPreference(text: string): PreferenceCandidate | undefined {
   }
 
   return undefined;
+}
+
+function detectArabicUserPreference(normalized: string): PreferenceCandidate | undefined {
+  const concisePatterns = [
+    /^خلّي\s+الردود\s+مختصرة$/u,
+    /^خلي\s+الردود\s+مختصرة$/u
+  ];
+  const detailedPatterns = [
+    /^خلّي\s+الردود\s+مفصلة$/u,
+    /^خلي\s+الردود\s+مفصلة$/u
+  ];
+
+  if (concisePatterns.some((pattern) => pattern.test(stripTrailingPunctuation(normalized)))) {
+    return {
+      key: "prefer concise replies.",
+      content: "Prefer concise replies.",
+      category: "reply-verbosity",
+      value: "الردود مختصرة"
+    };
+  }
+
+  if (detailedPatterns.some((pattern) => pattern.test(stripTrailingPunctuation(normalized)))) {
+    return {
+      key: "prefer detailed replies.",
+      content: "Prefer detailed replies.",
+      category: "reply-verbosity",
+      value: "الردود مفصلة"
+    };
+  }
+
+  const canonicalPatterns = [
+    /^(?:أفضل|أفضّل|افضل)\s+(.+)$/u,
+    /^استخدم\s+(.+?)\s+(?:افتراضياً|افتراضيا|كافتراضي)$/u
+  ];
+
+  for (const pattern of canonicalPatterns) {
+    const match = normalized.match(pattern);
+    const captured = match?.[1]?.trim().replace(/[.?!]+$/u, "");
+    if (captured === undefined || !isTechnicalPreferenceValue(captured)) {
+      continue;
+    }
+    return canonicalPreference(captured);
+  }
+
+  return undefined;
+}
+
+function isTechnicalPreferenceValue(value: string): boolean {
+  const normalizedValue = normalizePreferenceValue(value);
+  if (!/^[A-Za-z0-9_~./-]+(?:\s+[A-Za-z0-9_~./-]+)*$/u.test(normalizedValue)) {
+    return false;
+  }
+
+  const lowerValue = normalizedValue.toLowerCase();
+  if (/^(?:typescript|javascript)$/u.test(lowerValue)) {
+    return true;
+  }
+  if (/^(?:npm|pnpm|yarn|bun)(?:\s+[A-Za-z0-9_~./-]+)*$/u.test(normalizedValue)) {
+    return true;
+  }
+  if (/^[A-Z][A-Z0-9_]{2,}$/u.test(normalizedValue)) {
+    return true;
+  }
+  if (/^(?:~\/|\.\/|\.\.\/|\/)[A-Za-z0-9_~./-]+$/u.test(normalizedValue)) {
+    return true;
+  }
+  return /^[A-Za-z]+-\d+(?:\.\d+)*$/u.test(normalizedValue);
 }
 
 function canonicalPreference(value: string): PreferenceCandidate | undefined {
