@@ -64,6 +64,61 @@ describe("runCronCommand", () => {
     expect(result.output).toContain("*/5 * * * *");
   });
 
+  it("adds and edits no-agent and contextFrom fields", async () => {
+    const upstream = await store.create({ name: "upstream", schedule: "1h", prompt: "collect" });
+    const result = await runCronCommand({
+      args: [
+        "add",
+        "--name", "watchdog",
+        "--schedule", "1h",
+        "--command", "check",
+        "--script", "watch.sh",
+        "--no-agent",
+        "--context-from", upstream.id
+      ],
+      store,
+      executionStore
+    });
+
+    expect(result.ok).toBe(true);
+    const [job] = (await store.list()).filter((entry) => entry.name === "watchdog");
+    expect(job?.noAgent).toBe(true);
+    expect(job?.contextFrom).toEqual([upstream.id]);
+
+    const edit = await runCronCommand({
+      args: ["edit", job!.id, "--agent", "--clear-context-from"],
+      store,
+      executionStore
+    });
+    expect(edit.ok).toBe(true);
+    const updated = await store.get(job!.id);
+    expect(updated?.noAgent).toBeUndefined();
+    expect(updated?.contextFrom).toEqual([]);
+  });
+
+  it("rejects unknown contextFrom ids before persistence", async () => {
+    const result = await runCronCommand({
+      args: ["add", "--schedule", "1h", "--command", "check", "--context-from", "missing"],
+      store,
+      executionStore
+    });
+
+    expect(result.ok).toBe(false);
+    expect(result.output).toContain("Unknown contextFrom job id: missing");
+    expect(await store.list()).toHaveLength(0);
+  });
+
+  it("rejects no-agent CLI jobs without scripts", async () => {
+    const result = await runCronCommand({
+      args: ["add", "--schedule", "1h", "--command", "check", "--no-agent"],
+      store,
+      executionStore
+    });
+
+    expect(result.ok).toBe(false);
+    expect(result.output).toContain("no-agent cron jobs require --script");
+  });
+
   it("shows usage when flag syntax is missing required args", async () => {
     const result = await runCronCommand({ args: ["add", "--schedule", "*/5 * * * *"], store, executionStore });
     expect(result.ok).toBe(false);
@@ -82,6 +137,27 @@ describe("runCronCommand", () => {
       ok: false,
       content: "cronjob create requires prompt and schedule."
     });
+  });
+
+  it("cronjob tool round-trips noAgent, skills, and contextFrom", async () => {
+    const [tool] = createCronTools({ store });
+    const upstream = await store.create({ name: "upstream", schedule: "1h", prompt: "collect" });
+
+    const created = await tool!.run({
+      action: "create",
+      prompt: "check",
+      schedule: "1h",
+      script: "watch.sh",
+      no_agent: true,
+      skills: ["watch"],
+      context_from: [upstream.id]
+    });
+
+    expect(created.ok).toBe(true);
+    const [job] = (await store.list()).filter((entry) => entry.prompt === "check");
+    expect(job?.noAgent).toBe(true);
+    expect(job?.skills).toEqual(["watch"]);
+    expect(job?.contextFrom).toEqual([upstream.id]);
   });
 
   it("delegates cron tick to the supplied tick callback", async () => {

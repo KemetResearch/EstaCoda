@@ -65,9 +65,11 @@ export function buildCronListViewModel(data: CronListData): ViewModel {
         entries: [
           kv("schedule", job.schedule),
           kv("next", job.nextRunAt ?? "none"),
+          ...(job.noAgent === true ? [kv("mode", "no-agent")] : []),
           ...(job.script !== undefined ? [kv("script", job.script)] : []),
           kv("runs", job.runCount),
           ...(job.skills.length > 0 ? [kv("skills", job.skills.join(", "))] : []),
+          ...((job.contextFrom?.length ?? 0) > 0 ? [kv("contextFrom", job.contextFrom!.join(", "))] : []),
         ],
       })
     ),
@@ -97,8 +99,10 @@ export function buildCronJobDetailViewModel(data: CronJobDetailData): ViewModel 
       kv("Last run", job.lastRunAt ?? "never"),
       kv("Runs", job.runCount),
       ...(job.script !== undefined ? [kv("Script", job.script)] : []),
+      ...(job.noAgent === true ? [kv("Mode", "no-agent")] : []),
       kv("Delivery", job.delivery),
       ...(job.skills.length > 0 ? [kv("Skills", job.skills.join(", "))] : []),
+      ...((job.contextFrom?.length ?? 0) > 0 ? [kv("Context from", job.contextFrom!.join(", "))] : []),
     ],
   });
 
@@ -226,7 +230,9 @@ export function buildCronCreatedViewModel(data: CronCreatedData): ViewModel {
           kv("Name", job.name),
           kv("Schedule", job.schedule),
           kv("Next run", job.nextRunAt ?? "none"),
+          ...(job.noAgent === true ? [kv("Mode", "no-agent")] : []),
           ...(job.script !== undefined ? [kv("Script", job.script)] : []),
+          ...((job.contextFrom?.length ?? 0) > 0 ? [kv("Context from", job.contextFrom!.join(", "))] : []),
           kv("Delivery", job.delivery),
         ],
       }),

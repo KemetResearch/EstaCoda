@@ -12,6 +12,10 @@ type CronjobToolInput = {
   script_args?: string[];
   script_timeout_ms?: number;
   clear_script?: boolean;
+  no_agent?: boolean;
+  noAgent?: boolean;
+  context_from?: string[];
+  contextFrom?: string[];
   schedule?: string;
   name?: string;
   skill?: string;
@@ -37,6 +41,10 @@ export function createCronTools(options: { store: CronStore }): RegisteredTool[]
         script_args: { type: "array", items: { type: "string" } },
         script_timeout_ms: { type: "number" },
         clear_script: { type: "boolean" },
+        no_agent: { type: "boolean" },
+        noAgent: { type: "boolean" },
+        context_from: { type: "array", items: { type: "string" } },
+        contextFrom: { type: "array", items: { type: "string" } },
         schedule: { type: "string" },
         name: { type: "string" },
         skill: { type: "string" },
@@ -62,11 +70,21 @@ export function createCronTools(options: { store: CronStore }): RegisteredTool[]
         if (input.prompt === undefined || input.schedule === undefined) {
           return { ok: false, content: "cronjob create requires prompt and schedule." };
         }
+        if ((input.no_agent ?? input.noAgent) === true && (input.script === undefined || input.script.trim().length === 0)) {
+          return { ok: false, content: "no-agent cron jobs require script." };
+        }
+        const contextFrom = normalizeContextFrom(input);
+        const contextError = await validateContextFrom(options.store, contextFrom);
+        if (contextError !== undefined) {
+          return { ok: false, content: contextError };
+        }
         const job = await options.store.create({
           prompt: input.prompt,
           script: input.script,
           scriptArgs: input.script_args,
           scriptTimeoutMs: input.script_timeout_ms,
+          noAgent: input.no_agent ?? input.noAgent,
+          contextFrom,
           schedule: input.schedule,
           name: input.name,
           skills: normalizeSkills(input),
@@ -93,10 +111,23 @@ export function createCronTools(options: { store: CronStore }): RegisteredTool[]
           prompt: input.prompt,
           schedule: input.schedule,
           name: input.name,
+          noAgent: input.no_agent ?? input.noAgent,
+          contextFrom: normalizeContextFrom(input),
           skills: resolveUpdatedSkills(existing.skills, input),
           delivery: input.delivery,
           repeat: input.repeat
         });
+        const finalScript = input.clear_script === true
+          ? undefined
+          : input.script ?? existing.script;
+        const finalNoAgent = (input.no_agent ?? input.noAgent) ?? existing.noAgent;
+        if (finalNoAgent === true && (finalScript === undefined || finalScript.trim().length === 0)) {
+          return { ok: false, content: "no-agent cron jobs require script." };
+        }
+        const contextError = await validateContextFrom(options.store, patch.contextFrom as string[] | undefined);
+        if (contextError !== undefined) {
+          return { ok: false, content: contextError };
+        }
         const scriptPatch = input.clear_script === true
           ? { script: undefined, scriptArgs: [], scriptTimeoutMs: undefined }
           : {
@@ -156,6 +187,22 @@ function resolveUpdatedSkills(current: string[], input: CronjobToolInput): strin
   if (input.skill !== undefined) return [input.skill];
   if (input.add_skill !== undefined) return current.includes(input.add_skill) ? current : [...current, input.add_skill];
   if (input.remove_skill !== undefined) return current.filter((skill) => skill !== input.remove_skill);
+  return undefined;
+}
+
+function normalizeContextFrom(input: CronjobToolInput): string[] | undefined {
+  return input.contextFrom ?? input.context_from;
+}
+
+async function validateContextFrom(store: CronStore, jobIds: string[] | undefined): Promise<string | undefined> {
+  if (jobIds === undefined) {
+    return undefined;
+  }
+  for (const jobId of jobIds) {
+    if (await store.get(jobId) === undefined) {
+      return `Unknown contextFrom job id: ${jobId}`;
+    }
+  }
   return undefined;
 }
 

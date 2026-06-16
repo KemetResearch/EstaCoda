@@ -218,6 +218,20 @@ describe("Cron surfaces — current capability labels", () => {
     expect(output).not.toContain("Enabled toolsets");
     expect(output).not.toContain("Workdir");
   });
+
+  it("renders no-agent mode and upstream context labels", () => {
+    const output = renderPlain(buildCronJobDetailViewModel({
+      job: fakeCronJob({
+        noAgent: true,
+        script: "watch.sh",
+        contextFrom: ["cron-upstream"]
+      }),
+      executions: [],
+    }));
+
+    expect(output).toContain("Mode: no-agent");
+    expect(output).toContain("Context from: cron-upstream");
+  });
 });
 
 describe("Cron surfaces — execution history", () => {

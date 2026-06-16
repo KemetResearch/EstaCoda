@@ -50,6 +50,13 @@ export async function runCronCommand(
     if (parsed.delivery === undefined) {
       parsed.delivery = input.defaultDelivery;
     }
+    if (parsed.noAgent === true && (parsed.script === undefined || parsed.script.trim().length === 0)) {
+      return { ok: false, output: renderer(buildCronUsageErrorViewModel({ message: "no-agent cron jobs require --script." })) };
+    }
+    const contextError = await validateContextFrom(input.store, parsed.contextFrom);
+    if (contextError !== undefined) {
+      return { ok: false, output: renderer(buildCronUsageErrorViewModel({ message: contextError })) };
+    }
     const job = await input.store.create({
       ...parsed,
       schedule: parsed.schedule,
@@ -111,6 +118,15 @@ export async function runCronCommand(
       return { ok: false, output: renderer(viewModel) };
     }
     const patch = parseCronEditArgs(rest.slice(1), existing.skills);
+    const finalScript = "script" in patch ? patch.script : existing.script;
+    const finalNoAgent = "noAgent" in patch ? patch.noAgent : existing.noAgent;
+    if (finalNoAgent === true && (finalScript === undefined || finalScript.trim().length === 0)) {
+      return { ok: false, output: renderer(buildCronUsageErrorViewModel({ message: "no-agent cron jobs require --script." })) };
+    }
+    const contextError = await validateContextFrom(input.store, patch.contextFrom);
+    if (contextError !== undefined) {
+      return { ok: false, output: renderer(buildCronUsageErrorViewModel({ message: contextError })) };
+    }
     const job = await input.store.update(id, patch);
     return job === undefined
       ? { ok: false, output: renderer(buildCronNotFoundViewModel({ id })) }
@@ -141,6 +157,8 @@ function parseCronAddArgs(args: string[]): {
   skills: string[];
   delivery?: string;
   repeat?: number;
+  noAgent?: boolean;
+  contextFrom?: string[];
 } {
   const positional: string[] = [];
   const parsed: ReturnType<typeof parseCronAddArgs> = { skills: [], scriptArgs: [] };
@@ -165,6 +183,13 @@ function parseCronAddArgs(args: string[]): {
       index += 1;
     } else if (arg === "--script") {
       parsed.script = next;
+      index += 1;
+    } else if (arg === "--no-agent") {
+      parsed.noAgent = true;
+    } else if (arg === "--agent" || arg === "--clear-no-agent") {
+      parsed.noAgent = undefined;
+    } else if (arg === "--context-from") {
+      if (next !== undefined) parsed.contextFrom = [...(parsed.contextFrom ?? []), next];
       index += 1;
     } else if (arg === "--script-arg") {
       if (next !== undefined) parsed.scriptArgs?.push(next);
@@ -200,6 +225,8 @@ function parseCronEditArgs(args: string[], currentSkills: string[]): {
   skills?: string[];
   delivery?: string;
   repeat?: number;
+  noAgent?: boolean;
+  contextFrom?: string[];
 } {
   const parsed: ReturnType<typeof parseCronEditArgs> = {};
   let skills = [...currentSkills];
@@ -223,6 +250,15 @@ function parseCronEditArgs(args: string[], currentSkills: string[]): {
     } else if (arg === "--script") {
       parsed.script = next;
       index += 1;
+    } else if (arg === "--no-agent") {
+      parsed.noAgent = true;
+    } else if (arg === "--agent" || arg === "--clear-no-agent") {
+      parsed.noAgent = false;
+    } else if (arg === "--context-from") {
+      parsed.contextFrom = [...(parsed.contextFrom ?? []), next].filter((value): value is string => value !== undefined);
+      index += 1;
+    } else if (arg === "--clear-context-from") {
+      parsed.contextFrom = [];
     } else if (arg === "--script-arg") {
       parsed.scriptArgs = [...(parsed.scriptArgs ?? []), next].filter((value): value is string => value !== undefined);
       index += 1;
@@ -262,6 +298,18 @@ function parseCronEditArgs(args: string[], currentSkills: string[]): {
   }
 
   return parsed;
+}
+
+async function validateContextFrom(store: CronStore, jobIds: string[] | undefined): Promise<string | undefined> {
+  if (jobIds === undefined) {
+    return undefined;
+  }
+  for (const jobId of jobIds) {
+    if (await store.get(jobId) === undefined) {
+      return `Unknown contextFrom job id: ${jobId}`;
+    }
+  }
+  return undefined;
 }
 
 function renderMaybe(

@@ -1592,6 +1592,7 @@ export async function handleSlashCommand(input: {
           const results = await tickCron({
             store,
             runner: createRuntimeCronRunner({
+              store,
               runtimeFactory: async (_job, context) => createIsolatedCronRuntime({
                 context,
                 workspaceRoot: input.workspaceRoot ?? process.cwd(),

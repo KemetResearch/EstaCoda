@@ -1369,6 +1369,7 @@ export async function runGatewaySupervisor(options: GatewaySupervisorOptions): P
           },
           disposeRuntime: true,
           workspaceRoot: options.workspaceRoot,
+          store: cronStore,
           runtimeFactory: async (_job, context) => {
             const latestConfig = await loadConfig();
             return createRuntime(buildGatewayCronRuntimeOptions({
