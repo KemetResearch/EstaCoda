@@ -17,6 +17,14 @@ export type ProjectFactPromotionResult = {
   conclusion: MemoryConclusion;
 };
 
+type PromotionStatementCandidate = {
+  text: string;
+  source: "direct-user-input";
+  index: number;
+};
+
+const MAX_PROMOTION_STATEMENT_CANDIDATES = 8;
+
 export async function resolveUserPreferencePromotion(options: {
   profileId: string;
   currentUserText: string;
@@ -25,19 +33,21 @@ export async function resolveUserPreferencePromotion(options: {
   sourceTrajectoryId?: string;
   sourceEventId?: string;
 }): Promise<UserPreferencePromotionResult | undefined> {
-  const currentUserText = sanitizeMemoryLearningText(options.currentUserText);
-  const forgottenContent = detectForgetPreference(currentUserText);
-  if (forgottenContent !== undefined && options.memoryProvider.forgetPromotion !== undefined) {
-    const forgotten = await options.memoryProvider.forgetPromotion(forgottenContent);
-    if (forgotten !== undefined) {
-      return {
-        kind: "forgotten",
-        content: forgotten.content
-      };
+  const currentCandidates = extractPromotionStatementCandidates(options.currentUserText);
+  for (const currentCandidate of currentCandidates) {
+    const forgottenContent = detectForgetPreference(currentCandidate.text);
+    if (forgottenContent !== undefined && options.memoryProvider.forgetPromotion !== undefined) {
+      const forgotten = await options.memoryProvider.forgetPromotion(forgottenContent);
+      if (forgotten !== undefined) {
+        return {
+          kind: "forgotten",
+          content: forgotten.content
+        };
+      }
     }
   }
 
-  const currentPreference = detectUserPreference(currentUserText);
+  const currentPreference = firstDetectedCandidate(currentCandidates, detectUserPreference);
 
   if (currentPreference === undefined) {
     return undefined;
@@ -55,7 +65,10 @@ export async function resolveUserPreferencePromotion(options: {
       continue;
     }
 
-    const candidate = detectUserPreference(sanitizeMemoryLearningText(match.message.content));
+    const candidate = firstDetectedCandidate(
+      extractPromotionStatementCandidates(match.message.content),
+      detectUserPreference
+    );
     if (candidate?.key === currentPreference.key) {
       matchingSessionIds.add(match.session.id);
     }
@@ -93,8 +106,10 @@ export async function resolveProjectFactPromotion(options: {
   sourceTrajectoryId?: string;
   sourceEventId?: string;
 }): Promise<ProjectFactPromotionResult | undefined> {
-  const currentUserText = sanitizeMemoryLearningText(options.currentUserText);
-  const currentFact = detectProjectFact(currentUserText);
+  const currentFact = firstDetectedCandidate(
+    extractPromotionStatementCandidates(options.currentUserText),
+    detectProjectFact
+  );
 
   if (currentFact === undefined) {
     return undefined;
@@ -112,7 +127,10 @@ export async function resolveProjectFactPromotion(options: {
       continue;
     }
 
-    const candidate = detectProjectFact(sanitizeMemoryLearningText(match.message.content));
+    const candidate = firstDetectedCandidate(
+      extractPromotionStatementCandidates(match.message.content),
+      detectProjectFact
+    );
     if (candidate?.key === currentFact.key) {
       matchingSessionIds.add(match.session.id);
     }
@@ -146,6 +164,100 @@ type PreferenceCandidate = {
   key: string;
   content: string;
 };
+
+function firstDetectedCandidate(
+  candidates: readonly PromotionStatementCandidate[],
+  detect: (text: string) => PreferenceCandidate | undefined
+): PreferenceCandidate | undefined {
+  for (const candidate of candidates) {
+    const detected = detect(candidate.text);
+    if (detected !== undefined) {
+      return detected;
+    }
+  }
+  return undefined;
+}
+
+function extractPromotionStatementCandidates(text: string): PromotionStatementCandidate[] {
+  const sanitized = sanitizeMemoryLearningText(text);
+  const withoutCodeBlocks = stripFencedCodeBlocks(sanitized);
+  const statements = splitDirectStatements(withoutCodeBlocks);
+  const candidates: PromotionStatementCandidate[] = [];
+
+  for (const statement of statements) {
+    if (hasQuotedOrBacktickedSpan(statement)) {
+      continue;
+    }
+    const normalized = normalize(statement);
+    if (normalized.length === 0 || isAmbiguousPromotionStatement(normalized)) {
+      continue;
+    }
+    candidates.push({
+      text: normalized,
+      source: "direct-user-input",
+      index: candidates.length
+    });
+    if (candidates.length >= MAX_PROMOTION_STATEMENT_CANDIDATES) {
+      break;
+    }
+  }
+
+  return candidates;
+}
+
+function stripFencedCodeBlocks(text: string): string {
+  return text.replace(/```[\s\S]*?```/gu, "\n");
+}
+
+function hasQuotedOrBacktickedSpan(text: string): boolean {
+  return /["'`]/u.test(text);
+}
+
+function splitDirectStatements(text: string): string[] {
+  const statements: string[] = [];
+  let current = "";
+
+  for (let index = 0; index < text.length; index += 1) {
+    const character = text[index] ?? "";
+    current += character;
+
+    if (character === "\n") {
+      pushStatement(statements, current);
+      current = "";
+      continue;
+    }
+
+    if (!/[.?!]/u.test(character)) {
+      continue;
+    }
+
+    const next = text[index + 1];
+    if (next === undefined || /\s/u.test(next)) {
+      pushStatement(statements, current);
+      current = "";
+    }
+  }
+
+  pushStatement(statements, current);
+  return statements;
+}
+
+function pushStatement(statements: string[], statement: string): void {
+  const trimmed = statement.trim();
+  if (trimmed.length > 0) {
+    statements.push(trimmed);
+  }
+}
+
+function isAmbiguousPromotionStatement(statement: string): boolean {
+  if (statement.length > 180) {
+    return true;
+  }
+  if (statement.split(/\s+/u).length > 24) {
+    return true;
+  }
+  return /^(?:agent note|assistant note|tool output|earlier assistant said|the attached resume says|please summarize this)\b/iu.test(statement);
+}
 
 function detectUserPreference(text: string): PreferenceCandidate | undefined {
   const normalized = normalize(text);
@@ -342,4 +454,8 @@ export function __detectForgetPreferenceForTest(text: string): string | undefine
 
 export function __detectProjectFactForTest(text: string): string | undefined {
   return detectProjectFact(text)?.content;
+}
+
+export function __extractPromotionStatementCandidatesForTest(text: string): PromotionStatementCandidate[] {
+  return extractPromotionStatementCandidates(text);
 }

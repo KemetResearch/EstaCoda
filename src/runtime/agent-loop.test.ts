@@ -1248,6 +1248,59 @@ describe("AgentLoop provider availability gating", () => {
     expect(conclude).not.toHaveBeenCalled();
   });
 
+  it("promotes multiple direct statement candidates without using effective text scaffolding", async () => {
+    const conclude = vi.fn(async () => {});
+    const memoryProvider: MemoryProvider = {
+      id: "recording-memory",
+      async context() {
+        return { text: "", usage: [] };
+      },
+      async search() {
+        return [];
+      },
+      conclude,
+      async recordSkillOutcome() {}
+    };
+    const { loop, sessionDb } = await createAgentLoop({
+      canRunProvider: true,
+      runSkillPlaybook: vi.fn(async () => []),
+      providerExecution: successfulProviderExecution("done"),
+      memoryProvider
+    });
+    const compound = "I prefer concise replies. Project uses TypeScript.";
+    await sessionDb.createSession({ id: "previous-compound-session", profileId: "default" });
+    await sessionDb.appendMessage({
+      sessionId: "previous-compound-session",
+      role: "user",
+      content: compound
+    });
+
+    await loop.handle({
+      text: compound,
+      channel: "cli",
+      trustedWorkspace: true
+    });
+
+    expect(conclude).toHaveBeenCalledWith(expect.objectContaining({
+      kind: "user-preference",
+      content: "Prefer concise replies.",
+      source: "repeated-user-input",
+      occurrences: 2
+    }));
+    expect(conclude).toHaveBeenCalledWith(expect.objectContaining({
+      kind: "project-fact",
+      content: "Project uses TypeScript.",
+      source: "repeated-user-input",
+      occurrences: 2
+    }));
+    expect(resolveUserPreferencePromotion).toHaveBeenCalledWith(expect.objectContaining({
+      currentUserText: compound
+    }));
+    expect(resolveProjectFactPromotion).toHaveBeenCalledWith(expect.objectContaining({
+      currentUserText: compound
+    }));
+  });
+
   it("attempts preference and project fact promotion independently", async () => {
     vi.mocked(resolveUserPreferencePromotion).mockResolvedValueOnce({
       kind: "conclusion",

@@ -6,7 +6,7 @@ import type { IntentRoute } from "../contracts/intent.js";
 import type { MemoryPromptContext, PromptMemoryBlock } from "../contracts/memory.js";
 import type { ModelProfile, ProviderMessage, ProviderResponse, ResolvedAuxiliaryRoute, ResolvedModelRoute } from "../contracts/provider.js";
 import { assembleProviderPrompt } from "../prompt/prompt-assembly.js";
-import { resolveUserPreferencePromotion } from "./memory-promotion.js";
+import { resolveProjectFactPromotion, resolveUserPreferencePromotion } from "./memory-promotion.js";
 import { MemoryPromptContextBuilder } from "./memory-prompt-context-builder.js";
 import { MemoryPromotionStore } from "./memory-promotion-store.js";
 import { MemoryRecallOrchestrator } from "./memory-recall-orchestrator.js";
@@ -324,6 +324,74 @@ describe("memory hardening evals", () => {
         sourceSessionIds: expect.arrayContaining(["current-root-session", "previous-root-session"])
       })
     ]);
+  });
+
+  it("promotes preference and project fact from compound direct user statements", async () => {
+    const root = await makeTempDir();
+    const db = new InMemorySessionDB();
+    const store = new MemoryStore();
+    const promotionStore = new MemoryPromotionStore({ path: join(root, "promotions.json") });
+    const provider = new LocalMemoryProvider({ store, promotionStore });
+    const compound = "I prefer concise replies. Project uses TypeScript.";
+
+    await seedSession(db, "compound-root-a", "default", [compound]);
+    await seedSession(db, "compound-root-b", "default", [compound]);
+
+    await resolveUserPreferencePromotion({
+      profileId: "default",
+      currentUserText: compound,
+      sessionDb: db,
+      memoryProvider: provider
+    });
+    await resolveProjectFactPromotion({
+      profileId: "default",
+      currentUserText: compound,
+      sessionDb: db,
+      memoryProvider: provider
+    });
+
+    expect(store.read("USER.md")).toContain("Prefer concise replies.");
+    expect(store.read("MEMORY.md")).toContain("Project uses TypeScript.");
+    expect(await promotionStore.list()).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        kind: "user-preference",
+        content: "Prefer concise replies.",
+        sourceSessionIds: expect.arrayContaining(["compound-root-a", "compound-root-b"])
+      }),
+      expect.objectContaining({
+        kind: "project-fact",
+        content: "Project uses TypeScript.",
+        sourceSessionIds: expect.arrayContaining(["compound-root-a", "compound-root-b"])
+      })
+    ]));
+  });
+
+  it("promotes preference and project fact from newline-separated direct user statements", async () => {
+    const root = await makeTempDir();
+    const db = new InMemorySessionDB();
+    const store = new MemoryStore();
+    const promotionStore = new MemoryPromotionStore({ path: join(root, "promotions.json") });
+    const provider = new LocalMemoryProvider({ store, promotionStore });
+    const multiline = "I prefer concise replies.\nProject uses TypeScript.";
+
+    await seedSession(db, "multiline-root-a", "default", [multiline]);
+    await seedSession(db, "multiline-root-b", "default", [multiline]);
+
+    await resolveUserPreferencePromotion({
+      profileId: "default",
+      currentUserText: multiline,
+      sessionDb: db,
+      memoryProvider: provider
+    });
+    await resolveProjectFactPromotion({
+      profileId: "default",
+      currentUserText: multiline,
+      sessionDb: db,
+      memoryProvider: provider
+    });
+
+    expect(store.read("USER.md")).toContain("Prefer concise replies.");
+    expect(store.read("MEMORY.md")).toContain("Project uses TypeScript.");
   });
 
   it("does not resurrect manually deleted markdown from stale promotion metadata", async () => {
