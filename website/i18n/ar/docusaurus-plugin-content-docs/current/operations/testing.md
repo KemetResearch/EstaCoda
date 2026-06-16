@@ -1,14 +1,18 @@
 ---
 title: الاختبار
-description: طبقات التحقق، واختبارات smoke، واختبارات eval، وفحوصات المشغل.
+description: أوامر التحقق، وتغطية smoke، وفحوصات الإصدار، وأدلة المشغّل.
 sidebar_position: 1
 ---
 
 # الاختبار
 
-يأتي EstaCoda مع مكدس تحقق متعدد الطبقات. البوابة الموثوقة هي مجموعة اختبارات الوحدة Vitest. تخدم اختبارات smoke كشبكة أمان للتكامل. تكشف اختبارات eval عن الانحدارات الحتمية. تلتقط عمليات تدقيق الاستيراد في وقت التشغيل وESM أخطاء التعبئة قبل أن تصل إلى المستخدمين.
+تعتمد EstaCoda على طبقات تحقق متعددة. اختبارات الوحدة هي بوابة الكود الأساسية، وتغطي اختبارات smoke السلوك العابر للأنظمة الفرعية، وتكشف eval fixtures الانحدارات الحتمية في سلوك الوكيل، بينما تتحقق أدوات التثبيت والحزم من الملفات التي سيشغلها المستخدم فعليًا.
 
-شغل التحقق بالترتيب التالي:
+الأوامر في هذه الصفحة مبنية على ما هو موجود فعليًا في `package.json` و`vitest.node.config.ts` و`src/smoke.ts` و`src/smoke/cases/` و`scripts/run-eval-fixtures.ts` وسكربتات التحقق تحت `scripts/`.
+
+## مسار التحقق الأساسي
+
+شغّل هذا المسار قبل اعتبار أي تغيير عادي جاهزًا:
 
 ```bash
 pnpm run typecheck
@@ -20,160 +24,128 @@ pnpm run audit:esm
 pnpm run smoke:dist
 ```
 
-لا تتجاوز `typecheck`. يمكن لأخطاء النوع أن تمر في الاختبارات مع كسر البناء.
+ماذا يثبت كل أمر:
 
-## طبقات التحقق
+| الأمر | المصدر | ما يتحقق منه |
+|---|---|---|
+| `pnpm run typecheck` | `tsc --noEmit` | تجميع TypeScript دون إخراج ملفات. |
+| `pnpm run test` | `vitest run --config vitest.node.config.ts` | اختبارات Node/Vitest تحت `src/**/*.test.ts`. |
+| `pnpm run smoke` | `node --import tsx src/smoke.ts` | smoke في وضع المصدر مع مزوّدين ومحولات محاكاة. |
+| `pnpm run build` | `tsc -p tsconfig.build.json` بعد `clean:dist` | بناء مخرجات الإنتاج في `dist/`. |
+| `pnpm run audit:runtime-imports` | `scripts/audit-runtime-imports.mjs` | سلامة رسم الاستيراد في وقت التشغيل قبل الشحن. |
+| `pnpm run audit:esm` | `scripts/audit-esm.mjs dist` | صحة حزمة ESM في المخرجات المبنية. |
+| `pnpm run smoke:dist` | `node dist/smoke.js` | smoke على المخرجات المبنية. هذا هو فحص سلامة الأثر النهائي. |
 
-| الأمر | ما يتحقق منه | متى يُشغل |
-|-------|-------------|----------|
-| `pnpm run typecheck` | تجميع TypeScript بدون أخطاء | قبل كل التزام |
-| `pnpm run test` | مجموعة اختبارات Vitest | قبل كل PR |
-| `pnpm run smoke` | اختبار تكامل smoke في وضع المصدر | قبل كل PR |
-| `pnpm run build` | تجميع `dist/` للإنتاج | قبل مرشح الإصدار |
-| `pnpm run audit:runtime-imports` | سلامة رسم الاستيراد في وقت التشغيل | بعد التحركات البنيوية |
-| `pnpm run audit:esm` | صحة تعبئة ESM | بعد تغييرات البناء |
-| `pnpm run smoke:dist` | smoke على المخرجات المبنية | قبل مرشح الإصدار |
-| `pnpm run eval:fixtures` | 27 اختبار eval حتمي | بعد تغييرات المنطق |
+لا تتجاوز `typecheck`. قد تمر أخطاء النوع في الاختبارات لكنها تكسر البناء.
 
-`pnpm run smoke:dist` هو البوابة النهائية. إذا فشل، فالأثر المبني معطل.
+## التحقق حسب نوع التغيير
+
+استخدم المسارات المستهدفة لتسريع التغذية الراجعة، ثم شغّل مسار التحقق الأساسي قبل الدمج أو الإصدار.
+
+| نوع التغيير | ما يجب تشغيله |
+|---|---|
+| أغلب تغييرات TypeScript أو runtime | `pnpm run typecheck`، `pnpm run test` |
+| سلوك عابر للأنظمة الفرعية | `pnpm run smoke`، ثم `pnpm run smoke:dist` بعد البناء |
+| منطق الوكيل أو eval | `pnpm run eval:fixtures` |
+| توجيه المزوّدين أو التفكير أو continuation أو message normalization | `pnpm run provider:hardening` مع اختبارات Vitest المستهدفة للملفات التي تغيّرت |
+| سلوك التثبيت أو التحديث | `pnpm run validate:install`، `pnpm run validate:source-install` |
+| سلوك إزالة التثبيت | `pnpm run validate:uninstall` |
+| جاهزية npm أو الحزمة | `pnpm run verify:local-bin`، `pnpm run pack:dry-run`، `pnpm run verify:package-bin` |
+| تسليم Docker | `pnpm run validate:docker` |
+| تسليم Homebrew | `pnpm run validate:homebrew` |
+| تغييرات skills catalog | `pnpm run skills:catalog`، ثم افحص مخرجات website API المولدة |
+| تغييرات docs فقط | `git diff --check`؛ ابنِ موقع Docusaurus عند تغيير sidebars أو الروابط أو frontmatter أو ملفات i18n |
 
 ## اختبارات smoke
 
-**نقطة الدخول:** `src/smoke.ts`
-**المنفذ:** `src/smoke/smoke-runner.ts`
-**الحالات:** `src/smoke/cases/*.ts`
-**الأساس القديم:** `src/smoke/_legacy.ts` (التأكيدات محفوظة)
+اختبارات smoke هي شبكة أمان التكامل. تشغّل مسارات المنتج باستخدام مزوّدين ومحولات محاكاة، لذلك تبقى سريعة وحتمية. لكنها لا تثبت سلوك APIs الحية.
 
-تغطي smoke السلوك عبر الأنظمة الفرعية باستخدام مزودات ومحولات وهمية. لا تستدعي APIs حية.
+**نقطة الدخول:** `src/smoke.ts`
+
+**المشغّل:** `src/smoke/smoke-runner.ts`
+
+**الحالات:** `src/smoke/cases/*.ts`
+
+تشمل حالات smoke الحالية:
+
+- bare launch
+- init lifecycle
+- update dry run
+- pack lifecycle
+- bundled skill sync
+- corrupt skill usage recovery
+- evolution lifecycle وevolution safety
+- delegation MVP
+- gateway stop behavior
+- WhatsApp support
+
+أوامر smoke المفيدة:
 
 ```bash
-# جميع الحالات
+# All cases
 pnpm run smoke
 
-# حسب الوسم
+# List cases
+pnpm run smoke --list
+
+# By tag
 pnpm run smoke --tag skills
 pnpm run smoke --tag memory
 
-# حسب معرف الحالة
+# By case ID
 pnpm run smoke --id corrupt-skill-usage
 
-# سرد الحالات
-pnpm run smoke --list
-
-# الفشل السريع + JSON
+# Fail fast + JSON
 pnpm run smoke --fail-fast --json
 ```
 
-### ما تغطيه smoke
+### ما لا تثبته smoke
 
-- تطبيع المزود والتوجيه
-- استرداد استدعاء الأدوات والاستمرار
-- أساسيات خلفية المتصفح
-- توليد الصور (FAL، BytePlus/Seedream)
-- الصوت (TTS، STT)
-- تقدم Telegram، والموافقات، والمرفقات، ودورة حياة الجلسة
-- تنفيذ المهارة، والطفرة، والتطور
-- ترقية الذاكرة، والأصل، والعرض الانتقائي، والإلغاء، وحماية ملفات الأمان
-- سياسة الأمان والحد الأدنى الصارم
-- إنشاء/سرد/تحرير/tick Cron
-- اكتشاف MCP وإعادة التحميل
-- تدفق ACP الأساسي
-- توسيع السياق وتعبئة الموجه
-- التعامل مع المخرجات
-- استمرار المسار وتصنيف الفشل
-- أوامر CLI trace
-- منفذ eval والاختبارات
-- مقارنة التدفق الذهبي
-- انتقالات حالة التغيير
-- رسم تبعية الكود: البحث الأمامي/العكسي/المتأثر، الملخص، إبطال الذاكرة المؤقتة
-- Workflow: انتقالات الحالة، والقفل، والهجرة، والذرية، ودورة حياة المحرك، واسترداد إعادة التشغيل، ولوحة تحكم المشغل، والضغط
+تستخدم اختبارات smoke المحاكاة لعدة أسطح خارجية. اعتبر هذه حدود اختبار، لا حدودًا للمنتج:
 
-### ما لا تغطيه smoke
+- استدعاءات مزوّدين حقيقية
+- جلسات Telegram أو WhatsApp gateway حقيقية
+- أتمتة متصفح حقيقية عبر خدمة متصفح حية
+- تنفيذ خادم MCP حقيقي
+- مخرجات صوت أو صور حقيقية من المزوّدين
+- التقاط ميكروفون حقيقي، جلسات Discord voice حية، وتنزيلات faster-whisper عند التشغيل الأول
 
-- تنفيذ مزود حقيقي (وهمي)
-- بوابة Telegram حقيقية (محول وهمي)
-- أتمتة متصفح حقيقية (خلفية وهمية)
-- تنفيذ خادم MCP حقيقي (وهمي)
-- توليد صوت/صورة حقيقي (استجابات وهمية)
-- جلسات قنوات صوت Discord حقيقية، وإدخال ميكروفون، ومزودات صوت حية، وتنزيلات نموذج faster-whisper الحية
+السلوك الحي يحتاج تحقق مشغّل عندما يمس التغيير مزوّدًا حيًا، قناة، backend للمتصفح، مسار صوت، مثبّتًا، مسار تحديث، أو أثر حزمة.
 
-قيود smoke ليست قيود منتج. هي حدود اختبار.
+## Eval fixtures
 
-## اختبارات eval
-
-27 اختبارًا حتميًا يُشغل بـ `pnpm run eval:fixtures`.
-
-**وقت التشغيل الأساسي (3):**
-- `provider-text-response` — المزود يُرجع نصًا بدون استدعاءات أدوات
-- `tool-security-block` — الأمر الخطير محظور بسياسة الأمان
-- `missing-tool-failure` — الأداة غير المسجلة تُرجع undefined
-
-**الذاكرة (4):**
-- `memory-promotion-provenance` — الترقية تحمل بيانات وصفية للأصل
-- `memory-deactivate-suppresses` — الذاكرة المعطلة مُقمعَة من السياق
-- `memory-selective-renders` — العارض الانتقائي يحترم قواعد البديل
-- `memory-safety-files-protected` — ملفات الأمان لا يمكن إلغاء تنشيطها
-
-**رسم تبعية الكود (5):**
-- `knowledge-forward-deps` — البحث الأمامي عن التبعيات
-- `knowledge-reverse-deps` — البحث العكسي عن التبعيات
-- `knowledge-affected-files` — البحث عن الملفات المتأثرة انتقاليًا
-- `knowledge-graph-summary` — عدادات ملخص الرسم
-- `knowledge-cache-invalidates` — إبطال الذاكرة المؤقتة عند تغيير المصدر
-
-**التطور (6):**
-- `manifest-creation-from-observation` — الملاحظة تنشئ ChangeManifest
-- `skill-proposal-manifest-bridge` — `skill.propose_patch` ينشئ manifest
-- `user-correction-recording` — تصحيح المستخدم مسجل كحدث
-- `tool-description-proposal` — هيكل وصف الأداة
-- `routing-metadata-proposal` — هيكل بيانات وصفية للتوجيه
-- `evolution-export-shape` — تصدير مجموعة البيانات يطابق المخطط
-
-**أساس Workflow (5):**
-- `workflow-run-state-transitions` — انتقالات حالة التدفق والخطوة
-- `workflow-locking` — اكتساب القفل، والإصدار، ونبضة القلب، واسترداد القديم
-- `workflow-migration` — هجرة المخطط
-- `workflow-store-atomicity` — الانتقالات الذرية وسلامة الجولة
-- `workflow-engine-lifecycle` — دورة حياة محرك Workflow والخطوة
-
-**محرك Workflow (1):**
-- `workflow-restart-recovery` — استرداد إعادة التشغيل يعلم تشغيلات Workflow القديمة منقطعة
-
-**تحكم أوامر Workflow (1):**
-- `workflow-command-control` — الموزع يوجه ويتحقق من أوامر الشرطة المائلة
-
-**ملخصات أحداث Workflow (1):**
-- `workflow-event-summary` — يدوي، تلقائي، سلامة الحدود، الحفظ
-
-**تكامل Workflow (1):**
-- `workflow-integration` — تكامل النظام: المحول، جسر CLI، توصيل وقت التشغيل
-
-## أدوات CLI التشخيصية
+شغّل مجموعة eval الافتراضية عبر:
 
 ```bash
-# فحص تاريخ التنفيذ
-estacoda trace list [--session <id>] [--limit <n>]
-estacoda trace dump <trajectory-id> [--raw]
-estacoda trace timeline <trajectory-id> [--raw]
-estacoda trace failures <trajectory-id>
-
-# تشغيل اختبارات eval
-estacoda eval [fixture-id]
+pnpm run eval:fixtures
 ```
 
-هذه أدوات فحص وقت التشغيل، وليست بديلاً لاختبارات الوحدة.
-
-## ممارسات الاختبار المستهدفة
-
-شغل المكدس الكامل قبل التغييرات البنيوية. شغل مجموعات مستهدفة للعمل على الأنظمة الفرعية.
+شغّل fixture واحدًا بالمعرّف:
 
 ```bash
-# النظام الفرعي للصوت فقط
-pnpm exec vitest run src/tools/voice-tools.test.ts src/tools/tts-providers.test.ts src/tools/stt-providers.test.ts
-pnpm exec vitest run src/channels/voice-transcription.test.ts src/gateway/voice-state.test.ts
+pnpm run eval:fixtures -- <fixture-id>
 ```
 
-فحوصات إنهاء المزود ونظافة التفكير:
+تُعرّف المجموعة الافتراضية في `src/eval/fixtures/index.ts` وتغطي حاليًا:
+
+- سلوك runtime الأساسي
+- أمان الأدوات وتصنيف فشل الأداة المفقودة
+- ترقية الذاكرة، إلغاء تنشيطها، عرضها الانتقائي، وحماية ملفات الأمان
+- بحث رسم تبعية الكود وإبطال cache
+- Agent Evolution manifests، المقترحات، تسجيل تصحيح المستخدم، routing metadata، routing baseline، وشكل التصدير
+- حالة workflow run، القفل، الهجرة، ذرية التخزين، دورة حياة المحرك، التعافي بعد إعادة التشغيل، تحكم الأوامر، ملخصات الأحداث، والتكامل
+
+فضّل وصف الفئات في الوثائق بدل تثبيت أعداد fixtures. معرّفات fixtures تتغير مع توسع مجموعة eval.
+
+## فحوصات المزوّدين والتفكير
+
+ابدأ فحوصات provider hardening بهذا الأمر:
+
+```bash
+pnpm run provider:hardening
+```
+
+عند تغيير provider streaming أو tool-call planning أو reasoning extraction أو continuation أو prompt compression أو مستهلكي transcript، شغّل أيضًا الاختبارات المركزة التي تطابق النظام الفرعي الذي تغيّر. أمثلة شائعة:
 
 ```bash
 pnpm exec vitest run src/providers/provider-executor-fallback.test.ts
@@ -185,22 +157,33 @@ pnpm exec vitest run src/providers/provider-message-normalizer.test.ts
 pnpm exec vitest run src/runtime/provider-turn-loop.test.ts
 pnpm exec vitest run src/runtime/agent-loop.test.ts
 pnpm exec vitest run src/prompt/semantic-compressor.test.ts
-pnpm exec vitest run src/memory/local-memory-provider.test.ts
-pnpm exec vitest run src/skills/skill-learning.test.ts
-pnpm exec vitest run src/skills/skill-evolution.test.ts
-pnpm exec vitest run src/evolution/export-format.test.ts
 ```
 
-افحص أوضاع الفشل هذه قبل تغيير سلوك وقت تشغيل المزود:
+افحص أوضاع الفشل هذه قبل قبول تغييرات provider runtime:
 
-- `incomplete-stream` يبقى فشلًا أو يستخدم الاحتياطي؛ ويجب ألا يصبح جوابًا نهائيًا للمساعد
-- استدعاءات الأدوات المقطوعة بسبب `length` تُعاد محاولتها مرة واحدة أو تُرفض؛ ويجب ألا تصل المحاولة المقطوعة الأولى إلى التخطيط أو التنفيذ
-- JSON النهائي المشوه للأدوات يبقى خطأ في تخطيط الأدوات
-- الاستجابات التي تحتوي على تفكير فقط تستخدم مسار إعادة محاولة الجواب المرئي دون عرض التفكير الخام
-- متابعة النص المرئي المقطوع بسبب `length` تحفظ رسالة مساعد نهائية واحدة ولا تحفظ رسائل متابعة اصطناعية
-- اختبارات الملخصات والذاكرة والمهارات والتصدير تزيل التفكير مع الحفاظ على النص المرئي العادي
+- يبقى `incomplete-stream` فشلًا أو يستخدم fallback؛ يجب ألا يتحول إلى جواب نهائي للمساعد.
+- استدعاءات الأدوات المقطوعة بسبب الطول تعاد مرة واحدة أو تُرفض بأمان؛ يجب ألا تصل المحاولة الأولى المقطوعة إلى التخطيط أو التنفيذ.
+- JSON النهائي المشوه للأدوات يبقى خطأ في تخطيط الأدوات.
+- الاستجابات التي تحتوي على تفكير فقط تستخدم مسار إعادة محاولة الجواب المرئي دون كشف التفكير الخام.
+- continuation للنص المرئي المقطوع يحفظ رسالة مساعد نهائية واحدة دون رسائل continuation اصطناعية.
+- الملخصات، الذاكرة، المهارات، وآثار التصدير تزيل التفكير الخام وتحافظ على النص المرئي العادي.
 
-مسار الفحص اليدوي:
+## أدوات CLI التشخيصية
+
+هذه الأوامر تفحص أدلة runtime. ليست بديلًا للاختبارات.
+
+```bash
+# Inspect execution history
+estacoda trace list [--session <id>] [--limit <n>]
+estacoda trace dump <trajectory-id> [--raw]
+estacoda trace timeline <trajectory-id> [--raw]
+estacoda trace failures <trajectory-id>
+
+# Run eval fixtures from the CLI
+estacoda eval [fixture-id]
+```
+
+للفحص اليدوي بعد تشغيل محلي:
 
 ```bash
 pnpm run dev
@@ -208,18 +191,65 @@ estacoda trace list --limit 5
 estacoda trace dump <trajectory-id> --raw
 ```
 
-يجب ألا تظهر بيانات التفكير الخام، أو `reasoning_content`، أو `reasoning_details`، أو وسائط الأدوات المقطوعة والمستبعدة، أو رسائل المتابعة/التمهيد الاصطناعية في رسائل الجلسة المرئية المحفوظة، أو أحداث وقت التشغيل/الجلسة، أو الملخصات، أو ملفات الذاكرة، أو سجلات المهارات، أو آثار التصدير. قد تظهر بيانات آمنة مثل سبب الإنهاء، والاستخدام، و`reasoningMetadata`، وحالة القطع، وحالة المتابعة.
+يجب ألا تظهر بيانات التفكير الخام، أو `reasoning_content`، أو `reasoning_details`، أو وسائط الأدوات المقطوعة والمستبعدة، أو رسائل continuation/prefill الاصطناعية في رسائل الجلسة المرئية المحفوظة، أو أحداث runtime/session، أو الملخصات، أو ملفات الذاكرة، أو سجلات المهارات، أو آثار التصدير. قد تظهر بيانات آمنة مثل سبب الإنهاء، والاستخدام، و`reasoningMetadata`، وحالة القطع، وحالة continuation.
 
-تستخدم اختبارات المزود، وصوت Discord، وfaster-whisper المحاكاة حيث تكون الحزم الاختيارية أو الخدمات الحية غائبة. استدعاءات المزود الحية، وصوت Discord الحقيقي، والتقاط الميكروفون، وتنزيلات النموذج الأولى هي اختبارات تكامل المشغل، وليست متطلبات CI الأساسية.
+## التحقق من التثبيت والتحديث والحزم وإزالة التثبيت
+
+سطح الإصدار ليس TypeScript فقط. للمثبّت، والمحدّث، والحزمة، وسكربتات التسليم بوابات تحقق خاصة:
+
+```bash
+pnpm run verify:local-bin
+pnpm run pack:dry-run
+pnpm run verify:package-bin
+pnpm run validate:install
+pnpm run validate:source-install
+pnpm run validate:uninstall
+pnpm run validate:docker
+pnpm run validate:homebrew
+```
+
+استخدم هذه الأوامر عند تغيير:
+
+- `package.json` أو بيانات الحزمة أو `bin` أو `files`
+- `scripts/install.sh` أو `scripts/setup-estacoda.sh` أو `scripts/uninstall.sh` أو `scripts/estacoda-wrapper.sh`
+- توجيه التحديث أو سلوك managed-source
+- توثيق Docker أو Homebrew أو npm أو source-install
+- حدود حزم WhatsApp bridge
+
+يفحص `verify-package-bin.sh` أيضًا أن npm tarball يحتوي الملفات التشغيلية المطلوبة ويستبعد source وwebsite وtest وnode_modules ومسارات الأسرار والحالة.
+
+## تحقق المشغّل اليدوي
+
+تحافظ المحاكاة على حتمية CI، لكن بعض السلوك يجب اختباره حيًا قبل وصفه بأنه live-proven:
+
+- استدعاءات المزوّدين مع النموذج/المزوّد المستهدف
+- جلسات Telegram وWhatsApp gateway
+- Browserbase أو جلسات متصفح حية
+- hosted TTS/STT وتنزيل Local STT عند التشغيل الأول
+- التقاط الميكروفون ومسارات Discord voice
+- مسارات تثبيت Docker/Homebrew/npm في بيئات نظيفة
+- عرض العربية في الطرفية داخل سير عمل حقيقي
+
+اجمع الأدلة عبر:
+
+- مخرجات الأوامر
+- السجلات وtrace IDs
+- لقطات شاشة لمشاكل UI أو عرض الطرفية
+- المزوّد/القناة/الإعدادات المستخدمة بدقة
+- خطوات إعادة إنتاج الأعطال
 
 ## الممارسة الموصى بها
 
-1. شغل `pnpm run typecheck` أولاً.
-2. شغل `pnpm run test`، و`pnpm run smoke`، و`pnpm run smoke:dist` قبل إعلان النجاح.
-3. للسلوك الحي، شغل التحقق اليدوي للمشغل.
-4. سجّل الأعطال بلقطات شاشة، وسجلات، وخطوات إعادة الإنتاج.
+1. شغّل `pnpm run typecheck` أولًا.
+2. شغّل الاختبارات المستهدفة للنظام الفرعي الذي غيّرته.
+3. شغّل مسار التحقق الأساسي قبل إعلان النجاح.
+4. شغّل أدوات التثبيت والحزم عند تغيير أسطح الإصدار.
+5. شغّل تحققًا حيًا عند تغيير المزوّدين، القنوات، المتصفح، الصوت، المثبّت، أو سلوك العربية في الطرفية.
+6. وثّق الأعطال بالسجلات، الآثار، لقطات الشاشة، وخطوات إعادة الإنتاج.
 
 ## صفحات ذات صلة
 
 - [المشكلات المعروفة](./known-issues.md) — القيود التي تؤثر على نطاق الاختبار
-- [تشغيل البوابة](./gateway-operations.md) — أوامر المشغل للتشخيص
+- [تشغيل البوابة](./gateway-operations.md) — أوامر المشغّل للتشخيص
+- [تشغيل التحديث](./update-operations.md) — سلوك التحديث والتعافي
+- [النسخ الاحتياطي والحالة](./backups-and-state.md) — الحالة التي يجب حمايتها قبل الاختبارات المدمّرة

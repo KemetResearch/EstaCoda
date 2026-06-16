@@ -22,7 +22,6 @@ These surfaces exist in code or registry but are not live for users.
 | MiniMax LLM adapter | Catalog-known, not runnable | Appears in metadata but is not a live inference route. |
 | Nous LLM adapter | Catalog-known, not runnable | Appears in metadata but is not a live inference route. |
 | Arbitrary external memory providers | Unsupported | Only the built-in `file` provider constructs a live provider. Named providers without code implementation are rejected. |
-| WhatsApp as a non-experimental channel | Unsupported | Gated behind `experimental: true` by design. |
 
 ## Experimental in v0.1.0
 
@@ -30,7 +29,6 @@ These features are code-gated or maturity-marked. Enable them only if you unders
 
 | Feature | Gate | Risk |
 |---------|------|------|
-| WhatsApp channel | `channels.whatsapp.experimental: true` | Uses unofficial Baileys library. Meta may suspend accounts. |
 | Session compression | `compression.enabled` and `compression.experimental` both `true` | Experimental-only. Disabled by default. |
 | Agent Evolution autonomy above `suggest` | `skills.autonomy` modes above `suggest` | Phase 1A records reviewable evidence/proposals and shadow-only decisions. Real auto-promotion, auto-rollback, and automatic local skill creation are planned, not active. |
 | Skill evolution/proposal/promotion workflows | `skill.propose_patch`, `skill.rollback` | Governed but not fully autonomous. Promotion runs eval gates. |
@@ -47,8 +45,7 @@ These channels and providers exist in code but lack live validation evidence for
 
 | Surface | Evidence | Note |
 |---------|----------|------|
-| Discord channel | Present, not live-proven | Attachments, threads, and progress streaming not supported by capability registry. |
-| Email channel | Present, not live-proven | Attachments not supported by capability registry. |
+| Discord channel | Experimental | Adapter is present; live validation is incomplete. |
 | Google LLM provider | Configurable/catalog-known | Config path exists but not live-proven in this build. |
 | Anthropic LLM provider | Configurable/catalog-known | Config path exists but not runnable in this build. |
 
@@ -62,8 +59,7 @@ These channels and providers exist in code but lack live validation evidence for
 - Memory rendering is selective but not ranked. No freshness/staleness handling.
 - On non-vision providers, image analysis degrades to metadata-only.
 - Gateway status reports readiness, not real background-process liveness.
-- Full runtime CLI localization is incomplete. Arabic support is limited to setup labels and select surfaces.
-- Mixed Arabic + English technical tokens can show terminal bidi artifacts.
+- Full runtime CLI localization is incomplete. Arabic terminal rendering supports shaped, bidirectional Arabic, but not every CLI string is localized.
 - Evaluation substrate exists but is not a scored automated benchmark.
 - Internal alpha harness is manual and not yet a strict release gate.
 - Provider message content support was widened for vision, but many places still assume string content conceptually.

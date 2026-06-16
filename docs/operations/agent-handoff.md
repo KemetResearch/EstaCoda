@@ -44,4 +44,4 @@ skills/
 
 v0.8: Durable Workflow — state machines, wait/resume/cancel, workflow run persistence, approval gates.
 
-See the Docusaurus operations and release-process docs for current public handoff guidance.
+See the Docusaurus operations docs for current public operator guidance.
