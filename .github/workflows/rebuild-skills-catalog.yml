@@ -48,7 +48,10 @@ jobs:
         run: pnpm run skills:catalog
 
       - name: Install website dependencies
-        run: pnpm --dir website install --frozen-lockfile
+        run: pnpm --dir website install --frozen-lockfile --ignore-workspace
+
+      - name: Verify website CLI dependencies
+        run: test -x website/node_modules/.bin/docusaurus
 
       - name: Validate website build
         run: pnpm --dir website run build
