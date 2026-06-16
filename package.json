@@ -61,7 +61,7 @@
     "smoke:bun": "bun src/smoke.ts",
     "audit:esm": "node scripts/audit-esm.mjs dist",
     "audit:runtime-imports": "node scripts/audit-runtime-imports.mjs",
-    "test": "vitest run",
+    "test": "vitest run --config vitest.node.config.ts",
     "test:node": "vitest run --config vitest.node.config.ts",
     "test:bun": "bun ./node_modules/vitest/vitest.mjs run",
     "alpha:harness": "node --import tsx scripts/internal-alpha.ts",

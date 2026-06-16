@@ -163,6 +163,59 @@ describe("skills catalog builder", () => {
       counts: { total: 1 }
     });
   });
+
+  it("preserves generatedAt when existing output is semantically unchanged", async () => {
+    const repoRoot = await createTempRepo();
+    await writeSourceRegistry(repoRoot, [{ path: "skills/official", sourceType: "official" }]);
+    await writeSkill(repoRoot, "skills/official/stable/SKILL.md", validFrontmatter({
+      name: "Stable Skill"
+    }));
+
+    const first = await buildSkillsCatalog({
+      repoRoot,
+      generatedAt: "2026-06-12T00:00:00.000Z"
+    });
+    const second = await buildSkillsCatalog({
+      repoRoot,
+      generatedAt: "2026-06-13T00:00:00.000Z"
+    });
+
+    await expect(readJson(first.outputPaths.skills)).resolves.toMatchObject({
+      generatedAt: "2026-06-12T00:00:00.000Z"
+    });
+    await expect(readJson(first.outputPaths.meta)).resolves.toMatchObject({
+      generatedAt: "2026-06-12T00:00:00.000Z"
+    });
+    expect(second.catalog.generatedAt).toBe("2026-06-12T00:00:00.000Z");
+    expect(second.meta.generatedAt).toBe("2026-06-12T00:00:00.000Z");
+  });
+
+  it("uses a fresh generatedAt when catalog content changes", async () => {
+    const repoRoot = await createTempRepo();
+    await writeSourceRegistry(repoRoot, [{ path: "skills/official", sourceType: "official" }]);
+    await writeSkill(repoRoot, "skills/official/changing/SKILL.md", validFrontmatter({
+      name: "Changing Skill"
+    }));
+
+    await buildSkillsCatalog({
+      repoRoot,
+      generatedAt: "2026-06-12T00:00:00.000Z"
+    });
+    await writeSkill(repoRoot, "skills/official/changing/SKILL.md", validFrontmatter({
+      description: "Changed description."
+    }));
+    const result = await buildSkillsCatalog({
+      repoRoot,
+      generatedAt: "2026-06-13T00:00:00.000Z"
+    });
+
+    expect(result.catalog.generatedAt).toBe("2026-06-13T00:00:00.000Z");
+    expect(result.meta.generatedAt).toBe("2026-06-13T00:00:00.000Z");
+    await expect(readJson(result.outputPaths.skills)).resolves.toMatchObject({
+      generatedAt: "2026-06-13T00:00:00.000Z",
+      skills: [{ description: "Changed description." }]
+    });
+  });
 });
 
 async function createTempRepo(): Promise<string> {

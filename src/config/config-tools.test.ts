@@ -2,7 +2,8 @@ import { describe, expect, it, vi } from "vitest";
 import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { tmpdir } from "node:os";
-import type { SessionEvent } from "../contracts/session.js";
+import type { ModelProfile } from "../contracts/provider.js";
+import type { SessionEvent, SessionModelOverride } from "../contracts/session.js";
 import { InMemorySessionDB } from "../session/in-memory-session-db.js";
 import { resolveProfileStateHome } from "./profile-home.js";
 import { createConfigTools } from "../tools/config-tools.js";
@@ -60,6 +61,119 @@ type CompressionStatusMetadata = {
     };
   };
 };
+
+type ProviderStatusMetadata = {
+  model: ModelProfile;
+  profileModel: ModelProfile;
+  effectiveModel: {
+    provider: string;
+    id: string;
+    sessionOverride: boolean;
+  };
+  sessionModelOverride?: {
+    provider: string;
+    id: string;
+    setAt: string;
+    source: string;
+  };
+  sessionModelOverrideStatus: "none" | "active" | "ignored";
+  sessionModelOverrideMessage?: string;
+};
+
+describe("config.provider.status", () => {
+  it("reports profile config when no session override exists", async () => {
+    const homeDir = await configHome(localModelConfig({
+      primaryModel: "qwen2.5:3b",
+      models: ["qwen2.5:3b", "phi4:latest"]
+    }));
+
+    const result = await runProviderStatusTool({ homeDir });
+    const status = providerMetadata(result);
+
+    expect(result.content).toContain("Model: local/qwen2.5:3b");
+    expect(result.content).toContain("Selected route: local/qwen2.5:3b");
+    expect(result.content).not.toContain("session override");
+    expect(result.content).not.toContain("Profile config:");
+    expect(status.effectiveModel).toEqual({
+      provider: "local",
+      id: "qwen2.5:3b",
+      sessionOverride: false
+    });
+    expect(status.profileModel.id).toBe("qwen2.5:3b");
+    expect(status.sessionModelOverrideStatus).toBe("none");
+  });
+
+  it("reports valid session model override as the effective model", async () => {
+    const homeDir = await configHome(localModelConfig({
+      primaryModel: "qwen2.5:3b",
+      models: ["qwen2.5:3b", "phi4:latest"]
+    }));
+    const sessionDb = new InMemorySessionDB();
+    await sessionDb.createSession({ id: "session-1", profileId: "default" });
+    await sessionDb.setSessionModelOverride("session-1", sessionOverride("phi4:latest"));
+
+    const result = await runProviderStatusTool({
+      homeDir,
+      sessionId: "session-1",
+      sessionDb
+    });
+    const status = providerMetadata(result);
+
+    expect(result.content).toContain("Model: local/phi4:latest (session override)");
+    expect(result.content).toContain("Profile config: local/qwen2.5:3b");
+    expect(result.content).toContain("Selected route: local/phi4:latest");
+    expect(result.content).not.toContain("Selected route: local/qwen2.5:3b");
+    expect(status.effectiveModel).toEqual({
+      provider: "local",
+      id: "phi4:latest",
+      sessionOverride: true
+    });
+    expect(status.model.id).toBe("phi4:latest");
+    expect(status.profileModel.id).toBe("qwen2.5:3b");
+    expect(status.sessionModelOverride).toEqual({
+      provider: "local",
+      id: "phi4:latest",
+      setAt: "2026-06-15T00:00:00.000Z",
+      source: "cli"
+    });
+    expect(status.sessionModelOverrideStatus).toBe("active");
+  });
+
+  it("reports ignored stale session model override", async () => {
+    const homeDir = await configHome(localModelConfig({
+      primaryModel: "qwen2.5:3b",
+      models: ["qwen2.5:3b"]
+    }));
+    const sessionDb = new InMemorySessionDB();
+    await sessionDb.createSession({ id: "session-1", profileId: "default" });
+    await sessionDb.setSessionModelOverride("session-1", sessionOverride("missing-model"));
+
+    const result = await runProviderStatusTool({
+      homeDir,
+      sessionId: "session-1",
+      sessionDb
+    });
+    const status = providerMetadata(result);
+
+    expect(result.content).toContain("Model: local/qwen2.5:3b");
+    expect(result.content).toContain("Session override ignored:");
+    expect(result.content).toContain("Stored session override: local/missing-model");
+    expect(result.content).toContain("Selected route: local/qwen2.5:3b");
+    expect(status.effectiveModel).toEqual({
+      provider: "local",
+      id: "qwen2.5:3b",
+      sessionOverride: false
+    });
+    expect(status.sessionModelOverride).toEqual({
+      provider: "local",
+      id: "missing-model",
+      setAt: "2026-06-15T00:00:00.000Z",
+      source: "cli"
+    });
+    expect(status.sessionModelOverrideStatus).toBe("ignored");
+    expect(status.sessionModelOverrideMessage).toContain("Stored model override is no longer present");
+  });
+});
 
 describe("config.compression.status", () => {
   it("reports default disabled compression without session state", async () => {
@@ -304,6 +418,65 @@ async function configHome(config: Record<string, unknown>): Promise<string> {
   return homeDir;
 }
 
+function localModelConfig(input: { primaryModel: string; models: string[] }): Record<string, unknown> {
+  return {
+    model: {
+      provider: "local",
+      id: input.primaryModel
+    },
+    providers: {
+      local: {
+        models: input.models
+      }
+    }
+  };
+}
+
+function sessionOverride(modelId: string): SessionModelOverride {
+  const profile = modelProfile(modelId);
+  return {
+    route: {
+      provider: "local",
+      id: modelId,
+      contextWindowTokens: profile.contextWindowTokens,
+      authMethod: "none"
+    },
+    modelProfile: profile,
+    setAt: "2026-06-15T00:00:00.000Z",
+    source: "cli"
+  };
+}
+
+function modelProfile(modelId: string): ModelProfile {
+  return {
+    provider: "local",
+    id: modelId,
+    contextWindowTokens: 8192,
+    supportsTools: false,
+    supportsVision: false,
+    supportsStructuredOutput: false
+  };
+}
+
+async function runProviderStatusTool(input: {
+  homeDir: string;
+  sessionDb?: Pick<InMemorySessionDB, "listEvents" | "getSessionModelOverride">;
+  sessionId?: string;
+}) {
+  const tools = createConfigTools({
+    workspaceRoot: input.homeDir,
+    homeDir: input.homeDir,
+    profileId: "default",
+    sessionDb: input.sessionDb,
+    sessionId: input.sessionId
+  });
+  const tool = tools.find((candidate) => candidate.name === "config.provider.status");
+  if (tool === undefined) {
+    throw new Error("config.provider.status tool not registered");
+  }
+  return await tool.run({});
+}
+
 async function runCompressionStatusTool(input: {
   homeDir: string;
   sessionDb?: { listEvents(sessionId: string): Promise<SessionEvent[]> };
@@ -325,4 +498,8 @@ async function runCompressionStatusTool(input: {
 
 function metadata(result: Awaited<ReturnType<typeof runCompressionStatusTool>>): CompressionStatusMetadata {
   return result.metadata as CompressionStatusMetadata;
+}
+
+function providerMetadata(result: Awaited<ReturnType<typeof runProviderStatusTool>>): ProviderStatusMetadata {
+  return result.metadata as ProviderStatusMetadata;
 }

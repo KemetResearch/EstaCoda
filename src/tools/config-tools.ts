@@ -1,6 +1,7 @@
 import type { RegisteredTool, SessionToolProvider } from "../contracts/tool.js";
 import type { SessionDB } from "../contracts/session.js";
 import { buildCompressionStatusReport, renderCompressionStatusReport } from "../config/compression-status.js";
+import { resolveEffectiveSessionModelOverride } from "../providers/model-switch-resolver.js";
 import {
   loadRuntimeConfig,
   setupMcpConfig,
@@ -26,7 +27,7 @@ export type ConfigToolsOptions = {
   homeDir?: string;
   profileId?: string;
   sessionId?: string | (() => string);
-  sessionDb?: Pick<SessionDB, "listEvents">;
+  sessionDb?: Pick<SessionDB, "listEvents"> & Partial<Pick<SessionDB, "getSessionModelOverride">>;
 };
 
 export function createConfigTools(options: ConfigToolsOptions): RegisteredTool[] {
@@ -45,12 +46,49 @@ export function createConfigTools(options: ConfigToolsOptions): RegisteredTool[]
       isAvailable: () => true,
       run: async () => {
         const loaded = await loadRuntimeConfig(options);
-        const diagnostic = await diagnoseProviderConfig(loaded);
+        const sessionId = typeof options.sessionId === "function"
+          ? options.sessionId()
+          : options.sessionId;
+        const storedOverride = sessionId === undefined || options.sessionDb?.getSessionModelOverride === undefined
+          ? undefined
+          : await options.sessionDb.getSessionModelOverride(sessionId).catch(() => undefined);
+        const effectiveOverride = await resolveEffectiveSessionModelOverride(storedOverride, {
+          config: loaded.config,
+          providerRegistry: loaded.providerRegistry
+        });
+        const effectiveProvider = effectiveOverride?.ok === true
+          ? effectiveOverride.route.provider
+          : loaded.model.provider;
+        const effectiveModelId = effectiveOverride?.ok === true
+          ? effectiveOverride.route.id
+          : loaded.model.id;
+        const diagnosticConfig = effectiveOverride?.ok === true
+          ? {
+              ...loaded,
+              model: effectiveOverride.route.profile,
+              primaryModelRoute: effectiveOverride.route
+            }
+          : loaded;
+        const diagnostic = await diagnoseProviderConfig(diagnosticConfig);
+        const modelLines = effectiveOverride?.ok === true
+          ? [
+              `Model: ${effectiveOverride.route.provider}/${effectiveOverride.route.id} (session override)`,
+              `Profile config: ${loaded.model.provider}/${loaded.model.id}`
+            ]
+          : effectiveOverride?.ok === false
+            ? [
+                `Model: ${loaded.model.provider}/${loaded.model.id}`,
+                `Session override ignored: ${effectiveOverride.message}`,
+                `Stored session override: ${effectiveOverride.override.route.provider}/${effectiveOverride.override.route.id}`
+              ]
+            : [
+                `Model: ${loaded.model.provider}/${loaded.model.id}`
+              ];
 
         return {
           ok: true,
           content: [
-            `Model: ${loaded.model.provider}/${loaded.model.id}`,
+            ...modelLines,
             `Web extraction: ${loaded.web.enableNetwork ? "enabled" : "disabled"}`,
             `Browser backend: ${loaded.browser.backend}`,
             `Config sources: ${loaded.sources.join(", ") || "none"}`,
@@ -59,7 +97,29 @@ export function createConfigTools(options: ConfigToolsOptions): RegisteredTool[]
           ].join("\n"),
           metadata: {
             sources: loaded.sources,
-            model: loaded.model,
+            model: effectiveOverride?.ok === true ? effectiveOverride.route.profile : loaded.model,
+            profileModel: loaded.model,
+            effectiveModel: {
+              provider: effectiveProvider,
+              id: effectiveModelId,
+              sessionOverride: effectiveOverride?.ok === true
+            },
+            sessionModelOverride: storedOverride === undefined
+              ? undefined
+              : {
+                  provider: storedOverride.route.provider,
+                  id: storedOverride.route.id,
+                  setAt: storedOverride.setAt,
+                  source: storedOverride.source
+                },
+            sessionModelOverrideStatus: effectiveOverride === undefined
+              ? "none"
+              : effectiveOverride.ok
+                ? "active"
+                : "ignored",
+            sessionModelOverrideMessage: effectiveOverride?.ok === false
+              ? effectiveOverride.message
+              : undefined,
             web: loaded.web,
             browser: loaded.browser,
             providerDiagnostic: diagnostic
