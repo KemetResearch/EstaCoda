@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   __detectForgetPreferenceForTest,
   __detectProjectFactForTest,
+  __detectUserPreferenceCandidateForTest,
   __detectUserPreferenceForTest,
   __extractPromotionStatementCandidatesForTest
 } from "./memory-promotion.js";
@@ -29,6 +30,37 @@ describe("memory promotion deterministic detectors", () => {
     ["foo is stored under ~/.estacoda/foo", "Foo is stored under `~/.estacoda/foo`."]
   ])("accepts direct project fact form %j", (input, expected) => {
     expect(__detectProjectFactForTest(input)).toBe(expected);
+  });
+
+  it.each([
+    ["I prefer TypeScript", "language-default", "TypeScript", "language-default:typescript"],
+    ["Default to TypeScript", "language-default", "TypeScript", "language-default:typescript"],
+    ["Use TypeScript by default", "language-default", "TypeScript", "language-default:typescript"],
+    ["I prefer pnpm", "package-manager", "pnpm", "package-manager:pnpm"],
+    ["I prefer pnpm test", "test-command", "pnpm test", "test-command:pnpm test"],
+    ["always use strict mode", "code-style", "strict mode", "always use strict mode."]
+  ])("derives deterministic preference category data for %j", (input, category, value, key) => {
+    expect(__detectUserPreferenceCandidateForTest(input)).toMatchObject({
+      category,
+      value,
+      key
+    });
+  });
+
+  it("does not derive a conflict category for non-canonical want-by-default wording", () => {
+    expect(__detectUserPreferenceCandidateForTest("we want pnpm by default")).toMatchObject({
+      content: "Want pnpm by default.",
+      category: undefined,
+      value: "pnpm"
+    });
+  });
+
+  it("does not derive a code-style category for arbitrary always-use preferences", () => {
+    expect(__detectUserPreferenceCandidateForTest("always use GPT-5")).toMatchObject({
+      content: "Always use GPT-5.",
+      category: undefined,
+      value: "GPT-5"
+    });
   });
 
   it.each([

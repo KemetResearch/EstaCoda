@@ -1,4 +1,4 @@
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -352,6 +352,194 @@ describe("memory hardening evals", () => {
         sourceSessionIds: expect.arrayContaining(["canonical-root-a", "canonical-root-b"])
       })
     ]);
+  });
+
+  it("supersedes conflicting package-manager defaults without broad substring matching", async () => {
+    const root = await makeTempDir();
+    const store = new MemoryStore();
+    const promotionStore = new MemoryPromotionStore({ path: join(root, "promotions.json") });
+    const provider = new LocalMemoryProvider({ store, promotionStore });
+
+    await provider.conclude({
+      id: "pref-npm",
+      kind: "user-preference",
+      content: "Prefer npm.",
+      confidence: 0.8
+    });
+    await provider.conclude({
+      id: "pref-pnpm",
+      kind: "user-preference",
+      content: "Prefer pnpm.",
+      confidence: 0.9
+    });
+
+    expect(store.read("USER.md")).toContain("Prefer pnpm.");
+    expect(store.read("USER.md")).not.toContain("Prefer npm.");
+    expect(await promotionStore.list()).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        id: "pref-npm",
+        content: "Prefer npm.",
+        active: false,
+        supersededBy: "pref-pnpm"
+      }),
+      expect.objectContaining({
+        id: "pref-pnpm",
+        content: "Prefer pnpm.",
+        active: true
+      })
+    ]));
+  });
+
+  it("keeps unrelated deterministic preferences active together", async () => {
+    const root = await makeTempDir();
+    const store = new MemoryStore();
+    const promotionStore = new MemoryPromotionStore({ path: join(root, "promotions.json") });
+    const provider = new LocalMemoryProvider({ store, promotionStore });
+
+    await provider.conclude({
+      id: "pref-typescript",
+      kind: "user-preference",
+      content: "Prefer TypeScript.",
+      confidence: 0.8
+    });
+    await provider.conclude({
+      id: "pref-release-notes",
+      kind: "user-preference",
+      content: "Prefer careful release notes.",
+      confidence: 0.9
+    });
+
+    expect(store.read("USER.md")).toContain("Prefer TypeScript.");
+    expect(store.read("USER.md")).toContain("Prefer careful release notes.");
+    const records = await promotionStore.list();
+    expect(records).toHaveLength(2);
+    expect(records).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        id: "pref-typescript",
+        active: true
+      }),
+      expect.objectContaining({
+        id: "pref-release-notes",
+        active: true
+      })
+    ]));
+    expect(records.some((record) => record.supersededBy !== undefined)).toBe(false);
+  });
+
+  it("keeps project facts out of user-preference conflict categories", async () => {
+    const root = await makeTempDir();
+    const store = new MemoryStore();
+    const promotionStore = new MemoryPromotionStore({ path: join(root, "promotions.json") });
+    const provider = new LocalMemoryProvider({ store, promotionStore });
+
+    await provider.conclude({
+      id: "fact-typescript",
+      kind: "project-fact",
+      content: "Project uses TypeScript.",
+      confidence: 0.8
+    });
+    await provider.conclude({
+      id: "fact-javascript",
+      kind: "project-fact",
+      content: "Project uses JavaScript.",
+      confidence: 0.9
+    });
+
+    expect(store.read("MEMORY.md")).toContain("Project uses TypeScript.");
+    expect(store.read("MEMORY.md")).toContain("Project uses JavaScript.");
+    expect(await promotionStore.list()).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        id: "fact-typescript",
+        kind: "project-fact",
+        active: true
+      }),
+      expect.objectContaining({
+        id: "fact-javascript",
+        kind: "project-fact",
+        active: true
+      })
+    ]));
+  });
+
+  it("does not supersede project facts with preference-like content", async () => {
+    const root = await makeTempDir();
+    const store = new MemoryStore();
+    const promotionStore = new MemoryPromotionStore({ path: join(root, "promotions.json") });
+    const provider = new LocalMemoryProvider({ store, promotionStore });
+
+    await provider.conclude({
+      id: "fact-prefer-npm",
+      kind: "project-fact",
+      content: "Prefer npm.",
+      confidence: 0.8
+    });
+    await provider.conclude({
+      id: "pref-pnpm",
+      kind: "user-preference",
+      content: "Prefer pnpm.",
+      confidence: 0.9
+    });
+
+    expect(store.read("MEMORY.md")).toContain("Prefer npm.");
+    expect(store.read("USER.md")).toContain("Prefer pnpm.");
+    const records = await promotionStore.list();
+    expect(records).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        id: "fact-prefer-npm",
+        kind: "project-fact",
+        active: true
+      }),
+      expect.objectContaining({
+        id: "pref-pnpm",
+        kind: "user-preference",
+        active: true
+      })
+    ]));
+    expect(records.find((record) => record.id === "fact-prefer-npm")?.supersededBy).toBeUndefined();
+  });
+
+  it("loads existing promotion records without persisted category metadata", async () => {
+    const root = await makeTempDir();
+    const promotionsPath = join(root, "promotions.json");
+    await writeFile(promotionsPath, `${JSON.stringify({
+      version: 1,
+      records: [{
+        id: "pref-existing-npm",
+        kind: "user-preference",
+        content: "Prefer npm.",
+        active: true,
+        confidence: 0.8,
+        occurrences: 2,
+        source: "repeated-user-input",
+        sourceSessionIds: ["root-a", "root-b"],
+        updatedAt: "2026-06-16T00:00:00.000Z"
+      }]
+    }, null, 2)}\n`, "utf8");
+    const store = new MemoryStore();
+    store.write("USER.md", "- Prefer npm.");
+    const promotionStore = new MemoryPromotionStore({ path: promotionsPath });
+    const provider = new LocalMemoryProvider({ store, promotionStore });
+
+    await provider.conclude({
+      id: "pref-next-pnpm",
+      kind: "user-preference",
+      content: "Prefer pnpm.",
+      confidence: 0.9
+    });
+
+    expect(store.read("USER.md")).toContain("Prefer pnpm.");
+    expect(store.read("USER.md")).not.toContain("Prefer npm.");
+    expect(await promotionStore.list()).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        id: "pref-existing-npm",
+        active: false,
+        supersededBy: "pref-next-pnpm"
+      }),
+      expect.objectContaining({
+        id: "pref-next-pnpm",
+        active: true
+      })
+    ]));
   });
 
   it("strengthens an existing canonical promotion instead of creating duplicate variant records", async () => {

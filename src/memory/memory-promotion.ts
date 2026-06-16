@@ -163,9 +163,16 @@ export async function resolveProjectFactPromotion(options: {
 type PreferenceCandidate = {
   key: string;
   content: string;
-  category?: string;
+  category?: PreferenceConflictCategory;
   value?: string;
 };
+
+type PreferenceConflictCategory =
+  | "reply-verbosity"
+  | "language-default"
+  | "test-command"
+  | "package-manager"
+  | "code-style";
 
 function firstDetectedCandidate(
   candidates: readonly PromotionStatementCandidate[],
@@ -274,29 +281,26 @@ function detectUserPreference(text: string): PreferenceCandidate | undefined {
 
   const canonicalPatterns: Array<{
     regex: RegExp;
-    category: string;
   }> = [
     {
-      regex: /^(?:i\s+)?prefer\s+(.+)$/iu,
-      category: "prefer"
+      regex: /^(?:i\s+)?prefer\s+(.+)$/iu
     },
     {
-      regex: /^(?:please\s+)?use\s+(.+?)\s+by\s+default$/iu,
-      category: "prefer"
+      regex: /^(?:please\s+)?use\s+(.+?)\s+by\s+default$/iu
     },
     {
-      regex: /^(?:please\s+)?default\s+to\s+(.+)$/iu,
-      category: "prefer"
+      regex: /^(?:please\s+)?default\s+to\s+(.+)$/iu
     }
   ];
   const nonCanonicalPatterns: Array<{
     regex: RegExp;
     render: (value: string) => string;
-    category?: string;
+    category?: (value: string) => PreferenceConflictCategory | undefined;
   }> = [
     {
       regex: /^(?:please\s+)?always\s+use\s+(.+)$/iu,
-      render: (value) => `Always use ${value}`
+      render: (value) => `Always use ${value}`,
+      category: derivePreferenceConflictCategory
     },
     {
       regex: /^(?:we\s+)?want\s+(.+?)\s+by\s+default$/iu,
@@ -312,7 +316,7 @@ function detectUserPreference(text: string): PreferenceCandidate | undefined {
       continue;
     }
 
-    const canonical = canonicalPreference(pattern.category, captured);
+    const canonical = canonicalPreference(captured);
     if (canonical !== undefined) {
       return canonical;
     }
@@ -330,7 +334,7 @@ function detectUserPreference(text: string): PreferenceCandidate | undefined {
     return {
       key: content.toLowerCase(),
       content,
-      category: pattern.category,
+      category: pattern.category?.(captured),
       value: captured
     };
   }
@@ -338,14 +342,15 @@ function detectUserPreference(text: string): PreferenceCandidate | undefined {
   return undefined;
 }
 
-function canonicalPreference(category: string, value: string): PreferenceCandidate | undefined {
+function canonicalPreference(value: string): PreferenceCandidate | undefined {
   const normalizedValue = normalizePreferenceValue(value);
   if (normalizedValue.length === 0) {
     return undefined;
   }
+  const category = derivePreferenceConflictCategory(normalizedValue);
   const content = `Prefer ${normalizedValue}.`;
   return {
-    key: `${category}:${normalizedValue.toLowerCase()}`,
+    key: `${category ?? "prefer"}:${normalizedValue.toLowerCase()}`,
     content,
     category,
     value: normalizedValue
@@ -354,6 +359,26 @@ function canonicalPreference(category: string, value: string): PreferenceCandida
 
 function normalizePreferenceValue(value: string): string {
   return stripTrailingPunctuation(value).replace(/\s+/gu, " ").trim();
+}
+
+function derivePreferenceConflictCategory(value: string): PreferenceConflictCategory | undefined {
+  const normalized = value.toLowerCase();
+  if (/^(?:concise|detailed|brief)(?: telegram)? repl(?:y|ies)$/u.test(normalized)) {
+    return "reply-verbosity";
+  }
+  if (/^(?:npm|pnpm|yarn|bun)$/u.test(normalized)) {
+    return "package-manager";
+  }
+  if (/^(?:npm|pnpm|yarn|bun) test$/u.test(normalized)) {
+    return "test-command";
+  }
+  if (/^(?:typescript|javascript)$/u.test(normalized)) {
+    return "language-default";
+  }
+  if (/^(?:strict mode|semicolons|tabs|spaces)$/u.test(normalized)) {
+    return "code-style";
+  }
+  return undefined;
 }
 
 function searchQueryForPreference(candidate: PreferenceCandidate): string {
@@ -431,14 +456,18 @@ function detectVerbosityPreference(normalized: string): PreferenceCandidate | un
   if (concisePatterns.some((pattern) => pattern.test(statement))) {
     return {
       key: "prefer concise replies.",
-      content: "Prefer concise replies."
+      content: "Prefer concise replies.",
+      category: "reply-verbosity",
+      value: "concise replies"
     };
   }
 
   if (detailedPatterns.some((pattern) => pattern.test(statement))) {
     return {
       key: "prefer detailed replies.",
-      content: "Prefer detailed replies."
+      content: "Prefer detailed replies.",
+      category: "reply-verbosity",
+      value: "detailed replies"
     };
   }
 
@@ -501,6 +530,10 @@ export function __detectForgetPreferenceForTest(text: string): string | undefine
 
 export function __detectProjectFactForTest(text: string): string | undefined {
   return detectProjectFact(text)?.content;
+}
+
+export function __detectUserPreferenceCandidateForTest(text: string): PreferenceCandidate | undefined {
+  return detectUserPreference(text);
 }
 
 export function __extractPromotionStatementCandidatesForTest(text: string): PromotionStatementCandidate[] {
