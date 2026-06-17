@@ -1,9 +1,13 @@
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { runCliCommand } from "./cli.js";
 import type { Prompt } from "./readline-prompt.js";
+import { CronStore } from "../cron/cron-store.js";
+import { InMemorySessionDB } from "../session/in-memory-session-db.js";
+import type { Runtime } from "../runtime/create-runtime.js";
+import { resolveProfileStateHome } from "../config/profile-home.js";
 
 const readlineMock = vi.hoisted(() => ({
   prompt: vi.fn(),
@@ -80,6 +84,84 @@ describe("runCliCommand update dispatch", () => {
       gatewayMode: true,
       gatewayRestart: "never",
     }));
+  });
+});
+
+describe("runCliCommand cron dispatch", () => {
+  let tempDir: string;
+
+  beforeEach(async () => {
+    tempDir = await mkdtemp(join(tmpdir(), "estacoda-cli-cron-"));
+  });
+
+  afterEach(async () => {
+    await rm(tempDir, { recursive: true, force: true });
+  });
+
+  it("creates an isolated runtime for top-level estacoda cron tick", async () => {
+    const store = new CronStore({ homeDir: tempDir });
+    const job = await store.create({
+      name: "CLI tick baseline",
+      schedule: "* * * * *",
+      prompt: "run me"
+    });
+    await store.requestRun(job.id);
+    const interactiveHandle = vi.fn(async () => ({ text: "interactive runtime should not run" }));
+    const cronHandle = vi.fn(async () => ({ text: "cron isolated runtime" }));
+    const cronDispose = vi.fn(async () => undefined);
+    const runtime = {
+      handle: interactiveHandle,
+      dispose: vi.fn(async () => undefined),
+      sessionDb: new InMemorySessionDB(),
+      sessionId: "interactive-runtime",
+      trajectoryId: "interactive-trajectory"
+    } as unknown as Runtime;
+    const cronRuntimeFactory = vi.fn(async (runtimeOptions) => ({
+      handle: cronHandle,
+      dispose: cronDispose,
+      sessionDb: runtimeOptions.sessionDb ?? new InMemorySessionDB(),
+      sessionId: runtimeOptions.sessionId,
+      trajectoryId: "cron-trajectory"
+    }) as unknown as Runtime);
+
+    const result = await runCliCommand({
+      argv: ["cron", "tick"],
+      workspaceRoot: tempDir,
+      homeDir: tempDir,
+      runtime,
+      cronRuntimeFactory
+    });
+
+    expect(result.handled).toBe(true);
+    expect(result.exitCode).toBe(0);
+    expect(result.output).toContain("Cron tick complete. Ran 1 job(s).");
+    expect(interactiveHandle).not.toHaveBeenCalled();
+    expect(cronHandle).toHaveBeenCalledTimes(1);
+    expect(cronDispose).toHaveBeenCalledTimes(1);
+    expect(cronRuntimeFactory).toHaveBeenCalledTimes(1);
+    const runtimeOptions = cronRuntimeFactory.mock.calls[0]?.[0];
+    expect(runtimeOptions).toEqual(expect.objectContaining({
+      disableCronTools: true,
+      sessionId: expect.stringMatching(/^cron-/u)
+    }));
+    expect(runtimeOptions?.disabledToolsets).toEqual(["cron", "messaging", "clarify"]);
+    expect(runtimeOptions?.sessionDb).toBe(runtime.sessionDb);
+  });
+
+  it("runs read-only cron list without loading runtime config", async () => {
+    const profilePaths = resolveProfileStateHome({ homeDir: tempDir, profileId: "broken" });
+    await mkdir(profilePaths.configPath, { recursive: true });
+
+    const result = await runCliCommand({
+      argv: ["cron", "list"],
+      workspaceRoot: tempDir,
+      homeDir: tempDir,
+      profileId: "broken"
+    });
+
+    expect(result.handled).toBe(true);
+    expect(result.exitCode).toBe(0);
+    expect(result.output).toContain("No cron jobs configured");
   });
 });
 

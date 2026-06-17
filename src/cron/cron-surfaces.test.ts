@@ -204,6 +204,45 @@ describe("Cron surfaces — job detail", () => {
   }
 });
 
+describe("Cron surfaces — current capability labels", () => {
+  it("renders attached skills as labels without planned advanced controls", () => {
+    const output = renderPlain(buildCronJobDetailViewModel({
+      job: fakeCronJob({ skills: ["daily-reporting"] }),
+      executions: [],
+    }));
+
+    expect(output).toContain("Skills: daily-reporting");
+    expect(output).not.toContain("no-agent");
+    expect(output).not.toContain("contextFrom");
+    expect(output).not.toContain("Model override");
+    expect(output).not.toContain("Enabled toolsets");
+    expect(output).not.toContain("Workdir");
+  });
+
+  it("renders no-agent mode and upstream context labels", () => {
+    const output = renderPlain(buildCronJobDetailViewModel({
+      job: fakeCronJob({
+        noAgent: true,
+        script: "watch.sh",
+        contextFrom: ["cron-upstream"]
+      }),
+      executions: [],
+    }));
+
+    expect(output).toContain("Mode: no-agent");
+    expect(output).toContain("Context from: cron-upstream");
+  });
+
+  it("renders configured workdir as a capability label", () => {
+    const output = renderPlain(buildCronJobDetailViewModel({
+      job: fakeCronJob({ workdir: "/workspace/reports" }),
+      executions: [],
+    }));
+
+    expect(output).toContain("Workdir: /workspace/reports");
+  });
+});
+
 describe("Cron surfaces — execution history", () => {
   const vm = buildCronExecutionHistoryViewModel({
     executions: [

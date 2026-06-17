@@ -504,6 +504,181 @@ describe("assembleProviderPrompt", () => {
     expect(rendered).not.toContain("<reasoning>");
   });
 
+  it("renders compact provider execution annotations for assistant history", () => {
+    const prompt = assembleProviderPrompt(basePromptInput({
+      sessionHistory: [
+        {
+          role: "assistant",
+          content: "Primary answer",
+          metadata: {
+            providerExecution: primaryProviderExecutionMetadata()
+          }
+        },
+        {
+          role: "assistant",
+          content: "Fallback answer",
+          metadata: {
+            providerExecution: fallbackProviderExecutionMetadata()
+          }
+        }
+      ]
+    }));
+    const rendered = renderMessages(prompt.messages);
+
+    expect(rendered).toContain("assistant [served_by=kimi-k2.7-code]: Primary answer");
+    expect(rendered).toContain("assistant [served_by=deepseek-v4-pro fallback_from=kimi-k2.7-code reason=rate-limit]: Fallback answer");
+    expect(rendered.match(/served_by=deepseek-v4-pro/gu)).toHaveLength(1);
+    expect(rendered).not.toContain("kimi/");
+    expect(rendered).not.toContain("deepseek/");
+  });
+
+  it("leaves unannotated history unchanged and ignores provider metadata on user messages", () => {
+    const prompt = assembleProviderPrompt(basePromptInput({
+      sessionHistory: [
+        {
+          role: "assistant",
+          content: "Plain answer"
+        },
+        {
+          role: "user",
+          content: "User turn",
+          metadata: {
+            providerExecution: fallbackProviderExecutionMetadata()
+          }
+        },
+        {
+          role: "assistant",
+          content: "Malformed answer",
+          metadata: {
+            providerExecution: { status: "fallback-success", rawBody: "SECRET_RAW_ERROR_BODY" }
+          }
+        }
+      ]
+    }));
+    const rendered = renderMessages(prompt.messages);
+
+    expect(rendered).toContain("assistant: Plain answer");
+    expect(rendered).toContain("user: User turn");
+    expect(rendered).toContain("assistant: Malformed answer");
+    expect(rendered).not.toContain("user [");
+    expect(rendered).not.toContain("Malformed answer [");
+    expect(rendered).not.toContain("SECRET_RAW_ERROR_BODY");
+  });
+
+  it("does not leak provider credentials or raw error bodies in history annotations", () => {
+    const prompt = assembleProviderPrompt(basePromptInput({
+      sessionHistory: [
+        {
+          role: "assistant",
+          content: "Fallback answer",
+          metadata: {
+            providerExecution: providerExecutionMetadataWithCredentialLeak()
+          }
+        }
+      ]
+    }));
+    const rendered = renderMessages(prompt.messages);
+
+    expect(rendered).toContain("assistant [served_by=deepseek-v4-pro fallback_from=kimi-k2.7-code reason=rate-limit]: Fallback answer");
+    expect(rendered).not.toContain("SECRET");
+    expect(rendered).not.toContain("credential");
+    expect(rendered).not.toContain("raw");
+  });
+
+  it("renders active task layer for open state on acknowledgement continuation", () => {
+    const prompt = assembleProviderPrompt(basePromptInput({
+      userText: "okay",
+      routedText: "okay",
+      activeTaskState: activeTaskState("open")
+    }));
+    const rendered = renderMessages(prompt.messages);
+
+    expect(rendered).toContain("Active task continuity:");
+    expect(rendered).toContain("subordinate to the latest user message");
+    expect(rendered).toContain("Open task: inspect provider routing");
+  });
+
+  it("does not render active task layer for satisfied, cancelled, superseded, or explicit new turns", () => {
+    const satisfied = renderMessages(assembleProviderPrompt(basePromptInput({
+      userText: "continue",
+      routedText: "continue",
+      activeTaskState: activeTaskState("satisfied")
+    })).messages);
+    const cancelled = renderMessages(assembleProviderPrompt(basePromptInput({
+      userText: "continue",
+      routedText: "continue",
+      activeTaskState: activeTaskState("cancelled")
+    })).messages);
+    const superseded = renderMessages(assembleProviderPrompt(basePromptInput({
+      userText: "continue",
+      routedText: "continue",
+      activeTaskState: activeTaskState("superseded")
+    })).messages);
+    const newTask = renderMessages(assembleProviderPrompt(basePromptInput({
+      userText: "Can you review this file?",
+      routedText: "Can you review this file?",
+      activeTaskState: activeTaskState("open")
+    })).messages);
+
+    expect(satisfied).not.toContain("Active task continuity:");
+    expect(cancelled).not.toContain("Active task continuity:");
+    expect(superseded).not.toContain("Active task continuity:");
+    expect(newTask).not.toContain("Active task continuity:");
+  });
+
+  it("keeps secrets out of active task prompt", () => {
+    const prompt = assembleProviderPrompt(basePromptInput({
+      userText: "continue",
+      routedText: "continue",
+      activeTaskState: {
+        ...activeTaskState("open"),
+        promisedAction: "inspect API_KEY=secretsecretsecretsecretsecret provider logs",
+        lastProgress: "raw body TOKEN=secretsecretsecretsecretsecret"
+      }
+    }));
+    const rendered = renderMessages(prompt.messages);
+
+    expect(rendered).toContain("API_KEY=REDACTED");
+    expect(rendered).toContain("TOKEN=REDACTED");
+    expect(rendered).not.toContain("secretsecret");
+  });
+
+  it("ignores provider annotations with malicious persisted token strings", () => {
+    const prompt = assembleProviderPrompt(basePromptInput({
+      sessionHistory: [
+        {
+          role: "assistant",
+          content: "Suspicious provider metadata",
+          metadata: {
+            providerExecution: {
+              configuredPrimary: { provider: "kimi", model: "kimi-k2.7-code\ninject" },
+              actual: { provider: "deepseek", model: "deepseek-v4-pro] inject" },
+              fallbackUsed: true,
+              primaryFailureClass: "rate-limit] inject",
+              attempts: [
+                {
+                  provider: "kimi",
+                  model: "kimi-k2.7-code\ninject",
+                  ok: false,
+                  errorClass: "rate-limit] inject",
+                  routeRole: "primary",
+                  attemptedRouteIndex: 0
+                }
+              ],
+              status: "fallback-success"
+            }
+          }
+        }
+      ]
+    }));
+    const rendered = renderMessages(prompt.messages);
+
+    expect(rendered).toContain("assistant: Suspicious provider metadata");
+    expect(rendered).not.toContain("inject");
+    expect(rendered).not.toContain("served_by=");
+    expect(rendered).not.toContain("fallback_from=");
+  });
+
   it("renders tool context summaries without replacing bounded excerpts", () => {
     const prompt = assembleProviderPrompt(basePromptInput({
       toolExecutions: [
@@ -1038,6 +1213,95 @@ function providerExecution(content: string): Parameters<typeof assembleProviderC
         argumentsText: "{\"path\":\"src/index.ts\"}"
       }
     ]
+  };
+}
+
+function primaryProviderExecutionMetadata(): Record<string, unknown> {
+  return {
+    configuredPrimary: { provider: "kimi", model: "kimi-k2.7-code" },
+    actual: { provider: "kimi", model: "kimi-k2.7-code" },
+    fallbackUsed: false,
+    attempts: [
+      {
+        provider: "kimi",
+        model: "kimi-k2.7-code",
+        ok: true,
+        routeRole: "primary",
+        attemptedRouteIndex: 0
+      }
+    ],
+    status: "primary-success"
+  };
+}
+
+function fallbackProviderExecutionMetadata(): Record<string, unknown> {
+  return {
+    configuredPrimary: { provider: "kimi", model: "kimi-k2.7-code" },
+    actual: { provider: "deepseek", model: "deepseek-v4-pro" },
+    fallbackUsed: true,
+    primaryFailureClass: "rate-limit",
+    attempts: [
+      {
+        provider: "kimi",
+        model: "kimi-k2.7-code",
+        ok: false,
+        errorClass: "rate-limit",
+        routeRole: "primary",
+        attemptedRouteIndex: 0
+      },
+      {
+        provider: "deepseek",
+        model: "deepseek-v4-pro",
+        ok: true,
+        routeRole: "fallback",
+        attemptedRouteIndex: 1
+      }
+    ],
+    status: "fallback-success"
+  };
+}
+
+function providerExecutionMetadataWithCredentialLeak(): Record<string, unknown> {
+  return {
+    ...fallbackProviderExecutionMetadata(),
+    actual: {
+      provider: "deepseek",
+      model: "deepseek-v4-pro",
+      credentialId: "SECRET_ACTUAL_CREDENTIAL"
+    },
+    attempts: [
+      {
+        provider: "kimi",
+        model: "kimi-k2.7-code",
+        ok: false,
+        errorClass: "rate-limit",
+        credentialId: "SECRET_PRIMARY_CREDENTIAL",
+        rawBody: "SECRET_RAW_ERROR_BODY",
+        routeRole: "primary",
+        attemptedRouteIndex: 0
+      },
+      {
+        provider: "deepseek",
+        model: "deepseek-v4-pro",
+        ok: true,
+        credentialId: "SECRET_FALLBACK_CREDENTIAL",
+        routeRole: "fallback",
+        attemptedRouteIndex: 1
+      }
+    ],
+    rawErrorBody: "SECRET_TOP_LEVEL_RAW_ERROR_BODY"
+  };
+}
+
+function activeTaskState(status: "open" | "satisfied" | "cancelled" | "superseded") {
+  return {
+    id: "active-provider-routing",
+    status,
+    userRequest: "Check provider routing.",
+    promisedAction: "inspect provider routing",
+    lastProgress: "Provider files were located.",
+    updatedAt: "2026-06-17T00:00:00.000Z",
+    source: "heuristic" as const
   };
 }
 

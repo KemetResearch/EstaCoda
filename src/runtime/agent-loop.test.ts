@@ -193,6 +193,37 @@ function failedProviderExecution(): ProviderExecutionResult {
   };
 }
 
+function fallbackProviderExecution(content: string): ProviderExecutionResult {
+  return {
+    ok: true,
+    response: {
+      ok: true,
+      content,
+      model: "fallback-model",
+      provider: "fallback-provider"
+    },
+    fallbackUsed: true,
+    attempts: [
+      {
+        provider: model.provider,
+        model: model.id,
+        ok: false,
+        errorClass: "rate-limit",
+        credentialId: "PRIMARY_API_KEY",
+        content: "raw primary failure body"
+      },
+      {
+        provider: "fallback-provider",
+        model: "fallback-model",
+        ok: true,
+        credentialId: "FALLBACK_API_KEY",
+        content
+      }
+    ],
+    toolCalls: []
+  };
+}
+
 function memoryBudgetOverflow(kind: "USER.md" | "MEMORY.md"): MemoryBudgetOverflowError {
   return new MemoryBudgetOverflowError({
     code: "memory-budget-overflow",
@@ -430,6 +461,140 @@ describe("AgentLoop provider availability gating", () => {
     expect(userInput?.data).not.toHaveProperty("workflow");
   });
 
+  it("persists an active task when the assistant promises follow-up work", async () => {
+    const { loop, sessionDb, sessionId } = await createAgentLoop({
+      canRunProvider: true,
+      runSkillPlaybook: vi.fn(async () => []),
+      providerExecution: successfulProviderExecution("Let me inspect provider routing.")
+    });
+
+    await loop.handle({
+      text: "why did the model switch?",
+      channel: "cli",
+      trustedWorkspace: true
+    });
+
+    const agent = (await sessionDb.listMessages(sessionId)).find((message) => message.role === "agent");
+    expect(agent?.metadata?.activeTaskState).toMatchObject({
+      status: "open",
+      userRequest: "why did the model switch?",
+      promisedAction: "inspect provider routing",
+      source: "heuristic"
+    });
+  });
+
+  it("passes open active task state into an acknowledgement continuation turn", async () => {
+    const { loop, sessionDb, sessionId, providerTurnLoop } = await createAgentLoop({
+      canRunProvider: true,
+      runSkillPlaybook: vi.fn(async () => []),
+      providerExecution: successfulProviderExecution("Let me inspect provider routing.")
+    });
+
+    await loop.handle({ text: "why did the model switch?", channel: "cli", trustedWorkspace: true });
+    vi.mocked(providerTurnLoop.run).mockResolvedValueOnce({
+      providerExecution: successfulProviderExecution(
+        "I inspected the provider routing path and found the model switch comes from fallback selection after the primary route fails, with metadata persisted on the assistant message."
+      ),
+      toolExecutions: [],
+      iterations: 1
+    });
+    await loop.handle({ text: "okay", channel: "cli", trustedWorkspace: true });
+
+    expect(vi.mocked(providerTurnLoop.run).mock.calls[1]?.[0]).toMatchObject({
+      userText: "okay",
+      activeTaskState: {
+        status: "open",
+        promisedAction: "inspect provider routing"
+      }
+    });
+    const latestAgent = [...await sessionDb.listMessages(sessionId)].reverse().find((message) => message.role === "agent");
+    expect(latestAgent?.metadata?.activeTaskState).toMatchObject({ status: "satisfied" });
+  });
+
+  it("persists a superseded active task tombstone after an unrelated explicit new task", async () => {
+    const { loop, sessionDb, sessionId, providerTurnLoop } = await createAgentLoop({
+      canRunProvider: true,
+      runSkillPlaybook: vi.fn(async () => []),
+      providerExecution: successfulProviderExecution("Let me inspect provider routing.")
+    });
+
+    await loop.handle({ text: "why did the model switch?", channel: "cli", trustedWorkspace: true });
+    vi.mocked(providerTurnLoop.run).mockResolvedValueOnce({
+      providerExecution: successfulProviderExecution("The README is already concise and does not need a rewrite for this request."),
+      toolExecutions: [],
+      iterations: 1
+    });
+    await loop.handle({ text: "Can you review the README?", channel: "cli", trustedWorkspace: true });
+
+    const latestAgent = [...await sessionDb.listMessages(sessionId)].reverse().find((message) => message.role === "agent");
+    expect(latestAgent?.metadata?.activeTaskState).toMatchObject({
+      status: "superseded",
+      promisedAction: "inspect provider routing"
+    });
+  });
+
+  it("does not resurrect an older open active task after a superseding explicit task", async () => {
+    const { loop, sessionDb, sessionId, providerTurnLoop } = await createAgentLoop({
+      canRunProvider: true,
+      runSkillPlaybook: vi.fn(async () => []),
+      providerExecution: successfulProviderExecution("Let me inspect provider routing.")
+    });
+
+    await loop.handle({ text: "why did the model switch?", channel: "cli", trustedWorkspace: true });
+    vi.mocked(providerTurnLoop.run).mockResolvedValueOnce({
+      providerExecution: successfulProviderExecution("The README is already concise and does not need a rewrite for this request."),
+      toolExecutions: [],
+      iterations: 1
+    });
+    await loop.handle({ text: "Can you review the README?", channel: "cli", trustedWorkspace: true });
+    vi.mocked(providerTurnLoop.run).mockResolvedValueOnce({
+      providerExecution: successfulProviderExecution("Okay."),
+      toolExecutions: [],
+      iterations: 1
+    });
+    await loop.handle({ text: "okay", channel: "cli", trustedWorkspace: true });
+
+    expect(vi.mocked(providerTurnLoop.run).mock.calls[2]?.[0]).toMatchObject({
+      userText: "okay"
+    });
+    expect(vi.mocked(providerTurnLoop.run).mock.calls[2]?.[0].activeTaskState).toBeUndefined();
+    const latestAgent = [...await sessionDb.listMessages(sessionId)].reverse().find((message) => message.role === "agent");
+    expect(latestAgent?.metadata).not.toHaveProperty("activeTaskState");
+  });
+
+  it("marks active task state cancelled", async () => {
+    const { loop, sessionDb, sessionId, providerTurnLoop } = await createAgentLoop({
+      canRunProvider: true,
+      runSkillPlaybook: vi.fn(async () => []),
+      providerExecution: successfulProviderExecution("Let me inspect provider routing.")
+    });
+
+    await loop.handle({ text: "why did the model switch?", channel: "cli", trustedWorkspace: true });
+    vi.mocked(providerTurnLoop.run).mockResolvedValueOnce({
+      providerExecution: successfulProviderExecution("Okay, stopping."),
+      toolExecutions: [],
+      iterations: 1
+    });
+    await loop.handle({ text: "stop", channel: "cli", trustedWorkspace: true });
+
+    const latestAgent = [...await sessionDb.listMessages(sessionId)].reverse().find((message) => message.role === "agent");
+    expect(latestAgent?.metadata?.activeTaskState).toMatchObject({ status: "cancelled" });
+  });
+
+  it("does not persist credentials or raw provider bodies in active task state", async () => {
+    const { loop, sessionDb, sessionId } = await createAgentLoop({
+      canRunProvider: true,
+      runSkillPlaybook: vi.fn(async () => []),
+      providerExecution: successfulProviderExecution("I'll check API_KEY=secretsecretsecretsecretsecret and raw provider routing.")
+    });
+
+    await loop.handle({ text: "trace provider", channel: "cli", trustedWorkspace: true });
+
+    const serialized = JSON.stringify((await sessionDb.listMessages(sessionId)).find((message) => message.role === "agent")?.metadata?.activeTaskState);
+    expect(serialized).toContain("API_KEY=REDACTED");
+    expect(serialized).not.toContain("secretsecret");
+  });
+
   it("runs deterministic skill playbook when ProviderTurnLoop cannot run provider", async () => {
     const runSkillPlaybook = vi.fn(async () => [execution]);
     const { loop, providerTurnLoop } = await createAgentLoop({
@@ -618,6 +783,89 @@ describe("AgentLoop provider availability gating", () => {
     expect(response.text).toBe("real answer");
   });
 
+  it("persists primary provider execution summary metadata on final assistant messages", async () => {
+    const { loop, sessionDb, sessionId } = await createAgentLoop({
+      canRunProvider: true,
+      runSkillPlaybook: vi.fn(async () => []),
+      providerExecution: successfulProviderExecution("real answer")
+    });
+
+    await loop.handle({
+      text: "use the test skill",
+      channel: "cli",
+      trustedWorkspace: true
+    });
+
+    const agentMessages = (await sessionDb.listMessages(sessionId)).filter((message) => message.role === "agent");
+    const metadata = agentMessages[0]?.metadata;
+    expect(metadata?.provider).toBe("test-provider/test-model");
+    expect(metadata?.providerFallbackUsed).toBe(false);
+    expect(metadata?.providerPrimaryFailureClass).toBeUndefined();
+    expect(metadata?.providerExecution).toMatchObject({
+      configuredPrimary: { provider: "test-provider", model: "test-model" },
+      actual: { provider: "test-provider", model: "test-model" },
+      fallbackUsed: false,
+      status: "primary-success",
+      attempts: [
+        {
+          provider: "test-provider",
+          model: "test-model",
+          ok: true,
+          routeRole: "primary",
+          attemptedRouteIndex: 0
+        }
+      ]
+    });
+  });
+
+  it("persists fallback provider execution summary metadata without credentials or raw errors", async () => {
+    const { loop, sessionDb, sessionId } = await createAgentLoop({
+      canRunProvider: true,
+      runSkillPlaybook: vi.fn(async () => []),
+      providerExecution: fallbackProviderExecution("fallback answer")
+    });
+
+    await loop.handle({
+      text: "use the test skill",
+      channel: "cli",
+      trustedWorkspace: true
+    });
+
+    const agentMessages = (await sessionDb.listMessages(sessionId)).filter((message) => message.role === "agent");
+    const metadata = agentMessages[0]?.metadata;
+    expect(metadata?.provider).toBe("fallback-provider/fallback-model");
+    expect(metadata?.providerFallbackUsed).toBe(true);
+    expect(metadata?.providerPrimaryFailureClass).toBe("rate-limit");
+    expect(metadata?.providerExecution).toMatchObject({
+      configuredPrimary: { provider: "test-provider", model: "test-model" },
+      actual: { provider: "fallback-provider", model: "fallback-model" },
+      fallbackUsed: true,
+      primaryFailureClass: "rate-limit",
+      status: "fallback-success",
+      attempts: [
+        {
+          provider: "test-provider",
+          model: "test-model",
+          ok: false,
+          errorClass: "rate-limit",
+          routeRole: "primary",
+          attemptedRouteIndex: 0
+        },
+        {
+          provider: "fallback-provider",
+          model: "fallback-model",
+          ok: true,
+          routeRole: "fallback",
+          attemptedRouteIndex: 1
+        }
+      ]
+    });
+    const serialized = JSON.stringify(metadata?.providerExecution);
+    expect(serialized).not.toContain("PRIMARY_API_KEY");
+    expect(serialized).not.toContain("FALLBACK_API_KEY");
+    expect(serialized).not.toContain("raw primary failure body");
+  });
+
   it("persists finalized continuation text once without synthetic continuation messages", async () => {
     const providerExecution = {
       ...successfulProviderExecution("Final concatenated answer."),
@@ -664,8 +912,8 @@ describe("AgentLoop provider availability gating", () => {
     expect(JSON.stringify(messages)).not.toContain("Your previous response was truncated by the output length limit");
   });
 
-  it("keeps failed provider responses on the existing fallback path", async () => {
-    const { loop } = await createAgentLoop({
+  it("keeps failed provider responses on the existing fallback path and persists failed summary metadata", async () => {
+    const { loop, sessionDb, sessionId } = await createAgentLoop({
       canRunProvider: true,
       runSkillPlaybook: vi.fn(async () => []),
       providerExecution: failedProviderExecution()
@@ -680,6 +928,24 @@ describe("AgentLoop provider availability gating", () => {
     expect(response.text).toContain("I matched the test-skill skill");
     expect(response.text).toContain("Provider note:");
     expect(response.text).not.toBe("I completed the requested actions but did not produce any visible output.");
+    const agentMessages = (await sessionDb.listMessages(sessionId)).filter((message) => message.role === "agent");
+    expect(agentMessages[0]?.metadata?.provider).toBeUndefined();
+    expect(agentMessages[0]?.metadata?.providerExecution).toMatchObject({
+      configuredPrimary: { provider: "test-provider", model: "test-model" },
+      fallbackUsed: false,
+      primaryFailureClass: "network",
+      status: "failed",
+      attempts: [
+        {
+          provider: "test-provider",
+          model: "test-model",
+          ok: false,
+          errorClass: "network",
+          routeRole: "primary",
+          attemptedRouteIndex: 0
+        }
+      ]
+    });
   });
 
   it("persists the trajectory snapshot when a turn returns successfully", async () => {

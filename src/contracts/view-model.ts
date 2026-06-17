@@ -359,6 +359,9 @@ export interface FileChangePreviewViewModel {
 export interface SessionStatusRailViewModel {
   readonly kind: "sessionStatusRail";
   readonly modelLabel: string;
+  readonly modelState?: "configured" | "primary-serving" | "fallback-serving" | "failed";
+  readonly configuredModelLabel?: string;
+  readonly servingModelLabel?: string;
   readonly turnState: "idle" | "running" | "blocked" | "error" | "unknown";
   readonly showTurnState?: boolean;
   readonly sessionElapsedMs?: number;

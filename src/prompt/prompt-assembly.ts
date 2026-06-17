@@ -23,6 +23,12 @@ import { countImageLikeMetadata, estimateTextTokensRough, IMAGE_TOKEN_ESTIMATE }
 import type { AgentProfileMode, AgentResponseLanguage, UiFlavor, UiLanguage } from "../config/runtime-config.js";
 import { buildNativeHistoryMessages } from "./native-history-builder.js";
 import { selectNativeHistoryWindow, type NativeHistoryUnit } from "./native-history-selector.js";
+import { providerExecutionHistoryAnnotation } from "./provider-execution-history.js";
+import {
+  isAcknowledgementContinuation,
+  renderActiveTaskPrompt,
+  type ActiveTaskState
+} from "../runtime/active-task-state.js";
 
 type PromptSessionHistoryMessage = Pick<ProviderMessage, "role" | "content"> & {
   metadata?: Record<string, unknown>;
@@ -47,6 +53,7 @@ export type ProviderPromptInput = {
   cache?: PromptCache;
   sessionHistory?: PromptSessionHistoryMessage[];
   rawSessionHistory?: SessionMessage[];
+  activeTaskState?: ActiveTaskState;
   nativeHistoryRoute?: NativeHistoryRouteSupport;
   nativeHistoryRouteRole?: string;
   compactionNotice?: string;
@@ -249,6 +256,9 @@ function buildBaseLayers(input: ProviderPromptInput): InternalPromptLayer[] {
         .join("\n");
   const attachmentManifest = renderChannelAttachments(input.attachments);
   const sessionHistory = renderSessionHistory(input.sessionHistory);
+  const activeTaskPrompt = isAcknowledgementContinuation(input.userText)
+    ? renderActiveTaskPrompt(input.activeTaskState)
+    : undefined;
   const channelAttachments = `Channel attachments:\n${attachmentManifest}`;
   const identity = input.soul?.trim().length
     ? input.soul.trim()
@@ -298,6 +308,17 @@ function buildBaseLayers(input: ProviderPromptInput): InternalPromptLayer[] {
             protectedLayer: true,
             priority: 1,
             content: renderCompactionNotice(input.compactionNotice)
+          })
+        ]),
+    ...(activeTaskPrompt === undefined
+      ? []
+      : [
+          layer({
+            name: "active-task-continuity",
+            cacheable: false,
+            protectedLayer: true,
+            priority: 1,
+            content: activeTaskPrompt
           })
         ]),
     layer({
@@ -889,7 +910,11 @@ function toPromptSessionHistoryMessage(message: SessionMessage): PromptSessionHi
 function sanitizeNativeHistorySessionMessage(message: SessionMessage): SessionMessage {
   return {
     ...message,
-    content: stripInlineReasoning(message.content)
+    content: renderNativeHistoryContent({
+      role: message.role === "agent" ? "assistant" : message.role,
+      content: message.content,
+      metadata: message.metadata
+    })
   };
 }
 
@@ -1236,8 +1261,27 @@ function renderSessionHistory(messages: PromptSessionHistoryMessage[] | undefine
 
   return [
     "Session history:",
-    ...messages.map((message) => `${message.role}: ${truncate(stripInlineReasoning(stringifyProviderMessageContent(message.content)), 900)}`)
+    ...messages.map((message) => `${renderHistoryRole(message)}: ${renderHistoryContent(message)}`)
   ].join("\n");
+}
+
+function renderHistoryRole(message: PromptSessionHistoryMessage): string {
+  const annotation = message.role === "assistant"
+    ? providerExecutionHistoryAnnotation(message.metadata)
+    : undefined;
+  return annotation === undefined ? message.role : `${message.role} [${annotation}]`;
+}
+
+function renderHistoryContent(message: PromptSessionHistoryMessage): string {
+  return truncate(stripInlineReasoning(stringifyProviderMessageContent(message.content)), 900);
+}
+
+function renderNativeHistoryContent(message: PromptSessionHistoryMessage): string {
+  const content = stripInlineReasoning(stringifyProviderMessageContent(message.content));
+  const annotation = message.role === "assistant"
+    ? providerExecutionHistoryAnnotation(message.metadata)
+    : undefined;
+  return annotation === undefined ? content : `[${annotation}]\n${content}`;
 }
 
 function estimateSessionHistoryImageTokens(messages: PromptSessionHistoryMessage[] | undefined): number {

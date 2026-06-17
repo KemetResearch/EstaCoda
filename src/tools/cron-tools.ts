@@ -2,6 +2,9 @@ import type { RegisteredTool, RuntimeToolProvider } from "../contracts/tool.js";
 import { CronStore } from "../cron/cron-store.js";
 import { renderPlain } from "../ui/renderers/plain-renderer.js";
 import { buildCronListViewModel, buildCronActionViewModel, buildCronNotFoundViewModel } from "../cron/cron-view-models.js";
+import { validateCronRuntimeControls } from "../cron/cron-runtime-validation.js";
+import { resolveCronWorkdir } from "../cron/cron-workdir.js";
+import type { LoadedRuntimeConfig } from "../config/runtime-config.js";
 
 type CronjobToolInput = {
   action?: "create" | "list" | "update" | "pause" | "resume" | "run" | "remove";
@@ -12,6 +15,14 @@ type CronjobToolInput = {
   script_args?: string[];
   script_timeout_ms?: number;
   clear_script?: boolean;
+  no_agent?: boolean;
+  noAgent?: boolean;
+  context_from?: string[];
+  contextFrom?: string[];
+  model?: { provider?: string; model: string } | string;
+  enabled_toolsets?: string[];
+  enabledToolsets?: string[];
+  workdir?: string;
   schedule?: string;
   name?: string;
   skill?: string;
@@ -23,7 +34,18 @@ type CronjobToolInput = {
   repeat?: number;
 };
 
-export function createCronTools(options: { store: CronStore }): RegisteredTool[] {
+export function createCronTools(options: {
+  store: CronStore;
+  runtimeControls?: {
+    config: LoadedRuntimeConfig;
+    availableToolsets: () => string[];
+  };
+  workdirControls?: {
+    defaultWorkspaceRoot: string;
+    allowedRoots: string[];
+    isWorkspaceTrusted: (path: string) => Promise<boolean>;
+  };
+}): RegisteredTool[] {
   return [{
     name: "cronjob",
     description: "Create and manage scheduled EstaCoda tasks.",
@@ -37,6 +59,26 @@ export function createCronTools(options: { store: CronStore }): RegisteredTool[]
         script_args: { type: "array", items: { type: "string" } },
         script_timeout_ms: { type: "number" },
         clear_script: { type: "boolean" },
+        no_agent: { type: "boolean" },
+        noAgent: { type: "boolean" },
+        context_from: { type: "array", items: { type: "string" } },
+        contextFrom: { type: "array", items: { type: "string" } },
+        model: {
+          oneOf: [
+            { type: "string" },
+            {
+              type: "object",
+              properties: {
+                provider: { type: "string" },
+                model: { type: "string" }
+              },
+              required: ["model"]
+            }
+          ]
+        },
+        enabled_toolsets: { type: "array", items: { type: "string" } },
+        enabledToolsets: { type: "array", items: { type: "string" } },
+        workdir: { type: "string" },
         schedule: { type: "string" },
         name: { type: "string" },
         skill: { type: "string" },
@@ -62,11 +104,32 @@ export function createCronTools(options: { store: CronStore }): RegisteredTool[]
         if (input.prompt === undefined || input.schedule === undefined) {
           return { ok: false, content: "cronjob create requires prompt and schedule." };
         }
+        if ((input.no_agent ?? input.noAgent) === true && (input.script === undefined || input.script.trim().length === 0)) {
+          return { ok: false, content: "no-agent cron jobs require script." };
+        }
+        const contextFrom = normalizeContextFrom(input);
+        const contextError = await validateContextFrom(options.store, contextFrom);
+        if (contextError !== undefined) {
+          return { ok: false, content: contextError };
+        }
+        const controls = await validateToolRuntimeControls(options.runtimeControls, input);
+        if (!controls.ok) {
+          return { ok: false, content: controls.message };
+        }
+        const workdir = await validateToolWorkdir(options.workdirControls, input.workdir);
+        if (!workdir.ok) {
+          return { ok: false, content: workdir.message };
+        }
         const job = await options.store.create({
           prompt: input.prompt,
           script: input.script,
           scriptArgs: input.script_args,
           scriptTimeoutMs: input.script_timeout_ms,
+          noAgent: input.no_agent ?? input.noAgent,
+          contextFrom,
+          modelOverride: controls.normalized.modelOverride,
+          enabledToolsets: controls.normalized.enabledToolsets,
+          workdir: workdir.normalized.workdir,
           schedule: input.schedule,
           name: input.name,
           skills: normalizeSkills(input),
@@ -93,10 +156,39 @@ export function createCronTools(options: { store: CronStore }): RegisteredTool[]
           prompt: input.prompt,
           schedule: input.schedule,
           name: input.name,
+          noAgent: input.no_agent ?? input.noAgent,
+          contextFrom: normalizeContextFrom(input),
+          modelOverride: normalizeModelOverrideInput(input),
+          enabledToolsets: input.enabledToolsets ?? input.enabled_toolsets,
+          workdir: input.workdir,
           skills: resolveUpdatedSkills(existing.skills, input),
           delivery: input.delivery,
           repeat: input.repeat
         });
+        const finalScript = input.clear_script === true
+          ? undefined
+          : input.script ?? existing.script;
+        const finalNoAgent = (input.no_agent ?? input.noAgent) ?? existing.noAgent;
+        if (finalNoAgent === true && (finalScript === undefined || finalScript.trim().length === 0)) {
+          return { ok: false, content: "no-agent cron jobs require script." };
+        }
+        const contextError = await validateContextFrom(options.store, patch.contextFrom as string[] | undefined);
+        if (contextError !== undefined) {
+          return { ok: false, content: contextError };
+        }
+        const controls = await validateToolRuntimeControls(options.runtimeControls, {
+          model: patch.modelOverride as CronjobToolInput["model"],
+          enabledToolsets: patch.enabledToolsets as string[] | undefined
+        });
+        if (!controls.ok) {
+          return { ok: false, content: controls.message };
+        }
+        const workdir = await validateToolWorkdir(options.workdirControls, patch.workdir as string | undefined);
+        if (!workdir.ok) {
+          return { ok: false, content: workdir.message };
+        }
+        Object.assign(patch, controls.normalized);
+        Object.assign(patch, workdir.normalized);
         const scriptPatch = input.clear_script === true
           ? { script: undefined, scriptArgs: [], scriptTimeoutMs: undefined }
           : {
@@ -132,7 +224,15 @@ export const cronToolProvider: RuntimeToolProvider = {
     if (ctx.disableCronTools === true) {
       return [];
     }
-    return createCronTools({ store: ctx.cronStore });
+    return createCronTools({
+      store: ctx.cronStore,
+      runtimeControls: ctx.cronRuntimeControls,
+      workdirControls: {
+        defaultWorkspaceRoot: ctx.workspaceRoot,
+        allowedRoots: [ctx.workspaceRoot],
+        isWorkspaceTrusted: (path) => ctx.trustStore.isTrusted(path)
+      }
+    });
   }
 };
 
@@ -156,6 +256,76 @@ function resolveUpdatedSkills(current: string[], input: CronjobToolInput): strin
   if (input.skill !== undefined) return [input.skill];
   if (input.add_skill !== undefined) return current.includes(input.add_skill) ? current : [...current, input.add_skill];
   if (input.remove_skill !== undefined) return current.filter((skill) => skill !== input.remove_skill);
+  return undefined;
+}
+
+function normalizeContextFrom(input: CronjobToolInput): string[] | undefined {
+  return input.contextFrom ?? input.context_from;
+}
+
+function normalizeModelOverrideInput(input: CronjobToolInput): { provider?: string; model: string } | undefined {
+  if (input.model === undefined) {
+    return undefined;
+  }
+  return typeof input.model === "string" ? { model: input.model } : input.model;
+}
+
+async function validateToolRuntimeControls(
+  runtimeControls: { config: LoadedRuntimeConfig; availableToolsets: () => string[] } | undefined,
+  input: Pick<CronjobToolInput, "model" | "enabled_toolsets" | "enabledToolsets">
+): Promise<{ ok: true; normalized: { modelOverride?: { provider?: string; model: string }; enabledToolsets?: string[] } } | { ok: false; message: string }> {
+  const modelOverride = normalizeModelOverrideInput(input);
+  const enabledToolsets = input.enabledToolsets ?? input.enabled_toolsets;
+  if (modelOverride === undefined && enabledToolsets === undefined) {
+    return { ok: true, normalized: {} };
+  }
+  if (modelOverride === undefined && enabledToolsets !== undefined && enabledToolsets.length === 0) {
+    return { ok: true, normalized: { enabledToolsets: [] } };
+  }
+  if (runtimeControls === undefined) {
+    return { ok: false, message: "cronjob model/toolset controls require runtime config validation." };
+  }
+  return validateCronRuntimeControls({
+    modelOverride,
+    enabledToolsets,
+    config: runtimeControls.config,
+    availableToolsets: runtimeControls.availableToolsets
+  });
+}
+
+async function validateToolWorkdir(
+  workdirControls: {
+    defaultWorkspaceRoot: string;
+    allowedRoots: string[];
+    isWorkspaceTrusted: (path: string) => Promise<boolean>;
+  } | undefined,
+  workdir: string | undefined
+): Promise<{ ok: true; normalized: { workdir?: string } } | { ok: false; message: string }> {
+  if (workdir === undefined) {
+    return { ok: true, normalized: {} };
+  }
+  if (workdirControls === undefined) {
+    return { ok: false, message: "cronjob workdir requires workspace trust validation context." };
+  }
+  const resolved = await resolveCronWorkdir({
+    requestedWorkdir: workdir,
+    ...workdirControls
+  });
+  if (!resolved.ok) {
+    return { ok: false, message: resolved.message };
+  }
+  return { ok: true, normalized: { workdir: resolved.workdir } };
+}
+
+async function validateContextFrom(store: CronStore, jobIds: string[] | undefined): Promise<string | undefined> {
+  if (jobIds === undefined) {
+    return undefined;
+  }
+  for (const jobId of jobIds) {
+    if (await store.get(jobId) === undefined) {
+      return `Unknown contextFrom job id: ${jobId}`;
+    }
+  }
   return undefined;
 }
 

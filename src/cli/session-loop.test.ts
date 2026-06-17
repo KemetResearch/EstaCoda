@@ -17,6 +17,8 @@ import { renderPlain } from "../ui/renderers/plain-renderer.js";
 import { stripAnsi } from "../ui/renderers/layout.js";
 import { resolveProfileStateHome } from "../config/profile-home.js";
 import { writeCliVoiceMode } from "./voice-mode.js";
+import { CronStore } from "../cron/cron-store.js";
+import type { ProviderExecutionResult } from "../providers/provider-executor.js";
 
 function interactiveCaps(overrides: Partial<TerminalCapabilities> = {}): TerminalCapabilities {
   return {
@@ -132,6 +134,7 @@ function createMockRuntime(overrides: Partial<Runtime> = {}): Runtime {
     dispose: async () => {},
     sessionDb,
     sessionId: "test-session",
+    trajectoryId: "test-trajectory",
   };
   return { ...runtime, ...overrides };
 }
@@ -544,6 +547,40 @@ describe("runSessionLoop — user prompt rail behavior", () => {
     expect(rendered).toContain("/tools");
   });
 
+  it("shows configured model only before the first provider call", async () => {
+    const outputChunks: string[] = [];
+    const runtime = createMockRuntime();
+    let promptIndex = 0;
+
+    await runSessionLoop({
+      runtime,
+      output: {
+        write(chunk: string | Uint8Array): boolean {
+          outputChunks.push(String(chunk));
+          return true;
+        },
+        isTTY: true,
+        columns: 120,
+      } as unknown as NodeJS.WritableStream,
+      capabilities: interactiveCaps({ supportsAnimation: false }),
+      prompt: Object.assign(
+        async () => {
+          const values = ["/exit"];
+          return values[promptIndex++] ?? "/exit";
+        },
+        { close: () => {} }
+      ),
+      close: () => {},
+    });
+
+    const rendered = stripAnsi(outputChunks.join(""));
+    const idleRail = rendered.split("\n").find((line) => line.includes("mock-model") && line.includes("idle"));
+    expect(idleRail).toBeDefined();
+    expect(idleRail).not.toContain("->");
+    expect(idleRail).not.toContain("fallback(");
+    expect(idleRail).not.toContain("mock/mock-model");
+  });
+
   it("falls back to the legacy startup hero when readiness collection fails", async () => {
     const outputChunks: string[] = [];
     const runtime = createMockRuntime({
@@ -950,6 +987,126 @@ describe("runSessionLoop — user prompt rail behavior", () => {
   });
 });
 
+describe("handleSlashCommand cron", () => {
+  it("runs /cron list without loading runtime config", async () => {
+    const tmpHome = await mkdtemp(join(tmpdir(), "estacoda-session-cron-list-"));
+    const oldHome = process.env.HOME;
+    const oldEstacodaHome = process.env.ESTACODA_HOME;
+    try {
+      process.env.HOME = tmpHome;
+      delete process.env.ESTACODA_HOME;
+      const profilePaths = resolveProfileStateHome({ homeDir: tmpHome, profileId: "broken" });
+      await mkdir(profilePaths.configPath, { recursive: true });
+      const outputChunks: string[] = [];
+
+      const handled = await handleSlashCommand({
+        text: "/cron list",
+        runtime: createMockRuntime(),
+        output: {
+          write(chunk: string | Uint8Array): boolean {
+            outputChunks.push(String(chunk));
+            return true;
+          }
+        } as NodeJS.WritableStream,
+        renderer: { render: renderPlain },
+        workspaceRoot: tmpHome,
+        homeDir: tmpHome
+      });
+
+      expect(handled).toBe(false);
+      expect(outputChunks.join("")).toContain("No cron jobs configured");
+    } finally {
+      if (oldHome === undefined) {
+        delete process.env.HOME;
+      } else {
+        process.env.HOME = oldHome;
+      }
+      if (oldEstacodaHome === undefined) {
+        delete process.env.ESTACODA_HOME;
+      } else {
+        process.env.ESTACODA_HOME = oldEstacodaHome;
+      }
+      await rm(tmpHome, { recursive: true, force: true });
+    }
+  });
+
+  it("creates an isolated runtime for /cron tick and disposes it", async () => {
+    const tmpHome = await mkdtemp(join(tmpdir(), "estacoda-session-cron-"));
+    const oldHome = process.env.HOME;
+    const oldEstacodaHome = process.env.ESTACODA_HOME;
+    try {
+      process.env.HOME = tmpHome;
+      delete process.env.ESTACODA_HOME;
+      const store = new CronStore({ homeDir: tmpHome });
+      const job = await store.create({
+        name: "Interactive tick baseline",
+        schedule: "* * * * *",
+        prompt: "run me"
+      });
+      await store.requestRun(job.id);
+      const interactiveHandle = vi.fn(async () => ({
+        ...mockResponse(),
+        text: "interactive runtime should not run"
+      }));
+      const cronHandle = vi.fn(async () => ({
+        ...mockResponse(),
+        text: "cron isolated runtime"
+      }));
+      const cronDispose = vi.fn(async () => undefined);
+      const runtime = createMockRuntime({ handle: interactiveHandle });
+      const cronRuntimeFactory = vi.fn(async (runtimeOptions) => createMockRuntime({
+        sessionId: runtimeOptions.sessionId,
+        trajectoryId: "cron-trajectory",
+        handle: cronHandle,
+        dispose: cronDispose,
+        sessionDb: runtimeOptions.sessionDb ?? new InMemorySessionDB()
+      }));
+      const outputChunks: string[] = [];
+
+      const handled = await handleSlashCommand({
+        text: "/cron tick",
+        runtime,
+        output: {
+          write(chunk: string | Uint8Array): boolean {
+            outputChunks.push(String(chunk));
+            return true;
+          }
+        } as NodeJS.WritableStream,
+        renderer: { render: renderPlain },
+        workspaceRoot: tmpHome,
+        homeDir: tmpHome,
+        cronRuntimeFactory
+      });
+
+      expect(handled).toBe(false);
+      expect(interactiveHandle).not.toHaveBeenCalled();
+      expect(cronHandle).toHaveBeenCalledTimes(1);
+      expect(cronDispose).toHaveBeenCalledTimes(1);
+      expect(cronRuntimeFactory).toHaveBeenCalledTimes(1);
+      const runtimeOptions = cronRuntimeFactory.mock.calls[0]?.[0];
+      expect(runtimeOptions).toEqual(expect.objectContaining({
+        disableCronTools: true,
+        sessionId: expect.stringMatching(/^cron-/u)
+      }));
+      expect(runtimeOptions?.disabledToolsets).toEqual(["cron", "messaging", "clarify"]);
+      expect(runtimeOptions?.sessionDb).toBe(runtime.sessionDb);
+      expect(outputChunks.join("")).toContain("Cron tick complete. Ran 1 job(s).");
+    } finally {
+      if (oldHome === undefined) {
+        delete process.env.HOME;
+      } else {
+        process.env.HOME = oldHome;
+      }
+      if (oldEstacodaHome === undefined) {
+        delete process.env.ESTACODA_HOME;
+      } else {
+        process.env.ESTACODA_HOME = oldEstacodaHome;
+      }
+      await rm(tmpHome, { recursive: true, force: true });
+    }
+  });
+});
+
 function createEventEmittingMockRuntime(events: RuntimeEvent[]): Runtime {
   const base = createMockRuntime();
   return {
@@ -985,7 +1142,7 @@ function createEventEmittingMockRuntime(events: RuntimeEvent[]): Runtime {
   };
 }
 
-function mockResponse(): AgentLoopResponse {
+function mockResponse(overrides: Partial<AgentLoopResponse> = {}): AgentLoopResponse {
   return {
     label: "EstaCoda",
     text: "Mock response",
@@ -1008,7 +1165,151 @@ function mockResponse(): AgentLoopResponse {
     context: undefined,
     projectContext: undefined,
     progress: [],
+    ...overrides,
   };
+}
+
+function providerExecutionPrimarySuccess(
+  provider = "mock",
+  model = "mock-model"
+): ProviderExecutionResult {
+  return {
+    ok: true,
+    response: {
+      ok: true,
+      content: "Mock response",
+      provider,
+      model,
+    },
+    fallbackUsed: false,
+    attempts: [
+      {
+        provider,
+        model,
+        ok: true,
+        content: "Mock response",
+      },
+    ],
+    toolCalls: [],
+  };
+}
+
+function providerExecutionFallbackSuccess(): ProviderExecutionResult {
+  return {
+    ok: true,
+    response: {
+      ok: true,
+      content: "Fallback response",
+      provider: "fallback-provider",
+      model: "fallback-model",
+    },
+    fallbackUsed: true,
+    attempts: [
+      {
+        provider: "mock",
+        model: "mock-model",
+        credentialId: "secret-primary-credential",
+        ok: false,
+        errorClass: "rate-limit",
+        content: "raw upstream body should not appear",
+      },
+      {
+        provider: "fallback-provider",
+        model: "fallback-model",
+        credentialId: "secret-fallback-credential",
+        ok: true,
+        content: "Fallback response",
+      },
+    ],
+    toolCalls: [],
+  };
+}
+
+function providerExecutionFallbackSuccessWithModel(model: string): ProviderExecutionResult {
+  return {
+    ...providerExecutionFallbackSuccess(),
+    response: {
+      ok: true,
+      content: "Fallback response",
+      provider: "fallback-provider",
+      model,
+    },
+    attempts: [
+      {
+        provider: "mock",
+        model: "mock-model",
+        credentialId: "secret-primary-credential",
+        ok: false,
+        errorClass: "rate-limit",
+        content: "raw upstream body should not appear",
+      },
+      {
+        provider: "fallback-provider",
+        model,
+        credentialId: "secret-fallback-credential",
+        ok: true,
+        content: "Fallback response",
+      },
+    ],
+  };
+}
+
+function providerExecutionFailed(): ProviderExecutionResult {
+  return {
+    ok: false,
+    fallbackUsed: false,
+    attempts: [
+      {
+        provider: "mock",
+        model: "mock-model",
+        credentialId: "secret-primary-credential",
+        ok: false,
+        errorClass: "network",
+        content: "raw upstream body should not appear",
+      },
+    ],
+    toolCalls: [],
+  };
+}
+
+async function runProviderExecutionSequence(
+  executions: ProviderExecutionResult[]
+): Promise<string> {
+  const outputChunks: string[] = [];
+  let handleIndex = 0;
+  const runtime = {
+    ...createMockRuntime(),
+    handle: async (): Promise<AgentLoopResponse> =>
+      mockResponse({ providerExecution: executions[Math.min(handleIndex++, executions.length - 1)] }),
+  };
+  let promptIndex = 0;
+
+  await runSessionLoop({
+    runtime,
+    output: {
+      write(chunk: string | Uint8Array): boolean {
+        outputChunks.push(String(chunk));
+        return true;
+      },
+      isTTY: true,
+      columns: 160,
+    } as unknown as NodeJS.WritableStream,
+    capabilities: interactiveCaps({ terminalWidth: 160, supportsAnimation: false }),
+    prompt: Object.assign(
+      async () => {
+        const values = [...executions.map((_, index) => `turn ${index + 1}`), "/exit"];
+        return values[promptIndex++] ?? "/exit";
+      },
+      { close: () => {} }
+    ),
+    close: () => {},
+  });
+
+  return stripAnsi(outputChunks.join(""));
+}
+
+function countOccurrences(text: string, pattern: string): number {
+  return text.split(pattern).length - 1;
 }
 
 function withModelInfo<T extends Runtime>(runtime: T): T {
@@ -1020,6 +1321,25 @@ function withModelInfo<T extends Runtime>(runtime: T): T {
       entries: [
         { key: "provider", value: "mock" },
         { key: "model", value: "gpt-5.5" },
+        { key: "context window", value: "128000" },
+      ],
+    }),
+  };
+}
+
+function withModelRoute<T extends Runtime>(
+  runtime: T,
+  provider: string,
+  model: string
+): T {
+  return {
+    ...runtime,
+    getModelInfo: () => ({
+      kind: "kv" as const,
+      title: "Model",
+      entries: [
+        { key: "provider", value: provider },
+        { key: "model", value: model },
         { key: "context window", value: "128000" },
       ],
     }),
@@ -3268,6 +3588,239 @@ describe("runSessionLoop — active turn spinner", () => {
 
     const rendered = stripAnsi(outputChunks.join(""));
     expect(rendered).toContain("context 1.0k/64.0k");
+  });
+
+  it("shows actual serving provider after primary success without fallback health", async () => {
+    const outputChunks: string[] = [];
+    const runtime = {
+      ...createMockRuntime(),
+      handle: async (): Promise<AgentLoopResponse> =>
+        mockResponse({ providerExecution: providerExecutionPrimarySuccess("mock", "mock-model") }),
+    };
+    let promptIndex = 0;
+
+    await runSessionLoop({
+      runtime,
+      output: {
+        write(chunk: string | Uint8Array): boolean {
+          outputChunks.push(String(chunk));
+          return true;
+        },
+        isTTY: true,
+        columns: 140,
+      } as unknown as NodeJS.WritableStream,
+      capabilities: interactiveCaps({ terminalWidth: 140, supportsAnimation: false }),
+      prompt: Object.assign(
+        async () => {
+          const values = ["hello", "/exit"];
+          return values[promptIndex++] ?? "/exit";
+        },
+        { close: () => {} }
+      ),
+      close: () => {},
+    });
+
+    const rendered = stripAnsi(outputChunks.join(""));
+    const servingRail = rendered.split("\n").find((line) => line.includes("mock-model") && line.includes("⧖"));
+    expect(servingRail).toBeDefined();
+    expect(servingRail).not.toContain("->");
+    expect(servingRail).not.toContain("fallback(");
+    expect(servingRail).not.toContain("mock/mock-model");
+    expect(rendered).not.toContain("fallback(");
+  });
+
+  it("shows only the actual fallback model after fallback success", async () => {
+    const outputChunks: string[] = [];
+    const runtime = {
+      ...createMockRuntime(),
+      handle: async (): Promise<AgentLoopResponse> =>
+        mockResponse({ providerExecution: providerExecutionFallbackSuccess() }),
+    };
+    let promptIndex = 0;
+
+    await runSessionLoop({
+      runtime,
+      output: {
+        write(chunk: string | Uint8Array): boolean {
+          outputChunks.push(String(chunk));
+          return true;
+        },
+        isTTY: true,
+        columns: 160,
+      } as unknown as NodeJS.WritableStream,
+      capabilities: interactiveCaps({ terminalWidth: 160, supportsAnimation: false }),
+      prompt: Object.assign(
+        async () => {
+          const values = ["hello", "/exit"];
+          return values[promptIndex++] ?? "/exit";
+        },
+        { close: () => {} }
+      ),
+      close: () => {},
+    });
+
+    const rendered = stripAnsi(outputChunks.join(""));
+    const fallbackRail = rendered.split("\n").find((line) => line.includes("fallback-model") && line.includes("⧖"));
+    expect(fallbackRail).toBeDefined();
+    expect(fallbackRail).not.toContain("->");
+    expect(fallbackRail).not.toContain("fallback(");
+    expect(fallbackRail).not.toContain("rate-limit");
+    expect(fallbackRail).not.toContain("mock-model");
+    expect(fallbackRail).not.toContain("fallback-provider/fallback-model");
+    expect(rendered).not.toContain("secret-primary-credential");
+    expect(rendered).not.toContain("secret-fallback-credential");
+    expect(rendered).not.toContain("raw upstream body should not appear");
+  });
+
+  it("renders fallback transition alert once and recovery once", async () => {
+    const rendered = await runProviderExecutionSequence([
+      providerExecutionFallbackSuccess(),
+      providerExecutionFallbackSuccess(),
+      providerExecutionPrimarySuccess("mock", "mock-model"),
+      providerExecutionPrimarySuccess("mock", "mock-model"),
+    ]);
+
+    expect(countOccurrences(rendered, "primary model failed: mock-model rate-limit; using fallback fallback-model")).toBe(1);
+    expect(countOccurrences(rendered, "primary model available again: mock-model")).toBe(1);
+    expect(rendered).not.toContain("secret-primary-credential");
+    expect(rendered).not.toContain("secret-fallback-credential");
+    expect(rendered).not.toContain("raw upstream body should not appear");
+    expect(rendered).not.toContain("mock/mock-model");
+    expect(rendered).not.toContain("fallback-provider/fallback-model");
+
+    const fallbackRail = rendered.split("\n").find((line) => line.includes("fallback-model") && line.includes("⧖"));
+    expect(fallbackRail).toBeDefined();
+    expect(fallbackRail).not.toContain("rate-limit");
+    expect(fallbackRail).not.toContain("fallback(");
+  });
+
+  it("does not render noisy provider transition alerts for clean primary success", async () => {
+    const rendered = await runProviderExecutionSequence([
+      providerExecutionPrimarySuccess("mock", "mock-model"),
+      providerExecutionPrimarySuccess("mock", "mock-model"),
+    ]);
+
+    expect(rendered).not.toContain("primary model failed:");
+    expect(rendered).not.toContain("primary model available again:");
+    expect(rendered).not.toContain("provider failed:");
+  });
+
+  it("shows provider failure without pretending an actual serving model exists", async () => {
+    const outputChunks: string[] = [];
+    const runtime = {
+      ...createMockRuntime(),
+      handle: async (): Promise<AgentLoopResponse> =>
+        mockResponse({ providerExecution: providerExecutionFailed() }),
+    };
+    let promptIndex = 0;
+
+    await runSessionLoop({
+      runtime,
+      output: {
+        write(chunk: string | Uint8Array): boolean {
+          outputChunks.push(String(chunk));
+          return true;
+        },
+        isTTY: true,
+        columns: 140,
+      } as unknown as NodeJS.WritableStream,
+      capabilities: interactiveCaps({ terminalWidth: 140, supportsAnimation: false }),
+      prompt: Object.assign(
+        async () => {
+          const values = ["hello", "/exit"];
+          return values[promptIndex++] ?? "/exit";
+        },
+        { close: () => {} }
+      ),
+      close: () => {},
+    });
+
+    const rendered = stripAnsi(outputChunks.join(""));
+    const failureRail = rendered.split("\n").find((line) => line.includes("mock-model") && line.includes("⧖"));
+    expect(failureRail).toBeDefined();
+    expect(failureRail).not.toContain("->");
+    expect(failureRail).not.toContain("network");
+    expect(failureRail).not.toContain("provider-failed");
+    expect(rendered).not.toContain("secret-primary-credential");
+    expect(rendered).not.toContain("raw upstream body should not appear");
+  });
+
+  it("renders provider failed transition alert once without raw provider internals", async () => {
+    const rendered = await runProviderExecutionSequence([
+      providerExecutionFailed(),
+      providerExecutionFailed(),
+    ]);
+
+    expect(countOccurrences(rendered, "provider failed: mock-model network")).toBe(1);
+    expect(rendered).not.toContain("secret-primary-credential");
+    expect(rendered).not.toContain("raw upstream body should not appear");
+  });
+
+  it("renders failed to fallback recovery alert once", async () => {
+    const rendered = await runProviderExecutionSequence([
+      providerExecutionFailed(),
+      providerExecutionFallbackSuccess(),
+      providerExecutionFallbackSuccess(),
+    ]);
+
+    expect(countOccurrences(rendered, "provider failed: mock-model network")).toBe(1);
+    expect(countOccurrences(rendered, "provider recovered via fallback: fallback-model; primary mock-model failed with rate-limit")).toBe(1);
+    expect(rendered).not.toContain("secret-primary-credential");
+    expect(rendered).not.toContain("raw upstream body should not appear");
+  });
+
+  it("clears stale serving provider truth after /model refresh and updates it on the next turn", async () => {
+    const outputChunks: string[] = [];
+    const runtime = {
+      ...createMockRuntime(),
+      handle: async (): Promise<AgentLoopResponse> =>
+        mockResponse({ providerExecution: providerExecutionFallbackSuccess() }),
+    };
+    const refreshedRuntime = withModelRoute({
+      ...createMockRuntime(),
+      sessionDb: runtime.sessionDb,
+      sessionId: runtime.sessionId,
+      handle: async (): Promise<AgentLoopResponse> =>
+        mockResponse({ providerExecution: providerExecutionPrimarySuccess("fresh-provider", "fresh-model") }),
+    }, "fresh-provider", "fresh-model");
+    await runtime.sessionDb.createSession({ id: runtime.sessionId, profileId: "default" });
+    let promptIndex = 0;
+
+    await runSessionLoop({
+      runtime,
+      refreshRuntime: async () => refreshedRuntime,
+      output: {
+        write(chunk: string | Uint8Array): boolean {
+          outputChunks.push(String(chunk));
+          return true;
+        },
+        isTTY: true,
+        columns: 160,
+      } as unknown as NodeJS.WritableStream,
+      capabilities: interactiveCaps({ terminalWidth: 160, supportsAnimation: false }),
+      prompt: Object.assign(
+        async () => {
+          const values = ["hello", "/model clear", "hello again", "/exit"];
+          return values[promptIndex++] ?? "/exit";
+        },
+        { close: () => {} }
+      ),
+      close: () => {},
+    });
+
+    const rendered = stripAnsi(outputChunks.join(""));
+    expect(rendered).toContain("fallback-model");
+    const afterModelClear = rendered.slice(rendered.indexOf("Cleared the session model override."));
+    const refreshedIdleRail = afterModelClear.split("\n").find((line) =>
+      line.includes("fresh-model") && line.includes("idle")
+    );
+    expect(refreshedIdleRail).toBeDefined();
+    expect(refreshedIdleRail).not.toContain("fallback(");
+    expect(refreshedIdleRail).not.toContain("fallback-model");
+    expect(refreshedIdleRail).not.toContain("fresh-provider/fresh-model");
+    expect(refreshedIdleRail).not.toContain("->");
+    expect(afterModelClear).toContain("fresh-model");
+    expect(afterModelClear).not.toContain("fresh-provider/fresh-model");
   });
 
   it("keeps the last provider-actual context usage when live estimates arrive", async () => {

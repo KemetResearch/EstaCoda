@@ -12,6 +12,14 @@ export type CronJob = {
   id: string;
   name: string;
   prompt: string;
+  noAgent?: boolean;
+  contextFrom?: string[];
+  modelOverride?: {
+    provider?: string;
+    model: string;
+  };
+  enabledToolsets?: string[];
+  workdir?: string;
   script?: string;
   scriptArgs?: string[];
   scriptTimeoutMs?: number;
@@ -75,18 +83,29 @@ export class CronStore {
     script?: string;
     scriptArgs?: string[];
     scriptTimeoutMs?: number;
+    noAgent?: boolean;
+    contextFrom?: string[];
+    modelOverride?: CronJob["modelOverride"];
+    enabledToolsets?: string[];
+    workdir?: string;
     skills?: string[];
     delivery?: CronDelivery;
     repeat?: number;
     origin?: CronJob["origin"];
   }): Promise<CronJob> {
     assertCronPromptSafe(input.prompt);
+    validateCronJobShape(input);
     const now = this.#now().toISOString();
     const parsed = parseCronSchedule(input.schedule, this.#now());
     const job: CronJob = {
       id: `cron-${this.#id()}`,
       name: input.name ?? summarizePrompt(input.prompt),
       prompt: input.prompt,
+      ...(input.noAgent === true ? { noAgent: true } : {}),
+      ...(input.contextFrom === undefined ? {} : { contextFrom: input.contextFrom }),
+      ...(input.modelOverride === undefined ? {} : { modelOverride: input.modelOverride }),
+      ...(input.enabledToolsets === undefined ? {} : { enabledToolsets: input.enabledToolsets }),
+      ...(input.workdir === undefined ? {} : { workdir: input.workdir }),
       script: input.script,
       scriptArgs: input.scriptArgs,
       scriptTimeoutMs: input.scriptTimeoutMs,
@@ -106,7 +125,7 @@ export class CronStore {
     return structuredClone(job);
   }
 
-  async update(id: string, patch: Partial<Pick<CronJob, "name" | "prompt" | "script" | "scriptArgs" | "scriptTimeoutMs" | "schedule" | "skills" | "delivery" | "repeat">>): Promise<CronJob | undefined> {
+  async update(id: string, patch: Partial<Pick<CronJob, "name" | "prompt" | "noAgent" | "contextFrom" | "modelOverride" | "enabledToolsets" | "workdir" | "script" | "scriptArgs" | "scriptTimeoutMs" | "schedule" | "skills" | "delivery" | "repeat">>): Promise<CronJob | undefined> {
     if (patch.prompt !== undefined) {
       assertCronPromptSafe(patch.prompt);
     }
@@ -115,9 +134,10 @@ export class CronStore {
       if (job.id !== id) return job;
       const schedule = patch.schedule ?? job.schedule;
       const parsed = patch.schedule === undefined ? undefined : parseCronSchedule(schedule, this.#now());
+      const candidate = { ...job, ...patch, schedule };
+      validateCronJobShape(candidate);
       updated = {
-        ...job,
-        ...patch,
+        ...candidate,
         schedule,
         scheduleKind: parsed?.kind ?? job.scheduleKind,
         nextRunAt: parsed?.nextRunAt?.toISOString() ?? job.nextRunAt,
@@ -361,7 +381,7 @@ function cronFieldMatches(field: string, value: number, min: number, max: number
 }
 
 function normalizeJob(job: CronJob): CronJob {
-  return {
+  const normalized = {
     ...job,
     scriptArgs: Array.isArray(job.scriptArgs) ? job.scriptArgs : undefined,
     skills: Array.isArray(job.skills) ? job.skills : [],
@@ -369,6 +389,84 @@ function normalizeJob(job: CronJob): CronJob {
     status: job.status ?? "active",
     delivery: job.delivery ?? "local"
   };
+  if (job.noAgent === true) {
+    normalized.noAgent = true;
+  } else {
+    delete normalized.noAgent;
+  }
+  if (Array.isArray(job.contextFrom)) {
+    normalized.contextFrom = job.contextFrom.filter((value): value is string => typeof value === "string");
+  } else {
+    delete normalized.contextFrom;
+  }
+  if (isCronModelOverride(job.modelOverride)) {
+    normalized.modelOverride = normalizeCronModelOverride(job.modelOverride);
+  } else {
+    delete normalized.modelOverride;
+  }
+  if (Array.isArray(job.enabledToolsets)) {
+    normalized.enabledToolsets = normalizeStringList(job.enabledToolsets);
+  } else {
+    delete normalized.enabledToolsets;
+  }
+  if (typeof job.workdir === "string" && job.workdir.trim().length > 0) {
+    normalized.workdir = job.workdir.trim();
+  } else {
+    delete normalized.workdir;
+  }
+  return normalized;
+}
+
+function validateCronJobShape(input: {
+  noAgent?: boolean;
+  contextFrom?: unknown;
+  modelOverride?: unknown;
+  enabledToolsets?: unknown;
+  workdir?: unknown;
+  script?: string;
+}): void {
+  if (input.noAgent === true && (input.script === undefined || input.script.trim().length === 0)) {
+    throw new Error("Cron noAgent jobs require a script.");
+  }
+  if (input.contextFrom !== undefined && !Array.isArray(input.contextFrom)) {
+    throw new Error("Cron contextFrom must be an array of job ids.");
+  }
+  if (Array.isArray(input.contextFrom) && input.contextFrom.some((value) => typeof value !== "string")) {
+    throw new Error("Cron contextFrom must be an array of job ids.");
+  }
+  if (input.modelOverride !== undefined && !isCronModelOverride(input.modelOverride)) {
+    throw new Error("Cron modelOverride must include a model string and optional provider string.");
+  }
+  if (input.enabledToolsets !== undefined && !Array.isArray(input.enabledToolsets)) {
+    throw new Error("Cron enabledToolsets must be an array of toolset names.");
+  }
+  if (Array.isArray(input.enabledToolsets) && input.enabledToolsets.some((value: unknown) => typeof value !== "string")) {
+    throw new Error("Cron enabledToolsets must be an array of toolset names.");
+  }
+  if (input.workdir !== undefined && (typeof input.workdir !== "string" || input.workdir.trim().length === 0)) {
+    throw new Error("Cron workdir must be a non-empty string.");
+  }
+}
+
+function isCronModelOverride(value: unknown): value is NonNullable<CronJob["modelOverride"]> {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    return false;
+  }
+  const record = value as Record<string, unknown>;
+  return typeof record.model === "string" &&
+    record.model.trim().length > 0 &&
+    (record.provider === undefined || typeof record.provider === "string");
+}
+
+function normalizeCronModelOverride(value: NonNullable<CronJob["modelOverride"]>): NonNullable<CronJob["modelOverride"]> {
+  return {
+    ...(value.provider === undefined || value.provider.trim().length === 0 ? {} : { provider: value.provider.trim() }),
+    model: value.model.trim()
+  };
+}
+
+function normalizeStringList(values: string[]): string[] {
+  return [...new Set(values.map((value) => value.trim()).filter((value) => value.length > 0))];
 }
 
 function summarizePrompt(prompt: string): string {

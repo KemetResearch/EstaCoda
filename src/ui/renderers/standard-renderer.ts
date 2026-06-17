@@ -1618,8 +1618,7 @@ export class StandardRenderer {
 
   #renderSessionStatusRailLtr(vm: SessionStatusRailViewModel): string {
     const eye = this.#useUnicode ? "𓂀" : "*";
-    const modelLabel = vm.modelLabel;
-    const modelPart = `${this.#brand(eye)}  ${this.#brand(this.#bold(modelLabel))}`;
+    const modelPart = `${this.#brand(eye)}  ${this.#sessionStatusModelLabel(vm)}`;
     const parts: string[] = [];
 
     if (vm.contextUsage !== undefined) {
@@ -1673,7 +1672,7 @@ export class StandardRenderer {
       parts.push(`${isolateLtr(`${filled}/${total}`)} ${this.#copy.context}`);
     }
 
-    const modelPart = `${this.#brand(this.#bold(isolateLtr(vm.modelLabel)))}  ${this.#brand(eye)}`;
+    const modelPart = `${this.#sessionStatusModelLabel({ ...vm, modelLabel: isolateLtr(vm.modelLabel) })}  ${this.#brand(eye)}`;
     const rail = parts.length > 0
       ? `${this.#secondary(parts.join(" | "))}${this.#secondary(" | ")}${modelPart}`
       : modelPart;
@@ -1743,6 +1742,20 @@ export class StandardRenderer {
     }
     const blocks = Array.from({ length: 10 }, (_, index) => index < active ? "▰" : "▱").join(" ");
     return `${blocks} ${percent}%`;
+  }
+
+  #sessionStatusModelLabel(vm: SessionStatusRailViewModel): string {
+    const label = this.#bold(vm.modelLabel);
+    switch (vm.modelState) {
+      case "fallback-serving":
+        return this.#severity(label, "warn");
+      case "failed":
+        return this.#severity(label, "error");
+      case "configured":
+      case "primary-serving":
+      case undefined:
+        return this.#brand(label);
+    }
   }
 }
 

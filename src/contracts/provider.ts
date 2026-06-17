@@ -328,6 +328,31 @@ export type ProviderRoutePreferences = {
   providerBlocklist?: ProviderId[];
 };
 
+export type ProviderAttemptSummary = {
+  provider: string;
+  model: string;
+  ok: boolean;
+  errorClass?: ProviderResponse["errorClass"] | string;
+  credentialId?: string;
+  routeRole?: "primary" | "fallback";
+  attemptedRouteIndex?: number;
+};
+
+export type ProviderExecutionSummary = {
+  configuredPrimary?: {
+    provider: string;
+    model: string;
+  };
+  actual?: {
+    provider: string;
+    model: string;
+  };
+  fallbackUsed: boolean;
+  primaryFailureClass?: ProviderResponse["errorClass"] | string;
+  attempts: ProviderAttemptSummary[];
+  status: "not-run" | "primary-success" | "fallback-success" | "failed";
+};
+
 export type ProviderAdapter = {
   id: ProviderId;
   name: string;

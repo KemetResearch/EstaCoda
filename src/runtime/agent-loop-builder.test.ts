@@ -484,6 +484,21 @@ describe("AgentLoopBuilder", () => {
     expect(built.toolRegistry.get("mcp.read")).toBe(readTool);
     expect(built.providerTools.map((tool) => tool.function.name)).not.toContain("mcp.write");
   });
+
+  it("exposes cron runtime toolsets after disabled toolsets are removed", async () => {
+    const observedToolsets: string[][] = [];
+    const writeTool = registeredTool("mcp.write", ["shell-write"]);
+    const readTool = registeredTool("mcp.read", ["research"]);
+    const harness = await createBuilderHarness({
+      mcpTools: [writeTool, readTool],
+      setAvailableToolsets: (toolsets) => observedToolsets.push(toolsets)
+    });
+
+    await harness.build("session-a", { disabledToolsets: ["shell-write"] });
+
+    expect(observedToolsets.at(-1)).toContain("research");
+    expect(observedToolsets.at(-1)).not.toContain("shell-write");
+  });
 });
 
 async function createBuilderHarness(input: {
@@ -493,6 +508,7 @@ async function createBuilderHarness(input: {
   factories?: ConstructorParameters<typeof AgentLoopBuilder>[0]["factories"];
   sessionRecallServiceFactory?: AgentLoopRuntimeSubstrate["sessionRecallServiceFactory"];
   memoryFileCompactionServiceFactory?: AgentLoopRuntimeSubstrate["memoryFileCompactionServiceFactory"];
+  setAvailableToolsets?: AgentLoopRuntimeSubstrate["setAvailableToolsets"];
 } = {}) {
   const workspaceRoot = await mkdtemp(join(tmpdir(), "estacoda-builder-test-"));
   const homeDir = workspaceRoot;
@@ -610,7 +626,8 @@ async function createBuilderHarness(input: {
     },
     channelMediaRoot: join(workspaceRoot, "channel-media"),
     audioCacheRoot: join(workspaceRoot, "audio-cache"),
-    imageCacheRoot: join(workspaceRoot, "image-cache")
+    imageCacheRoot: join(workspaceRoot, "image-cache"),
+    setAvailableToolsets: input.setAvailableToolsets
   };
   const builder = new AgentLoopBuilder({
     substrate,

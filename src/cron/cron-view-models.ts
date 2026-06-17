@@ -65,9 +65,14 @@ export function buildCronListViewModel(data: CronListData): ViewModel {
         entries: [
           kv("schedule", job.schedule),
           kv("next", job.nextRunAt ?? "none"),
+          ...(job.noAgent === true ? [kv("mode", "no-agent")] : []),
           ...(job.script !== undefined ? [kv("script", job.script)] : []),
+          ...(job.workdir !== undefined ? [kv("workdir", job.workdir)] : []),
           kv("runs", job.runCount),
           ...(job.skills.length > 0 ? [kv("skills", job.skills.join(", "))] : []),
+          ...((job.contextFrom?.length ?? 0) > 0 ? [kv("contextFrom", job.contextFrom!.join(", "))] : []),
+          ...(job.modelOverride !== undefined ? [kv("model", renderCronModelOverride(job.modelOverride))] : []),
+          ...((job.enabledToolsets?.length ?? 0) > 0 ? [kv("toolsets", job.enabledToolsets!.join(", "))] : []),
         ],
       })
     ),
@@ -97,8 +102,13 @@ export function buildCronJobDetailViewModel(data: CronJobDetailData): ViewModel 
       kv("Last run", job.lastRunAt ?? "never"),
       kv("Runs", job.runCount),
       ...(job.script !== undefined ? [kv("Script", job.script)] : []),
+      ...(job.workdir !== undefined ? [kv("Workdir", job.workdir)] : []),
+      ...(job.noAgent === true ? [kv("Mode", "no-agent")] : []),
       kv("Delivery", job.delivery),
       ...(job.skills.length > 0 ? [kv("Skills", job.skills.join(", "))] : []),
+      ...((job.contextFrom?.length ?? 0) > 0 ? [kv("Context from", job.contextFrom!.join(", "))] : []),
+      ...(job.modelOverride !== undefined ? [kv("Model", renderCronModelOverride(job.modelOverride))] : []),
+      ...((job.enabledToolsets?.length ?? 0) > 0 ? [kv("Enabled toolsets", job.enabledToolsets!.join(", "))] : []),
     ],
   });
 
@@ -226,12 +236,21 @@ export function buildCronCreatedViewModel(data: CronCreatedData): ViewModel {
           kv("Name", job.name),
           kv("Schedule", job.schedule),
           kv("Next run", job.nextRunAt ?? "none"),
+          ...(job.noAgent === true ? [kv("Mode", "no-agent")] : []),
           ...(job.script !== undefined ? [kv("Script", job.script)] : []),
+          ...(job.workdir !== undefined ? [kv("Workdir", job.workdir)] : []),
+          ...((job.contextFrom?.length ?? 0) > 0 ? [kv("Context from", job.contextFrom!.join(", "))] : []),
+          ...(job.modelOverride !== undefined ? [kv("Model", renderCronModelOverride(job.modelOverride))] : []),
+          ...((job.enabledToolsets?.length ?? 0) > 0 ? [kv("Enabled toolsets", job.enabledToolsets!.join(", "))] : []),
           kv("Delivery", job.delivery),
         ],
       }),
     ],
   });
+}
+
+function renderCronModelOverride(model: NonNullable<import("./cron-store.js").CronJob["modelOverride"]>): string {
+  return model.provider === undefined ? model.model : `${model.provider}/${model.model}`;
 }
 
 // ─────────────────────────────────────────────────────────────

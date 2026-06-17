@@ -1031,7 +1031,8 @@ function createMinimalRuntime(): Runtime {
       listEvents: async () => [],
       search: async () => []
     },
-    sessionId: "sess-1"
+    sessionId: "sess-1",
+    trajectoryId: undefined
   } as Runtime;
 }
 

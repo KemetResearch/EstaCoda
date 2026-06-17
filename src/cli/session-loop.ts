@@ -4,6 +4,7 @@ import type { Runtime } from "../runtime/create-runtime.js";
 import type { RuntimeEvent } from "../contracts/runtime-event.js";
 import type { SessionEvent } from "../contracts/session.js";
 import type { ToolResult } from "../contracts/tool.js";
+import type { ProviderExecutionSummary } from "../contracts/provider.js";
 import type { ModelSwitchContext } from "../providers/model-switch-resolver.js";
 import { renderSessionRecallResult } from "../session/session-recall-service.js";
 import { renderSessionCompactionResult } from "../prompt/session-compression-service.js";
@@ -13,9 +14,12 @@ import {
   resolveEffectiveSessionModelOverride,
   resolveModelSwitchRequest
 } from "../providers/model-switch-resolver.js";
-import { runCronCommand } from "../cron/cron-command.js";
+import { cronCommandNeedsRuntimeControlValidation, cronCommandNeedsWorkdirValidation, runCronCommand } from "../cron/cron-command.js";
 import { createRuntimeCronRunner, tickCron } from "../cron/cron-runner.js";
+import { createIsolatedCronRuntime, type CronRuntimeFactory } from "../cron/cron-runtime-factory.js";
+import { availableToolsetsFromTools } from "../cron/cron-runtime-validation.js";
 import { CronStore } from "../cron/cron-store.js";
+import { WorkspaceTrustStore } from "../security/workspace-trust-store.js";
 import { storeCapabilitySecret, type SetupNeededMetadata } from "../capabilities/capability-setup.js";
 import { defaultImageModel } from "../contracts/image-generation.js";
 import { createReadlinePrompt, type Prompt, type PromptOptions, type PromptSpecialKeyControl } from "./readline-prompt.js";
@@ -62,6 +66,7 @@ import {
 import { ActiveTurnCommandController } from "./active-turn-command-controller.js";
 import { createFilePasteReferenceStore } from "./paste-interceptor.js";
 import { beginExplicitWorkflowRun, beginSkillPlaybookWorkflowRun } from "../workflow/workflow-begin.js";
+import { summarizeProviderExecution } from "../runtime/provider-execution-summary.js";
 
 export type SessionLoopOptions = {
   runtime: Runtime;
@@ -75,6 +80,7 @@ export type SessionLoopOptions = {
   now?: () => number;
   workspaceRoot?: string;
   homeDir?: string;
+  cronRuntimeFactory?: CronRuntimeFactory;
   locale?: import("../contracts/ui.js").UiLocale;
   showResponseProgress?: boolean;
   capabilities?: TerminalCapabilities;
@@ -90,7 +96,22 @@ const MAX_ACTIVE_TURN_PREVIEW_LINES = 4;
 const MAX_ACTIVE_TURN_QUEUED_LINES = 3;
 
 type ContextUsageSnapshot = NonNullable<SessionStatusRailViewModel["contextUsage"]>;
+type RuntimeModelInfo = ReturnType<NonNullable<Runtime["getModelInfo"]>>;
 type StatusRailTimerMode = "idle" | "active-turn" | "last-turn";
+type ProviderServingStatus = "primary" | "fallback" | "failed";
+
+type ProviderRouteServingState = {
+  readonly status: ProviderServingStatus;
+  readonly primary?: {
+    readonly provider: string;
+    readonly model: string;
+  };
+  readonly actual?: {
+    readonly provider: string;
+    readonly model: string;
+  };
+  readonly reason?: string;
+};
 
 type StatusRailTiming = {
   readonly now: () => number;
@@ -353,6 +374,8 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
     let activeTurnStartedAtMs: number | undefined;
     let lastCompletedTurnSeconds: number | undefined;
     let pendingCompactionPostTokens: number | undefined;
+    let lastProviderExecutionSummary: ProviderExecutionSummary | undefined;
+    let providerServingState: ProviderRouteServingState | undefined;
     const resetTurnRailState = () => {
       timerMode = "idle";
       activeTurnStartedAtMs = undefined;
@@ -414,7 +437,8 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
         slashMenu: pendingSlashCompletion,
         slashMenuMinRows: pendingSlashCompletion === undefined ? undefined : PROMPT_REGION_SLASH_PANEL_ROWS,
         contextUsage: latestContextUsage,
-        timing: railTiming()
+        timing: railTiming(),
+        providerExecutionSummary: lastProviderExecutionSummary
       });
       const redrawIdleReadlineChrome = () => {
         if (!bottomChrome.enabled) return;
@@ -479,7 +503,7 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
           bottomChrome.updateState(idleBottomState());
           bottomChrome.startReadlineTicker(idleBottomState, () => livePromptRows);
         } else if (chrome.enabled) {
-          chrome.renderChrome(buildPromptChromeState(runtime, renderer, undefined, pendingSlashCompletion, latestContextUsage, railTiming()));
+          chrome.renderChrome(buildPromptChromeState(runtime, renderer, undefined, pendingSlashCompletion, latestContextUsage, railTiming(), lastProviderExecutionSummary));
         } else {
           const topRule = renderHorizontalRule(renderer.tokens, useColor, useUnicode, termWidth);
           output.write(`${topRule}\n`);
@@ -588,6 +612,7 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
           prompt,
           workspaceRoot: options.workspaceRoot,
           homeDir: options.homeDir,
+          cronRuntimeFactory: options.cronRuntimeFactory,
           onSessionCompacted: ({ postTokens }) => applyCompactionRailReset(postTokens)
         });
 
@@ -595,6 +620,8 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
           await runtime.dispose();
           runtime = shouldExit.runtime;
           latestContextUsage = undefined;
+          lastProviderExecutionSummary = undefined;
+          providerServingState = undefined;
           resetTurnRailState();
           activityBuilder = new ToolActivityViewModelBuilder({
             tools: runtime.tools()
@@ -662,7 +689,8 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
           slashMenu: activeTurnSlashCompletion,
           slashMenuMinRows: activeTurnSlashCompletion === undefined ? undefined : PROMPT_REGION_SLASH_PANEL_ROWS,
           contextUsage: latestContextUsage,
-          timing: railTiming()
+          timing: railTiming(),
+          providerExecutionSummary: lastProviderExecutionSummary
         });
 
         currentAnimator = new ToolActivityAnimator({
@@ -839,7 +867,7 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
           if (chrome.enabled) {
             chrome.renderInlineSpinner(phase, (p) => {
               const activeSpinner = buildActiveTurnSpinnerViewModel({ phase: p });
-              const statusRail = buildPromptChromeState(runtime, renderer, undefined, undefined, latestContextUsage, railTiming()).statusRail;
+              const statusRail = buildPromptChromeState(runtime, renderer, undefined, undefined, latestContextUsage, railTiming(), lastProviderExecutionSummary).statusRail;
               return [
                 statusRail === undefined ? undefined : renderer.render(statusRail),
                 renderer.render(activeSpinner)
@@ -1092,6 +1120,12 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
           });
         activeTurnCommandController.start();
         const response = await responsePromise;
+        lastProviderExecutionSummary = response.providerExecution === undefined
+          ? undefined
+          : summarizeProviderExecution({
+              configuredModel: configuredModelForRuntime(runtime),
+              execution: response.providerExecution,
+            });
         if (pendingCompactionPostTokens !== undefined) {
           applyCompactionRailReset(pendingCompactionPostTokens);
           pendingCompactionPostTokens = undefined;
@@ -1105,7 +1139,8 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
             runtime,
             renderer,
             contextUsage: latestContextUsage,
-            timing: railTiming()
+            timing: railTiming(),
+            providerExecutionSummary: lastProviderExecutionSummary
           }));
         } else if (bottomChrome.enabled) {
           skippedPreResponseBottomChromeStateUpdate = true;
@@ -1122,6 +1157,13 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
           continue;
         }
 
+        const providerServingAlert = lastProviderExecutionSummary === undefined
+          ? undefined
+          : providerServingTransitionAlert(providerServingState, lastProviderExecutionSummary);
+        if (lastProviderExecutionSummary !== undefined) {
+          providerServingState = providerServingStateFromSummary(lastProviderExecutionSummary);
+        }
+
         const assistantVm = buildAssistantResponseViewModel({
           label: response.label,
           text: response.text,
@@ -1129,6 +1171,11 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
           progress: options.showResponseProgress === true ? response.progress : undefined,
         });
         flushCompletedToolRowsNoRestore();
+        if (providerServingAlert !== undefined) {
+          writeAboveChrome(() => {
+            output.write(`${providerServingAlert}\n`);
+          });
+        }
         writeAboveChrome(() => {
           output.write(renderer.render(assistantVm));
         });
@@ -1137,7 +1184,8 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
             runtime,
             renderer,
             contextUsage: latestContextUsage,
-            timing: railTiming()
+            timing: railTiming(),
+            providerExecutionSummary: lastProviderExecutionSummary
           }));
         }
         if (turnVoiceMode === "tts") {
@@ -1422,6 +1470,7 @@ export async function handleSlashCommand(input: {
   };
   workspaceRoot?: string;
   homeDir?: string;
+  cronRuntimeFactory?: CronRuntimeFactory;
   onSessionCompacted?: (result: { readonly postTokens: number }) => void;
 }): Promise<boolean | { runtime: Runtime; notice: (runtime: Runtime) => string }> {
   const [command = "", ...args] = input.text.slice(1).trim().split(/\s+/u);
@@ -1580,17 +1629,52 @@ export async function handleSlashCommand(input: {
     }
     case "cron": {
       const store = new CronStore();
+      const profileId = await runtimeProfileId(input.runtime);
+      const runtimeConfig = cronCommandNeedsRuntimeControlValidation(args)
+        ? await loadRuntimeConfig({
+            workspaceRoot: input.workspaceRoot ?? process.cwd(),
+            homeDir: input.homeDir,
+            profileId
+          })
+        : undefined;
+      const defaultWorkspaceRoot = input.workspaceRoot ?? process.cwd();
+      const workdirControls = cronCommandNeedsWorkdirValidation(args)
+        ? {
+            defaultWorkspaceRoot,
+            allowedRoots: [defaultWorkspaceRoot],
+            isWorkspaceTrusted: (path: string) => new WorkspaceTrustStore({ homeDir: input.homeDir }).isTrusted(path)
+          }
+        : undefined;
       const result = await runCronCommand({
         args,
         store,
+        runtimeControls: runtimeConfig === undefined
+          ? undefined
+          : {
+              config: runtimeConfig,
+              availableToolsets: () => availableToolsetsFromTools(input.runtime.tools())
+            },
+        workdirControls,
         tick: async () => {
+          const trustStore = new WorkspaceTrustStore({ homeDir: input.homeDir });
           const results = await tickCron({
             store,
             runner: createRuntimeCronRunner({
-              runtimeFactory: async () => input.runtime,
+              store,
+              runtimeFactory: async (job, context) => createIsolatedCronRuntime({
+                job,
+                context,
+                workspaceRoot: defaultWorkspaceRoot,
+                homeDir: input.homeDir,
+                profileId,
+                sessionDb: input.runtime.sessionDb,
+                createRuntime: input.cronRuntimeFactory
+              }),
               wrapResponse: true,
-              disposeRuntime: false,
-              workspaceRoot: input.workspaceRoot
+              disposeRuntime: true,
+              workspaceRoot: defaultWorkspaceRoot,
+              allowedWorkdirRoots: [defaultWorkspaceRoot],
+              isWorkspaceTrusted: (path) => trustStore.isTrusted(path)
             })
           });
           return results.length === 0
@@ -2868,12 +2952,12 @@ function buildPromptChromeState(
   activeSpinner?: import("../contracts/view-model.js").ActiveTurnSpinnerViewModel,
   slashMenu?: SlashMenuViewModel,
   contextUsage?: ContextUsageSnapshot,
-  timing?: StatusRailTiming
+  timing?: StatusRailTiming,
+  providerExecutionSummary?: ProviderExecutionSummary
 ) {
   const modelInfo = typeof runtime.getModelInfo === "function" ? runtime.getModelInfo() : undefined;
-  const modelId = modelInfo?.kind === "kv"
-    ? String(modelInfo.entries.find((e) => e.key === "model")?.value ?? "unknown")
-    : "unknown";
+  const configuredModel = configuredModelFromInfo(modelInfo);
+  const providerRail = providerExecutionRailState(configuredModel, providerExecutionSummary);
   const contextWindow = modelContextWindow(runtime, modelInfo);
   const sessionElapsedMs = timing === undefined
     ? undefined
@@ -2883,7 +2967,7 @@ function buildPromptChromeState(
 
   return {
     statusRail: buildSessionStatusRailViewModel({
-      modelLabel: modelId,
+      ...providerRail,
       turnState: "idle",
       showTurnState,
       sessionElapsedMs,
@@ -2905,6 +2989,7 @@ function buildBottomChromeState(input: {
   shortcutRail?: ShortcutHintRailViewModel;
   contextUsage?: ContextUsageSnapshot;
   timing?: StatusRailTiming;
+  providerExecutionSummary?: ProviderExecutionSummary;
 }): BottomChromeState {
   const chromeState = buildPromptChromeState(
     input.runtime,
@@ -2912,7 +2997,8 @@ function buildBottomChromeState(input: {
     undefined,
     input.slashMenu,
     input.contextUsage,
-    input.timing
+    input.timing,
+    input.providerExecutionSummary
   );
   return {
     statusRail: chromeState.statusRail,
@@ -3040,6 +3126,168 @@ function currentTurnSecondsForTiming(timing: StatusRailTiming | undefined): numb
 
 function elapsedSeconds(startedAtMs: number, finishedAtMs: number): number {
   return Math.max(0, Math.floor((finishedAtMs - startedAtMs) / 1000));
+}
+
+function configuredModelForRuntime(runtime: Runtime): { provider: string; id: string } | undefined {
+  const modelInfo = typeof runtime.getModelInfo === "function" ? runtime.getModelInfo() : undefined;
+  const configured = configuredModelFromInfo(modelInfo);
+  if (configured.id === "unknown" && configured.provider === undefined) {
+    return undefined;
+  }
+  return {
+    provider: configured.provider ?? "unknown",
+    id: configured.id,
+  };
+}
+
+function configuredModelFromInfo(modelInfo?: RuntimeModelInfo): {
+  provider?: string;
+  id: string;
+  label: string;
+} {
+  if (modelInfo?.kind !== "kv") {
+    return { id: "unknown", label: "unknown" };
+  }
+
+  const model = String(modelInfo.entries.find((entry) => entry.key === "model")?.value ?? "unknown");
+  const providerValue = modelInfo.entries.find((entry) => entry.key === "provider")?.value;
+  const provider = providerValue === undefined ? undefined : String(providerValue);
+  return {
+    provider,
+    id: model,
+    label: model,
+  };
+}
+
+function providerExecutionRailState(
+  configuredModel: { label: string },
+  summary?: ProviderExecutionSummary
+): {
+  modelLabel: string;
+  modelState: NonNullable<SessionStatusRailViewModel["modelState"]>;
+  configuredModelLabel?: string;
+  servingModelLabel?: string;
+} {
+  if (summary === undefined || summary.status === "not-run") {
+    return {
+      modelLabel: configuredModel.label,
+      modelState: "configured",
+    };
+  }
+
+  if (summary.status === "failed") {
+    return {
+      modelLabel: configuredModel.label,
+      modelState: "failed",
+    };
+  }
+
+  if (summary.actual === undefined) {
+    return {
+      modelLabel: configuredModel.label,
+      modelState: "configured",
+    };
+  }
+
+  return {
+    modelLabel: summary.actual.model,
+    modelState: summary.status === "fallback-success" ? "fallback-serving" : "primary-serving",
+    configuredModelLabel: summary.configuredPrimary?.model,
+    servingModelLabel: summary.actual.model,
+  };
+}
+
+function providerServingTransitionAlert(
+  previous: ProviderRouteServingState | undefined,
+  summary: ProviderExecutionSummary
+): string | undefined {
+  const next = providerServingStateFromSummary(summary);
+  if (next === undefined) {
+    return undefined;
+  }
+
+  if (next.status === "primary") {
+    if (previous?.status === "fallback" || previous?.status === "failed") {
+      return `primary model available again: ${routeModelLabel(next.actual ?? next.primary)}`;
+    }
+    return undefined;
+  }
+
+  if (next.status === "fallback") {
+    if (previous?.status === "failed") {
+      return `provider recovered via fallback: ${routeModelLabel(next.actual)}; primary ${routeModelLabel(next.primary)} failed with ${formatProviderFailureReason(next.reason)}`;
+    }
+    if (previous?.status !== "fallback") {
+      return `primary model failed: ${routeModelLabel(next.primary)} ${formatProviderFailureReason(next.reason)}; using fallback ${routeModelLabel(next.actual)}`;
+    }
+    return undefined;
+  }
+
+  if (previous?.status !== "failed") {
+    return `provider failed: ${routeModelLabel(next.primary ?? next.actual)} ${formatProviderFailureReason(next.reason)}`;
+  }
+
+  return undefined;
+}
+
+function providerServingStateFromSummary(
+  summary: ProviderExecutionSummary
+): ProviderRouteServingState | undefined {
+  if (summary.status === "not-run") {
+    return undefined;
+  }
+
+  if (summary.status === "failed") {
+    const primary = firstProviderSummaryRoute(summary) ?? summary.configuredPrimary;
+    return {
+      status: "failed",
+      primary,
+      reason: summary.primaryFailureClass ?? firstProviderFailureReason(summary),
+    };
+  }
+
+  if (summary.actual === undefined) {
+    return undefined;
+  }
+
+  if (summary.status === "fallback-success") {
+    return {
+      status: "fallback",
+      primary: firstProviderSummaryRoute(summary) ?? summary.configuredPrimary,
+      actual: summary.actual,
+      reason: summary.primaryFailureClass ?? firstProviderFailureReason(summary),
+    };
+  }
+
+  return {
+    status: "primary",
+    primary: summary.configuredPrimary,
+    actual: summary.actual,
+  };
+}
+
+function firstProviderSummaryRoute(
+  summary: ProviderExecutionSummary
+): { provider: string; model: string } | undefined {
+  const attempt = summary.attempts.find((candidate) => candidate.attemptedRouteIndex === 0) ?? summary.attempts[0];
+  return attempt === undefined
+    ? undefined
+    : {
+        provider: attempt.provider,
+        model: attempt.model,
+      };
+}
+
+function firstProviderFailureReason(summary: ProviderExecutionSummary): string | undefined {
+  return summary.attempts.find((attempt) => !attempt.ok)?.errorClass;
+}
+
+function routeModelLabel(route: { model: string } | undefined): string {
+  return route?.model ?? "unknown";
+}
+
+function formatProviderFailureReason(reason: string | undefined): string {
+  return reason ?? "unknown";
 }
 
 function modelContextWindow(

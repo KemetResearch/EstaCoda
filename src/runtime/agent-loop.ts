@@ -43,6 +43,12 @@ import { SkillPlaybookRunner } from "./skill-playbook-runner.js";
 import { NativeToolExecutor } from "./native-tool-executor.js";
 import type { SessionRuntimeContext } from "./session-runtime-context.js";
 import { buildFallbackResponse, cancelledResponse, buildResumeNote, renderToolPlanProgress } from "./response-builders.js";
+import { renderProviderExecutionSummary, summarizeProviderExecution } from "./provider-execution-summary.js";
+import {
+  sanitizeActiveTaskState,
+  updateActiveTaskState,
+  type ActiveTaskState
+} from "./active-task-state.js";
 import { emit, isAborted } from "../utils/runtime-helpers.js";
 import { appendArtifactSummary, renderArtifactProgress } from "../utils/artifact-formatting.js";
 import { summarizeProviderFailure } from "../providers/provider-diagnostics.js";
@@ -598,6 +604,7 @@ export class AgentLoop {
     const deterministicImageGenerationRan = deterministicNativeTools.executions.some((execution) => execution.tool.name === "image.generate");
     const providerTools = this.#model?.supportsTools === true ? this.#providerTools : [];
     const preflightCompression = await this.#compactBeforeProviderTurn(input.signal, input.onEvent);
+    const previousActiveTaskState = await this.#latestActiveTaskState();
     await this.#emitLiveContextUsageEstimate({
       onEvent: input.onEvent,
       routedText,
@@ -636,6 +643,7 @@ export class AgentLoop {
       toolPlans,
       trustedWorkspace,
       initialRiskClass,
+      activeTaskState: previousActiveTaskState,
       signal: input.signal
     });
     const effectiveProviderExecution = providerLoop.providerExecution;
@@ -699,6 +707,13 @@ export class AgentLoop {
     const displayText = providerReturnedEmptyContent
       ? "I completed the requested actions but did not produce any visible output."
       : rawProviderContent;
+    const providerSummary = summarizeProviderExecution({
+      configuredModel: this.#model === undefined
+        ? undefined
+        : { provider: this.#model.provider, id: this.#model.id },
+      execution: effectiveProviderExecution
+    });
+    const providerProgress = renderProviderExecutionSummary(providerSummary);
     const response = effectiveProviderExecution?.ok === true && effectiveProviderExecution.response !== undefined
       ? {
           ...fallbackResponse,
@@ -712,8 +727,7 @@ export class AgentLoop {
             ...fallbackResponse.progress,
             ...renderArtifactProgress(artifacts),
             ...renderToolPlanProgress(toolPlans),
-            `provider: ${effectiveProviderExecution.response.provider}/${effectiveProviderExecution.response.model}`,
-            effectiveProviderExecution.fallbackUsed ? "provider fallback used" : "provider primary used",
+            ...providerProgress,
             providerLoop.iterations > 1 ? `provider iterations: ${providerLoop.iterations}` : "provider continuation: not needed"
           ]
         }
@@ -746,9 +760,16 @@ export class AgentLoop {
               ...fallbackResponse.progress,
               ...renderArtifactProgress(artifacts),
               ...renderToolPlanProgress(toolPlans),
-              `provider failed: ${effectiveProviderExecution.attempts.map((attempt) => `${attempt.provider}/${attempt.model}:${attempt.errorClass ?? "unknown"}`).join(", ") || "no route"}`
-            ]
-          };
+            ...providerProgress
+          ]
+        };
+    const activeTaskState = updateActiveTaskState({
+      previous: previousActiveTaskState,
+      userText: effectiveText,
+      agentText: response.text,
+      toolExecutions,
+      providerExecution: providerSummary
+    });
 
     await this.#skillLearningManager?.observeTurn({
       profileId: this.#profileId,
@@ -804,9 +825,13 @@ export class AgentLoop {
           securityDecision,
           contextReferences: context?.references.map((reference) => reference.raw) ?? [],
           toolExecutions: toolExecutions.map((execution) => execution.tool.name),
-          provider: effectiveProviderExecution?.response === undefined
+          provider: providerSummary.actual === undefined
             ? undefined
-            : `${effectiveProviderExecution.response.provider}/${effectiveProviderExecution.response.model}`,
+            : `${providerSummary.actual.provider}/${providerSummary.actual.model}`,
+          providerExecution: providerSummary,
+          providerFallbackUsed: providerSummary.fallbackUsed,
+          providerPrimaryFailureClass: providerSummary.primaryFailureClass,
+          ...(activeTaskState === undefined ? {} : { activeTaskState }),
           toolPlans: toolPlans.map((plan) => ({
             id: plan.id,
             tool: plan.tool,
@@ -881,6 +906,20 @@ export class AgentLoop {
     const lastAgent = [...messages].reverse().find((message) => message.role === "agent");
     return lastAgent?.metadata?.kind === "provider-tool-call-turn" &&
       response.text === "I completed the requested actions but did not produce any visible output.";
+  }
+
+  async #latestActiveTaskState(): Promise<ActiveTaskState | undefined> {
+    const messages = await this.#sessionDb.listMessages(this.#currentSessionId()).catch(() => []);
+    for (const message of [...messages].reverse()) {
+      if (message.role !== "agent") {
+        continue;
+      }
+      const state = sanitizeActiveTaskState(message.metadata?.activeTaskState);
+      if (state !== undefined) {
+        return state.status === "open" ? state : undefined;
+      }
+    }
+    return undefined;
   }
 
   async #estimateLiveContextTokens(input: {

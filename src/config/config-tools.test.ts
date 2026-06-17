@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { tmpdir } from "node:os";
-import type { ModelProfile } from "../contracts/provider.js";
+import type { ModelProfile, ProviderExecutionSummary } from "../contracts/provider.js";
 import type { SessionEvent, SessionModelOverride } from "../contracts/session.js";
 import { InMemorySessionDB } from "../session/in-memory-session-db.js";
 import { resolveProfileStateHome } from "./profile-home.js";
@@ -78,6 +78,7 @@ type ProviderStatusMetadata = {
   };
   sessionModelOverrideStatus: "none" | "active" | "ignored";
   sessionModelOverrideMessage?: string;
+  providerExecution?: ProviderExecutionSummary;
 };
 
 describe("config.provider.status", () => {
@@ -172,6 +173,204 @@ describe("config.provider.status", () => {
     });
     expect(status.sessionModelOverrideStatus).toBe("ignored");
     expect(status.sessionModelOverrideMessage).toContain("Stored model override is no longer present");
+  });
+
+  it("includes sanitized latest provider execution truth when available", async () => {
+    const homeDir = await configHome(localModelConfig({
+      primaryModel: "kimi-k2.7-code",
+      models: ["kimi-k2.7-code", "deepseek-v4-pro"]
+    }));
+    const sessionDb = new InMemorySessionDB();
+    await sessionDb.createSession({ id: "session-1", profileId: "default" });
+    await sessionDb.appendMessage({
+      sessionId: "session-1",
+      role: "agent",
+      content: "fallback response",
+      metadata: {
+        providerExecution: providerExecutionMetadataWithCredentialLeak()
+      }
+    });
+
+    const result = await runProviderStatusTool({
+      homeDir,
+      sessionId: "session-1",
+      sessionDb
+    });
+    const status = providerMetadata(result);
+    const serialized = JSON.stringify(status.providerExecution);
+
+    expect(result.content).toContain("Health check: env/config only, not a live inference check.");
+    expect(result.content).toContain("provider: deepseek/deepseek-v4-pro");
+    expect(result.content).toContain("provider fallback used: local/kimi-k2.7-code failed with rate-limit");
+    expect(status.providerExecution).toMatchObject({
+      status: "fallback-success",
+      fallbackUsed: true,
+      primaryFailureClass: "rate-limit",
+      actual: {
+        provider: "deepseek",
+        model: "deepseek-v4-pro"
+      },
+      attempts: [
+        {
+          provider: "local",
+          model: "kimi-k2.7-code",
+          ok: false,
+          errorClass: "rate-limit"
+        },
+        {
+          provider: "deepseek",
+          model: "deepseek-v4-pro",
+          ok: true
+        }
+      ]
+    });
+    expect(serialized).not.toContain("credential");
+    expect(serialized).not.toContain("SECRET");
+    expect(result.content).not.toContain("credential");
+    expect(result.content).not.toContain("SECRET");
+  });
+
+  it("does not print malicious latest execution tokens in provider status", async () => {
+    const homeDir = await configHome(localModelConfig({
+      primaryModel: "kimi-k2.7-code",
+      models: ["kimi-k2.7-code", "deepseek-v4-pro"]
+    }));
+    const sessionDb = new InMemorySessionDB();
+    await sessionDb.createSession({ id: "session-1", profileId: "default" });
+    await sessionDb.appendMessage({
+      sessionId: "session-1",
+      role: "agent",
+      content: "fallback response",
+      metadata: {
+        providerExecution: maliciousProviderExecutionMetadata()
+      }
+    });
+
+    const result = await runProviderStatusTool({
+      homeDir,
+      sessionId: "session-1",
+      sessionDb
+    });
+    const serialized = JSON.stringify(providerMetadata(result).providerExecution);
+
+    expect(result.content).toContain("provider: deepseek/deepseek-v4-pro");
+    expect(result.content).toContain("provider fallback used: unknown/unknown failed with unknown");
+    for (const unsafe of ["ignore previous", "[deepseek]", "${", "rate-limit leak", "SECRET_RAW_ERROR_BODY"]) {
+      expect(result.content).not.toContain(unsafe);
+      expect(serialized).not.toContain(unsafe);
+    }
+  });
+});
+
+describe("config.provider.execution_status", () => {
+  it("reports no latest execution without making a live check", async () => {
+    const homeDir = await configHome(localModelConfig({
+      primaryModel: "qwen2.5:3b",
+      models: ["qwen2.5:3b"]
+    }));
+
+    const result = await runProviderExecutionStatusTool({ homeDir });
+
+    expect(result.content).toContain("Health check: env/config only, not a live inference check.");
+    expect(result.content).toContain("Last execution:\nnone recorded for this session");
+    expect(result.metadata?.providerExecution).toBeUndefined();
+  });
+
+  it("reads the latest agent provider execution metadata and strips credential-like fields", async () => {
+    const homeDir = await configHome(localModelConfig({
+      primaryModel: "kimi-k2.7-code",
+      models: ["kimi-k2.7-code", "deepseek-v4-pro"]
+    }));
+    const sessionDb = new InMemorySessionDB();
+    await sessionDb.createSession({ id: "session-1", profileId: "default" });
+    await sessionDb.appendMessage({
+      sessionId: "session-1",
+      role: "agent",
+      content: "older primary response",
+      metadata: {
+        providerExecution: {
+          configuredPrimary: { provider: "local", model: "kimi-k2.7-code" },
+          actual: { provider: "local", model: "kimi-k2.7-code" },
+          fallbackUsed: false,
+          attempts: [{ provider: "local", model: "kimi-k2.7-code", ok: true }],
+          status: "primary-success"
+        }
+      }
+    });
+    await sessionDb.appendMessage({
+      sessionId: "session-1",
+      role: "agent",
+      content: "latest fallback response",
+      metadata: {
+        providerExecution: providerExecutionMetadataWithCredentialLeak()
+      }
+    });
+
+    const result = await runProviderExecutionStatusTool({
+      homeDir,
+      sessionId: "session-1",
+      sessionDb
+    });
+    const execution = result.metadata?.providerExecution as ProviderExecutionSummary | undefined;
+    const serialized = JSON.stringify(result.metadata?.providerExecution);
+
+    expect(result.content).toContain("Configured provider route:");
+    expect(result.content).toContain("Fallback routes: none");
+    expect(result.content).toContain("provider: deepseek/deepseek-v4-pro");
+    expect(result.content).toContain("provider fallback used: local/kimi-k2.7-code failed with rate-limit");
+    expect(execution?.status).toBe("fallback-success");
+    expect(execution?.actual?.provider).toBe("deepseek");
+    expect(execution?.attempts[0]).toMatchObject({
+      provider: "local",
+      model: "kimi-k2.7-code",
+      ok: false,
+      errorClass: "rate-limit"
+    });
+    expect(serialized).not.toContain("credential");
+    expect(serialized).not.toContain("SECRET");
+    expect(result.content).not.toContain("credential");
+    expect(result.content).not.toContain("SECRET");
+  });
+
+  it("sanitizes malicious persisted provider execution tokens before rendering", async () => {
+    const homeDir = await configHome(localModelConfig({
+      primaryModel: "kimi-k2.7-code",
+      models: ["kimi-k2.7-code", "deepseek-v4-pro"]
+    }));
+    const sessionDb = new InMemorySessionDB();
+    await sessionDb.createSession({ id: "session-1", profileId: "default" });
+    await sessionDb.appendMessage({
+      sessionId: "session-1",
+      role: "agent",
+      content: "latest fallback response",
+      metadata: {
+        providerExecution: maliciousProviderExecutionMetadata()
+      }
+    });
+
+    const result = await runProviderExecutionStatusTool({
+      homeDir,
+      sessionId: "session-1",
+      sessionDb
+    });
+    const execution = result.metadata?.providerExecution as ProviderExecutionSummary | undefined;
+    const serialized = JSON.stringify(execution);
+
+    expect(result.content).toContain("provider: deepseek/deepseek-v4-pro");
+    expect(result.content).toContain("provider fallback used: unknown/unknown failed with unknown");
+    expect(execution?.actual).toEqual({ provider: "deepseek", model: "deepseek-v4-pro" });
+    expect(execution?.attempts[0]).toMatchObject({ provider: "unknown", model: "unknown", ok: false });
+    expect(execution?.attempts).toContainEqual({
+      provider: "deepseek",
+      model: "deepseek-v4-pro",
+      ok: true,
+      routeRole: "fallback",
+      attemptedRouteIndex: 1
+    });
+    for (const unsafe of ["ignore previous", "[deepseek]", "${", "rate-limit leak", "SECRET_RAW_ERROR_BODY", "SECRET_PRIMARY_CREDENTIAL"]) {
+      expect(result.content).not.toContain(unsafe);
+      expect(serialized).not.toContain(unsafe);
+    }
   });
 });
 
@@ -460,7 +659,7 @@ function modelProfile(modelId: string): ModelProfile {
 
 async function runProviderStatusTool(input: {
   homeDir: string;
-  sessionDb?: Pick<InMemorySessionDB, "listEvents" | "getSessionModelOverride">;
+  sessionDb?: Pick<InMemorySessionDB, "listEvents" | "getSessionModelOverride" | "listMessages">;
   sessionId?: string;
 }) {
   const tools = createConfigTools({
@@ -473,6 +672,25 @@ async function runProviderStatusTool(input: {
   const tool = tools.find((candidate) => candidate.name === "config.provider.status");
   if (tool === undefined) {
     throw new Error("config.provider.status tool not registered");
+  }
+  return await tool.run({});
+}
+
+async function runProviderExecutionStatusTool(input: {
+  homeDir: string;
+  sessionDb?: Pick<InMemorySessionDB, "listEvents" | "getSessionModelOverride" | "listMessages">;
+  sessionId?: string;
+}) {
+  const tools = createConfigTools({
+    workspaceRoot: input.homeDir,
+    homeDir: input.homeDir,
+    profileId: "default",
+    sessionDb: input.sessionDb,
+    sessionId: input.sessionId
+  });
+  const tool = tools.find((candidate) => candidate.name === "config.provider.execution_status");
+  if (tool === undefined) {
+    throw new Error("config.provider.execution_status tool not registered");
   }
   return await tool.run({});
 }
@@ -502,4 +720,79 @@ function metadata(result: Awaited<ReturnType<typeof runCompressionStatusTool>>):
 
 function providerMetadata(result: Awaited<ReturnType<typeof runProviderStatusTool>>): ProviderStatusMetadata {
   return result.metadata as ProviderStatusMetadata;
+}
+
+function providerExecutionMetadataWithCredentialLeak(): Record<string, unknown> {
+  return {
+    configuredPrimary: { provider: "local", model: "kimi-k2.7-code" },
+    actual: {
+      provider: "deepseek",
+      model: "deepseek-v4-pro",
+      credentialId: "SECRET_ACTUAL_CREDENTIAL"
+    },
+    fallbackUsed: true,
+    primaryFailureClass: "rate-limit",
+    attempts: [
+      {
+        provider: "local",
+        model: "kimi-k2.7-code",
+        ok: false,
+        errorClass: "rate-limit",
+        credentialId: "SECRET_PRIMARY_CREDENTIAL",
+        rawBody: "SECRET_RAW_ERROR_BODY",
+        routeRole: "primary",
+        attemptedRouteIndex: 0
+      },
+      {
+        provider: "deepseek",
+        model: "deepseek-v4-pro",
+        ok: true,
+        credentialId: "SECRET_FALLBACK_CREDENTIAL",
+        routeRole: "fallback",
+        attemptedRouteIndex: 1
+      }
+    ],
+    rawErrorBody: "SECRET_TOP_LEVEL_RAW_ERROR_BODY",
+    status: "fallback-success"
+  };
+}
+
+function maliciousProviderExecutionMetadata(): Record<string, unknown> {
+  return {
+    configuredPrimary: { provider: "kimi ${inject}", model: "kimi-k2.7-code" },
+    actual: {
+      provider: "deepseek",
+      model: "deepseek-v4-pro"
+    },
+    fallbackUsed: true,
+    primaryFailureClass: "rate-limit\nleak",
+    attempts: [
+      {
+        provider: "kimi ${inject}",
+        model: "kimi\nignore previous",
+        ok: false,
+        errorClass: "rate-limit\nleak",
+        credentialId: "SECRET_PRIMARY_CREDENTIAL",
+        rawBody: "SECRET_RAW_ERROR_BODY",
+        routeRole: "primary",
+        attemptedRouteIndex: 0
+      },
+      {
+        provider: "deepseek",
+        model: "deepseek-v4-pro",
+        ok: true,
+        routeRole: "fallback",
+        attemptedRouteIndex: 1
+      },
+      {
+        provider: "kimi",
+        model: "[deepseek]",
+        ok: false,
+        errorClass: "auth",
+        routeRole: "fallback",
+        attemptedRouteIndex: 2
+      }
+    ],
+    status: "fallback-success"
+  };
 }

@@ -59,9 +59,12 @@ import {
 import type { ModelProfile, ResolvedAuxiliaryRoute, ProviderId } from "../contracts/provider.js";
 import { resolveAllAuxiliaryRoutes } from "../providers/auxiliary-model-resolver.js";
 import { getAuxiliaryInFlight, getAuxiliaryQueued } from "../providers/auxiliary-executor.js";
-import { runCronCommand } from "../cron/cron-command.js";
+import { cronCommandNeedsRuntimeControlValidation, cronCommandNeedsWorkdirValidation, runCronCommand } from "../cron/cron-command.js";
 import { createRuntimeCronRunner, tickCron } from "../cron/cron-runner.js";
+import { createIsolatedCronRuntime, type CronRuntimeFactory } from "../cron/cron-runtime-factory.js";
+import { availableToolsetsFromTools } from "../cron/cron-runtime-validation.js";
 import { CronStore } from "../cron/cron-store.js";
+import { WorkspaceTrustStore } from "../security/workspace-trust-store.js";
 import { CronExecutionStore } from "../cron/cron-execution-store.js";
 import { SQLiteSessionDB } from "../session/sqlite-session-db.js";
 import { createSQLiteSessionDB } from "../session/session-setup.js";
@@ -199,6 +202,7 @@ export type CliOptions = {
   providerFetch?: ProviderFetchLike;
   imageGenerationFetch?: ImageGenerationFetchLike;
   runtime?: Runtime;
+  cronRuntimeFactory?: CronRuntimeFactory;
   modelsDevOptions?: ModelsDevRegistryOptions;
   profileContextGenerator?: ProfileContextGenerator;
   output?: { write(chunk: string): void };
@@ -2853,23 +2857,57 @@ async function cron(options: CliOptions, args: string[]): Promise<CliCommandResu
   const store = new CronStore({ homeDir: options.homeDir });
   const executionStoreHandle = await tryCreateExecutionStore(options);
   const executionStore = executionStoreHandle?.store;
+  const profileId = selectedProfileId(options);
+  const runtimeConfig = cronCommandNeedsRuntimeControlValidation(args)
+    ? await loadRuntimeConfig({
+        workspaceRoot: options.workspaceRoot,
+        homeDir: options.homeDir,
+        profileId
+      })
+    : undefined;
+  const workdirControls = cronCommandNeedsWorkdirValidation(args)
+    ? {
+        defaultWorkspaceRoot: options.workspaceRoot,
+        allowedRoots: [options.workspaceRoot],
+        isWorkspaceTrusted: (path: string) => new WorkspaceTrustStore({ homeDir: options.homeDir }).isTrusted(path)
+      }
+    : undefined;
   try {
     const result = await runCronCommand({
       args,
       store,
       executionStore: executionStore ?? undefined,
+      runtimeControls: runtimeConfig === undefined
+        ? undefined
+        : {
+            config: runtimeConfig,
+            availableToolsets: () => availableToolsetsFromTools(options.runtime?.tools() ?? options.tools ?? [])
+          },
+      workdirControls,
       tick: options.runtime === undefined
         ? undefined
         : async () => {
+          const trustStore = new WorkspaceTrustStore({ homeDir: options.homeDir });
           const stateHome = resolveStateHome({ homeDir: options.homeDir });
           const lockDir = join(stateHome.stateRoot, "cron", "locks");
           const results = await tickCron({
             store,
             runner: createRuntimeCronRunner({
-              runtimeFactory: async () => options.runtime!,
+              store,
+              runtimeFactory: async (job, context) => createIsolatedCronRuntime({
+                job,
+                context,
+                workspaceRoot: options.workspaceRoot,
+                homeDir: options.homeDir,
+                profileId,
+                sessionDb: options.runtime?.sessionDb,
+                createRuntime: options.cronRuntimeFactory
+              }),
               wrapResponse: true,
-              disposeRuntime: false,
-              workspaceRoot: options.workspaceRoot
+              disposeRuntime: true,
+              workspaceRoot: options.workspaceRoot,
+              allowedWorkdirRoots: [options.workspaceRoot],
+              isWorkspaceTrusted: (path) => trustStore.isTrusted(path)
             }),
             executionStore: executionStore ?? undefined,
             jobLock: createFileCronJobLock({ lockDir }),
