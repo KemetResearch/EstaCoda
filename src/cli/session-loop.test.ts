@@ -18,6 +18,7 @@ import { stripAnsi } from "../ui/renderers/layout.js";
 import { resolveProfileStateHome } from "../config/profile-home.js";
 import { writeCliVoiceMode } from "./voice-mode.js";
 import { CronStore } from "../cron/cron-store.js";
+import type { ProviderExecutionResult } from "../providers/provider-executor.js";
 
 function interactiveCaps(overrides: Partial<TerminalCapabilities> = {}): TerminalCapabilities {
   return {
@@ -544,6 +545,40 @@ describe("runSessionLoop — user prompt rail behavior", () => {
     expect(rendered).toContain("╭");
     expect(rendered).toContain("𓂀  mock-model");
     expect(rendered).toContain("/tools");
+  });
+
+  it("shows configured model only before the first provider call", async () => {
+    const outputChunks: string[] = [];
+    const runtime = createMockRuntime();
+    let promptIndex = 0;
+
+    await runSessionLoop({
+      runtime,
+      output: {
+        write(chunk: string | Uint8Array): boolean {
+          outputChunks.push(String(chunk));
+          return true;
+        },
+        isTTY: true,
+        columns: 120,
+      } as unknown as NodeJS.WritableStream,
+      capabilities: interactiveCaps({ supportsAnimation: false }),
+      prompt: Object.assign(
+        async () => {
+          const values = ["/exit"];
+          return values[promptIndex++] ?? "/exit";
+        },
+        { close: () => {} }
+      ),
+      close: () => {},
+    });
+
+    const rendered = stripAnsi(outputChunks.join(""));
+    const idleRail = rendered.split("\n").find((line) => line.includes("mock-model") && line.includes("idle"));
+    expect(idleRail).toBeDefined();
+    expect(idleRail).not.toContain("->");
+    expect(idleRail).not.toContain("fallback(");
+    expect(idleRail).not.toContain("mock/mock-model");
   });
 
   it("falls back to the legacy startup hero when readiness collection fails", async () => {
@@ -1107,7 +1142,7 @@ function createEventEmittingMockRuntime(events: RuntimeEvent[]): Runtime {
   };
 }
 
-function mockResponse(): AgentLoopResponse {
+function mockResponse(overrides: Partial<AgentLoopResponse> = {}): AgentLoopResponse {
   return {
     label: "EstaCoda",
     text: "Mock response",
@@ -1130,6 +1165,81 @@ function mockResponse(): AgentLoopResponse {
     context: undefined,
     projectContext: undefined,
     progress: [],
+    ...overrides,
+  };
+}
+
+function providerExecutionPrimarySuccess(
+  provider = "mock",
+  model = "mock-model"
+): ProviderExecutionResult {
+  return {
+    ok: true,
+    response: {
+      ok: true,
+      content: "Mock response",
+      provider,
+      model,
+    },
+    fallbackUsed: false,
+    attempts: [
+      {
+        provider,
+        model,
+        ok: true,
+        content: "Mock response",
+      },
+    ],
+    toolCalls: [],
+  };
+}
+
+function providerExecutionFallbackSuccess(): ProviderExecutionResult {
+  return {
+    ok: true,
+    response: {
+      ok: true,
+      content: "Fallback response",
+      provider: "fallback-provider",
+      model: "fallback-model",
+    },
+    fallbackUsed: true,
+    attempts: [
+      {
+        provider: "mock",
+        model: "mock-model",
+        credentialId: "secret-primary-credential",
+        ok: false,
+        errorClass: "rate-limit",
+        content: "raw upstream body should not appear",
+      },
+      {
+        provider: "fallback-provider",
+        model: "fallback-model",
+        credentialId: "secret-fallback-credential",
+        ok: true,
+        content: "Fallback response",
+      },
+    ],
+    toolCalls: [],
+  };
+}
+
+function providerExecutionFailed(): ProviderExecutionResult {
+  return {
+    ok: false,
+    fallbackUsed: false,
+    attempts: [
+      {
+        provider: "mock",
+        model: "mock-model",
+        credentialId: "secret-primary-credential",
+        ok: false,
+        errorClass: "network",
+        content: "raw upstream body should not appear",
+      },
+    ],
+    toolCalls: [],
   };
 }
 
@@ -1142,6 +1252,25 @@ function withModelInfo<T extends Runtime>(runtime: T): T {
       entries: [
         { key: "provider", value: "mock" },
         { key: "model", value: "gpt-5.5" },
+        { key: "context window", value: "128000" },
+      ],
+    }),
+  };
+}
+
+function withModelRoute<T extends Runtime>(
+  runtime: T,
+  provider: string,
+  model: string
+): T {
+  return {
+    ...runtime,
+    getModelInfo: () => ({
+      kind: "kv" as const,
+      title: "Model",
+      entries: [
+        { key: "provider", value: provider },
+        { key: "model", value: model },
         { key: "context window", value: "128000" },
       ],
     }),
@@ -3390,6 +3519,182 @@ describe("runSessionLoop — active turn spinner", () => {
 
     const rendered = stripAnsi(outputChunks.join(""));
     expect(rendered).toContain("context 1.0k/64.0k");
+  });
+
+  it("shows actual serving provider after primary success without fallback health", async () => {
+    const outputChunks: string[] = [];
+    const runtime = {
+      ...createMockRuntime(),
+      handle: async (): Promise<AgentLoopResponse> =>
+        mockResponse({ providerExecution: providerExecutionPrimarySuccess("mock", "mock-model") }),
+    };
+    let promptIndex = 0;
+
+    await runSessionLoop({
+      runtime,
+      output: {
+        write(chunk: string | Uint8Array): boolean {
+          outputChunks.push(String(chunk));
+          return true;
+        },
+        isTTY: true,
+        columns: 140,
+      } as unknown as NodeJS.WritableStream,
+      capabilities: interactiveCaps({ terminalWidth: 140, supportsAnimation: false }),
+      prompt: Object.assign(
+        async () => {
+          const values = ["hello", "/exit"];
+          return values[promptIndex++] ?? "/exit";
+        },
+        { close: () => {} }
+      ),
+      close: () => {},
+    });
+
+    const rendered = stripAnsi(outputChunks.join(""));
+    const servingRail = rendered.split("\n").find((line) => line.includes("mock-model") && line.includes("⧖"));
+    expect(servingRail).toBeDefined();
+    expect(servingRail).not.toContain("->");
+    expect(servingRail).not.toContain("fallback(");
+    expect(servingRail).not.toContain("mock/mock-model");
+    expect(rendered).not.toContain("fallback(");
+  });
+
+  it("shows only the actual fallback model after fallback success", async () => {
+    const outputChunks: string[] = [];
+    const runtime = {
+      ...createMockRuntime(),
+      handle: async (): Promise<AgentLoopResponse> =>
+        mockResponse({ providerExecution: providerExecutionFallbackSuccess() }),
+    };
+    let promptIndex = 0;
+
+    await runSessionLoop({
+      runtime,
+      output: {
+        write(chunk: string | Uint8Array): boolean {
+          outputChunks.push(String(chunk));
+          return true;
+        },
+        isTTY: true,
+        columns: 160,
+      } as unknown as NodeJS.WritableStream,
+      capabilities: interactiveCaps({ terminalWidth: 160, supportsAnimation: false }),
+      prompt: Object.assign(
+        async () => {
+          const values = ["hello", "/exit"];
+          return values[promptIndex++] ?? "/exit";
+        },
+        { close: () => {} }
+      ),
+      close: () => {},
+    });
+
+    const rendered = stripAnsi(outputChunks.join(""));
+    const fallbackRail = rendered.split("\n").find((line) => line.includes("fallback-model") && line.includes("⧖"));
+    expect(fallbackRail).toBeDefined();
+    expect(fallbackRail).not.toContain("->");
+    expect(fallbackRail).not.toContain("fallback(");
+    expect(fallbackRail).not.toContain("rate-limit");
+    expect(fallbackRail).not.toContain("mock-model");
+    expect(fallbackRail).not.toContain("fallback-provider/fallback-model");
+    expect(rendered).not.toContain("secret-primary-credential");
+    expect(rendered).not.toContain("secret-fallback-credential");
+    expect(rendered).not.toContain("raw upstream body should not appear");
+  });
+
+  it("shows provider failure without pretending an actual serving model exists", async () => {
+    const outputChunks: string[] = [];
+    const runtime = {
+      ...createMockRuntime(),
+      handle: async (): Promise<AgentLoopResponse> =>
+        mockResponse({ providerExecution: providerExecutionFailed() }),
+    };
+    let promptIndex = 0;
+
+    await runSessionLoop({
+      runtime,
+      output: {
+        write(chunk: string | Uint8Array): boolean {
+          outputChunks.push(String(chunk));
+          return true;
+        },
+        isTTY: true,
+        columns: 140,
+      } as unknown as NodeJS.WritableStream,
+      capabilities: interactiveCaps({ terminalWidth: 140, supportsAnimation: false }),
+      prompt: Object.assign(
+        async () => {
+          const values = ["hello", "/exit"];
+          return values[promptIndex++] ?? "/exit";
+        },
+        { close: () => {} }
+      ),
+      close: () => {},
+    });
+
+    const rendered = stripAnsi(outputChunks.join(""));
+    const failureRail = rendered.split("\n").find((line) => line.includes("mock-model") && line.includes("⧖"));
+    expect(failureRail).toBeDefined();
+    expect(failureRail).not.toContain("->");
+    expect(failureRail).not.toContain("network");
+    expect(failureRail).not.toContain("provider-failed");
+    expect(rendered).not.toContain("secret-primary-credential");
+    expect(rendered).not.toContain("raw upstream body should not appear");
+  });
+
+  it("clears stale serving provider truth after /model refresh and updates it on the next turn", async () => {
+    const outputChunks: string[] = [];
+    const runtime = {
+      ...createMockRuntime(),
+      handle: async (): Promise<AgentLoopResponse> =>
+        mockResponse({ providerExecution: providerExecutionFallbackSuccess() }),
+    };
+    const refreshedRuntime = withModelRoute({
+      ...createMockRuntime(),
+      sessionDb: runtime.sessionDb,
+      sessionId: runtime.sessionId,
+      handle: async (): Promise<AgentLoopResponse> =>
+        mockResponse({ providerExecution: providerExecutionPrimarySuccess("fresh-provider", "fresh-model") }),
+    }, "fresh-provider", "fresh-model");
+    await runtime.sessionDb.createSession({ id: runtime.sessionId, profileId: "default" });
+    let promptIndex = 0;
+
+    await runSessionLoop({
+      runtime,
+      refreshRuntime: async () => refreshedRuntime,
+      output: {
+        write(chunk: string | Uint8Array): boolean {
+          outputChunks.push(String(chunk));
+          return true;
+        },
+        isTTY: true,
+        columns: 160,
+      } as unknown as NodeJS.WritableStream,
+      capabilities: interactiveCaps({ terminalWidth: 160, supportsAnimation: false }),
+      prompt: Object.assign(
+        async () => {
+          const values = ["hello", "/model clear", "hello again", "/exit"];
+          return values[promptIndex++] ?? "/exit";
+        },
+        { close: () => {} }
+      ),
+      close: () => {},
+    });
+
+    const rendered = stripAnsi(outputChunks.join(""));
+    expect(rendered).toContain("fallback-model");
+    const afterModelClear = rendered.slice(rendered.indexOf("Cleared the session model override."));
+    const refreshedIdleRail = afterModelClear.split("\n").find((line) =>
+      line.includes("fresh-model") && line.includes("idle")
+    );
+    expect(refreshedIdleRail).toBeDefined();
+    expect(refreshedIdleRail).not.toContain("fallback(");
+    expect(refreshedIdleRail).not.toContain("fallback-model");
+    expect(refreshedIdleRail).not.toContain("fresh-provider/fresh-model");
+    expect(refreshedIdleRail).not.toContain("->");
+    expect(afterModelClear).toContain("fresh-model");
+    expect(afterModelClear).not.toContain("fresh-provider/fresh-model");
   });
 
   it("keeps the last provider-actual context usage when live estimates arrive", async () => {

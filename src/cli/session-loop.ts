@@ -4,6 +4,7 @@ import type { Runtime } from "../runtime/create-runtime.js";
 import type { RuntimeEvent } from "../contracts/runtime-event.js";
 import type { SessionEvent } from "../contracts/session.js";
 import type { ToolResult } from "../contracts/tool.js";
+import type { ProviderExecutionSummary } from "../contracts/provider.js";
 import type { ModelSwitchContext } from "../providers/model-switch-resolver.js";
 import { renderSessionRecallResult } from "../session/session-recall-service.js";
 import { renderSessionCompactionResult } from "../prompt/session-compression-service.js";
@@ -65,6 +66,7 @@ import {
 import { ActiveTurnCommandController } from "./active-turn-command-controller.js";
 import { createFilePasteReferenceStore } from "./paste-interceptor.js";
 import { beginExplicitWorkflowRun, beginSkillPlaybookWorkflowRun } from "../workflow/workflow-begin.js";
+import { summarizeProviderExecution } from "../runtime/provider-execution-summary.js";
 
 export type SessionLoopOptions = {
   runtime: Runtime;
@@ -94,6 +96,7 @@ const MAX_ACTIVE_TURN_PREVIEW_LINES = 4;
 const MAX_ACTIVE_TURN_QUEUED_LINES = 3;
 
 type ContextUsageSnapshot = NonNullable<SessionStatusRailViewModel["contextUsage"]>;
+type RuntimeModelInfo = ReturnType<NonNullable<Runtime["getModelInfo"]>>;
 type StatusRailTimerMode = "idle" | "active-turn" | "last-turn";
 
 type StatusRailTiming = {
@@ -357,6 +360,7 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
     let activeTurnStartedAtMs: number | undefined;
     let lastCompletedTurnSeconds: number | undefined;
     let pendingCompactionPostTokens: number | undefined;
+    let lastProviderExecutionSummary: ProviderExecutionSummary | undefined;
     const resetTurnRailState = () => {
       timerMode = "idle";
       activeTurnStartedAtMs = undefined;
@@ -418,7 +422,8 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
         slashMenu: pendingSlashCompletion,
         slashMenuMinRows: pendingSlashCompletion === undefined ? undefined : PROMPT_REGION_SLASH_PANEL_ROWS,
         contextUsage: latestContextUsage,
-        timing: railTiming()
+        timing: railTiming(),
+        providerExecutionSummary: lastProviderExecutionSummary
       });
       const redrawIdleReadlineChrome = () => {
         if (!bottomChrome.enabled) return;
@@ -483,7 +488,7 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
           bottomChrome.updateState(idleBottomState());
           bottomChrome.startReadlineTicker(idleBottomState, () => livePromptRows);
         } else if (chrome.enabled) {
-          chrome.renderChrome(buildPromptChromeState(runtime, renderer, undefined, pendingSlashCompletion, latestContextUsage, railTiming()));
+          chrome.renderChrome(buildPromptChromeState(runtime, renderer, undefined, pendingSlashCompletion, latestContextUsage, railTiming(), lastProviderExecutionSummary));
         } else {
           const topRule = renderHorizontalRule(renderer.tokens, useColor, useUnicode, termWidth);
           output.write(`${topRule}\n`);
@@ -600,6 +605,7 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
           await runtime.dispose();
           runtime = shouldExit.runtime;
           latestContextUsage = undefined;
+          lastProviderExecutionSummary = undefined;
           resetTurnRailState();
           activityBuilder = new ToolActivityViewModelBuilder({
             tools: runtime.tools()
@@ -667,7 +673,8 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
           slashMenu: activeTurnSlashCompletion,
           slashMenuMinRows: activeTurnSlashCompletion === undefined ? undefined : PROMPT_REGION_SLASH_PANEL_ROWS,
           contextUsage: latestContextUsage,
-          timing: railTiming()
+          timing: railTiming(),
+          providerExecutionSummary: lastProviderExecutionSummary
         });
 
         currentAnimator = new ToolActivityAnimator({
@@ -844,7 +851,7 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
           if (chrome.enabled) {
             chrome.renderInlineSpinner(phase, (p) => {
               const activeSpinner = buildActiveTurnSpinnerViewModel({ phase: p });
-              const statusRail = buildPromptChromeState(runtime, renderer, undefined, undefined, latestContextUsage, railTiming()).statusRail;
+              const statusRail = buildPromptChromeState(runtime, renderer, undefined, undefined, latestContextUsage, railTiming(), lastProviderExecutionSummary).statusRail;
               return [
                 statusRail === undefined ? undefined : renderer.render(statusRail),
                 renderer.render(activeSpinner)
@@ -1097,6 +1104,12 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
           });
         activeTurnCommandController.start();
         const response = await responsePromise;
+        lastProviderExecutionSummary = response.providerExecution === undefined
+          ? undefined
+          : summarizeProviderExecution({
+              configuredModel: configuredModelForRuntime(runtime),
+              execution: response.providerExecution,
+            });
         if (pendingCompactionPostTokens !== undefined) {
           applyCompactionRailReset(pendingCompactionPostTokens);
           pendingCompactionPostTokens = undefined;
@@ -1110,7 +1123,8 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
             runtime,
             renderer,
             contextUsage: latestContextUsage,
-            timing: railTiming()
+            timing: railTiming(),
+            providerExecutionSummary: lastProviderExecutionSummary
           }));
         } else if (bottomChrome.enabled) {
           skippedPreResponseBottomChromeStateUpdate = true;
@@ -1142,7 +1156,8 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
             runtime,
             renderer,
             contextUsage: latestContextUsage,
-            timing: railTiming()
+            timing: railTiming(),
+            providerExecutionSummary: lastProviderExecutionSummary
           }));
         }
         if (turnVoiceMode === "tts") {
@@ -2909,12 +2924,12 @@ function buildPromptChromeState(
   activeSpinner?: import("../contracts/view-model.js").ActiveTurnSpinnerViewModel,
   slashMenu?: SlashMenuViewModel,
   contextUsage?: ContextUsageSnapshot,
-  timing?: StatusRailTiming
+  timing?: StatusRailTiming,
+  providerExecutionSummary?: ProviderExecutionSummary
 ) {
   const modelInfo = typeof runtime.getModelInfo === "function" ? runtime.getModelInfo() : undefined;
-  const modelId = modelInfo?.kind === "kv"
-    ? String(modelInfo.entries.find((e) => e.key === "model")?.value ?? "unknown")
-    : "unknown";
+  const configuredModel = configuredModelFromInfo(modelInfo);
+  const providerRail = providerExecutionRailState(configuredModel, providerExecutionSummary);
   const contextWindow = modelContextWindow(runtime, modelInfo);
   const sessionElapsedMs = timing === undefined
     ? undefined
@@ -2924,7 +2939,7 @@ function buildPromptChromeState(
 
   return {
     statusRail: buildSessionStatusRailViewModel({
-      modelLabel: modelId,
+      ...providerRail,
       turnState: "idle",
       showTurnState,
       sessionElapsedMs,
@@ -2946,6 +2961,7 @@ function buildBottomChromeState(input: {
   shortcutRail?: ShortcutHintRailViewModel;
   contextUsage?: ContextUsageSnapshot;
   timing?: StatusRailTiming;
+  providerExecutionSummary?: ProviderExecutionSummary;
 }): BottomChromeState {
   const chromeState = buildPromptChromeState(
     input.runtime,
@@ -2953,7 +2969,8 @@ function buildBottomChromeState(input: {
     undefined,
     input.slashMenu,
     input.contextUsage,
-    input.timing
+    input.timing,
+    input.providerExecutionSummary
   );
   return {
     statusRail: chromeState.statusRail,
@@ -3081,6 +3098,75 @@ function currentTurnSecondsForTiming(timing: StatusRailTiming | undefined): numb
 
 function elapsedSeconds(startedAtMs: number, finishedAtMs: number): number {
   return Math.max(0, Math.floor((finishedAtMs - startedAtMs) / 1000));
+}
+
+function configuredModelForRuntime(runtime: Runtime): { provider: string; id: string } | undefined {
+  const modelInfo = typeof runtime.getModelInfo === "function" ? runtime.getModelInfo() : undefined;
+  const configured = configuredModelFromInfo(modelInfo);
+  if (configured.id === "unknown" && configured.provider === undefined) {
+    return undefined;
+  }
+  return {
+    provider: configured.provider ?? "unknown",
+    id: configured.id,
+  };
+}
+
+function configuredModelFromInfo(modelInfo?: RuntimeModelInfo): {
+  provider?: string;
+  id: string;
+  label: string;
+} {
+  if (modelInfo?.kind !== "kv") {
+    return { id: "unknown", label: "unknown" };
+  }
+
+  const model = String(modelInfo.entries.find((entry) => entry.key === "model")?.value ?? "unknown");
+  const providerValue = modelInfo.entries.find((entry) => entry.key === "provider")?.value;
+  const provider = providerValue === undefined ? undefined : String(providerValue);
+  return {
+    provider,
+    id: model,
+    label: model,
+  };
+}
+
+function providerExecutionRailState(
+  configuredModel: { label: string },
+  summary?: ProviderExecutionSummary
+): {
+  modelLabel: string;
+  modelState: NonNullable<SessionStatusRailViewModel["modelState"]>;
+  configuredModelLabel?: string;
+  servingModelLabel?: string;
+} {
+  if (summary === undefined || summary.status === "not-run") {
+    return {
+      modelLabel: configuredModel.label,
+      modelState: "configured",
+    };
+  }
+
+  if (summary.status === "failed") {
+    return {
+      modelLabel: configuredModel.label,
+      modelState: "failed",
+    };
+  }
+
+  if (summary.actual === undefined) {
+    return {
+      modelLabel: configuredModel.label,
+      modelState: "configured",
+    };
+  }
+
+  return {
+    modelLabel: summary.actual.model,
+    modelState: summary.status === "fallback-success" ? "fallback-serving" : "primary-serving",
+    configuredModelLabel: summary.configuredPrimary?.model,
+    servingModelLabel: summary.actual.model,
+  };
 }
 
 function modelContextWindow(

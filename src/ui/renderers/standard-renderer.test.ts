@@ -1672,6 +1672,46 @@ describe("StandardRenderer — prompt chrome rails", () => {
     expect(out.split("\n")).toHaveLength(1);
   });
 
+  it("renders only the visible model label for fallback-serving state", () => {
+    const tokens = resolveTokens("standard", "dark", "kemetBlue");
+    const r = new StandardRenderer({ tokens, capabilities: fullCaps() });
+    const rendered = r.render(buildSessionStatusRailViewModel({
+      modelLabel: "deepseek-v4-pro",
+      modelState: "fallback-serving",
+      configuredModelLabel: "kimi-k2.7-code",
+      servingModelLabel: "deepseek-v4-pro",
+      turnState: "idle",
+      showTurnState: false,
+    }));
+    const out = stripAnsi(rendered);
+
+    expect(out).toContain("deepseek-v4-pro");
+    expect(out).not.toContain("kimi-k2.7-code");
+    expect(out).not.toContain("fallback(");
+    expect(out).not.toContain("->");
+    expect(rendered).toContain(ansiFgForHex(tokens.contract.severity.warn));
+    expect(out.split("\n")).toHaveLength(1);
+  });
+
+  it("keeps compact fallback-serving rails bounded without verbose fallback text", () => {
+    const compactCaps = { ...fullCaps(), terminalWidth: 56 };
+    const r = renderer("dark", compactCaps);
+    const out = stripAnsi(r.render(buildSessionStatusRailViewModel({
+      modelLabel: "deepseek-v4-pro",
+      modelState: "fallback-serving",
+      configuredModelLabel: "kimi-k2.7-code",
+      servingModelLabel: "deepseek-v4-pro",
+      turnState: "idle",
+    })));
+
+    expect(out).toContain("deepseek-v4-pro");
+    expect(out).not.toContain("fallback(");
+    expect(out).not.toContain("kimi-k2.7-code");
+    expect(out).not.toContain("->");
+    expect(out.split("\n")).toHaveLength(1);
+    expect(measureVisibleWidth(out)).toBeLessThanOrEqual(compactCaps.terminalWidth);
+  });
+
   it("renders status and shortcut rails in standard light theme", () => {
     const r = renderer("light", fullCaps());
     const status = r.render(buildSessionStatusRailViewModel({ modelLabel: "deepseek-reasoner", turnState: "idle" }));

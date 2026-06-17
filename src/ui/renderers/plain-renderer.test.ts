@@ -1233,6 +1233,24 @@ describe("PlainRenderer — prompt chrome rails", () => {
     assertNoAnsi(out);
   });
 
+  it("renders only the visible model label for fallback-serving state", () => {
+    const vm = buildSessionStatusRailViewModel({
+      modelLabel: "deepseek-v4-pro",
+      modelState: "fallback-serving",
+      configuredModelLabel: "kimi-k2.7-code",
+      servingModelLabel: "deepseek-v4-pro",
+      turnState: "idle",
+      showTurnState: false,
+    });
+    const out = renderSessionStatusRail(vm);
+
+    expect(out).toBe("* deepseek-v4-pro");
+    expect(out).not.toContain("->");
+    expect(out).not.toContain("fallback(");
+    expect(out).not.toContain("kimi-k2.7-code");
+    assertNoAnsi(out);
+  });
+
   it("renders deterministic shortcut rail without ANSI", () => {
     const out = renderShortcutHintRail(buildShortcutHintRailViewModel({ hints: [] }));
     expect(out).toBe("> /help · /tools · /model · /status · Ctrl+C exit");
