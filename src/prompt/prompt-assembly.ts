@@ -225,6 +225,13 @@ type InternalPromptLayer = PromptLayerReport & {
   content: string;
 };
 
+const MUTABLE_STATE_GROUNDING_GUIDANCE = [
+  "Mutable-state grounding:",
+  "- Treat session history, compaction summaries, skill-learning records, and native replayed tool results as historical reference unless they were produced in the current turn.",
+  "- Do not assert that files, directories, skills, config, processes, credentials, branches, packages, services, or network state currently exist based only on historical context.",
+  "- If the user asks for current state, verify with an available tool or phrase the claim explicitly as historical."
+].join("\n");
+
 function buildBaseLayers(input: ProviderPromptInput): InternalPromptLayer[] {
   const toolSummary = input.toolExecutions.length === 0
     ? "No tools were executed before this response."
@@ -278,6 +285,13 @@ function buildBaseLayers(input: ProviderPromptInput): InternalPromptLayer[] {
       protectedLayer: true,
       priority: 1,
       content: renderProfileGuidance(input)
+    }),
+    layer({
+      name: "mutable-state-grounding",
+      cacheable: true,
+      protectedLayer: true,
+      priority: 1,
+      content: MUTABLE_STATE_GROUNDING_GUIDANCE
     }),
     layer({
       name: "safety-memory",
@@ -489,11 +503,13 @@ function omitToolContextSummary(metadata: Record<string, unknown> | undefined): 
 }
 
 function renderResponseGuidance(input: ProviderPromptInput): string {
+  const mutableStateReminder = "Current mutable-state claims require current-turn tool evidence; otherwise phrase them as historical.";
   if (input.selectedSkill === undefined) {
     return [
       "Response guidance:",
       "No specialized playbook was selected for this turn.",
       "Answer the user directly using the available context.",
+      mutableStateReminder,
       "Do not mention internal routing, discovery, or fallback handling."
     ].join("\n");
   }
@@ -501,6 +517,7 @@ function renderResponseGuidance(input: ProviderPromptInput): string {
   return [
     "Response guidance:",
     `Use the selected ${input.selectedSkill.name} skill and available context to answer the user.`,
+    mutableStateReminder,
     "Do not mention internal fallback handling unless a provider or tool failure is directly relevant to the user."
   ].join("\n");
 }
