@@ -1,6 +1,7 @@
 import type { SessionMessage } from "../contracts/session.js";
 import { stripInlineReasoning } from "../providers/provider-reasoning.js";
 import { estimateMessageTokensRough, estimateMessagesTokensRough } from "./token-estimator.js";
+import { sanitizeProviderExecutionMetadata } from "./provider-execution-history.js";
 
 export const DEFAULT_HISTORY_CONTEXT_WINDOW = 128_000;
 export const HISTORY_BUDGET_RATIO = 0.12;
@@ -92,7 +93,7 @@ export function packSessionHistory(
     ...recent.map((message, index) => ({
       role: message.role === "agent" ? "assistant" as const : message.role,
       content: sanitizeHistoryContent(message.content, maxMessageChars),
-      metadata: message.metadata,
+      metadata: message.role === "agent" ? sanitizeProviderExecutionMetadata(message.metadata) : message.metadata,
       pinned: pinnedIndexes.has(protectedStart + index)
     }))
   ];
