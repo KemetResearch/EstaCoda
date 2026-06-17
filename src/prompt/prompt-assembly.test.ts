@@ -585,6 +585,64 @@ describe("assembleProviderPrompt", () => {
     expect(rendered).not.toContain("raw");
   });
 
+  it("renders active task layer for open state on acknowledgement continuation", () => {
+    const prompt = assembleProviderPrompt(basePromptInput({
+      userText: "okay",
+      routedText: "okay",
+      activeTaskState: activeTaskState("open")
+    }));
+    const rendered = renderMessages(prompt.messages);
+
+    expect(rendered).toContain("Active task continuity:");
+    expect(rendered).toContain("subordinate to the latest user message");
+    expect(rendered).toContain("Open task: inspect provider routing");
+  });
+
+  it("does not render active task layer for satisfied, cancelled, superseded, or explicit new turns", () => {
+    const satisfied = renderMessages(assembleProviderPrompt(basePromptInput({
+      userText: "continue",
+      routedText: "continue",
+      activeTaskState: activeTaskState("satisfied")
+    })).messages);
+    const cancelled = renderMessages(assembleProviderPrompt(basePromptInput({
+      userText: "continue",
+      routedText: "continue",
+      activeTaskState: activeTaskState("cancelled")
+    })).messages);
+    const superseded = renderMessages(assembleProviderPrompt(basePromptInput({
+      userText: "continue",
+      routedText: "continue",
+      activeTaskState: activeTaskState("superseded")
+    })).messages);
+    const newTask = renderMessages(assembleProviderPrompt(basePromptInput({
+      userText: "Can you review this file?",
+      routedText: "Can you review this file?",
+      activeTaskState: activeTaskState("open")
+    })).messages);
+
+    expect(satisfied).not.toContain("Active task continuity:");
+    expect(cancelled).not.toContain("Active task continuity:");
+    expect(superseded).not.toContain("Active task continuity:");
+    expect(newTask).not.toContain("Active task continuity:");
+  });
+
+  it("keeps secrets out of active task prompt", () => {
+    const prompt = assembleProviderPrompt(basePromptInput({
+      userText: "continue",
+      routedText: "continue",
+      activeTaskState: {
+        ...activeTaskState("open"),
+        promisedAction: "inspect API_KEY=secretsecretsecretsecretsecret provider logs",
+        lastProgress: "raw body TOKEN=secretsecretsecretsecretsecret"
+      }
+    }));
+    const rendered = renderMessages(prompt.messages);
+
+    expect(rendered).toContain("API_KEY=REDACTED");
+    expect(rendered).toContain("TOKEN=REDACTED");
+    expect(rendered).not.toContain("secretsecret");
+  });
+
   it("ignores provider annotations with malicious persisted token strings", () => {
     const prompt = assembleProviderPrompt(basePromptInput({
       sessionHistory: [
@@ -1232,6 +1290,18 @@ function providerExecutionMetadataWithCredentialLeak(): Record<string, unknown> 
       }
     ],
     rawErrorBody: "SECRET_TOP_LEVEL_RAW_ERROR_BODY"
+  };
+}
+
+function activeTaskState(status: "open" | "satisfied" | "cancelled" | "superseded") {
+  return {
+    id: "active-provider-routing",
+    status,
+    userRequest: "Check provider routing.",
+    promisedAction: "inspect provider routing",
+    lastProgress: "Provider files were located.",
+    updatedAt: "2026-06-17T00:00:00.000Z",
+    source: "heuristic" as const
   };
 }
 

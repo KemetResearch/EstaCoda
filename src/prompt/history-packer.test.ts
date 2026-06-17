@@ -380,6 +380,33 @@ describe("packSessionHistory", () => {
     expect(JSON.stringify(packed.messages[0]?.metadata) ?? "").not.toContain("SECRET_RAW_ERROR_BODY");
   });
 
+  it("does not preserve active task state as arbitrary packed assistant metadata", () => {
+    const packed = packSessionHistory([
+      {
+        id: "a1",
+        sessionId: "s",
+        role: "agent" as const,
+        content: "Let me inspect provider routing.",
+        metadata: {
+          activeTaskState: {
+            id: "active-provider",
+            status: "open",
+            userRequest: "Inspect provider routing.",
+            promisedAction: "inspect provider routing",
+            updatedAt: "2026-06-17T00:00:00.000Z",
+            source: "heuristic"
+          },
+          unrelated: "do-not-preserve"
+        }
+      }
+    ], {
+      maxProtectedMessages: 6,
+      maxEstimatedTokens: 2_000
+    });
+
+    expect(packed.messages[0]?.metadata).toBeUndefined();
+  });
+
   it("keeps fixed protected-message packing behavior separate from native history selection", () => {
     const messages = Array.from({ length: 8 }, (_, index) => ({
       id: `a${index + 1}`,

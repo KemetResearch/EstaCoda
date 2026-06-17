@@ -24,6 +24,11 @@ import type { AgentProfileMode, AgentResponseLanguage, UiFlavor, UiLanguage } fr
 import { buildNativeHistoryMessages } from "./native-history-builder.js";
 import { selectNativeHistoryWindow, type NativeHistoryUnit } from "./native-history-selector.js";
 import { providerExecutionHistoryAnnotation } from "./provider-execution-history.js";
+import {
+  isAcknowledgementContinuation,
+  renderActiveTaskPrompt,
+  type ActiveTaskState
+} from "../runtime/active-task-state.js";
 
 type PromptSessionHistoryMessage = Pick<ProviderMessage, "role" | "content"> & {
   metadata?: Record<string, unknown>;
@@ -48,6 +53,7 @@ export type ProviderPromptInput = {
   cache?: PromptCache;
   sessionHistory?: PromptSessionHistoryMessage[];
   rawSessionHistory?: SessionMessage[];
+  activeTaskState?: ActiveTaskState;
   nativeHistoryRoute?: NativeHistoryRouteSupport;
   nativeHistoryRouteRole?: string;
   compactionNotice?: string;
@@ -250,6 +256,9 @@ function buildBaseLayers(input: ProviderPromptInput): InternalPromptLayer[] {
         .join("\n");
   const attachmentManifest = renderChannelAttachments(input.attachments);
   const sessionHistory = renderSessionHistory(input.sessionHistory);
+  const activeTaskPrompt = isAcknowledgementContinuation(input.userText)
+    ? renderActiveTaskPrompt(input.activeTaskState)
+    : undefined;
   const channelAttachments = `Channel attachments:\n${attachmentManifest}`;
   const identity = input.soul?.trim().length
     ? input.soul.trim()
@@ -299,6 +308,17 @@ function buildBaseLayers(input: ProviderPromptInput): InternalPromptLayer[] {
             protectedLayer: true,
             priority: 1,
             content: renderCompactionNotice(input.compactionNotice)
+          })
+        ]),
+    ...(activeTaskPrompt === undefined
+      ? []
+      : [
+          layer({
+            name: "active-task-continuity",
+            cacheable: false,
+            protectedLayer: true,
+            priority: 1,
+            content: activeTaskPrompt
           })
         ]),
     layer({
