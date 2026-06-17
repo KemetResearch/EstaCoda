@@ -160,6 +160,8 @@ describe("session_search tool", () => {
       untrusted: true,
       untrustedLabel: SESSION_SEARCH_UNTRUSTED_LABEL
     });
+    expect(payload.messages[0].untrustedLabel).toContain("records what was said then");
+    expect(payload.messages[0].untrustedLabel).toContain("current mutable state must be verified with current tools");
   });
 
   it("excludes the active session when current context is available", async () => {
@@ -236,6 +238,14 @@ describe("session_search tool", () => {
       sessionId: "session",
       currentSessionId: () => "session"
     }).map((tool) => tool.name)).toEqual(["session_search"]);
+  });
+
+  it("tool description includes the current-state boundary", () => {
+    const tool = createSessionSearchTool({});
+
+    expect(tool.description).toContain("past conversation recall");
+    expect(tool.description).toContain("Do not use it as proof of current filesystem/config/process/skill state");
+    expect(tool.description).toContain("inspect current state with tools");
   });
 });
 

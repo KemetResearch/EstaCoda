@@ -41,7 +41,7 @@ export function createSessionSearchTool(options: SessionSearchToolOptions): Regi
   return {
     name: "session_search",
     description:
-      "Browse, search, or scroll raw historical session messages as bounded untrusted reference context. This is deterministic and does not summarize.",
+      "Browse, search, or scroll raw historical session messages as bounded untrusted reference context for past conversation recall. Do not use it as proof of current filesystem/config/process/skill state; inspect current state with tools. This is deterministic and does not summarize.",
     inputSchema: {
       type: "object",
       properties: {

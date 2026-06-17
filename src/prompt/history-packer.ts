@@ -132,9 +132,9 @@ function summarizeOlderTurns(messages: PackableSessionMessage[], maxChars: numbe
     .map((message) => `- agent: ${sanitizeHistoryContent(message.content, 220)}`);
   const notableToolTurns = toolMessages
     .slice(-3)
-    .map((message) => `- tool: ${sanitizeHistoryContent(message.content, 220)}`);
+    .map((message) => `- historical tool result (${message.createdAt ?? "unknown time"}): ${sanitizeHistoryContent(message.content, 220)} [verify before current-state claim]`);
   const summary = [
-    `Session summary of ${messages.length} older turn(s):`,
+    `Historical session summary of ${messages.length} older turn(s):`,
     ...notableUserTurns,
     ...notableAgentTurns,
     ...notableToolTurns
