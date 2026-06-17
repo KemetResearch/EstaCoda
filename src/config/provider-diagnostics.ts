@@ -1,5 +1,7 @@
 import type { LoadedRuntimeConfig } from "./runtime-config.js";
+import type { ProviderExecutionSummary } from "../contracts/provider.js";
 import { ProviderExecutor } from "../providers/provider-executor.js";
+import { renderProviderExecutionSummary } from "../runtime/provider-execution-summary.js";
 
 export type ProviderDiagnostic = {
   status: "ready" | "warning" | "blocked";
@@ -110,6 +112,34 @@ export function renderProviderDiagnostic(diagnostic: ProviderDiagnostic): string
   ].join("\n");
 }
 
+export function formatProviderTruthStatus(input: {
+  config: ProviderDiagnostic;
+  lastExecution?: ProviderExecutionSummary;
+  live?: ProviderLiveDiagnostic;
+}): string {
+  return [
+    "Configured provider route:",
+    ...input.config.lines,
+    "Health check: env/config only, not a live inference check.",
+    input.config.warnings.length === 0
+      ? "Configured provider status: ready"
+      : `Configured provider warnings:\n${input.config.warnings.map((warning) => `- ${warning}`).join("\n")}`,
+    "",
+    "Last execution:",
+    ...formatLastExecution(input.lastExecution),
+    ...(input.live === undefined
+      ? []
+      : [
+          "",
+          "Live provider check:",
+          ...input.live.lines,
+          input.live.warnings.length === 0
+            ? "Live provider status: ready"
+            : `Live provider warnings:\n${input.live.warnings.map((warning) => `- ${warning}`).join("\n")}`
+        ])
+  ].join("\n");
+}
+
 export async function diagnoseProviderLive(config: LoadedRuntimeConfig): Promise<ProviderLiveDiagnostic> {
   if (config.model.provider === "unconfigured" || config.model.id === "unconfigured") {
     return {
@@ -191,6 +221,14 @@ function humanProviderHealthIssue(reason: string | undefined): string {
   }
 
   return reason;
+}
+
+function formatLastExecution(summary: ProviderExecutionSummary | undefined): string[] {
+  if (summary === undefined || summary.status === "not-run") {
+    return ["none recorded for this session"];
+  }
+
+  return renderProviderExecutionSummary(summary);
 }
 
 function formatCount(value: number): string {

@@ -3,7 +3,7 @@ import type { LoadedRuntimeConfig } from "./runtime-config.js";
 import type { ModelProfile, ProviderAdapter, ProviderId, ResolvedModelRoute } from "../contracts/provider.js";
 import { ProviderRegistry } from "../providers/provider-registry.js";
 import { createOpenAICompatibleProvider, type FetchLike } from "../providers/openai-compatible-provider.js";
-import { diagnoseProviderConfig, diagnoseProviderLive } from "./provider-diagnostics.js";
+import { diagnoseProviderConfig, diagnoseProviderLive, formatProviderTruthStatus } from "./provider-diagnostics.js";
 import { normalizeMemoryConfig } from "./memory-config.js";
 import { normalizeDelegationConfig } from "./runtime-config.js";
 
@@ -183,5 +183,59 @@ describe("provider diagnostics", () => {
     expect(diagnostic.status).toBe("ready");
     expect(capturedBody?.max_completion_tokens).toBe(8);
     expect(capturedBody).not.toHaveProperty("max_tokens");
+  });
+
+  it("formats config health separately from last execution truth", async () => {
+    process.env.TEST_OPENAI_KEY = "sk-test";
+    const registry = new ProviderRegistry();
+    registry.register(adapter("openai"));
+    const diagnostic = await diagnoseProviderConfig(loadedConfig({ registry }));
+
+    const content = formatProviderTruthStatus({
+      config: diagnostic,
+      lastExecution: {
+        configuredPrimary: { provider: "kimi", model: "kimi-k2.7-code" },
+        actual: { provider: "deepseek", model: "deepseek-v4-pro" },
+        fallbackUsed: true,
+        primaryFailureClass: "rate-limit",
+        attempts: [
+          {
+            provider: "kimi",
+            model: "kimi-k2.7-code",
+            ok: false,
+            errorClass: "rate-limit",
+            routeRole: "primary",
+            attemptedRouteIndex: 0
+          },
+          {
+            provider: "deepseek",
+            model: "deepseek-v4-pro",
+            ok: true,
+            routeRole: "fallback",
+            attemptedRouteIndex: 1
+          }
+        ],
+        status: "fallback-success"
+      }
+    });
+
+    expect(content).toContain("Configured provider route:");
+    expect(content).toContain("Health check: env/config only, not a live inference check.");
+    expect(content).toContain("Configured provider status: ready");
+    expect(content).toContain("Last execution:");
+    expect(content).toContain("provider: deepseek/deepseek-v4-pro");
+    expect(content).toContain("provider fallback used: kimi/kimi-k2.7-code failed with rate-limit");
+    expect(content).not.toContain("Live provider check:");
+  });
+
+  it("formats missing last execution gracefully", async () => {
+    process.env.TEST_OPENAI_KEY = "sk-test";
+    const registry = new ProviderRegistry();
+    registry.register(adapter("openai"));
+    const diagnostic = await diagnoseProviderConfig(loadedConfig({ registry }));
+
+    const content = formatProviderTruthStatus({ config: diagnostic });
+
+    expect(content).toContain("Last execution:\nnone recorded for this session");
   });
 });

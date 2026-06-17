@@ -1,5 +1,9 @@
 import type { RegisteredTool, SessionToolProvider } from "../contracts/tool.js";
-import type { SessionDB } from "../contracts/session.js";
+import type { SessionDB, SessionMessage } from "../contracts/session.js";
+import type {
+  ProviderAttemptSummary,
+  ProviderExecutionSummary
+} from "../contracts/provider.js";
 import { buildCompressionStatusReport, renderCompressionStatusReport } from "../config/compression-status.js";
 import { resolveEffectiveSessionModelOverride } from "../providers/model-switch-resolver.js";
 import {
@@ -20,14 +24,18 @@ import {
   type WebSetupInput
 } from "../config/runtime-config.js";
 import { defaultProfileId, readActiveProfile, resolveProfileStateHome } from "../config/profile-home.js";
-import { diagnoseProviderConfig, renderProviderDiagnostic } from "../config/provider-diagnostics.js";
+import {
+  diagnoseProviderConfig,
+  formatProviderTruthStatus,
+  renderProviderDiagnostic
+} from "../config/provider-diagnostics.js";
 
 export type ConfigToolsOptions = {
   workspaceRoot: string;
   homeDir?: string;
   profileId?: string;
   sessionId?: string | (() => string);
-  sessionDb?: Pick<SessionDB, "listEvents"> & Partial<Pick<SessionDB, "getSessionModelOverride">>;
+  sessionDb?: Pick<SessionDB, "listEvents"> & Partial<Pick<SessionDB, "getSessionModelOverride" | "listMessages">>;
 };
 
 export function createConfigTools(options: ConfigToolsOptions): RegisteredTool[] {
@@ -70,6 +78,10 @@ export function createConfigTools(options: ConfigToolsOptions): RegisteredTool[]
             }
           : loaded;
         const diagnostic = await diagnoseProviderConfig(diagnosticConfig);
+        const lastExecution = await readLatestProviderExecutionSummary({
+          sessionDb: options.sessionDb,
+          sessionId
+        });
         const modelLines = effectiveOverride?.ok === true
           ? [
               `Model: ${effectiveOverride.route.provider}/${effectiveOverride.route.id} (session override)`,
@@ -93,7 +105,10 @@ export function createConfigTools(options: ConfigToolsOptions): RegisteredTool[]
             `Browser backend: ${loaded.browser.backend}`,
             `Config sources: ${loaded.sources.join(", ") || "none"}`,
             "",
-            renderProviderDiagnostic(diagnostic)
+            formatProviderTruthStatus({
+              config: diagnostic,
+              lastExecution
+            })
           ].join("\n"),
           metadata: {
             sources: loaded.sources,
@@ -122,7 +137,63 @@ export function createConfigTools(options: ConfigToolsOptions): RegisteredTool[]
               : undefined,
             web: loaded.web,
             browser: loaded.browser,
-            providerDiagnostic: diagnostic
+            providerDiagnostic: diagnostic,
+            providerExecution: lastExecution
+          }
+        };
+      }
+    },
+    {
+      name: "config.provider.execution_status",
+      description: "Show the latest provider execution truth recorded for the current session without making a network call.",
+      inputSchema: {
+        type: "object",
+        properties: {}
+      },
+      riskClass: "read-only-local",
+      toolsets: ["core"],
+      progressLabel: "checking provider execution status",
+      maxResultSizeChars: 4000,
+      isAvailable: () => true,
+      run: async () => {
+        const loaded = await loadRuntimeConfig(options);
+        const sessionId = typeof options.sessionId === "function"
+          ? options.sessionId()
+          : options.sessionId;
+        const storedOverride = sessionId === undefined || options.sessionDb?.getSessionModelOverride === undefined
+          ? undefined
+          : await options.sessionDb.getSessionModelOverride(sessionId).catch(() => undefined);
+        const effectiveOverride = await resolveEffectiveSessionModelOverride(storedOverride, {
+          config: loaded.config,
+          providerRegistry: loaded.providerRegistry
+        });
+        const diagnosticConfig = effectiveOverride?.ok === true
+          ? {
+              ...loaded,
+              model: effectiveOverride.route.profile,
+              primaryModelRoute: effectiveOverride.route
+            }
+          : loaded;
+        const diagnostic = await diagnoseProviderConfig(diagnosticConfig);
+        const lastExecution = await readLatestProviderExecutionSummary({
+          sessionDb: options.sessionDb,
+          sessionId
+        });
+
+        return {
+          ok: true,
+          content: formatProviderTruthStatus({
+            config: diagnostic,
+            lastExecution
+          }),
+          metadata: {
+            providerDiagnostic: diagnostic,
+            providerExecution: lastExecution,
+            sessionModelOverrideStatus: effectiveOverride === undefined
+              ? "none"
+              : effectiveOverride.ok
+                ? "active"
+                : "ignored"
           }
         };
       }
@@ -658,6 +729,88 @@ function requireProviderDependency<T>(provider: string, dependency: string, valu
     throw new TypeError(`${provider}ToolProvider requires ${dependency}.`);
   }
   return value;
+}
+
+async function readLatestProviderExecutionSummary(input: {
+  sessionDb?: Partial<Pick<SessionDB, "listMessages">>;
+  sessionId?: string;
+}): Promise<ProviderExecutionSummary | undefined> {
+  if (input.sessionDb?.listMessages === undefined || input.sessionId === undefined) {
+    return undefined;
+  }
+
+  const messages = await input.sessionDb.listMessages(input.sessionId).catch(() => []);
+  for (const message of [...messages].reverse()) {
+    const summary = readProviderExecutionSummaryFromMessage(message);
+    if (summary !== undefined) {
+      return summary;
+    }
+  }
+
+  return undefined;
+}
+
+function readProviderExecutionSummaryFromMessage(message: SessionMessage): ProviderExecutionSummary | undefined {
+  if (message.role !== "agent") {
+    return undefined;
+  }
+
+  const value = message.metadata?.providerExecution;
+  if (!isRecord(value)) {
+    return undefined;
+  }
+
+  const status = readExecutionStatus(value.status);
+  const fallbackUsed = typeof value.fallbackUsed === "boolean" ? value.fallbackUsed : undefined;
+  const attemptsValue = Array.isArray(value.attempts) ? value.attempts : undefined;
+  if (status === undefined || fallbackUsed === undefined || attemptsValue === undefined) {
+    return undefined;
+  }
+
+  return {
+    ...(readRoute(value.configuredPrimary) === undefined ? {} : { configuredPrimary: readRoute(value.configuredPrimary) }),
+    ...(readRoute(value.actual) === undefined ? {} : { actual: readRoute(value.actual) }),
+    fallbackUsed,
+    ...(typeof value.primaryFailureClass === "string" ? { primaryFailureClass: value.primaryFailureClass } : {}),
+    attempts: attemptsValue.map(readAttemptSummary).filter((attempt) => attempt !== undefined),
+    status
+  };
+}
+
+function readAttemptSummary(value: unknown): ProviderAttemptSummary | undefined {
+  if (!isRecord(value) || typeof value.provider !== "string" || typeof value.model !== "string" || typeof value.ok !== "boolean") {
+    return undefined;
+  }
+
+  return {
+    provider: value.provider,
+    model: value.model,
+    ok: value.ok,
+    ...(typeof value.errorClass === "string" ? { errorClass: value.errorClass } : {}),
+    ...(value.routeRole === "primary" || value.routeRole === "fallback" ? { routeRole: value.routeRole } : {}),
+    ...(typeof value.attemptedRouteIndex === "number" ? { attemptedRouteIndex: value.attemptedRouteIndex } : {})
+  };
+}
+
+function readRoute(value: unknown): { provider: string; model: string } | undefined {
+  if (!isRecord(value) || typeof value.provider !== "string" || typeof value.model !== "string") {
+    return undefined;
+  }
+
+  return {
+    provider: value.provider,
+    model: value.model
+  };
+}
+
+function readExecutionStatus(value: unknown): ProviderExecutionSummary["status"] | undefined {
+  return value === "not-run" || value === "primary-success" || value === "fallback-success" || value === "failed"
+    ? value
+    : undefined;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 function redactConfigToolInput<T extends Record<string, unknown>>(input: T): T {
