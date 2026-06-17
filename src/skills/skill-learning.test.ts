@@ -1,8 +1,8 @@
-import { mkdtemp, readdir, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, readdir, rm, writeFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { dirname, join } from "node:path";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { deriveAgentEvolutionPolicy, type AgentEvolutionPolicy } from "../contracts/agent-evolution.js";
 import type { SessionDB, SessionEvent } from "../contracts/session.js";
 import type { SkillDefinition } from "../contracts/skill.js";
@@ -21,6 +21,7 @@ async function makeTempDir(): Promise<string> {
 }
 
 afterEach(async () => {
+  vi.restoreAllMocks();
   while (tempDirs.length > 0) {
     await rm(tempDirs.pop()!, { recursive: true, force: true });
   }
@@ -198,17 +199,239 @@ describe("SkillLearningManager", () => {
     expect(records[0]?.content).not.toContain("private chain");
     expect(records[0]?.content).not.toContain("<think>");
   });
+
+  it("marks created records with missing createdSkillPath as stale", async () => {
+    const harness = await createHarness("suggest");
+    await seedSkillLearningStore(harness.storePath, [{
+      ...record("missing-path"),
+      status: "created"
+    }]);
+
+    const result = await harness.manager.reconcileCreatedPaths();
+    const records = await harness.manager.inspect();
+
+    expect(result).toEqual({ checked: 1, stale: 1 });
+    expect(records[0]).toEqual(expect.objectContaining({
+      key: "missing-path",
+      status: "stale",
+      staleReason: "created-path-missing",
+      staleDetectedAt: expect.any(String)
+    }));
+  });
+
+  it("keeps created records when the created skill path exists inside the local skills root", async () => {
+    const harness = await createHarness("suggest");
+    const skillPath = join(harness.localSkillsRoot, "release-checks", "SKILL.md");
+    await mkdir(join(harness.localSkillsRoot, "release-checks"), { recursive: true });
+    await writeFile(skillPath, "placeholder", "utf8");
+    await seedSkillLearningStore(harness.storePath, [{
+      ...record("existing-path"),
+      status: "created",
+      createdSkillPath: skillPath
+    }]);
+
+    const result = await harness.manager.reconcileCreatedPaths();
+    const records = await harness.manager.inspect();
+
+    expect(result).toEqual({ checked: 1, stale: 0 });
+    expect(records[0]).toEqual(expect.objectContaining({
+      key: "existing-path",
+      status: "created",
+      createdSkillPath: skillPath
+    }));
+  });
+
+  it("does not resurrect a stale workflow when the same turn is observed again", async () => {
+    const harness = await createHarness("suggest");
+    const prompt = "Run the release checks";
+    const workflowKey = "run the release checks::shell>file.read";
+    await seedSkillLearningStore(harness.storePath, [{
+      ...record(workflowKey),
+      status: "stale",
+      staleReason: "created-path-missing",
+      staleDetectedAt: "2026-06-17T00:00:00.000Z"
+    }]);
+
+    const result = await harness.manager.observeTurn({
+      ...turnBase(),
+      userText: prompt,
+      selectedSkill: undefined,
+      agentEvolutionPolicy: harness.policy,
+      toolExecutions: [execution("shell"), execution("file.read")]
+    });
+    const records = await harness.manager.inspect();
+
+    expect(result).toBeUndefined();
+    expect(records[0]).toEqual(expect.objectContaining({
+      key: workflowKey,
+      status: "stale",
+      occurrences: 1
+    }));
+    expect(harness.events).toEqual([]);
+  });
+
+  it("does not emit live candidate events for stale selected-skill records", async () => {
+    const harness = await createHarness("proactive");
+    const staleDetectedAt = "2026-06-17T00:00:00.000Z";
+    const key = "selected:release-skill:prompt-hash-stale";
+    await seedSkillLearningStore(harness.storePath, [{
+      ...record(key),
+      name: "release-skill refinement",
+      content: "Selected skill refinement evidence: release-skill",
+      status: "stale",
+      staleReason: "created-path-missing",
+      staleDetectedAt,
+      selectedSkillName: "release-skill",
+      promptHash: "prompt-hash-stale"
+    }]);
+
+    const result = await harness.manager.observeTurn({
+      ...turnBase(),
+      selectedSkill: skill("release-skill"),
+      promptHash: "prompt-hash-stale",
+      agentEvolutionPolicy: harness.policy,
+      toolExecutions: [execution("file.read")]
+    });
+    const records = await harness.manager.inspect();
+
+    expect(result).toBeUndefined();
+    expect(records[0]).toEqual(expect.objectContaining({
+      key,
+      status: "stale",
+      staleReason: "created-path-missing",
+      staleDetectedAt
+    }));
+    expect(harness.events).not.toContainEqual(expect.objectContaining({
+      kind: "skill-learned",
+      action: "candidate",
+      record: expect.objectContaining({ key })
+    }));
+  });
+
+  it("marks outside-root createdSkillPath as stale without probing the outside path", async () => {
+    const harness = await createHarness("suggest");
+    const outsideSkillPath = `/outside-root-\u0000/SKILL.md`;
+    await seedSkillLearningStore(harness.storePath, [{
+      ...record("outside-path"),
+      status: "created",
+      createdSkillPath: outsideSkillPath
+    }]);
+
+    const result = await harness.manager.reconcileCreatedPaths();
+    const records = await harness.manager.inspect();
+
+    expect(result).toEqual({ checked: 1, stale: 1 });
+    expect(records[0]).toEqual(expect.objectContaining({
+      status: "stale",
+      staleReason: "created-path-outside-profile"
+    }));
+  });
+
+  it("does not create workflow records for generic two-tool continuation prompts", async () => {
+    const harness = await createHarness("suggest");
+
+    const result = await harness.manager.observeTurn({
+      ...turnBase(),
+      userText: "can you try",
+      selectedSkill: undefined,
+      agentEvolutionPolicy: harness.policy,
+      toolExecutions: [execution("shell"), execution("file.read")]
+    });
+
+    expect(result).toBeUndefined();
+    await expect(harness.manager.inspect()).resolves.toEqual([]);
+    expect(harness.events).toEqual([]);
+  });
+
+  it("still creates observed workflow records for concrete two-tool task prompts", async () => {
+    const harness = await createHarness("suggest");
+
+    const result = await harness.manager.observeTurn({
+      ...turnBase(),
+      userText: "Run the release checks for package.json",
+      selectedSkill: undefined,
+      agentEvolutionPolicy: harness.policy,
+      toolExecutions: [execution("shell"), execution("file.read")]
+    });
+
+    expect(result?.action).toBe("observed");
+    expect(result?.record).toEqual(expect.objectContaining({
+      status: "observed",
+      bounded: true
+    }));
+  });
+
+  it("accepts meaningful Arabic workflow prompts without English-only token assumptions", async () => {
+    const harness = await createHarness("suggest");
+
+    const result = await harness.manager.observeTurn({
+      ...turnBase(),
+      userText: "راجع إعدادات الإصدار قبل تشغيل الاختبارات",
+      selectedSkill: undefined,
+      agentEvolutionPolicy: harness.policy,
+      toolExecutions: [execution("shell"), execution("file.read")]
+    });
+
+    expect(result?.action).toBe("observed");
+    expect(result?.record.status).toBe("observed");
+  });
+
+  it("keeps secret-sensitive workflow prompts bounded as untrusted for skill creation", async () => {
+    const harness = await createHarness("suggest");
+
+    const result = await harness.manager.observeTurn({
+      ...turnBase(),
+      userText: "Check the deployment token handling in package.json",
+      selectedSkill: undefined,
+      agentEvolutionPolicy: harness.policy,
+      toolExecutions: [execution("shell"), execution("file.read")]
+    });
+
+    expect(result?.record).toEqual(expect.objectContaining({
+      bounded: false,
+      boundedReason: "prompt references secrets or credentials"
+    }));
+    expect(result?.candidate).toEqual(expect.objectContaining({
+      suggestedTarget: "routing_metadata_update"
+    }));
+  });
+
+  it("keeps repeated occurrence threshold before marking workflow records as candidates", async () => {
+    const harness = await createHarness("suggest");
+    const turn = {
+      ...turnBase(),
+      userText: "Run the release checks for package.json",
+      selectedSkill: undefined,
+      agentEvolutionPolicy: harness.policy,
+      toolExecutions: [execution("shell"), execution("file.read")]
+    };
+
+    const first = await harness.manager.observeTurn(turn);
+    const second = await harness.manager.observeTurn({
+      ...turn,
+      sessionId: "session-2"
+    });
+
+    expect(first?.action).toBe("observed");
+    expect(second?.action).toBe("candidate");
+    expect(second?.record).toEqual(expect.objectContaining({
+      status: "candidate",
+      occurrences: 2
+    }));
+  });
 });
 
 async function createHarness(mode: "none" | "suggest" | "proactive" | "autonomous"): Promise<{
   manager: SkillLearningManager;
   skillEvolutionStore: SkillEvolutionStore;
   localSkillsRoot: string;
+  storePath: string;
   policy: AgentEvolutionPolicy;
   events: SessionEvent[];
 }> {
   const root = await makeTempDir();
   const localSkillsRoot = join(root, "skills");
+  const storePath = join(root, "skill-learning.json");
   const skillEvolutionStore = new SkillEvolutionStore({
     usagePath: join(localSkillsRoot, ".usage.json"),
     evolutionRoot: join(localSkillsRoot, ".evolution")
@@ -218,7 +441,7 @@ async function createHarness(mode: "none" | "suggest" | "proactive" | "autonomou
     autonomy: mode,
     registry: new SkillRegistry(),
     localSkillsRoot,
-    storePath: join(root, "skill-learning.json"),
+    storePath,
     sessionDb: fakeSessionDb(events),
     skillEvolutionStore
   });
@@ -226,8 +449,29 @@ async function createHarness(mode: "none" | "suggest" | "proactive" | "autonomou
     manager,
     skillEvolutionStore,
     localSkillsRoot,
+    storePath,
     policy: deriveAgentEvolutionPolicy(mode),
     events
+  };
+}
+
+async function seedSkillLearningStore(storePath: string, records: Array<Record<string, unknown>>): Promise<void> {
+  await mkdir(dirname(storePath), { recursive: true });
+  await writeFile(storePath, `${JSON.stringify({ version: 1, records }, null, 2)}\n`, "utf8");
+}
+
+function record(key: string): Record<string, unknown> {
+  return {
+    key,
+    name: "Run Release Checks workflow",
+    content: "Reusable workflow: Run the release checks",
+    occurrences: 1,
+    sourceSessionIds: ["session"],
+    tools: ["shell", "file.read"],
+    requiredToolsets: ["shell-write"],
+    bounded: true,
+    status: "observed",
+    updatedAt: "2026-06-17T00:00:00.000Z"
   };
 }
 
