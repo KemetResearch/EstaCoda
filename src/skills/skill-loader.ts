@@ -3,7 +3,6 @@ import { readdir, readFile, realpath, stat } from "node:fs/promises";
 import { basename, dirname, join, relative, resolve } from "node:path";
 import type {
   LoadedSkill,
-  SkillConfigField,
   SkillDefinition,
   SkillEvaluation,
   SkillPattern,
@@ -233,11 +232,7 @@ function validateSkillDefinition(value: unknown): SkillDefinition {
     visibility?: Record<string, unknown>;
     routing?: unknown;
   };
-  const inferredVisibility = mergeVisibilityRules(
-    parseVisibilityRules(definition.visibility),
-    inferHermesVisibility(definition.metadata)
-  );
-  const inferredConfigFields = inferHermesConfigFields(definition.metadata);
+  const parsedVisibility = parseVisibilityRules(definition.visibility);
 
   assertString(definition.name, "name");
   assertString(definition.description, "description");
@@ -260,7 +255,7 @@ function validateSkillDefinition(value: unknown): SkillDefinition {
     name: definition.name,
     description: definition.description,
     version: isNonEmptyString(definition.version) ? definition.version : "0.1.0",
-    category: isNonEmptyString(definition.category) ? definition.category : inferHermesCategory(definition.metadata),
+    category: isNonEmptyString(definition.category) ? definition.category : undefined,
     platforms: stringArrayOrEmpty(definition.platforms),
     references: [
       ...stringArrayOrEmpty(definition.references),
@@ -277,8 +272,8 @@ function validateSkillDefinition(value: unknown): SkillDefinition {
     requiredEnvironmentVariables: stringArrayOrEmpty(definition.requiredEnvironmentVariables ?? definition.required_environment_variables),
     requiredCredentialFiles: stringArrayOrEmpty(definition.requiredCredentialFiles ?? definition.required_credential_files),
     pythonCapabilities: normalizePythonCapabilities(definition.pythonCapabilities ?? definition.python_capabilities),
-    configFields: inferredConfigFields,
-    visibility: inferredVisibility,
+    configFields: undefined,
+    visibility: parsedVisibility,
     inputs: definition.inputs,
     outputs: definition.outputs,
     playbook: normalizePlaybook(definition.playbook, {
@@ -633,68 +628,6 @@ function stringArrayOrEmpty(value: unknown): string[] {
   return value.filter(isNonEmptyString).map((entry) => entry.trim());
 }
 
-function inferHermesCategory(metadata: unknown): string | undefined {
-  if (!isRecord(metadata)) {
-    return undefined;
-  }
-
-  const hermes = metadata.hermes;
-  if (!isRecord(hermes) || !isNonEmptyString(hermes.category)) {
-    return undefined;
-  }
-
-  return hermes.category;
-}
-
-function inferHermesVisibility(metadata: unknown): SkillVisibilityRules | undefined {
-  if (!isRecord(metadata)) {
-    return undefined;
-  }
-
-  const hermes = metadata.hermes;
-  if (!isRecord(hermes)) {
-    return undefined;
-  }
-
-  return normalizeVisibilityRules({
-    requiresToolsets: hermes.requiresToolsets ?? hermes.requires_toolsets,
-    fallbackForToolsets: hermes.fallbackForToolsets ?? hermes.fallback_for_toolsets,
-    requiresTools: hermes.requiresTools ?? hermes.requires_tools,
-    fallbackForTools: hermes.fallbackForTools ?? hermes.fallback_for_tools
-  });
-}
-
-function inferHermesConfigFields(metadata: unknown): SkillConfigField[] | undefined {
-  if (!isRecord(metadata)) {
-    return undefined;
-  }
-
-  const hermes = metadata.hermes;
-  if (!isRecord(hermes) || !isRecord(hermes.config)) {
-    return undefined;
-  }
-
-  const configFields: SkillConfigField[] = [];
-  for (const [key, value] of Object.entries(hermes.config)) {
-    if (isRecord(value)) {
-      configFields.push({
-        key,
-        description: isNonEmptyString(value.description) ? value.description : undefined,
-        required: value.required === true,
-        defaultValue: value.default
-      });
-      continue;
-    }
-
-    configFields.push({
-      key,
-      defaultValue: value
-    });
-  }
-
-  return configFields.length === 0 ? undefined : configFields;
-}
-
 function parseVisibilityRules(value: unknown): SkillVisibilityRules | undefined {
   if (!isRecord(value)) {
     return undefined;
@@ -734,28 +667,6 @@ function normalizeVisibilityRules(value: {
   }
 
   return Object.keys(normalized).length === 0 ? undefined : normalized;
-}
-
-function mergeVisibilityRules(
-  left: SkillVisibilityRules | undefined,
-  right: SkillVisibilityRules | undefined
-): SkillVisibilityRules | undefined {
-  if (left === undefined) {
-    return right;
-  }
-
-  if (right === undefined) {
-    return left;
-  }
-
-  const merged = normalizeVisibilityRules({
-    requiresToolsets: [...(left.requiresToolsets ?? []), ...(right.requiresToolsets ?? [])],
-    fallbackForToolsets: [...(left.fallbackForToolsets ?? []), ...(right.fallbackForToolsets ?? [])],
-    requiresTools: [...(left.requiresTools ?? []), ...(right.requiresTools ?? [])],
-    fallbackForTools: [...(left.fallbackForTools ?? []), ...(right.fallbackForTools ?? [])]
-  });
-
-  return merged;
 }
 
 function skillPermissionExpectations(value: unknown): SkillPermissionExpectation[] {
