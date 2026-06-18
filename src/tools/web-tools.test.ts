@@ -363,14 +363,14 @@ describe("web and browser tools baselines", () => {
     await expect(search.isAvailable()).resolves.toBe(true);
     const result = await search.run({ query: "estacoda" });
 
-    expect(configure).toHaveBeenCalledWith({
+    expect(configure).toHaveBeenCalledWith(expect.objectContaining({
       config: {
         searchBackend: "brave",
         brave: {
           apiKeyEnv: "CUSTOM_BRAVE_KEY"
         }
       }
-    });
+    }));
     expect(result).toMatchObject({
       ok: true,
       metadata: {
@@ -381,6 +381,47 @@ describe("web and browser tools baselines", () => {
           snippet: "CUSTOM_BRAVE_KEY"
         }]
       }
+    });
+  });
+
+  it("uses mocked Brave web.search and formats snippets and metadata", async () => {
+    vi.stubEnv("BRAVE_SEARCH_API_KEY", "brave-token");
+    const fetch = vi.fn(async (_url: string, _init?: Parameters<FetchLike>[1]) => createFetchResponse({
+      contentType: "application/json",
+      body: JSON.stringify({
+        web: {
+          results: [{
+            title: "Brave Result",
+            url: "https://example.com/brave-result",
+            description: "Brave snippet from API"
+          }]
+        }
+      })
+    }));
+    const search = tool("web.search", createWebTools({
+      fetch,
+      webConfig: {
+        searchBackend: "brave"
+      }
+    }));
+
+    await expect(search.isAvailable()).resolves.toBe(true);
+    const result = await search.run({ query: "estacoda", maxResults: 3 });
+
+    expect(fetch).toHaveBeenCalledTimes(1);
+    expect((fetch.mock.calls[0] as [string, Parameters<FetchLike>[1]])[0]).toBe("https://api.search.brave.com/res/v1/web/search?q=estacoda&count=3");
+    expect(result.ok).toBe(true);
+    expect(result.content).toContain("1. Brave Result");
+    expect(result.content).toContain("https://example.com/brave-result");
+    expect(result.content).toContain("Brave snippet from API");
+    expect(result.metadata).toMatchObject({
+      provider: "brave",
+      _estacoda_context_summary: "Web search returned 1 result(s). Top sources: Brave Result (example.com).",
+      results: [{
+        title: "Brave Result",
+        url: "https://example.com/brave-result",
+        snippet: "Brave snippet from API"
+      }]
     });
   });
 

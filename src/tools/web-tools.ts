@@ -91,7 +91,7 @@ export function createWebTools(options: WebToolOptions = {}): readonly Registere
     withDerivedBrowserSessionId(input, options.currentSessionId);
 
   return [
-    createWebSearchTool(options.webConfig),
+    createWebSearchTool(options.webConfig, options.fetch),
     {
       name: "web.extract",
       description: "Fetch and extract readable text from a URL for research workflows.",
@@ -758,7 +758,7 @@ function requireProviderDependency<T>(provider: string, dependency: string, valu
   return value;
 }
 
-function createWebSearchTool(webConfig: WebResearchConfig | undefined): RegisteredTool {
+function createWebSearchTool(webConfig: WebResearchConfig | undefined, fetch: FetchLike | undefined): RegisteredTool {
   return {
     name: "web.search",
     description: "Search the web using a configured research provider.",
@@ -774,7 +774,7 @@ function createWebSearchTool(webConfig: WebResearchConfig | undefined): Register
     toolsets: ["web", "research"],
     progressLabel: "searching web",
     maxResultSizeChars: 8000,
-    isAvailable: async () => (await selectWebResearchProvider("search", webConfig)).availability.available,
+    isAvailable: async () => (await selectWebResearchProvider("search", webConfig, { fetch })).availability.available,
     run: async (input: { query?: string; maxResults?: number }, context) => {
       const query = input.query?.trim();
       if (query === undefined || query.length === 0) {
@@ -785,7 +785,7 @@ function createWebSearchTool(webConfig: WebResearchConfig | undefined): Register
         };
       }
 
-      const providerSelection = await selectWebResearchProvider("search", webConfig);
+      const providerSelection = await selectWebResearchProvider("search", webConfig, { fetch });
       if (!providerSelection.availability.available) {
         return unavailableWebResearchResult("web.search", "search", providerSelection);
       }

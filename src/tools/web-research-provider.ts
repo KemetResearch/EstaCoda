@@ -1,3 +1,6 @@
+import type { RuntimeCredentialResolution, RuntimeCredentialResolverOptions } from "../providers/runtime-credential-resolver.js";
+import { resolveRuntimeCredential } from "../providers/runtime-credential-resolver.js";
+
 export type WebResearchCapability = "search" | "extract" | "crawl";
 
 export type ProviderAvailability = {
@@ -44,6 +47,19 @@ export type WebCrawlOptions = {
   signal?: AbortSignal;
 };
 
+export type WebResearchFetch = (url: string, init?: {
+  method?: string;
+  headers?: Record<string, string>;
+  signal?: AbortSignal;
+}) => Promise<{
+  ok: boolean;
+  status: number;
+  statusText?: string;
+  text(): Promise<string>;
+}>;
+
+export type WebResearchCredentialResolver = (options: RuntimeCredentialResolverOptions) => Promise<RuntimeCredentialResolution>;
+
 export type WebResearchProvider = {
   name: string;
   displayName: string;
@@ -61,6 +77,8 @@ export type WebResearchProvider = {
 
 export type WebResearchProviderContext = {
   config: WebResearchConfig;
+  fetch: WebResearchFetch;
+  credentialResolver: WebResearchCredentialResolver;
 };
 
 export type WebResearchConfig = {
@@ -72,3 +90,16 @@ export type WebResearchConfig = {
     apiKeyEnv?: string;
   };
 };
+
+export function defaultWebResearchFetch(): WebResearchFetch {
+  return async (url, init) => {
+    if (globalThis.fetch === undefined) {
+      throw new Error("fetch is not available in this runtime.");
+    }
+    return globalThis.fetch(url, init);
+  };
+}
+
+export function defaultWebResearchCredentialResolver(): WebResearchCredentialResolver {
+  return resolveRuntimeCredential;
+}
