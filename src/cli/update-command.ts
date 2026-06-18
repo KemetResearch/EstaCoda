@@ -27,6 +27,13 @@ import {
   type ServiceScope
 } from "../gateway/service-manager.js";
 import { resolveHomeDir, resolveOsHomeDir } from "../config/home-dir.js";
+import { readConfig } from "../config/runtime-config.js";
+import { resolveProfileStateHome, type ProfileStatePaths } from "../config/profile-home.js";
+import {
+  clearGatewayRestartPlannedMarker,
+  writeGatewayRestartPlannedMarker,
+  type GatewayRestartPlannedReason,
+} from "../runtime/gateway-restart-marker.js";
 
 export type UpdateOptions = {
   check?: boolean;
@@ -227,6 +234,8 @@ async function restartManagedGatewayService(
     };
   }
 
+  const profilePaths = resolveProfileStateHome({ homeDir: options.homeDir, profileId: options.profileId });
+  const markerWritten = await writeRestartPlannedMarkerIfEnabled(profilePaths, "update");
   const restart = await restartService({
     serviceUserHomeDir: resolveOsHomeDir(),
     profileId: options.profileId,
@@ -234,6 +243,9 @@ async function restartManagedGatewayService(
   });
 
   if (!restart.ok) {
+    if (markerWritten) {
+      await clearGatewayRestartPlannedMarker(profilePaths);
+    }
     return {
       restarted: false,
       message: [
@@ -248,6 +260,25 @@ async function restartManagedGatewayService(
     restarted: true,
     message: `Gateway service restarted (${detected.scope} scope, profile: ${options.profileId}).`
   };
+}
+
+async function writeRestartPlannedMarkerIfEnabled(
+  paths: ProfileStatePaths,
+  reason: GatewayRestartPlannedReason
+): Promise<boolean> {
+  try {
+    const loaded = await readConfig(paths.configPath);
+    if (loaded.config.gateway?.lifecycleNotifications?.enabled !== true) {
+      return false;
+    }
+    await writeGatewayRestartPlannedMarker(paths, {
+      plannedAt: new Date().toISOString(),
+      reason
+    });
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 async function resolveManagedGatewayRestart(input: {

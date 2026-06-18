@@ -1,7 +1,7 @@
 import { join, dirname } from "node:path";
 import { access, constants, readFile, writeFile, mkdir, rm, rename, stat, readdir } from "node:fs/promises";
 import { resolveHomeDir, resolveOsHomeDir } from "../config/home-dir.js";
-import { loadRuntimeConfig } from "../config/runtime-config.js";
+import { loadRuntimeConfig, readConfig } from "../config/runtime-config.js";
 import { defaultProfileId, readActiveProfile, resolveGlobalStateHome, resolveProfileStateHome, type ProfileStatePaths } from "../config/profile-home.js";
 import { getTelegramGatewayDiagnostics } from "../channels/gateway-runner.js";
 import { getWhatsAppGatewayDiagnostics } from "../channels/whatsapp-diagnostics.js";
@@ -71,6 +71,11 @@ import {
 import type { ServiceManagerState, ServiceScope } from "../gateway/service-manager.js";
 import { resolveGatewayExec } from "../gateway/service-exec-resolver.js";
 import { detectInstallMethod } from "../lifecycle/install-method.js";
+import {
+  clearGatewayRestartPlannedMarker,
+  writeGatewayRestartPlannedMarker,
+  type GatewayRestartPlannedReason,
+} from "../runtime/gateway-restart-marker.js";
 
 export type GatewayCommandOptions = {
   homeDir?: string;
@@ -681,12 +686,18 @@ export async function runGatewayRestart(
     return { ok: serviceSelection.ok, output: serviceSelection.output };
   }
   if (serviceSelection.kind === "service") {
+    const markerWritten = await writeRestartPlannedMarkerIfEnabled(selected.paths, "gateway-restart");
     const result = await restartService({
       serviceUserHomeDir: resolveOsHomeDir(),
       profileId: selected.profileId,
       system: serviceSelection.scope === "system",
     });
-    if (!result.ok) return { ok: false, output: result.error };
+    if (!result.ok) {
+      if (markerWritten) {
+        await clearGatewayRestartPlannedMarker(selected.paths);
+      }
+      return { ok: false, output: result.error };
+    }
     return {
       ok: true,
       output: `Gateway service restarted (${serviceSelection.scope} scope, profile: ${selected.profileId}).`,
@@ -694,6 +705,25 @@ export async function runGatewayRestart(
   }
 
   return { ok: false, output: serviceNotInstalledMessage(selected.profileId) };
+}
+
+async function writeRestartPlannedMarkerIfEnabled(
+  paths: ProfileStatePaths,
+  reason: GatewayRestartPlannedReason
+): Promise<boolean> {
+  try {
+    const loaded = await readConfig(paths.configPath);
+    if (loaded.config.gateway?.lifecycleNotifications?.enabled !== true) {
+      return false;
+    }
+    await writeGatewayRestartPlannedMarker(paths, {
+      plannedAt: new Date().toISOString(),
+      reason
+    });
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 type LifecycleServiceSelection =

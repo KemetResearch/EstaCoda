@@ -37,6 +37,10 @@ import { ActiveTurnRegistry } from "./active-turn-registry.js";
 import { RuntimeCache } from "../runtime/runtime-cache.js";
 import { runtimeCacheStatePath, readRuntimeCacheState } from "./runtime-cache-state.js";
 import { readCleanShutdownMarker, writeCleanShutdownMarker } from "./supervisor-lifecycle.js";
+import {
+  readGatewayRestartPlannedMarker,
+  writeGatewayRestartPlannedMarker,
+} from "../runtime/gateway-restart-marker.js";
 import { HookRegistry } from "./hook-registry.js";
 import { resolveProfileStateHome, type ProfileStatePaths } from "../config/profile-home.js";
 import { createWhatsAppUserAuthCode, defaultWhatsAppUserAuthStorePath } from "../channels/whatsapp-pairing-store.js";
@@ -2079,6 +2083,159 @@ describe("supervisor lifecycle hooks", () => {
 
   afterEach(async () => {
     await rm(tmpDir, { recursive: true, force: true });
+  });
+
+  it("sends online notification on startup when enabled and planned restart marker exists", async () => {
+    const delivered: Array<{ targets: unknown[]; text: string }> = [];
+    const configPath = profileConfigPath(tmpDir);
+    await mkdir(dirname(configPath), { recursive: true });
+    await writeFile(configPath, JSON.stringify({
+      gateway: { lifecycleNotifications: { enabled: true } },
+      channels: {
+        telegram: {
+          enabled: true,
+          botTokenEnv: "TEST_BOT_TOKEN",
+          defaultChatId: "123",
+        },
+      },
+    }));
+    await writeGatewayRestartPlannedMarker(profilePaths, {
+      plannedAt: "2026-06-18T00:00:00.000Z",
+      reason: "gateway-restart",
+    });
+    process.env.TEST_BOT_TOKEN = "fake";
+
+    try {
+      const router = {
+        ...fakeDeliveryRouter(),
+        deliverText: async (targets: unknown[], text: string) => {
+          delivered.push({ targets, text });
+          return new Map([["telegram:123", { success: true }]]);
+        },
+      };
+
+      const result = await runGatewaySupervisor({
+        workspaceRoot: tmpDir,
+        homeDir: tmpDir,
+        once: true,
+        factories: {
+          createChannelGateway: () => fakeChannelGateway() as any,
+          createDeliveryRouter: () => router as any,
+          createTelegramAdapter: () => fakeAdapter("telegram") as any,
+        },
+      });
+
+      expect(result.ok).toBe(true);
+      expect(delivered).toEqual([{
+        targets: [{ kind: "channel", platform: "telegram", chatId: "123" }],
+        text: "🟢 EstaCoda: Gateway online — agent ready.",
+      }]);
+      await expect(readGatewayRestartPlannedMarker(profilePaths)).resolves.toBeUndefined();
+    } finally {
+      delete process.env.TEST_BOT_TOKEN;
+    }
+  });
+
+  it("does not send online notification when enabled but no planned restart marker exists", async () => {
+    const delivered: string[] = [];
+    const configPath = profileConfigPath(tmpDir);
+    await mkdir(dirname(configPath), { recursive: true });
+    await writeFile(configPath, JSON.stringify({
+      gateway: { lifecycleNotifications: { enabled: true } },
+      channels: {
+        telegram: {
+          enabled: true,
+          botTokenEnv: "TEST_BOT_TOKEN",
+          defaultChatId: "123",
+        },
+      },
+    }));
+    process.env.TEST_BOT_TOKEN = "fake";
+
+    try {
+      const router = {
+        ...fakeDeliveryRouter(),
+        deliverText: async (_targets: unknown[], text: string) => {
+          delivered.push(text);
+          return new Map();
+        },
+      };
+
+      const result = await runGatewaySupervisor({
+        workspaceRoot: tmpDir,
+        homeDir: tmpDir,
+        once: true,
+        factories: {
+          createChannelGateway: () => fakeChannelGateway() as any,
+          createDeliveryRouter: () => router as any,
+          createTelegramAdapter: () => fakeAdapter("telegram") as any,
+        },
+      });
+
+      expect(result.ok).toBe(true);
+      expect(delivered).toEqual([]);
+    } finally {
+      delete process.env.TEST_BOT_TOKEN;
+    }
+  });
+
+  it("sends restarting notification during SIGTERM drain when enabled and planned marker exists", async () => {
+    const exited = fakeExit();
+    const delivered: Array<{ targets: unknown[]; text: string }> = [];
+    const gateway = fakeChannelGateway();
+    const beforeSigterm = process.listenerCount("SIGTERM");
+    const configPath = profileConfigPath(tmpDir);
+    await mkdir(dirname(configPath), { recursive: true });
+    await writeFile(configPath, JSON.stringify({
+      gateway: { lifecycleNotifications: { enabled: true } },
+      channels: {
+        telegram: {
+          enabled: true,
+          botTokenEnv: "TEST_BOT_TOKEN",
+          defaultChatId: "123",
+        },
+      },
+    }));
+    process.env.TEST_BOT_TOKEN = "fake";
+
+    try {
+      const router = {
+        ...fakeDeliveryRouter(),
+        deliverText: async (targets: unknown[], text: string) => {
+          delivered.push({ targets, text });
+          return new Map([["telegram:123", { success: true }]]);
+        },
+      };
+
+      const promise = runGatewaySupervisor({
+        workspaceRoot: tmpDir,
+        homeDir: tmpDir,
+        once: false,
+        factories: {
+          createChannelGateway: () => gateway as any,
+          createDeliveryRouter: () => router as any,
+          createTelegramAdapter: () => fakeAdapter("telegram") as any,
+          exit: exited.exit,
+        },
+      });
+
+      await waitForCondition(() => process.listenerCount("SIGTERM") > beforeSigterm);
+      await writeGatewayRestartPlannedMarker(profilePaths, {
+        plannedAt: "2026-06-18T00:00:00.000Z",
+        reason: "gateway-restart",
+      });
+      process.emit("SIGTERM");
+      await promise;
+
+      expect(exited.codes()).toContain(0);
+      expect(delivered).toEqual([{
+        targets: [{ kind: "channel", platform: "telegram", chatId: "123" }],
+        text: "⚠️ EstaCoda: Gateway restarting — running tasks will stop. Send anything after restart to continue from the thread.",
+      }]);
+      expect(process.listenerCount("SIGTERM")).toBe(beforeSigterm);
+    } finally {
+      delete process.env.TEST_BOT_TOKEN;
+    }
   });
 
   it("supervisor:start emitted on successful startup", async () => {

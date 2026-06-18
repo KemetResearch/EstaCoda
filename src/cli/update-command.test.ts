@@ -1,9 +1,28 @@
-import { describe, expect, it } from "vitest";
-import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
-import { join } from "node:path";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { dirname, join } from "node:path";
 import { tmpdir } from "node:os";
+
+const serviceManagerMock = vi.hoisted(() => ({
+  detectServiceManager: vi.fn(),
+  probeServiceState: vi.fn(),
+  restartService: vi.fn(),
+}));
+
+vi.mock("../gateway/service-manager.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../gateway/service-manager.js")>();
+  return {
+    ...actual,
+    detectServiceManager: serviceManagerMock.detectServiceManager,
+    probeServiceState: serviceManagerMock.probeServiceState,
+    restartService: serviceManagerMock.restartService,
+  };
+});
+
 import { runUpdateCommand, type GatewayRestartHandoffOptions } from "./update-command.js";
 import { updateLogPath } from "./update-resilience.js";
+import { resolveProfileStateHome } from "../config/profile-home.js";
+import { readGatewayRestartPlannedMarker } from "../runtime/gateway-restart-marker.js";
 import type { InstallMethod, InstallMethodInfo } from "../lifecycle/install-method.js";
 import type { UpdateApplyResult } from "../lifecycle/update-engine.js";
 import type { GitUpdateResolverResult } from "../lifecycle/version-resolver.js";
@@ -30,6 +49,20 @@ function installInfo(method: InstallMethod, overrides: Partial<InstallMethodInfo
 }
 
 describe("runUpdateCommand install-method routing", () => {
+  beforeEach(() => {
+    serviceManagerMock.detectServiceManager.mockReset();
+    serviceManagerMock.probeServiceState.mockReset();
+    serviceManagerMock.restartService.mockReset();
+    serviceManagerMock.detectServiceManager.mockReturnValue("none");
+    serviceManagerMock.probeServiceState.mockResolvedValue({
+      kind: "none",
+      installed: false,
+      activeState: "unknown",
+      profileId: "default",
+    });
+    serviceManagerMock.restartService.mockResolvedValue({ ok: true });
+  });
+
   it.each([
     ["manual-source", "git fetch origin && git status"],
     ["homebrew", "brew upgrade kemetresearch/tap/estacoda"],
@@ -262,6 +295,53 @@ describe("runUpdateCommand install-method routing", () => {
     expect(result.output).toContain("Update applied.");
     expect(result.output).toContain("Gateway service restarted");
     expect(restarted).toBe(true);
+  });
+
+  it("default managed-source changed update writes a planned restart marker when lifecycle notifications are enabled", async () => {
+    const homeDir = mkdtempSync(join(tmpdir(), "estacoda-update-command-"));
+    try {
+      const profilePaths = resolveProfileStateHome({ homeDir, profileId: "default" });
+      mkdirSync(dirname(profilePaths.configPath), { recursive: true });
+      writeFileSync(profilePaths.configPath, JSON.stringify({
+        gateway: { lifecycleNotifications: { enabled: true } }
+      }), "utf8");
+      serviceManagerMock.probeServiceState.mockResolvedValue({
+        kind: "systemd-user",
+        installed: true,
+        scope: "user",
+        activeState: "active",
+        unitName: "estacoda-gateway.service",
+        profileId: "default",
+      });
+
+      const result = await runUpdateCommand({
+        dryRun: false,
+        apply: true,
+        homeDir,
+        installMethodInfo: installInfo("managed-source", {
+          source: "stamp",
+          installDir: "/repo",
+          sourceUrl: "https://github.com/KemetResearch/EstaCoda.git",
+          expectedBranch: "main"
+        }),
+        applyManagedSourceUpdate: async (): Promise<UpdateApplyResult> => ({
+          kind: "success",
+          changed: true,
+          message: "Update applied."
+        }),
+      });
+
+      expect(result.exitCode).toBe(0);
+      expect(serviceManagerMock.restartService).toHaveBeenCalledWith(expect.objectContaining({
+        profileId: "default",
+        system: false,
+      }));
+      const marker = await readGatewayRestartPlannedMarker(profilePaths);
+      expect(marker?.reason).toBe("update");
+      expect(typeof marker?.plannedAt).toBe("string");
+    } finally {
+      rmSync(homeDir, { recursive: true, force: true });
+    }
   });
 
   it("default managed-source changed update stays quiet when no managed gateway service is detected", async () => {

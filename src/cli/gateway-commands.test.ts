@@ -104,6 +104,7 @@ import * as lifecycleModule from "../gateway/supervisor-lifecycle.js";
 import { acquireAdapterIdentityLock, listAdapterIdentityLocks } from "../gateway/identity-lock.js";
 import { writeRuntimeCacheState, runtimeCacheStatePath } from "../gateway/runtime-cache-state.js";
 import type { RuntimeCacheState } from "../gateway/runtime-cache-state.js";
+import { readGatewayRestartPlannedMarker } from "../runtime/gateway-restart-marker.js";
 import { writeAdapterRuntimeState, RUNTIME_STATE_FILE } from "../gateway/adapter-runtime-state.js";
 import type { PersistedRuntimeState, AdapterRuntimeState } from "../gateway/adapter-runtime-state.js";
 import { openDefaultSQLiteDatabase } from "../storage/factory.js";
@@ -1638,6 +1639,70 @@ describe("gateway commands", () => {
       }));
       expect(stopGatewaySpy).not.toHaveBeenCalled();
       expect(childProcessMock.spawn).not.toHaveBeenCalled();
+    });
+
+    it("writes a planned restart marker before user service restart when lifecycle notifications are enabled", async () => {
+      const configPath = defaultProfileConfigPath(tmpDir);
+      await mkdir(dirname(configPath), { recursive: true });
+      await writeFile(configPath, JSON.stringify({
+        gateway: { lifecycleNotifications: { enabled: true } }
+      }), "utf8");
+      serviceManagerMock.detectServiceManager.mockReturnValue("systemd-user");
+      serviceManagerMock.probeServiceState.mockImplementation(async (options: { profileId: string; system?: boolean }) => ({
+        kind: options.system ? "systemd-system" : "systemd-user",
+        installed: options.system !== true,
+        scope: options.system ? "system" : "user",
+        activeState: "active",
+        unitName: "unit",
+        profileId: options.profileId,
+      }));
+
+      const result = await withEnv({ HOME: tmpDir }, () => runGatewayRestart({ workspaceRoot: tmpDir, homeDir: tmpDir }));
+
+      expect(result.ok).toBe(true);
+      const marker = await readGatewayRestartPlannedMarker(profilePaths);
+      expect(marker?.reason).toBe("gateway-restart");
+      expect(typeof marker?.plannedAt).toBe("string");
+    });
+
+    it("does not write a planned restart marker when lifecycle notifications are absent", async () => {
+      serviceManagerMock.detectServiceManager.mockReturnValue("systemd-user");
+      serviceManagerMock.probeServiceState.mockImplementation(async (options: { profileId: string; system?: boolean }) => ({
+        kind: options.system ? "systemd-system" : "systemd-user",
+        installed: options.system !== true,
+        scope: options.system ? "system" : "user",
+        activeState: "active",
+        unitName: "unit",
+        profileId: options.profileId,
+      }));
+
+      const result = await withEnv({ HOME: tmpDir }, () => runGatewayRestart({ workspaceRoot: tmpDir, homeDir: tmpDir }));
+
+      expect(result.ok).toBe(true);
+      await expect(readGatewayRestartPlannedMarker(profilePaths)).resolves.toBeUndefined();
+    });
+
+    it("clears the planned restart marker when service restart fails", async () => {
+      const configPath = defaultProfileConfigPath(tmpDir);
+      await mkdir(dirname(configPath), { recursive: true });
+      await writeFile(configPath, JSON.stringify({
+        gateway: { lifecycleNotifications: { enabled: true } }
+      }), "utf8");
+      serviceManagerMock.detectServiceManager.mockReturnValue("systemd-user");
+      serviceManagerMock.probeServiceState.mockImplementation(async (options: { profileId: string; system?: boolean }) => ({
+        kind: options.system ? "systemd-system" : "systemd-user",
+        installed: options.system !== true,
+        scope: options.system ? "system" : "user",
+        activeState: "active",
+        unitName: "unit",
+        profileId: options.profileId,
+      }));
+      serviceManagerMock.restartService.mockResolvedValueOnce({ ok: false, error: "boom" });
+
+      const result = await withEnv({ HOME: tmpDir }, () => runGatewayRestart({ workspaceRoot: tmpDir, homeDir: tmpDir }));
+
+      expect(result.ok).toBe(false);
+      await expect(readGatewayRestartPlannedMarker(profilePaths)).resolves.toBeUndefined();
     });
 
     it("restarts the system service only when --system is passed", async () => {
