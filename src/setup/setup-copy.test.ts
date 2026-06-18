@@ -861,6 +861,7 @@ describe("setup copy", () => {
     expect(rawSetupCopy("en", "setupEditor.actions.configureVoice.description")).toBe("Set speech-to-text and text-to-speech providers.");
     expect(rawSetupCopy("en", "setupEditor.actions.configureImageGeneration")).toBe("Configure image generation");
     expect(rawSetupCopy("en", "setupEditor.actions.configureImageGeneration.description")).toBe("Set the image generation provider.");
+    expect(rawSetupCopy("en", "setupEditor.actions.configureWebSearch")).toBe("Configure search");
     expect(rawSetupCopy("en", "setupEditor.actions.configureBrowser")).toBe("Configure browser");
     expect(rawSetupCopy("en", "setupEditor.actions.configureBrowser.description")).toBe("Set browser behavior without launching a browser.");
     expect(rawSetupCopy("en", "setupEditor.actions.editSecurityMode")).toBe("Edit security mode");
@@ -893,11 +894,25 @@ describe("setup copy", () => {
     expect(rawSetupCopy("en", "setupEditor.prompt.auxiliaryRoute.memoryCompaction")).toBe("Memory compaction");
     expect(rawSetupCopy("en", "setupEditor.prompt.auxiliaryRoute.profileContext")).toBe("Profile context");
     expect(rawSetupCopy("en", "setupEditor.prompt.auxiliaryRoute.assessor.description")).toContain("approval assessment");
+    expect(rawSetupCopy("en", "setupEditor.prompt.optionalCapabilityAction.enableConfigure")).toBe("Configure");
+    expect(rawSetupCopy("en", "setupEditor.prompt.webSearch.provider.brave.description")).toBe("Use the Brave Search API with an API key");
+    expect(rawSetupCopy("en", "setupEditor.prompt.webSearch.provider.ddgs.description")).toBe("Use DuckDuckGo (free). Setup requires installing the registered DDGS capability via Python review.");
+    expect(rawSetupCopy("en", "setupEditor.prompt.webSearch.brave.secretValue")).toBe("Enter Brave Search API key:");
 
     expect(rawSetupCopy("ar", "setupEditor.shell.title")).toBe("محرّر الإعدادات");
     expect(rawSetupCopy("ar", "setupEditor.prompt.action.body")).toBe("اختار اللي تحب تضبطه.");
+    expect(rawSetupCopy("ar", "setupEditor.actions.configureWebSearch")).toBe("اضبط البحث");
+    expect(rawSetupCopy("ar", "setupEditor.prompt.optionalCapabilityAction.enableConfigure")).toBe("اضبط");
+    expect(rawSetupCopy("ar", "setupEditor.prompt.webSearch.provider.brave.description")).toBe("استخدم Brave Search API مع مفتاح API.");
+    expect(rawSetupCopy("ar", "setupEditor.prompt.webSearch.provider.ddgs.description")).toBe("استخدم DuckDuckGo مجانًا. يتطلب الإعداد تثبيت قدرة DDGS المسجلة عبر مراجعة Python.");
+    expect(rawSetupCopy("ar", "setupEditor.prompt.webSearch.brave.secretValue")).toBe("أدخل مفتاح API لـ Brave Search:");
     expect(rawSetupCopy("ar", "setupEditor.actions.configureChannels.description")).toContain("Telegram");
     expect(rawSetupCopy("ar", "setupEditor.actions.editSecurityMode.description")).toContain("EstaCoda");
+    expect(resolveSetupCopy("ar", "setupEditor.prompt.webSearch.provider.brave.description")).toContain(isolateLtr("Brave Search"));
+    expect(resolveSetupCopy("ar", "setupEditor.prompt.webSearch.provider.ddgs.description")).toContain(isolateLtr("DuckDuckGo"));
+    expect(resolveSetupCopy("ar", "setupEditor.prompt.webSearch.provider.ddgs.description")).toContain(isolateLtr("DDGS"));
+    expect(resolveSetupCopy("ar", "setupEditor.prompt.webSearch.provider.ddgs.description")).toContain(isolateLtr("Python"));
+    expect(resolveSetupCopy("ar", "setupEditor.prompt.webSearch.brave.secretValue")).toContain(isolateLtr("Brave Search"));
     expect(rawSetupCopy("ar", "setupEditor.prompt.auxiliaryRoute.assessor.description")).toContain("assessor");
     expect(rawSetupCopy("ar", "setupEditor.prompt.auxiliaryRoute.compression.description")).toContain("compression");
     expect(rawSetupCopy("ar", "setupEditor.prompt.auxiliaryRoute.sessionSearch.description")).toContain("session_search");
