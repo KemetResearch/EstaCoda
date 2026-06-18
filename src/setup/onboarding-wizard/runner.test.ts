@@ -30,6 +30,8 @@ import {
 import type { SetupReviewManifest } from "../setup-review-manifest.js";
 import type { WhatsAppPairDeviceOptions, WhatsAppSetupDependencies } from "../whatsapp-setup-flow.js";
 import * as pythonEnvManager from "../../python-env/manager.js";
+import * as capabilityManager from "../../python-env/capability-manager.js";
+import { DDGS_CAPABILITY_ID } from "../../python-env/capability-registry.js";
 
 async function makeTempDir(): Promise<string> {
   return mkdtemp(join(tmpdir(), "estacoda-first-run-runner-"));
@@ -57,6 +59,16 @@ function browserPromptOverrides(modeLabel: string, extra: Record<string, FakePro
     [resolveSetupCopy("en", "onboarding.optionalCapabilities.title")]: true,
     [resolveSetupCopy("en", "onboarding.optionalCapabilities.menu.title")]: "Configure browser",
     [resolveSetupCopy("en", "setupEditor.prompt.browser.mode.title")]: modeLabel,
+    [resolveSetupCopy("en", "onboarding.optionalCapabilities.more.title")]: false,
+    ...extra,
+  };
+}
+
+function searchPromptOverrides(providerLabel: string, extra: Record<string, FakePromptOverrideValue> = {}): Record<string, FakePromptOverrideValue> {
+  return {
+    [resolveSetupCopy("en", "onboarding.optionalCapabilities.title")]: true,
+    [resolveSetupCopy("en", "onboarding.optionalCapabilities.menu.title")]: resolveSetupCopy("en", "onboarding.optionalCapabilities.webSearch"),
+    [resolveSetupCopy("en", "setupEditor.prompt.webSearch.provider.title")]: providerLabel,
     [resolveSetupCopy("en", "onboarding.optionalCapabilities.more.title")]: false,
     ...extra,
   };
@@ -364,6 +376,50 @@ function reviewedExecutor(homeDir: string, workspaceRoot: string, profileId?: st
   });
 }
 
+function readyDdgsStatus(homeDir: string): Awaited<ReturnType<typeof capabilityManager.checkManagedPythonCapabilityStatus>> {
+  const stateRoot = resolveGlobalStateHome({ homeDir }).stateRoot;
+  return {
+    ok: true,
+    status: "verified",
+    capabilityId: DDGS_CAPABILITY_ID,
+    version: "9.14.4",
+    specHash: "hash",
+    installedGroups: [],
+    installedPackages: ["ddgs==9.14.4"],
+    pythonPath: join(stateRoot, "python-capabilities", DDGS_CAPABILITY_ID, "bin", "python"),
+    envPath: join(stateRoot, "python-capabilities", DDGS_CAPABILITY_ID),
+    manifest: {
+      id: DDGS_CAPABILITY_ID,
+      version: "9.14.4",
+      specHash: "hash",
+      installedPackages: ["ddgs==9.14.4"],
+      installedGroups: [],
+      pythonPath: join(stateRoot, "python-capabilities", DDGS_CAPABILITY_ID, "bin", "python"),
+      envPath: join(stateRoot, "python-capabilities", DDGS_CAPABILITY_ID),
+      createdAt: "2026-01-01T00:00:00.000Z",
+      updatedAt: "2026-01-01T00:00:00.000Z",
+      verifiedAt: "2026-01-01T00:00:00.000Z",
+      status: "verified",
+    },
+  };
+}
+
+function readyDdgsInstallResult(homeDir: string): Awaited<ReturnType<typeof capabilityManager.installManagedPythonCapabilityEnvironment>> {
+  const status = readyDdgsStatus(homeDir);
+  if (!status.ok) throw new Error("expected ready status");
+  return {
+    ok: true,
+    capabilityId: status.capabilityId,
+    version: status.version,
+    specHash: status.specHash,
+    installedGroups: status.installedGroups,
+    installedPackages: status.installedPackages,
+    pythonPath: status.pythonPath,
+    envPath: status.envPath,
+    manifest: status.manifest,
+  };
+}
+
 function gatewayServiceActions(input: {
   readonly installedBefore?: boolean;
   readonly activeAfterInstall?: boolean;
@@ -455,10 +511,12 @@ describe("runFirstRunSetup", () => {
   });
 
   afterEach(async () => {
+    vi.restoreAllMocks();
     delete process.env.ESTACODA_TELEGRAM_BOT_TOKEN;
     delete process.env.ESTACODA_DISCORD_BOT_TOKEN;
     delete process.env.BROWSERBASE_API_KEY;
     delete process.env.BROWSERBASE_PROJECT_ID;
+    delete process.env.BRAVE_SEARCH_API_KEY;
     await rm(tempDir, { recursive: true, force: true });
   });
 
@@ -1169,6 +1227,7 @@ describe("runFirstRunSetup", () => {
       "Configure channels",
       "Configure voice",
       "Configure browser",
+      "Search",
       "Skip",
     ]);
     expect(seenOptions["Configure optional capability"]).not.toContain("Configure image generation");
@@ -1469,8 +1528,26 @@ describe("runFirstRunSetup", () => {
     expect(seenOptions["Configure optional capability"]).toEqual([
       "Configure channels",
       "Configure voice",
+      "Search",
       "Skip",
     ]);
+  });
+
+  it("offers Search in the first-run optional capability list", async () => {
+    const seenOptions: Record<string, readonly string[]> = {};
+
+    await runFirstRunSetup({
+      homeDir: tempDir,
+      workspaceRoot,
+      prompt: fakePrompt({
+        "Optional capabilities": "Yes",
+        "Configure optional capability": "Skip",
+      }, seenOptions),
+      flowEngine: flowEngine(),
+    });
+
+    expect(seenOptions["Configure optional capability"]).toContain("Search");
+    expect(seenOptions["Configure optional capability"]).not.toContain("Vision");
   });
 
   it("offers the setup-editor browser mode choices during onboarding", async () => {
@@ -1715,6 +1792,168 @@ describe("runFirstRunSetup", () => {
     expect(result.selections.optionalCapabilities).toEqual(["browser"]);
     expect(config.browser).toEqual(expect.objectContaining({ backend: "unconfigured" }));
     expect(renderOnboardingWizardSummary(result.wizardState)).toContain("  - Browser: Disabled");
+  });
+
+  it("maps Brave Search onboarding through reviewed config and deferred secret write", async () => {
+    vi.spyOn(capabilityManager, "checkManagedPythonCapabilityStatus").mockResolvedValue({
+      ok: false,
+      capabilityId: DDGS_CAPABILITY_ID,
+      reason: "install_required",
+      message: "Managed Python capability environment has not been installed.",
+    });
+
+    const result = await runFirstRunSetup({
+      homeDir: tempDir,
+      workspaceRoot,
+      prompt: fakePrompt(searchPromptOverrides(
+        resolveSetupCopy("en", "setupEditor.prompt.webSearch.provider.brave"),
+        {
+          __prompt: ["", "BRAVE_SEARCH_API_KEY"],
+          __secret: "brave-secret-value",
+        }
+      )),
+      flowEngine: flowEngine(),
+      applyExecutor: reviewedExecutor(tempDir, workspaceRoot),
+    });
+    const config = await readProfileConfig(tempDir) as {
+      web?: {
+        searchBackend?: string;
+        brave?: { apiKeyEnv?: string; apiKey?: string };
+      };
+    };
+    const env = await readFile(profileEnvPath(tempDir), "utf8");
+    const reviewJson = JSON.stringify(result.reviewManifest);
+
+    expect(result.completed).toBe(true);
+    expect(result.selections.optionalCapabilities).toEqual(["web-search"]);
+    expect(result.wizardState.optionalCapabilities?.webSearch).toBe("configured");
+    expect(config.web).toEqual(expect.objectContaining({
+      searchBackend: "brave",
+      brave: {
+        apiKeyEnv: "BRAVE_SEARCH_API_KEY",
+      },
+    }));
+    expect(config.web?.brave?.apiKey).toBeUndefined();
+    expect(env).toContain("BRAVE_SEARCH_API_KEY=\"brave-secret-value\"");
+    expect(reviewJson).toContain("BRAVE_SEARCH_API_KEY");
+    expect(reviewJson).not.toContain("brave-secret-value");
+    expect(result.output).not.toContain("brave-secret-value");
+    expect(renderOnboardingWizardSummary(result.wizardState)).toContain("  - Search: Configured");
+  });
+
+  it("maps ready DDGS Search onboarding through reviewed config without install", async () => {
+    const statusSpy = vi.spyOn(capabilityManager, "checkManagedPythonCapabilityStatus").mockResolvedValue(readyDdgsStatus(tempDir));
+    const installSpy = vi.spyOn(capabilityManager, "installManagedPythonCapabilityEnvironment").mockResolvedValue(readyDdgsInstallResult(tempDir));
+
+    const result = await runFirstRunSetup({
+      homeDir: tempDir,
+      workspaceRoot,
+      prompt: fakePrompt(searchPromptOverrides(
+        resolveSetupCopy("en", "setupEditor.prompt.webSearch.provider.ddgs")
+      )),
+      flowEngine: flowEngine(),
+      applyExecutor: reviewedExecutor(tempDir, workspaceRoot),
+    });
+    const config = await readProfileConfig(tempDir) as { web?: { searchBackend?: string } };
+
+    expect(result.completed).toBe(true);
+    expect(result.selections.optionalCapabilities).toEqual(["web-search"]);
+    expect(result.wizardState.optionalCapabilities?.webSearch).toBe("configured");
+    expect(statusSpy).toHaveBeenCalled();
+    expect(installSpy).not.toHaveBeenCalled();
+    expect(config.web?.searchBackend).toBe("ddgs");
+  });
+
+  it("confirms managed DDGS setup during first-run apply when DDGS is missing", async () => {
+    const statusSpy = vi.spyOn(capabilityManager, "checkManagedPythonCapabilityStatus").mockResolvedValue({
+      ok: false,
+      capabilityId: DDGS_CAPABILITY_ID,
+      reason: "install_required",
+      message: "Managed Python capability environment has not been installed.",
+    });
+    const installSpy = vi.spyOn(capabilityManager, "installManagedPythonCapabilityEnvironment").mockResolvedValue(readyDdgsInstallResult(tempDir));
+
+    const result = await runFirstRunSetup({
+      homeDir: tempDir,
+      workspaceRoot,
+      prompt: fakePrompt(searchPromptOverrides(
+        resolveSetupCopy("en", "setupEditor.prompt.webSearch.provider.ddgs"),
+        {
+          [resolveSetupCopy("en", "setupEditor.prompt.webSearch.ddgs.install.title")]: true,
+        }
+      )),
+      flowEngine: flowEngine(),
+      applyExecutor: reviewedExecutor(tempDir, workspaceRoot),
+    });
+    const config = await readProfileConfig(tempDir) as { web?: { searchBackend?: string } };
+
+    expect(result.completed).toBe(true);
+    expect(result.wizardState.optionalCapabilities?.webSearch).toBe("configured");
+    expect(statusSpy).toHaveBeenCalled();
+    expect(installSpy).toHaveBeenCalledWith({
+      stateRoot: resolveGlobalStateHome({ homeDir: tempDir }).stateRoot,
+      capabilityId: DDGS_CAPABILITY_ID,
+    });
+    expect(config.web?.searchBackend).toBe("ddgs");
+  });
+
+  it("warns and leaves Search unconfigured when first-run DDGS setup fails", async () => {
+    vi.spyOn(capabilityManager, "checkManagedPythonCapabilityStatus").mockResolvedValue({
+      ok: false,
+      capabilityId: DDGS_CAPABILITY_ID,
+      reason: "install_required",
+      message: "Managed Python capability environment has not been installed.",
+    });
+    vi.spyOn(capabilityManager, "installManagedPythonCapabilityEnvironment").mockResolvedValue({
+      ok: false,
+      capabilityId: DDGS_CAPABILITY_ID,
+      reason: "pip_install_failed",
+      message: "Could not install ddgs.",
+      diagnostic: "Traceback: hidden details",
+    });
+
+    const result = await runFirstRunSetup({
+      homeDir: tempDir,
+      workspaceRoot,
+      prompt: fakePrompt(searchPromptOverrides(
+        resolveSetupCopy("en", "setupEditor.prompt.webSearch.provider.ddgs"),
+        {
+          [resolveSetupCopy("en", "setupEditor.prompt.webSearch.ddgs.install.title")]: true,
+        }
+      )),
+      flowEngine: flowEngine(),
+      applyExecutor: reviewedExecutor(tempDir, workspaceRoot),
+    });
+    const config = await readProfileConfig(tempDir) as { web?: unknown };
+
+    expect(result.completed).toBe(true);
+    expect(result.exitCode).toBe(0);
+    expect(result.wizardState.optionalCapabilities?.webSearch).toBe("configured");
+    expect(result.output).toContain("Optional capability warnings:");
+    expect(result.output).toContain(resolveSetupCopy("en", "onboarding.optionalCapabilities.webSearch.ddgsSkipped"));
+    expect(result.output).not.toContain("Could not install ddgs.");
+    expect(result.output).not.toContain("Traceback");
+    expect(config.web).toBeUndefined();
+  });
+
+  it("skips Search without blocking first-run launch", async () => {
+    const result = await runFirstRunSetup({
+      homeDir: tempDir,
+      workspaceRoot,
+      prompt: fakePrompt(searchPromptOverrides(
+        resolveSetupCopy("en", "setupEditor.prompt.webSearch.provider.none")
+      )),
+      flowEngine: flowEngine(),
+      applyExecutor: reviewedExecutor(tempDir, workspaceRoot),
+    });
+    const config = await readProfileConfig(tempDir) as { web?: unknown };
+
+    expect(result.completed).toBe(true);
+    expect(result.applyEndState?.kind).not.toBe("blocked");
+    expect(result.selections.optionalCapabilities).toEqual([]);
+    expect(result.wizardState.optionalCapabilities?.webSearch).toBe("skipped");
+    expect(config.web).toBeUndefined();
+    expect(renderOnboardingWizardSummary(result.wizardState)).toContain("  - Search: Skipped");
   });
 
   it("skips the onboarding optional capability flow cleanly", async () => {

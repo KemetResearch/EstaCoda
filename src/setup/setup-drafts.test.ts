@@ -269,6 +269,41 @@ describe("setup draft bundles", () => {
       skipped: false,
       capabilities: ["channels", "voice", "browser"],
     });
+    expect(optional?.target).toEqual(expect.objectContaining({
+      kind: "config-scope",
+      scope: ["channels", "voice", "browser", "web"],
+    }));
+  });
+
+  it("derives selected Search capability from onboarding state", () => {
+    const bundle = buildOnboardingWizardDraftBundle(onboardingWizardState({
+      optionalCapabilities: {
+        channels: {
+          telegram: "not_set",
+          whatsapp: "not_set",
+        },
+        voice: {
+          stt: "not_set",
+          tts: "not_set",
+        },
+        browser: "not_set",
+        webSearch: "configured",
+      },
+    }), {
+      configPath: "/tmp/home/.estacoda/config.json",
+      workspaceRoot: "/tmp/workspace",
+      trustStorePath: "/tmp/home/.estacoda/trust.json",
+    });
+    const optional = bundle.drafts.find((draft) => draft.kind === "optional-capability");
+
+    expect(optional?.review.values).toEqual({
+      skipped: false,
+      capabilities: ["web-search"],
+    });
+    expect(optional?.target).toEqual(expect.objectContaining({
+      kind: "config-scope",
+      scope: ["channels", "voice", "browser", "web"],
+    }));
   });
 
   it("derives selected channel capability when onboarding configured WhatsApp", () => {

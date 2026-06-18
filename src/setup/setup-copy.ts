@@ -202,7 +202,7 @@ export const SETUP_COPY_ENTRIES = [
   copy("onboarding.workflowLearning.validation.selected", "Choose an Agent Evolution mode.", "اختر وضع تطوّر الوكيل.", [], "workflow-learning"),
   copy("onboarding.optionalCapabilities", "Add extra capabilities now, or start light. Skipping them does not weaken core setup.", "أضف القدرات الإضافية الآن، أو ابدأ بتشغيل خفيف. تخطيها لا يضعف الإعداد الأساسي.", [], "optional-capability"),
   copy("onboarding.optionalCapabilities.title", "Optional capabilities", "القدرات الاختيارية", [], "optional-capability"),
-  copy("onboarding.optionalCapabilities.configureNow", "Would you like to configure optional capabilities such as Channels, Voice, and Browser now?", "هل ترغب في ضبط قدرات اختيارية مثل القنوات والصوت والمتصفح الآن؟", [], "optional-capability"),
+  copy("onboarding.optionalCapabilities.configureNow", "Would you like to configure optional capabilities such as Channels, Voice, Browser, and Search now?", "هل ترغب في ضبط قدرات اختيارية مثل القنوات والصوت والمتصفح وبحث الويب الآن؟", [], "optional-capability"),
   copy("onboarding.optionalCapabilities.configureNow.yes", "Yes", "نعم", [], "optional-capability"),
   copy("onboarding.optionalCapabilities.configureNow.no", "No", "لا", [], "optional-capability"),
   copy("onboarding.optionalCapabilities.note", "You can configure these capabilities at any time by running estacoda setup.", "يمكنك ضبط هذه القدرات في أي وقت بتشغيل estacoda setup.", [], "optional-capability"),
@@ -215,6 +215,15 @@ export const SETUP_COPY_ENTRIES = [
     "Setup completed, but local faster-whisper STT was skipped because EstaCoda could not create its managed Python environment. Fix Python venv support, then reconfigure local STT from setup.",
     "اكتمل الإعداد، لكن تم تخطي STT المحلي عبر faster-whisper لأن EstaCoda لم تتمكن من إنشاء بيئة Python المُدارة. أصلح دعم Python venv، ثم أعد ضبط STT المحلي من الإعداد.",
     ["STT", "faster-whisper", "EstaCoda", "Python", "venv"],
+    "optional-capability"
+  ),
+  copy("onboarding.optionalCapabilities.webSearch", "Search", "بحث الويب", [], "optional-capability"),
+  copy("onboarding.optionalCapabilities.webSearch.description", "Configure web.search with Brave Search or DDGS.", "اضبط web.search باستخدام Brave Search أو DDGS.", [], "optional-capability"),
+  copy(
+    "onboarding.optionalCapabilities.webSearch.ddgsSkipped",
+    "Setup completed, but DDGS Search was skipped because EstaCoda could not create its managed Python capability environment. Fix Python setup, then configure Search from setup.",
+    "اكتمل الإعداد، لكن تم تخطي بحث DDGS لأن EstaCoda لم تتمكن من إنشاء بيئة قدرة Python المُدارة. أصلح إعداد Python، ثم اضبط بحث الويب من الإعداد.",
+    ["DDGS", "EstaCoda", "Python"],
     "optional-capability"
   ),
   copy("onboarding.optionalCapabilities.promptCapability", "Enable {capabilityId}?", "هل تريد تفعيل {capabilityId}؟", ["{capabilityId}"], "optional-capability"),
@@ -241,6 +250,7 @@ export const SETUP_COPY_ENTRIES = [
   copy("onboarding.summary.labels.voiceStt", "Voice STT", "الصوت STT", [], "config-summary"),
   copy("onboarding.summary.labels.voiceTts", "Voice TTS", "الصوت TTS", [], "config-summary"),
   copy("onboarding.summary.labels.browser", "Browser", "المتصفح", [], "config-summary"),
+  copy("onboarding.summary.labels.webSearch", "Search", "بحث الويب", [], "config-summary"),
   copy("onboarding.summary.status.notSet", "Not set", "غير مهيأ", [], "config-summary"),
   copy("onboarding.summary.status.skipped", "Skipped", "تم التخطي", [], "config-summary"),
   copy("onboarding.summary.status.incomplete", "Setup incomplete", "الإعداد غير مكتمل", [], "config-summary"),

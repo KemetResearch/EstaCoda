@@ -3,6 +3,7 @@ import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promi
 import { dirname, join } from "node:path";
 import { tmpdir } from "node:os";
 import { buildOnboardingWizardDraftBundle } from "../setup-drafts.js";
+import { resolveSetupCopy } from "../setup-copy.js";
 import { buildSetupModuleDraftBundle, type SetupModuleContext } from "../setup-modules.js";
 import { buildSetupReviewManifest } from "../setup-review-manifest.js";
 import { executeSetupApplyPlan, planSetupApply, type SetupApplyMode, type SetupApplyPlan } from "../setup-apply-plan.js";
@@ -1284,6 +1285,48 @@ describe("reviewed setup apply executor", () => {
     expect(result.ok).toBe(false);
     expect(result.error).toContain("DDGS managed Python capability setup failed");
     expect(result.error).toContain("Could not install ddgs.");
+  });
+
+  it("warns and leaves web config unchanged when first-run DDGS setup fails", async () => {
+    vi.spyOn(capabilityManager, "checkManagedPythonCapabilityStatus").mockResolvedValue({
+      ok: false,
+      capabilityId: DDGS_CAPABILITY_ID,
+      reason: "install_required",
+      message: "Managed Python capability environment has not been installed.",
+    });
+    vi.spyOn(capabilityManager, "installManagedPythonCapabilityEnvironment").mockResolvedValue({
+      ok: false,
+      capabilityId: DDGS_CAPABILITY_ID,
+      reason: "pip_install_failed",
+      message: "Could not install ddgs.",
+      diagnostic: "Traceback: hidden details",
+    });
+    const plan = webSearchCapabilityPlan({
+      searchBackend: "ddgs",
+      ddgsCapabilityId: DDGS_CAPABILITY_ID,
+      ddgsCapabilityStatus: "missing",
+      ddgsSetupConfirmed: true,
+    }, { homeDir: tempDir });
+
+    const result = await applyReviewedSetupPlanOperations(plan, {
+      homeDir: tempDir,
+      workspaceRoot,
+      mode: "firstRunTolerant",
+    });
+    const config = JSON.parse(await readFile(profileConfigPath(tempDir), "utf8").catch(() => "{}")) as {
+      web?: unknown;
+    };
+
+    expect(result.ok).toBe(true);
+    expect(result.warnings).toEqual([expect.objectContaining({
+      capability: "web-search",
+      subCapability: "search",
+      code: "managed_python_setup_failed",
+      message: resolveSetupCopy("en", "onboarding.optionalCapabilities.webSearch.ddgsSkipped"),
+      cause: "Could not install ddgs.",
+    })]);
+    expect(JSON.stringify(result.warnings)).not.toContain("Traceback");
+    expect(config.web).toBeUndefined();
   });
 
   it("creates the managed Python environment before applying reviewed local STT", async () => {
