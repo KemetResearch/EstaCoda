@@ -1369,7 +1369,7 @@ describe("runConfigEditor", () => {
     const result = await runConfigEditor({
       homeDir: tempDir,
       workspaceRoot,
-      prompt: fakePrompt(),
+      prompt: fakePrompt({ values: ["telegram", "unchanged"] }),
       defaultActionId: "configure-channels",
       applyExecutor: {
         apply: () => {
@@ -1388,7 +1388,7 @@ describe("runConfigEditor", () => {
     await expect(readFile(profileConfigPath(tempDir), "utf8")).resolves.toBe(before);
   });
 
-  it("does not offer skip for already configured optional capabilities", async () => {
+  it("orders optional capability actions with configure first and hides skip when already configured", async () => {
     await writeUserConfig(tempDir, {
       ...localReadyConfig(),
       channels: {
@@ -1401,11 +1401,13 @@ describe("runConfigEditor", () => {
     });
     await trustWorkspace(tempDir, workspaceRoot);
     const optionLabels: string[][] = [];
+    const defaultLabels: string[] = [];
 
-    const prompt = fakePrompt();
+    const prompt = fakePrompt({ values: ["telegram", "unchanged"] });
     const baseSelect = prompt.select!;
     prompt.select = async (input) => {
       optionLabels.push(input.options.map((option) => option.label));
+      defaultLabels.push(input.options[input.defaultIndex ?? 0]?.label ?? "");
       return baseSelect(input);
     };
 
@@ -1418,9 +1420,46 @@ describe("runConfigEditor", () => {
 
     expect(result.completed).toBe(true);
     expect(optionLabels[0]).toEqual(["Telegram", "WhatsApp beta", "Discord beta"]);
-    expect(optionLabels[1]).toEqual(["Leave unchanged", "Configure"]);
+    expect(optionLabels[1]).toEqual(["Configure", "Leave unchanged"]);
+    expect(defaultLabels[1]).toBe("Configure");
     expect(optionLabels).toHaveLength(2);
     expect(result.reviewManifest).toBeUndefined();
+  });
+
+  it("uses configure-first optional action ordering for unconfigured capabilities", async () => {
+    await writeUserConfig(tempDir, localReadyConfig());
+    await trustWorkspace(tempDir, workspaceRoot);
+    const actions = [
+      { actionId: "configure-channels" as const, values: ["telegram", "unchanged"] },
+      { actionId: "configure-voice" as const, values: ["stt", "unchanged"] },
+      { actionId: "configure-image-generation" as const, values: ["unchanged"] },
+      { actionId: "configure-web-search" as const, values: ["unchanged"] },
+      { actionId: "configure-browser" as const, values: ["unchanged"] },
+    ];
+
+    for (const { actionId, values } of actions) {
+      const optionLabels: string[][] = [];
+      const defaultLabels: string[] = [];
+      const prompt = fakePrompt({ values });
+      const baseSelect = prompt.select!;
+      prompt.select = async (input) => {
+        optionLabels.push(input.options.map((option) => option.label));
+        defaultLabels.push(input.options[input.defaultIndex ?? 0]?.label ?? "");
+        return baseSelect(input);
+      };
+
+      const result = await runConfigEditor({
+        homeDir: tempDir,
+        workspaceRoot,
+        prompt,
+        defaultActionId: actionId,
+      });
+
+      expect(result.completed).toBe(true);
+      expect(optionLabels.at(-1)).toEqual(["Configure", "Leave unchanged", "Skip"]);
+      expect(defaultLabels.at(-1)).toBe("Configure");
+      expect(result.reviewManifest).toBeUndefined();
+    }
   });
 
   it("lets incomplete Telegram optional capability setup skip instead of drafting blockers", async () => {

@@ -677,20 +677,20 @@ export async function promptOptionalCapabilityAction(
     message: `${input.title}\n`,
     choices: [
       {
+        id: `${input.id}-enable`,
+        label: setupCopyText(locale, "setupEditor.prompt.optionalCapabilityAction.enableConfigure"),
+        description: setupCopyText(locale, "setupEditor.prompt.optionalCapabilityAction.enableConfigure.description"),
+        value: "enable" as const,
+      },
+      {
         id: `${input.id}-unchanged`,
         label: setupCopyText(locale, "setupEditor.prompt.optionalCapabilityAction.leaveUnchanged"),
         description: setupCopyText(locale, "setupEditor.prompt.optionalCapabilityAction.leaveUnchanged.description"),
         value: "unchanged" as const,
       },
       ...skipChoice,
-      {
-        id: `${input.id}-enable`,
-        label: setupCopyText(locale, "setupEditor.prompt.optionalCapabilityAction.enableConfigure"),
-        description: setupCopyText(locale, "setupEditor.prompt.optionalCapabilityAction.enableConfigure.description"),
-        value: "enable" as const,
-      },
     ],
-    defaultValue: "unchanged" as const,
+    defaultValue: "enable" as const,
   });
 }
 
