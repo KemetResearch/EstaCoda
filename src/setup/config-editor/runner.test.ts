@@ -1418,7 +1418,7 @@ describe("runConfigEditor", () => {
 
     expect(result.completed).toBe(true);
     expect(optionLabels[0]).toEqual(["Telegram", "WhatsApp beta", "Discord beta"]);
-    expect(optionLabels[1]).toEqual(["Leave unchanged", "Enable/configure"]);
+    expect(optionLabels[1]).toEqual(["Leave unchanged", "Configure"]);
     expect(optionLabels).toHaveLength(2);
     expect(result.reviewManifest).toBeUndefined();
   });
