@@ -133,6 +133,7 @@ The base capability is required. The `advancedOcr` group is optional. Failure to
 
 Registered built-in capability IDs include:
 
+- `ddgs`: DDGS web search subprocess support.
 - `faster-whisper`: local STT package support.
 - `pdf-extraction`: PyMuPDF/PyMuPDF4LLM extraction, with optional `tables` and `advancedOcr` groups.
 - `pdf-editor`: nano-pdf editing support.

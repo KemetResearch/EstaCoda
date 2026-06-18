@@ -125,8 +125,8 @@ export type SetupLaunchHandoffIntent = {
 
 export type OptionalCapabilityApplyWarning = {
   readonly operationId?: string;
-  readonly capability: "voice" | "browser" | "vision" | "channels";
-  readonly subCapability?: "stt" | "tts" | "telegram" | "browser" | "imageGeneration";
+  readonly capability: "voice" | "browser" | "vision" | "channels" | "web-search";
+  readonly subCapability?: "stt" | "tts" | "telegram" | "browser" | "imageGeneration" | "search";
   readonly code:
     | "managed_python_setup_failed"
     | "missing_dependency"

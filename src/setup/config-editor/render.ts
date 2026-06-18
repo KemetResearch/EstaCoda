@@ -22,6 +22,7 @@ const PR6_EDITOR_ACTION_ORDER: readonly SetupEditorActionId[] = [
   "configure-channels",
   "configure-voice",
   "configure-image-generation",
+  "configure-web-search",
   "configure-browser",
   "repair-workspace-trust",
   "edit-security-mode",
@@ -276,6 +277,8 @@ function editorActionDescription(action: SetupEditorActionDraft, locale: SetupCo
       return setupCopyText(locale, "setupEditor.actions.configureVoice.description");
     case "configure-image-generation":
       return setupCopyText(locale, "setupEditor.actions.configureImageGeneration.description");
+    case "configure-web-search":
+      return setupCopyText(locale, "setupEditor.actions.configureWebSearch.description");
     case "configure-browser":
       return setupCopyText(locale, "setupEditor.actions.configureBrowser.description");
     case "repair-primary-provider":

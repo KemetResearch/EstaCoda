@@ -317,7 +317,7 @@ function onboardingOptionalCapabilitiesDraft(
     kind: "optional-capability",
     source: { kind: "onboarding-wizard", stepId: "optional-capabilities" },
     riskSurface: "optional-capability",
-    scope: ["channels", "voice", "browser"],
+    scope: ["channels", "voice", "browser", "web"],
     configPath: options.configPath,
     summaryKey: "setupDrafts.optionalCapabilities.summary",
     values: {
@@ -358,6 +358,7 @@ function onboardingSelectedOptionalCapabilities(
     capabilities.push("voice");
   }
   if (state.optionalCapabilities?.browser === "configured") capabilities.push("browser");
+  if (state.optionalCapabilities?.webSearch === "configured") capabilities.push("web-search");
   return capabilities;
 }
 
@@ -719,6 +720,7 @@ function kindForEditorAction(action: SetupEditorActionDraft): SetupDraftKind {
     case "configure-channels":
     case "configure-voice":
     case "configure-image-generation":
+    case "configure-web-search":
     case "configure-browser":
       return "optional-capability";
     case "repair-state-directory":

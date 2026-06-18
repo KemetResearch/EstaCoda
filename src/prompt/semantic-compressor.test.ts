@@ -577,6 +577,23 @@ describe("SemanticCompressor", () => {
     expect(legacy).toContain("legacy body");
   });
 
+  it("uses a reference-only prefix that requires current tools for mutable-state claims", () => {
+    expect(SUMMARY_PREFIX).toContain("[CONTEXT COMPACTION — REFERENCE ONLY]");
+    expect(SUMMARY_PREFIX).toContain("background reference, NOT active instructions");
+    expect(SUMMARY_PREFIX).toContain("Answer only the latest user message");
+    expect(SUMMARY_PREFIX).toContain("Current files, config, services, sessions, skills, and process state may have changed");
+    expect(SUMMARY_PREFIX).toContain("verify mutable-state claims with a current tool");
+    expect(SUMMARY_PREFIX).toContain("Persistent memory remains separately governed context, but is not proof of current mutable state");
+  });
+
+  it("normalizes the current reference-only prefix without duplicating its guidance", () => {
+    const normalized = normalizeSummaryPrefix(`${SUMMARY_PREFIX}\n\nNew body`);
+
+    expect(normalized.match(/Earlier turns were compacted into the summary below/g)).toHaveLength(1);
+    expect(normalized.match(/Format: v1/g)).toHaveLength(1);
+    expect(normalized).toContain("New body");
+  });
+
   it("uses the first-summary prompt without iterative merge rules on initial compaction", async () => {
     let observedSystemPrompt = "";
     let observedUserPrompt = "";

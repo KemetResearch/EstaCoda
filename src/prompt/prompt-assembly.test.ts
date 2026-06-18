@@ -5,6 +5,7 @@ import { describe, expect, it } from "vitest";
 import type { IntentRoute } from "../contracts/intent.js";
 import type { ModelProfile, ProviderMessage, ResolvedModelRoute } from "../contracts/provider.js";
 import type { SessionMessage } from "../contracts/session.js";
+import type { SkillDefinition } from "../contracts/skill.js";
 import { SESSION_RECALL_UNTRUSTED_NOTICE } from "../session/session-recall-service.js";
 import type { ToolExecutionRecord } from "../tools/tool-executor.js";
 import { assembleProviderContinuationPrompt, assembleProviderPrompt } from "./prompt-assembly.js";
@@ -42,6 +43,13 @@ const generalIntent: IntentRoute = {
   evidence: [],
   rationale: "No specialized route matched."
 };
+
+const mutableStateGroundingGuidance = [
+  "Mutable-state grounding:",
+  "- Treat session history, compaction summaries, skill-learning records, and native replayed tool results as historical reference unless they were produced in the current turn.",
+  "- Do not assert that files, directories, skills, config, processes, credentials, branches, packages, services, or network state currently exist based only on historical context.",
+  "- If the user asks for current state, verify with an available tool or phrase the claim explicitly as historical."
+].join("\n");
 
 function renderMessages(messages: ProviderMessage[]): string {
   return messages.map((message) => {
@@ -102,6 +110,53 @@ describe("assembleProviderPrompt", () => {
     expect(rendered).not.toMatch(/matching skill/i);
     expect(rendered).not.toMatch(/future skill discovery/i);
     expect(rendered).not.toMatch(/I would answer directly/i);
+  });
+
+  it("includes mutable-state grounding guidance in protected cached system context without a selected skill", () => {
+    const prompt = assembleProviderPrompt(basePromptInput({
+      userText: "What files are here?",
+      routedText: "What files are here?",
+      selectedSkill: undefined,
+      selectedSkillInstructions: undefined
+    }));
+    const rendered = renderMessages(prompt.messages);
+    const groundingLayer = prompt.budget.layers.find((candidate) => candidate.name === "mutable-state-grounding");
+
+    expect(rendered).toContain(mutableStateGroundingGuidance);
+    expect(rendered).toContain("Current mutable-state claims require current-turn tool evidence; otherwise phrase them as historical.");
+    expect(groundingLayer).toEqual(expect.objectContaining({
+      cacheable: true,
+      protected: true
+    }));
+    expect(prompt.messages.some((message) =>
+      message.role === "user" &&
+      typeof message.content === "string" &&
+      message.content.includes("Mutable-state grounding:")
+    )).toBe(false);
+  });
+
+  it("keeps mutable-state grounding guidance when a selected skill is loaded", () => {
+    const prompt = assembleProviderPrompt(basePromptInput({
+      userText: "Inspect the repo state.",
+      routedText: "Inspect the repo state.",
+      selectedSkill: selectedTestSkill(),
+      selectedSkillInstructions: "Use the selected workflow, but do not override safety guidance."
+    }));
+    const rendered = renderMessages(prompt.messages);
+    const groundingLayer = prompt.budget.layers.find((candidate) => candidate.name === "mutable-state-grounding");
+
+    expect(rendered).toContain(mutableStateGroundingGuidance);
+    expect(rendered).toContain("Current mutable-state claims require current-turn tool evidence; otherwise phrase them as historical.");
+    expect(rendered).toContain("Use the selected state-review skill and available context to answer the user.");
+    expect(groundingLayer).toEqual(expect.objectContaining({
+      cacheable: true,
+      protected: true
+    }));
+    expect(prompt.messages.some((message) =>
+      message.role === "user" &&
+      typeof message.content === "string" &&
+      message.content.includes("Mutable-state grounding:")
+    )).toBe(false);
   });
 
   it("renders canonical memory blocks exactly once before project context and session history", () => {
@@ -581,7 +636,7 @@ describe("assembleProviderPrompt", () => {
 
     expect(rendered).toContain("assistant [served_by=deepseek-v4-pro fallback_from=kimi-k2.7-code reason=rate-limit]: Fallback answer");
     expect(rendered).not.toContain("SECRET");
-    expect(rendered).not.toContain("credential");
+    expect(rendered).not.toContain("credentialId");
     expect(rendered).not.toContain("raw");
   });
 
@@ -694,6 +749,7 @@ describe("assembleProviderPrompt", () => {
 
     expect(rendered).toContain("Context summary: Command exited 0 with 1 line.");
     expect(rendered).toContain("Excerpt:\nactual command output");
+    expect(rendered).not.toContain("[Historical tool result");
     expect(rendered).not.toContain("_estacoda_context_summary=Command exited 0 with 1 line.");
   });
 });
@@ -775,15 +831,19 @@ describe("assembleProviderContinuationPrompt", () => {
       expect.objectContaining({
         role: "tool",
         toolCallId: "call-1",
-        content: "native tool result"
+        content: expect.stringContaining("native tool result")
       })
     ]));
+    expect(renderMessages(prompt.messages)).toContain("[Historical tool result");
+    expect(renderMessages(prompt.messages)).toContain("Verify with a current tool before asserting current state.");
     expect(renderMessages(prompt.messages)).not.toContain("flat native tool result fallback");
     expect(prompt.nativeHistoryDiagnostics).toEqual(expect.arrayContaining([
       expect.objectContaining({
         kind: "structured-tool-history-selected",
         nativePairs: 1,
-        routeRole: "primary"
+        routeRole: "primary",
+        historicalToolResultsLabeled: 1,
+        mutableStateToolResultsLabeled: 1
       })
     ]));
   });
@@ -846,13 +906,14 @@ describe("assembleProviderContinuationPrompt", () => {
       expect.objectContaining({
         role: "tool",
         toolCallId: "call-read",
-        content: "selected native result"
+        content: expect.stringContaining("selected native result")
       })
     ]));
     const finalContent = renderMessages([finalMessage!]);
     expect(finalContent).toContain("EstaCoda executed the requested tools.");
     expect(finalContent).toContain("Some tool results are already included as structured tool messages above.");
     expect(finalContent).not.toContain("selected native result");
+    expect(finalContent).not.toContain("[Historical tool result");
     expect(finalContent).toContain("non-selected flat result");
     expect(countOccurrences(JSON.stringify(prompt.messages), "selected native result")).toBe(1);
   });
@@ -941,7 +1002,7 @@ describe("assembleProviderContinuationPrompt", () => {
       expect.objectContaining({
         role: "tool",
         toolCallId: "call-1",
-        content: "native tool result"
+        content: expect.stringContaining("native tool result")
       })
     ]));
 
@@ -950,6 +1011,7 @@ describe("assembleProviderContinuationPrompt", () => {
     expect(rendered).toContain("User message:\nInspect this.");
     expect(rendered).not.toContain("flat fallback should be replaced");
     expect(countOccurrences(rendered, "native tool result")).toBe(1);
+    expect(rendered).toContain("[Historical tool result");
     expect(prompt.messages.findIndex((message) => message.role === "assistant" && message.toolCalls !== undefined))
       .toBeLessThan(prompt.messages.length - 1);
   });
@@ -1161,6 +1223,20 @@ function basePromptInput(overrides: Partial<Parameters<typeof assembleProviderPr
     providerTools: [],
     fallbackText: "fallback",
     ...overrides
+  };
+}
+
+function selectedTestSkill(): SkillDefinition {
+  return {
+    name: "state-review",
+    description: "Inspect mutable project state.",
+    version: "0.1.0",
+    whenToUse: ["state review"],
+    requiredToolsets: ["files"],
+    playbook: [],
+    permissionExpectations: ["auto-read"],
+    examples: [],
+    evaluations: []
   };
 }
 

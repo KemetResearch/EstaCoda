@@ -126,7 +126,10 @@ describe("session_search tool", () => {
   it("schema does not expose maxChars", () => {
     const tool = createSessionSearchTool({});
     const schema = tool.inputSchema as {
-      oneOf?: Array<{ properties?: Record<string, { const?: string; enum?: string[] }>; required?: string[] }>;
+      type?: unknown;
+      oneOf?: unknown;
+      properties?: Record<string, { enum?: string[] }>;
+      required?: string[];
     };
 
     expect(JSON.stringify(tool.inputSchema)).not.toContain("maxChars");
@@ -135,11 +138,11 @@ describe("session_search tool", () => {
     expect(JSON.stringify(tool.inputSchema)).not.toContain("summar");
     expect(JSON.stringify(tool.inputSchema)).toContain("limit");
     expect(JSON.stringify(tool.inputSchema)).toContain("window");
-    expect(schema.oneOf?.map((entry) => entry.properties?.mode?.const)).toEqual(["browse", "search", "scroll"]);
-    expect(schema.oneOf?.[0]?.properties?.sort?.enum).toEqual(["newest", "oldest"]);
-    expect(schema.oneOf?.[1]?.properties?.sort?.enum).toEqual(["newest", "oldest", "rank"]);
-    expect(schema.oneOf?.[1]?.required).toEqual(["mode", "query"]);
-    expect(schema.oneOf?.[2]?.required).toEqual(["mode", "session_id", "around_message_id"]);
+    expect(schema.type).toBe("object");
+    expect(schema.oneOf).toBeUndefined();
+    expect(schema.properties?.mode?.enum).toEqual(["browse", "search", "scroll"]);
+    expect(schema.properties?.sort?.enum).toEqual(["newest", "oldest", "rank"]);
+    expect(schema.required).toEqual(["mode"]);
   });
 
   it("returns bounded redacted output with untrusted labels", async () => {
@@ -160,6 +163,8 @@ describe("session_search tool", () => {
       untrusted: true,
       untrustedLabel: SESSION_SEARCH_UNTRUSTED_LABEL
     });
+    expect(payload.messages[0].untrustedLabel).toContain("records what was said then");
+    expect(payload.messages[0].untrustedLabel).toContain("current mutable state must be verified with current tools");
   });
 
   it("excludes the active session when current context is available", async () => {
@@ -236,6 +241,14 @@ describe("session_search tool", () => {
       sessionId: "session",
       currentSessionId: () => "session"
     }).map((tool) => tool.name)).toEqual(["session_search"]);
+  });
+
+  it("tool description includes the current-state boundary", () => {
+    const tool = createSessionSearchTool({});
+
+    expect(tool.description).toContain("past conversation recall");
+    expect(tool.description).toContain("Do not use it as proof of current filesystem/config/process/skill state");
+    expect(tool.description).toContain("inspect current state with tools");
   });
 });
 

@@ -31,7 +31,8 @@ import { isolateLtr } from "../../ui/bidi.js";
 
 export type OptionalCapabilityPromptAction = "unchanged" | "skip" | "enable";
 
-export type OptionalCapabilityPromptId = "telegram" | "discord" | "whatsapp" | "voice" | "vision" | "browser";
+export type OptionalCapabilityPromptId = "telegram" | "discord" | "whatsapp" | "voice" | "vision" | "web-search" | "browser";
+export type WebSearchProviderChoice = "brave" | "ddgs" | "none";
 
 export type ChannelCapabilityPromptId = "telegram" | "whatsapp" | "discord";
 
@@ -418,6 +419,112 @@ export async function promptCredentialReuseChoice(
     ],
     defaultValue: "existing" as const,
   });
+}
+
+export async function promptWebSearchCapability(
+  prompt: Prompt,
+  current: {
+    readonly searchBackend?: string;
+    readonly braveApiKeyEnv?: string;
+    readonly ddgsCapabilityStatus?: "ready" | "missing" | "failed" | "unknown";
+  },
+  locale: SetupCopyLocale = "en"
+): Promise<
+  | {
+      readonly provider: "brave";
+      readonly braveApiKeyEnv: string;
+    }
+  | {
+      readonly provider: "ddgs";
+      readonly ddgsSetupConfirmed: boolean;
+    }
+  | {
+      readonly provider: "none";
+    }
+> {
+  const defaultProvider: WebSearchProviderChoice = current.searchBackend === "brave" || current.searchBackend === "ddgs"
+    ? current.searchBackend
+    : "none";
+  const provider = await promptSetupChoice<WebSearchProviderChoice>(prompt, {
+    title: setupCopyText(locale, "setupEditor.prompt.webSearch.provider.title"),
+    message: `${setupCopyText(locale, "setupEditor.prompt.webSearch.provider.body")}\n`,
+    choices: [
+      {
+        id: "web-search-brave",
+        label: setupCopyText(locale, "setupEditor.prompt.webSearch.provider.brave"),
+        description: setupCopyText(locale, "setupEditor.prompt.webSearch.provider.brave.description"),
+        value: "brave" as const,
+      },
+      {
+        id: "web-search-ddgs",
+        label: setupCopyText(locale, "setupEditor.prompt.webSearch.provider.ddgs"),
+        description: setupCopyText(locale, "setupEditor.prompt.webSearch.provider.ddgs.description"),
+        value: "ddgs" as const,
+      },
+      {
+        id: "web-search-none",
+        label: setupCopyText(locale, "setupEditor.prompt.webSearch.provider.none"),
+        description: setupCopyText(locale, "setupEditor.prompt.webSearch.provider.none.description"),
+        value: "none" as const,
+      },
+    ],
+    defaultValue: defaultProvider,
+  });
+
+  if (provider === "none") {
+    return { provider };
+  }
+
+  if (provider === "brave") {
+    const envVar = await promptSetupStringWithDefault(
+      prompt,
+      setupPromptLabel(locale, setupCopyText(locale, "setupEditor.prompt.webSearch.brave.apiKeyEnv")),
+      current.braveApiKeyEnv ?? "BRAVE_SEARCH_API_KEY"
+    );
+    return {
+      provider,
+      braveApiKeyEnv: envVar,
+    };
+  }
+
+  if (current.ddgsCapabilityStatus === "ready") {
+    return {
+      provider,
+      ddgsSetupConfirmed: false,
+    };
+  }
+
+  const confirmed = await promptSetupChoice(prompt, {
+    title: setupCopyText(locale, "setupEditor.prompt.webSearch.ddgs.install.title"),
+    message: [
+      setupCopyText(locale, "setupEditor.prompt.webSearch.ddgs.status.missing"),
+      setupCopyText(locale, "setupEditor.prompt.webSearch.ddgs.install.body"),
+      formatSetupCopy(locale, "setupEditor.prompt.webSearch.ddgs.command", {
+        command: setupTechnicalToken(locale, "estacoda python-env setup ddgs"),
+      }),
+      "",
+    ].join("\n"),
+    choices: [
+      {
+        id: "web-search-ddgs-install-confirm",
+        label: setupCopyText(locale, "setupEditor.prompt.webSearch.ddgs.install.confirm"),
+        description: setupCopyText(locale, "setupEditor.prompt.webSearch.provider.ddgs.description"),
+        value: true,
+      },
+      {
+        id: "web-search-ddgs-install-skip",
+        label: setupCopyText(locale, "setupEditor.prompt.webSearch.ddgs.install.skip"),
+        description: setupCopyText(locale, "setupEditor.prompt.webSearch.ddgs.notInstalled"),
+        value: false,
+      },
+    ],
+    defaultValue: false,
+  });
+
+  return {
+    provider,
+    ddgsSetupConfirmed: confirmed,
+  };
 }
 
 export async function promptFallbackRouteAction(

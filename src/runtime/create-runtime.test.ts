@@ -1607,8 +1607,13 @@ describe("createRuntime MCP trust gating", () => {
             "requiredConfig": undefined,
             "riskClass": "shared-state-mutation",
             "schemaAliasOrder": [
+              "backend",
+              "brave",
+              "crawlBackend",
               "enableNetwork",
+              "extractBackend",
               "maxContentChars",
+              "searchBackend",
             ],
             "toolsets": [
               "core",

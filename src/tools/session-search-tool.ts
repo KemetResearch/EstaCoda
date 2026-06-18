@@ -41,7 +41,7 @@ export function createSessionSearchTool(options: SessionSearchToolOptions): Regi
   return {
     name: "session_search",
     description:
-      "Browse, search, or scroll raw historical session messages as bounded untrusted reference context. This is deterministic and does not summarize.",
+      "Browse, search, or scroll raw historical session messages as bounded untrusted reference context for past conversation recall. Do not use it as proof of current filesystem/config/process/skill state; inspect current state with tools. This is deterministic and does not summarize.",
     inputSchema: {
       type: "object",
       properties: {
@@ -57,42 +57,7 @@ export function createSessionSearchTool(options: SessionSearchToolOptions): Regi
         },
         window: { type: "number" }
       },
-      required: ["mode"],
-      oneOf: [
-        {
-          properties: {
-            mode: { const: "browse" },
-            limit: { type: "number" },
-            sort: { type: "string", enum: ["newest", "oldest"] }
-          },
-          required: ["mode"],
-          additionalProperties: false
-        },
-        {
-          properties: {
-            mode: { const: "search" },
-            query: { type: "string" },
-            limit: { type: "number" },
-            sort: { type: "string", enum: ["newest", "oldest", "rank"] },
-            role_filter: {
-              type: "array",
-              items: { type: "string", enum: ["user", "agent", "tool", "system"] }
-            }
-          },
-          required: ["mode", "query"],
-          additionalProperties: false
-        },
-        {
-          properties: {
-            mode: { const: "scroll" },
-            session_id: { type: "string" },
-            around_message_id: { type: "string" },
-            window: { type: "number" }
-          },
-          required: ["mode", "session_id", "around_message_id"],
-          additionalProperties: false
-        }
-      ]
+      required: ["mode"]
     },
     riskClass: "read-only-local",
     toolsets: ["core", "memory"],

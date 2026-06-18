@@ -6,7 +6,21 @@ import { firecrawlProvider } from "./web-research-providers/firecrawl-provider.j
 import { parallelProvider } from "./web-research-providers/parallel-provider.js";
 import { searxngProvider } from "./web-research-providers/searxng-provider.js";
 import { tavilyProvider } from "./web-research-providers/tavily-provider.js";
-import type { ProviderAvailability, WebResearchCapability, WebResearchConfig, WebResearchProvider } from "./web-research-provider.js";
+import {
+  defaultWebResearchCredentialResolver,
+  defaultWebResearchFetch,
+  defaultWebResearchPythonCapabilityPathResolver,
+  defaultWebResearchPythonCapabilityStatusChecker,
+  type ProviderAvailability,
+  type WebResearchCapability,
+  type WebResearchConfig,
+  type WebResearchCredentialResolver,
+  type WebResearchFetch,
+  type WebResearchPythonCapabilityPathResolver,
+  type WebResearchPythonCapabilityStatusChecker,
+  type WebResearchProvider,
+  type WebResearchSubprocessSpawn
+} from "./web-research-provider.js";
 
 const providers = new Map<string, WebResearchProvider>();
 const AUTO_DETECT_ORDER = ["firecrawl", "parallel", "tavily", "exa", "searxng", "brave", "ddgs"] as const;
@@ -17,6 +31,15 @@ export type WebResearchProviderSelection = {
   availability: ProviderAvailability;
   explicit: boolean;
   fallback: boolean;
+};
+
+export type WebResearchProviderSelectionOptions = {
+  fetch?: WebResearchFetch;
+  credentialResolver?: WebResearchCredentialResolver;
+  pythonStateRoot?: string;
+  pythonCapabilityStatusChecker?: WebResearchPythonCapabilityStatusChecker;
+  pythonCapabilityPathResolver?: WebResearchPythonCapabilityPathResolver;
+  subprocessSpawn?: WebResearchSubprocessSpawn;
 };
 
 export function registerWebResearchProvider(provider: WebResearchProvider): void {
@@ -52,11 +75,12 @@ export function registerDefaultWebResearchProviders(): void {
 
 export async function selectWebResearchProvider(
   capability: WebResearchCapability,
-  config: WebResearchConfig = {}
+  config: WebResearchConfig = {},
+  options: WebResearchProviderSelectionOptions = {}
 ): Promise<WebResearchProviderSelection> {
   const explicitName = explicitProviderName(capability, config);
   if (explicitName !== undefined) {
-    return selectExplicitProvider(capability, explicitName);
+    return selectExplicitProvider(capability, explicitName, config, options);
   }
 
   for (const name of AUTO_DETECT_ORDER) {
@@ -65,9 +89,10 @@ export async function selectWebResearchProvider(
       continue;
     }
 
-    const availability = await provider.getAvailability();
+    const configuredProvider = configureProvider(provider, config, options);
+    const availability = await configuredProvider.getAvailability();
     if (availability.available) {
-      return { provider, providerName: provider.name, availability, explicit: false, fallback: false };
+      return { provider: configuredProvider, providerName: configuredProvider.name, availability, explicit: false, fallback: false };
     }
   }
 
@@ -98,7 +123,9 @@ function explicitProviderName(capability: WebResearchCapability, config: WebRese
 
 async function selectExplicitProvider(
   capability: WebResearchCapability,
-  name: string
+  name: string,
+  config: WebResearchConfig,
+  options: WebResearchProviderSelectionOptions
 ): Promise<WebResearchProviderSelection> {
   const provider = providers.get(name);
   if (provider === undefined) {
@@ -110,21 +137,38 @@ async function selectExplicitProvider(
     };
   }
 
-  if (provider.capabilities[capability] !== true) {
+  const configuredProvider = configureProvider(provider, config, options);
+  if (configuredProvider.capabilities[capability] !== true) {
     return {
-      provider,
-      providerName: provider.name,
-      availability: { available: false, reason: `Provider ${provider.name} does not support web ${capability}.` },
+      provider: configuredProvider,
+      providerName: configuredProvider.name,
+      availability: { available: false, reason: `Provider ${configuredProvider.name} does not support web ${capability}.` },
       explicit: true,
       fallback: false
     };
   }
 
   return {
-    provider,
-    providerName: provider.name,
-    availability: await provider.getAvailability(),
+    provider: configuredProvider,
+    providerName: configuredProvider.name,
+    availability: await configuredProvider.getAvailability(),
     explicit: true,
     fallback: false
   };
+}
+
+function configureProvider(
+  provider: WebResearchProvider,
+  config: WebResearchConfig,
+  options: WebResearchProviderSelectionOptions
+): WebResearchProvider {
+  return provider.configure?.({
+    config,
+    fetch: options.fetch ?? defaultWebResearchFetch(),
+    credentialResolver: options.credentialResolver ?? defaultWebResearchCredentialResolver(),
+    pythonStateRoot: options.pythonStateRoot,
+    pythonCapabilityStatusChecker: options.pythonCapabilityStatusChecker ?? defaultWebResearchPythonCapabilityStatusChecker(),
+    pythonCapabilityPathResolver: options.pythonCapabilityPathResolver ?? defaultWebResearchPythonCapabilityPathResolver(),
+    subprocessSpawn: options.subprocessSpawn
+  }) ?? provider;
 }

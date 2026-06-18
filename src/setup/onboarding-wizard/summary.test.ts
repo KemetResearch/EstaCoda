@@ -39,6 +39,7 @@ describe("onboarding wizard summary", () => {
           tts: "not_set",
         },
         browser: "disabled",
+        webSearch: "configured",
       },
     };
 
@@ -59,6 +60,7 @@ describe("onboarding wizard summary", () => {
       "  - Voice STT: Configured",
       "  - Voice TTS: Not set",
       "  - Browser: Disabled",
+      "  - Search: Configured",
     ].join("\n"));
   });
 
@@ -92,6 +94,7 @@ describe("onboarding wizard summary", () => {
           tts: "not_set",
         },
         browser: "disabled",
+        webSearch: "skipped",
       },
     };
 
@@ -112,6 +115,7 @@ describe("onboarding wizard summary", () => {
     expect(rendered).toContain(`الصوت ${isolateLtr("STT")}: مهيأ`);
     expect(rendered).toContain(`الصوت ${isolateLtr("TTS")}: غير مهيأ`);
     expect(rendered).toContain("المتصفح: غير مفعّل");
+    expect(rendered).toContain("بحث الويب: تم التخطي");
     expect(rendered).not.toContain("Configuration summary");
     expect(rendered).not.toContain("Credential status");
   });
@@ -134,6 +138,7 @@ describe("onboarding wizard summary", () => {
       "  - Voice STT: Not set",
       "  - Voice TTS: Not set",
       "  - Browser: Not set",
+      "  - Search: Not set",
     ].join("\n"));
   });
 

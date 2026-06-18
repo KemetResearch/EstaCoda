@@ -709,6 +709,37 @@ describe("TelegramAdapter", () => {
     expect(callsFor(calls, "deleteMessage")).toHaveLength(0);
   });
 
+  it("delivery.startStreamingText failed provider fallback keeps draft streaming alive with a fresh draft", async () => {
+    vi.useFakeTimers();
+    const { adapter, calls } = createTelegramStreamingHarness();
+    const handle = adapter.delivery.startStreamingText!({ platform: "telegram", chatId: "123", chatType: "dm" }, {
+      minInitialChars: 1,
+      transport: "draft"
+    });
+
+    handle.append("draft");
+    await flushTelegramStreamingTimers();
+    const firstDraftId = callsFor(calls, "sendRichMessageDraft")[0]?.body.draft_id;
+    handle.providerAttemptResult({ ok: false, willFallback: true, provider: "kimi", model: "kimi-k2" });
+    await flushTelegramStreamingTimers();
+    handle.append("fallback");
+    await flushTelegramStreamingTimers();
+    const result = await handle.finish("fallback");
+
+    expect(callsFor(calls, "sendRichMessageDraft").map((call) => call.body.rich_message)).toEqual([
+      { markdown: "draft▌" },
+      { markdown: "fallback▌" }
+    ]);
+    expect(callsFor(calls, "sendRichMessageDraft")[1]?.body.draft_id).not.toBe(firstDraftId);
+    expect(callsFor(calls, "sendMessage").map((call) => call.body.text)).toEqual(["fallback"]);
+    expect(callsFor(calls, "deleteMessage")).toHaveLength(0);
+    expect(result).toEqual({
+      delivered: true,
+      fallbackRequired: false,
+      deliveredText: "fallback"
+    });
+  });
+
   it("delivery.startStreamingText finish with drafts returns fallback when final send fails", async () => {
     vi.useFakeTimers();
     const { adapter, calls } = createTelegramStreamingHarness({
@@ -1315,7 +1346,7 @@ describe("TelegramAdapter", () => {
     expect(result.fallbackRequired).toBe(true);
   });
 
-  it("delivery.startStreamingText fallback provider attempt deletes current live provisional message", async () => {
+  it("delivery.startStreamingText failed provider attempt with fallback resets segment and keeps stream alive", async () => {
     vi.useFakeTimers();
     const { adapter, calls } = createTelegramStreamingHarness();
     const handle = adapter.delivery.startStreamingText!({ platform: "telegram", chatId: "123" }, {
@@ -1324,10 +1355,49 @@ describe("TelegramAdapter", () => {
 
     handle.append("draft");
     await flushTelegramStreamingTimers();
-    handle.providerAttemptResult({ ok: true, willFallback: true, provider: "p", model: "m" });
+    handle.providerAttemptResult({ ok: false, willFallback: true, provider: "kimi", model: "kimi-k2" });
     await flushTelegramStreamingTimers();
+    handle.append("fallback");
+    await flushTelegramStreamingTimers();
+    const result = await handle.finish("fallback");
 
-    expect(callsFor(calls, "deleteMessage")[0]?.body.message_id).toBe(1);
+    expect(callsFor(calls, "deleteMessage").map((call) => call.body.message_id)).toEqual([1, 2]);
+    expect(callsFor(calls, "sendMessage").map((call) => call.body.text)).toEqual(["draft▌", "fallback▌"]);
+    expect(callsFor(calls, "sendRichMessage").at(-1)?.body).toMatchObject({
+      rich_message: {
+        markdown: "fallback"
+      }
+    });
+    expect(result).toEqual({
+      delivered: true,
+      fallbackRequired: false,
+      deliveredText: "fallback"
+    });
+  });
+
+  it("delivery.startStreamingText failed provider fallback does not retain failed provider partial text", async () => {
+    vi.useFakeTimers();
+    const { adapter, calls } = createTelegramStreamingHarness();
+    const handle = adapter.delivery.startStreamingText!({ platform: "telegram", chatId: "123" }, {
+      minInitialChars: 1
+    });
+
+    handle.append("draft");
+    await flushTelegramStreamingTimers();
+    handle.providerAttemptResult({ ok: false, willFallback: true, provider: "kimi", model: "kimi-k2" });
+    await flushTelegramStreamingTimers();
+    handle.append("fallback");
+    await flushTelegramStreamingTimers();
+    const result = await handle.finish("fallback");
+
+    const fallbackPreview = callsFor(calls, "sendMessage")[1]?.body.text;
+    const finalMarkdown = callsFor(calls, "sendRichMessage").at(-1)?.body.rich_message;
+
+    expect(fallbackPreview).toBe("fallback▌");
+    expect(finalMarkdown).toEqual({ markdown: "fallback" });
+    expect(String(fallbackPreview)).not.toContain("draft");
+    expect(JSON.stringify(finalMarkdown)).not.toContain("draft");
+    expect(result.fallbackRequired).toBe(false);
   });
 
   it("delivery.startStreamingText delete failure neutralizes and requires fallback", async () => {
@@ -1736,7 +1806,7 @@ describe("TelegramAdapter", () => {
     expect(callsFor(calls, "editMessageText")).toHaveLength(0);
   });
 
-  it("delivery.startStreamingText fallback provider attempt cleanup stops pending edits", async () => {
+  it("delivery.startStreamingText failed provider fallback clears pending failed edits and accepts fallback tokens", async () => {
     vi.useFakeTimers();
     const { adapter, calls } = createTelegramStreamingHarness();
     const handle = adapter.delivery.startStreamingText!({ platform: "telegram", chatId: "123" }, {
@@ -1747,14 +1817,19 @@ describe("TelegramAdapter", () => {
     handle.append("draft");
     await flushTelegramStreamingTimers();
     handle.append(" pending");
-    handle.providerAttemptResult({ ok: true, willFallback: true, provider: "p", model: "m" });
+    handle.providerAttemptResult({ ok: false, willFallback: true, provider: "kimi", model: "kimi-k2" });
     await flushTelegramStreamingTimers();
+    handle.append("fallback");
+    await flushTelegramStreamingTimers();
+    const result = await handle.finish("fallback");
 
-    expect(callsFor(calls, "deleteMessage")).toHaveLength(1);
-    expect(callsFor(calls, "editMessageText")).toHaveLength(0);
+    expect(callsFor(calls, "deleteMessage").map((call) => call.body.message_id)).toEqual([1, 2]);
+    expect(callsFor(calls, "editMessageText").map((call) => call.body.text)).not.toContain("draft pending");
+    expect(callsFor(calls, "sendMessage").map((call) => call.body.text)).toEqual(["draft▌", "fallback▌"]);
+    expect(result.fallbackRequired).toBe(false);
   });
 
-  it("delivery.startStreamingText repeated provider-result cleanup is idempotent", async () => {
+  it("delivery.startStreamingText repeated provider-result after degradation is idempotent", async () => {
     vi.useFakeTimers();
     const { adapter, calls } = createTelegramStreamingHarness();
     const handle = adapter.delivery.startStreamingText!({ platform: "telegram", chatId: "123" }, {

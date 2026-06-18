@@ -17,6 +17,7 @@ export type ManagedPythonCapabilityEnvSpec = {
 export const FASTER_WHISPER_CAPABILITY_ID = "faster-whisper";
 export const PDF_EXTRACTION_CAPABILITY_ID = "pdf-extraction";
 export const PDF_EDITOR_CAPABILITY_ID = "pdf-editor";
+export const DDGS_CAPABILITY_ID = "ddgs";
 
 const DEFAULT_REGISTERED_CAPABILITY_SPECS: ManagedPythonCapabilityEnvSpec[] = [
   {
@@ -62,6 +63,13 @@ const DEFAULT_REGISTERED_CAPABILITY_SPECS: ManagedPythonCapabilityEnvSpec[] = [
     packages: ["nano-pdf==0.2.1"],
     verifyImports: ["nano_pdf"],
     estimatedInstallSizeMb: 100
+  },
+  {
+    id: DDGS_CAPABILITY_ID,
+    version: "9.14.4",
+    packages: ["ddgs==9.14.4"],
+    verifyImports: ["ddgs"],
+    estimatedInstallSizeMb: 25
   }
 ];
 

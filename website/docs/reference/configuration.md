@@ -170,14 +170,37 @@ Web research backend selection.
 ```json
 {
   "web": {
-    "backend": "fetch",
-    "searchBackend": "fetch",
-    "extractBackend": "fetch"
+    "searchBackend": "brave",
+    "extractBackend": "fetch",
+    "brave": {
+      "apiKeyEnv": "BRAVE_SEARCH_API_KEY"
+    }
   }
 }
 ```
 
-Only `fetch` is live-implemented. Firecrawl, Parallel, Tavily, Exa, SearXNG, Brave, and DDGS are registered stubs and will report unavailable even when configured.
+Selection is capability-specific:
+
+```text
+web.searchBackend / web.extractBackend / web.crawlBackend
+→ web.backend
+→ auto-detect available providers
+→ unavailable
+```
+
+Explicit config wins. If `web.searchBackend` names an unavailable provider, `web.search` reports that provider's unavailable reason instead of silently falling back.
+
+| Key | Type | Notes |
+|---|---|---|
+| `web.backend` | string | Legacy/general web provider preference used when no capability-specific backend is set. |
+| `web.searchBackend` | string | Search provider preference. Live search providers are `brave` and `ddgs`. |
+| `web.extractBackend` | string | Extraction provider preference. `fetch` is the guarded live extraction fallback. |
+| `web.crawlBackend` | string | Crawl provider preference. No live crawl provider is implemented in this release. |
+| `web.brave.apiKeyEnv` | string | Env-var reference for Brave Search. Defaults to `BRAVE_SEARCH_API_KEY`. Do not store the raw API key in config. |
+
+Brave Search is a credentialed external provider and uses the same env-reference/deferred-secret setup pattern as model providers. DDGS uses the managed Python capability `ddgs`; install or verify it explicitly with `estacoda python-env setup ddgs` and `estacoda python-env verify ddgs`. Runtime `web.search` does not install Python packages automatically.
+
+Firecrawl, Parallel, Tavily, Exa, and SearXNG remain registered stubs and report unavailable when configured.
 
 ### compression
 

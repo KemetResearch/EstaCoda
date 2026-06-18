@@ -1,5 +1,5 @@
-import { mkdir, readFile, writeFile } from "node:fs/promises";
-import { dirname } from "node:path";
+import * as fs from "node:fs/promises";
+import { dirname, isAbsolute, relative, resolve, sep } from "node:path";
 import type { AgentEvolutionPolicy } from "../contracts/agent-evolution.js";
 import type { SessionDB } from "../contracts/session.js";
 import type {
@@ -28,7 +28,9 @@ export type SkillLearningRecord = {
   requiredToolsets: ToolsetName[];
   bounded: boolean;
   boundedReason?: string;
-  status: "observed" | "candidate" | "created";
+  status: "observed" | "candidate" | "created" | "stale";
+  staleReason?: "created-path-missing" | "created-path-outside-profile";
+  staleDetectedAt?: string;
   evidenceIds?: string[];
   candidateId?: string;
   candidateKind?: SkillLearningCandidate["kind"];
@@ -68,7 +70,8 @@ export class SkillLearningManager {
   }) {
     this.#autonomy = options.autonomy;
     this.#store = new SkillLearningStore({
-      path: options.storePath
+      path: options.storePath,
+      localSkillsRoot: options.localSkillsRoot
     });
     this.#sessionDb = options.sessionDb;
     this.#skillEvolutionStore = options.skillEvolutionStore;
@@ -117,6 +120,10 @@ export class SkillLearningManager {
       toolExecutions: input.toolExecutions
     });
     if (workflow === undefined) {
+      return undefined;
+    }
+    const existing = await this.#store.get(workflow.key);
+    if (existing?.status === "stale") {
       return undefined;
     }
 
@@ -201,6 +208,10 @@ export class SkillLearningManager {
     return this.#store.list();
   }
 
+  async reconcileCreatedPaths(): Promise<{ checked: number; stale: number }> {
+    return this.#store.reconcileCreatedPaths();
+  }
+
   async #observeSelectedSkillTurn(input: {
     profileId: string;
     sessionId: string;
@@ -269,9 +280,15 @@ export class SkillLearningManager {
       promptHash: input.promptHash,
       selectedSkillName
     });
+    if (record.status === "stale") {
+      return undefined;
+    }
     const candidateRecord = record.status === "candidate"
       ? record
       : await this.#store.markCandidate(record.key);
+    if (candidateRecord.status === "stale") {
+      return undefined;
+    }
 
     await this.#sessionDb.appendEvent(input.sessionId, {
       kind: "skill-learned",
@@ -360,12 +377,14 @@ function confidenceFromObservation(routeConfidence: number | undefined, fallback
 
 class SkillLearningStore {
   readonly #path: string;
+  readonly #localSkillsRoot: string;
   readonly #now: () => Date;
   readonly #records = new Map<string, SkillLearningRecord>();
   #loaded = false;
 
-  constructor(options: { path: string; now?: () => Date }) {
+  constructor(options: { path: string; localSkillsRoot: string; now?: () => Date }) {
     this.#path = options.path;
+    this.#localSkillsRoot = resolve(options.localSkillsRoot);
     this.#now = options.now ?? (() => new Date());
   }
 
@@ -385,6 +404,7 @@ class SkillLearningStore {
     selectedSkillName?: string;
   }): Promise<SkillLearningRecord> {
     await this.#ensureLoaded();
+    await this.#reconcileCreatedPathsLoaded();
     const now = this.#now().toISOString();
     const existing = this.#records.get(input.key);
     const sourceSessionIds = existing === undefined
@@ -408,6 +428,8 @@ class SkillLearningStore {
       selectedSkillName: input.selectedSkillName ?? existing?.selectedSkillName,
       createdSkillName: existing?.createdSkillName,
       createdSkillPath: existing?.createdSkillPath,
+      staleReason: existing?.staleReason,
+      staleDetectedAt: existing?.staleDetectedAt,
       updatedAt: now
     };
     this.#records.set(input.key, record);
@@ -417,9 +439,13 @@ class SkillLearningStore {
 
   async markCandidate(key: string): Promise<SkillLearningRecord> {
     await this.#ensureLoaded();
+    await this.#reconcileCreatedPathsLoaded();
     const existing = this.#records.get(key);
     if (existing === undefined) {
       throw new Error(`Workflow candidate not found: ${key}`);
+    }
+    if (existing.status === "stale") {
+      return existing;
     }
     const updated: SkillLearningRecord = {
       ...existing,
@@ -431,8 +457,55 @@ class SkillLearningStore {
     return updated;
   }
 
+  async get(key: string): Promise<SkillLearningRecord | undefined> {
+    await this.#ensureLoaded();
+    await this.#reconcileCreatedPathsLoaded();
+    return this.#records.get(key);
+  }
+
+  async reconcileCreatedPaths(): Promise<{ checked: number; stale: number }> {
+    await this.#ensureLoaded();
+    return this.#reconcileCreatedPathsLoaded();
+  }
+
+  async #reconcileCreatedPathsLoaded(): Promise<{ checked: number; stale: number }> {
+    let checked = 0;
+    let stale = 0;
+    for (const record of [...this.#records.values()]) {
+      if (record.status !== "created") {
+        continue;
+      }
+      checked += 1;
+      const reason = await this.#staleReasonForCreatedRecord(record);
+      if (reason !== undefined) {
+        await this.markStale(record.key, reason);
+        stale += 1;
+      }
+    }
+    return { checked, stale };
+  }
+
+  async markStale(key: string, reason: NonNullable<SkillLearningRecord["staleReason"]>): Promise<SkillLearningRecord> {
+    await this.#ensureLoaded();
+    const existing = this.#records.get(key);
+    if (existing === undefined) {
+      throw new Error(`Workflow record not found: ${key}`);
+    }
+    const updated: SkillLearningRecord = {
+      ...existing,
+      status: "stale",
+      staleReason: reason,
+      staleDetectedAt: this.#now().toISOString(),
+      updatedAt: this.#now().toISOString()
+    };
+    this.#records.set(key, updated);
+    await this.#flush();
+    return updated;
+  }
+
   async list(): Promise<SkillLearningRecord[]> {
     await this.#ensureLoaded();
+    await this.#reconcileCreatedPathsLoaded();
     return [...this.#records.values()].sort((left, right) => right.updatedAt.localeCompare(left.updatedAt));
   }
 
@@ -442,7 +515,7 @@ class SkillLearningStore {
     }
     this.#loaded = true;
     try {
-      const parsed = JSON.parse(await readFile(this.#path, "utf8")) as Partial<SkillLearningFile>;
+      const parsed = JSON.parse(await fs.readFile(this.#path, "utf8")) as Partial<SkillLearningFile>;
       for (const record of Array.isArray(parsed.records) ? parsed.records : []) {
         if (typeof record?.key !== "string") {
           continue;
@@ -456,13 +529,35 @@ class SkillLearningStore {
     }
   }
 
+  async #staleReasonForCreatedRecord(record: SkillLearningRecord): Promise<SkillLearningRecord["staleReason"] | undefined> {
+    if (record.createdSkillPath === undefined || record.createdSkillPath.trim().length === 0) {
+      return "created-path-missing";
+    }
+    const resolvedPath = resolve(record.createdSkillPath);
+    if (!isPathInside(this.#localSkillsRoot, resolvedPath)) {
+      return "created-path-outside-profile";
+    }
+    const skillPath = resolvedPath.endsWith(`${sep}SKILL.md`) || resolvedPath === resolve(this.#localSkillsRoot, "SKILL.md")
+      ? resolvedPath
+      : resolve(resolvedPath, "SKILL.md");
+    try {
+      const skillStat = await fs.stat(skillPath);
+      return skillStat.isFile() ? undefined : "created-path-missing";
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+        return "created-path-missing";
+      }
+      throw error;
+    }
+  }
+
   async #flush(): Promise<void> {
     const file: SkillLearningFile = {
       version: 1,
       records: [...this.#records.values()].sort((left, right) => left.key.localeCompare(right.key))
     };
-    await mkdir(dirname(this.#path), { recursive: true });
-    await writeFile(this.#path, `${JSON.stringify(file, null, 2)}\n`, "utf8");
+    await fs.mkdir(dirname(this.#path), { recursive: true });
+    await fs.writeFile(this.#path, `${JSON.stringify(file, null, 2)}\n`, "utf8");
   }
 }
 
@@ -494,6 +589,9 @@ function detectWorkflow(input: {
   if (normalizedPrompt.length === 0) {
     return undefined;
   }
+  if (!hasMeaningfulWorkflowIntent(visibleUserText)) {
+    return undefined;
+  }
 
   const secretReason = sensitiveWorkflowReason(visibleUserText);
   const boundedByRisk = successful.every((execution) => isBoundedRisk(execution.riskClass));
@@ -515,6 +613,47 @@ function detectWorkflow(input: {
     boundedReason
   };
 }
+
+function hasMeaningfulWorkflowIntent(prompt: string): boolean {
+  const normalized = normalizePrompt(redactLearningText(prompt));
+  if (normalized.length === 0) {
+    return false;
+  }
+  if (GENERIC_WORKFLOW_PROMPTS.has(normalized)) {
+    return false;
+  }
+  if (hasConcreteWorkflowReference(prompt)) {
+    return true;
+  }
+  const wordCount = normalized.split(/\s+/u).filter(Boolean).length;
+  return wordCount >= MIN_WORKFLOW_WORDS && normalized.length >= MIN_WORKFLOW_CHARS;
+}
+
+function hasConcreteWorkflowReference(prompt: string): boolean {
+  return (
+    /(?:^|[\s"'`])(?:\.{0,2}\/|~\/|\/|[A-Za-z]:[\\/])\S+/u.test(prompt) ||
+    /\b[\w.-]+\.(?:ts|tsx|js|jsx|json|md|yml|yaml|toml|lock|txt|sh|sql|py|go|rs|java|css|html)\b/iu.test(prompt) ||
+    /\b(?:file|directory|folder|branch|commit|test|typecheck|build|package|service|server|config|skill|tool|workflow|release|deploy|migration|script|database)\b/iu.test(prompt)
+  );
+}
+
+function isPathInside(root: string, child: string): boolean {
+  const rel = relative(root, child);
+  return rel === "" || (!rel.startsWith("..") && !isAbsolute(rel));
+}
+
+const MIN_WORKFLOW_WORDS = 4;
+const MIN_WORKFLOW_CHARS = 24;
+const GENERIC_WORKFLOW_PROMPTS = new Set([
+  "can you try",
+  "okay",
+  "ok",
+  "try again",
+  "yes",
+  "no",
+  "continue",
+  "go on"
+]);
 
 function mergeOrdered<T extends string>(left: T[], right: T[]): T[] {
   return [...new Set([...left, ...right])];

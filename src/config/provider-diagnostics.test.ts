@@ -82,6 +82,7 @@ function loadedConfig(input: {
     delegation: normalizeDelegationConfig(undefined),
     browser: { backend: "unconfigured", autoLaunch: false, supervised: false },
     imageGen: { provider: "fal", model: "test", useGateway: false },
+    gateway: { lifecycleNotifications: { enabled: false } },
     tts: { provider: "edge", speed: 1 },
     stt: { provider: "local" },
     voice: { autoTts: false },

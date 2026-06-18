@@ -76,6 +76,7 @@ import {
 import {
   browserSetupModule,
   telegramSetupModule,
+  webSearchSetupModule,
   whatsappSetupModule,
   voiceSetupModule,
   type SetupModuleContext,
@@ -126,6 +127,7 @@ type OnboardingOptionalCapabilityFlowResult = {
   readonly pendingCredentialWrites: readonly PendingCredentialWrite[];
   readonly channelSummaries?: {
     readonly whatsapp?: OnboardingOptionalCapabilitySummaryStatus;
+    readonly webSearch?: OnboardingOptionalCapabilitySummaryStatus;
   };
 };
 
@@ -713,6 +715,7 @@ async function chooseOptionalCapabilities(
   const capabilitySummaries: {
     whatsapp?: OnboardingOptionalCapabilitySummaryStatus;
     browser?: OnboardingOptionalCapabilitySummaryStatus;
+    webSearch?: OnboardingOptionalCapabilitySummaryStatus;
   } = {};
 
   if (!configureNow) {
@@ -737,6 +740,9 @@ async function chooseOptionalCapabilities(
     }
     if (collected.channelSummaries?.browser !== undefined) {
       capabilitySummaries.browser = collected.channelSummaries.browser;
+    }
+    if (collected.channelSummaries?.webSearch !== undefined) {
+      capabilitySummaries.webSearch = collected.channelSummaries.webSearch;
     }
 
     if (onboardingOptionalCapabilityActions(context).length === 0) {
@@ -808,6 +814,9 @@ function onboardingOptionalCapabilityActions(
   if (browserSetupModule.detect(context).status !== "configured") {
     actions.push("browser");
   }
+  if (webSearchSetupModule.detect(context).status !== "configured") {
+    actions.push("web-search");
+  }
   return actions;
 }
 
@@ -842,6 +851,13 @@ function onboardingOptionalCapabilityChoice(
         description: setupCopyText(locale, "setupEditor.actions.configureBrowser.description"),
         value: "browser",
       };
+    case "web-search":
+      return {
+        id: "web-search",
+        label: setupCopyText(locale, "onboarding.optionalCapabilities.webSearch"),
+        description: setupCopyText(locale, "onboarding.optionalCapabilities.webSearch.description"),
+        value: "web-search",
+      };
   }
 }
 
@@ -859,6 +875,7 @@ async function collectOnboardingOptionalCapability(
       readonly channelSummaries?: {
         readonly whatsapp?: OnboardingOptionalCapabilitySummaryStatus;
         readonly browser?: OnboardingOptionalCapabilitySummaryStatus;
+        readonly webSearch?: OnboardingOptionalCapabilitySummaryStatus;
       };
     }
   | {
@@ -866,6 +883,7 @@ async function collectOnboardingOptionalCapability(
       readonly channelSummaries?: {
         readonly whatsapp?: OnboardingOptionalCapabilitySummaryStatus;
         readonly browser?: OnboardingOptionalCapabilitySummaryStatus;
+        readonly webSearch?: OnboardingOptionalCapabilitySummaryStatus;
       };
     }
 > {
@@ -898,7 +916,11 @@ async function collectOnboardingOptionalCapability(
     };
   }
 
-  const module = action === "voice" ? voiceSetupModule : browserSetupModule;
+  const module = action === "voice"
+    ? voiceSetupModule
+    : action === "web-search"
+      ? webSearchSetupModule
+      : browserSetupModule;
   const voiceMode = action === "voice"
     ? await promptVoiceCapability(options.prompt, locale)
     : undefined;
@@ -913,6 +935,12 @@ async function collectOnboardingOptionalCapability(
   }, context, module, voiceMode);
 
   if (collected.kind !== "configured") {
+    if (action === "web-search" && collected.kind === "skip") {
+      return {
+        kind: "skip",
+        channelSummaries: { webSearch: "skipped" },
+      };
+    }
     return collected;
   }
 
@@ -927,10 +955,16 @@ async function collectOnboardingOptionalCapability(
     : collected.context;
   const configuration = module.configure(collectedContext);
   const drafts = module.toDrafts(collectedContext, configuration);
-  if (action === "browser" && browserDraftsHaveBlockers(drafts)) {
+  if (action === "browser" && optionalDraftsHaveBlockers(drafts)) {
     return {
       kind: "incomplete",
       channelSummaries: { browser: "incomplete" },
+    };
+  }
+  if (action === "web-search" && optionalDraftsHaveBlockers(drafts)) {
+    return {
+      kind: "incomplete",
+      channelSummaries: { webSearch: "incomplete" },
     };
   }
   if (action === "browser" && collectedContext.browser?.backend === "unconfigured") {
@@ -942,6 +976,15 @@ async function collectOnboardingOptionalCapability(
       channelSummaries: { browser: "disabled" },
     };
   }
+  if (action === "web-search") {
+    return {
+      kind: "configured",
+      context: collectedContext,
+      drafts,
+      pendingCredentialWrites: collected.pendingCredentialWrites ?? [],
+      channelSummaries: { webSearch: "configured" },
+    };
+  }
   return {
     kind: "configured",
     context: collectedContext,
@@ -950,7 +993,7 @@ async function collectOnboardingOptionalCapability(
   };
 }
 
-function browserDraftsHaveBlockers(drafts: readonly SetupDraft[]): boolean {
+function optionalDraftsHaveBlockers(drafts: readonly SetupDraft[]): boolean {
   return drafts.some((draft) => draft.blockers.length > 0);
 }
 
@@ -1040,6 +1083,7 @@ function onboardingOptionalCapabilityResult(
   capabilitySummaries: {
     readonly whatsapp?: OnboardingOptionalCapabilitySummaryStatus;
     readonly browser?: OnboardingOptionalCapabilitySummaryStatus;
+    readonly webSearch?: OnboardingOptionalCapabilitySummaryStatus;
   } = {}
 ): OnboardingOptionalCapabilityFlowResult {
   return {
@@ -1055,6 +1099,7 @@ function onboardingOptionalCapabilityResult(
         tts: context.voice?.ttsProvider === undefined ? "not_set" : "configured",
       },
       browser: capabilitySummaries.browser ?? (browserSetupModule.detect(context).status === "configured" ? "configured" : "not_set"),
+      webSearch: capabilitySummaries.webSearch ?? (webSearchSetupModule.detect(context).status === "configured" ? "configured" : "not_set"),
     },
     drafts: [...draftMap.values()].flat(),
     pendingCredentialWrites,

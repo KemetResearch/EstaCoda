@@ -37,6 +37,7 @@ export function renderOnboardingWizardSummary(
     `  - ${label("onboarding.summary.labels.voiceStt")}: ${optionalCapabilityStatusLabel(optionalCapabilities?.voice?.stt, locale)}`,
     `  - ${label("onboarding.summary.labels.voiceTts")}: ${optionalCapabilityStatusLabel(optionalCapabilities?.voice?.tts, locale)}`,
     `  - ${label("onboarding.summary.labels.browser")}: ${optionalCapabilityStatusLabel(optionalCapabilities?.browser, locale)}`,
+    `  - ${label("onboarding.summary.labels.webSearch")}: ${optionalCapabilityStatusLabel(optionalCapabilities?.webSearch, locale)}`,
   ].join("\n");
 }
 
@@ -102,7 +103,8 @@ type SummaryLabelKey =
   | "onboarding.summary.labels.channelsWhatsApp"
   | "onboarding.summary.labels.voiceStt"
   | "onboarding.summary.labels.voiceTts"
-  | "onboarding.summary.labels.browser";
+  | "onboarding.summary.labels.browser"
+  | "onboarding.summary.labels.webSearch";
 
 function summaryCopy(locale: SummaryLocale, key: SetupCopyKey): string {
   return resolveSetupCopy(locale, key);

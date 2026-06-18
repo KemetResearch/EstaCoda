@@ -4,10 +4,12 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
+  DDGS_CAPABILITY_ID,
   FASTER_WHISPER_CAPABILITY_ID,
   PDF_EDITOR_CAPABILITY_ID,
   PDF_EXTRACTION_CAPABILITY_ID,
   getRegisteredPythonCapabilitySpec,
+  isRegisteredPythonCapabilityId,
   listRegisteredPythonCapabilitySpecs
 } from "./capability-registry.js";
 import {
@@ -85,6 +87,13 @@ describe("managed Python capability substrate", () => {
         packages: ["nano-pdf==0.2.1"],
         verifyImports: ["nano_pdf"],
         estimatedInstallSizeMb: 100
+      },
+      {
+        id: "ddgs",
+        version: "9.14.4",
+        packages: ["ddgs==9.14.4"],
+        verifyImports: ["ddgs"],
+        estimatedInstallSizeMb: 25
       }
     ]);
   });
@@ -116,6 +125,22 @@ describe("managed Python capability substrate", () => {
       packages: ["nano-pdf==0.2.1"],
       verifyImports: ["nano_pdf"]
     });
+  });
+
+  it("registers DDGS as a pinned managed Python capability", () => {
+    expect(DDGS_CAPABILITY_ID).toBe("ddgs");
+    expect(getRegisteredPythonCapabilitySpec(DDGS_CAPABILITY_ID)).toEqual({
+      id: "ddgs",
+      version: "9.14.4",
+      packages: ["ddgs==9.14.4"],
+      verifyImports: ["ddgs"],
+      estimatedInstallSizeMb: 25
+    });
+    expect(getRegisteredPythonCapabilitySpec(DDGS_CAPABILITY_ID)?.packages.every((entry) => /^ddgs==\d+\.\d+\.\d+$/u.test(entry))).toBe(true);
+    expect(getRegisteredPythonCapabilitySpec(DDGS_CAPABILITY_ID)?.verifyImports).toEqual(["ddgs"]);
+    expect(isRegisteredPythonCapabilityId("ddgs")).toBe(true);
+    expect(isRegisteredPythonCapabilityId("ddgs==9.14.4")).toBe(false);
+    expect(isRegisteredPythonCapabilityId("arbitrary-package")).toBe(false);
   });
 
   it("resolves deterministic capability env, pip cache, manifest, and python paths under state root", () => {

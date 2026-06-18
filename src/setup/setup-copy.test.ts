@@ -50,6 +50,9 @@ const FIRST_RUN_KEYS = [
   "onboarding.optionalCapabilities.more.yes",
   "onboarding.optionalCapabilities.skipped",
   "onboarding.optionalCapabilities.voice.localSttSkipped",
+  "onboarding.optionalCapabilities.webSearch",
+  "onboarding.optionalCapabilities.webSearch.description",
+  "onboarding.optionalCapabilities.webSearch.ddgsSkipped",
   "onboarding.optionalCapabilities.validation.skippable",
   "onboarding.summary.confirmTitle",
   "onboarding.summary.confirmMessage",
@@ -70,6 +73,7 @@ const FIRST_RUN_KEYS = [
   "onboarding.summary.labels.voiceStt",
   "onboarding.summary.labels.voiceTts",
   "onboarding.summary.labels.browser",
+  "onboarding.summary.labels.webSearch",
   "onboarding.summary.status.notSet",
   "onboarding.summary.status.skipped",
   "onboarding.summary.status.incomplete",
@@ -157,6 +161,7 @@ const SETUP_EDITOR_KEYS = [
   "setupEditor.actions.configureChannels",
   "setupEditor.actions.configureVoice",
   "setupEditor.actions.configureImageGeneration",
+  "setupEditor.actions.configureWebSearch",
   "setupEditor.actions.configureBrowser",
   "setupEditor.actions.runReadonlyVerification",
   "setupEditor.actions.showDiagnostics",
@@ -178,6 +183,7 @@ const SETUP_EDITOR_KEYS = [
   "setupEditor.actions.configureChannels.description",
   "setupEditor.actions.configureVoice.description",
   "setupEditor.actions.configureImageGeneration.description",
+  "setupEditor.actions.configureWebSearch.description",
   "setupEditor.actions.configureBrowser.description",
   "setupEditor.actions.runReadonlyVerification.description",
   "setupEditor.actions.showDiagnostics.description",
@@ -297,6 +303,26 @@ const SETUP_EDITOR_KEYS = [
   "setupEditor.prompt.vision.model",
   "setupEditor.prompt.vision.apiKeyEnv",
   "setupEditor.prompt.vision.useGateway",
+  "setupEditor.prompt.webSearch.provider.title",
+  "setupEditor.prompt.webSearch.provider.body",
+  "setupEditor.prompt.webSearch.provider.brave",
+  "setupEditor.prompt.webSearch.provider.brave.description",
+  "setupEditor.prompt.webSearch.provider.ddgs",
+  "setupEditor.prompt.webSearch.provider.ddgs.description",
+  "setupEditor.prompt.webSearch.provider.none",
+  "setupEditor.prompt.webSearch.provider.none.description",
+  "setupEditor.prompt.webSearch.brave.apiKeyEnv",
+  "setupEditor.prompt.webSearch.brave.secretValue",
+  "setupEditor.prompt.webSearch.brave.missingCredential",
+  "setupEditor.prompt.webSearch.ddgs.status.ready",
+  "setupEditor.prompt.webSearch.ddgs.status.missing",
+  "setupEditor.prompt.webSearch.ddgs.install.title",
+  "setupEditor.prompt.webSearch.ddgs.install.body",
+  "setupEditor.prompt.webSearch.ddgs.install.confirm",
+  "setupEditor.prompt.webSearch.ddgs.install.skip",
+  "setupEditor.prompt.webSearch.ddgs.command",
+  "setupEditor.prompt.webSearch.ddgs.notInstalled",
+  "setupEditor.apply.webSearch.ddgs.failed",
   "setupEditor.prompt.browser.mode.title",
   "setupEditor.prompt.browser.mode.body",
   "setupEditor.prompt.browser.mode.recommended",
@@ -361,6 +387,12 @@ const SETUP_MODULE_KEYS = [
   "setupModules.vision.title",
   "setupModules.vision.review",
   "setupModules.vision.draft",
+  "setupModules.webSearch.title",
+  "setupModules.webSearch.review",
+  "setupModules.webSearch.draft",
+  "setupModules.webSearch.blocked",
+  "setupModules.webSearch.skipped",
+  "setupModules.webSearch.unchanged",
   "setupModules.browser.title",
   "setupModules.browser.review",
   "setupModules.browser.draft",
@@ -646,6 +678,12 @@ describe("setup copy", () => {
     expect(resolveSetupCopy("ar", "onboarding.optionalCapabilities.voice.localSttSkipped")).toContain(isolateLtr("EstaCoda"));
     expect(resolveSetupCopy("ar", "onboarding.optionalCapabilities.voice.localSttSkipped")).toContain(isolateLtr("Python"));
     expect(resolveSetupCopy("ar", "onboarding.optionalCapabilities.voice.localSttSkipped")).toContain(isolateLtr("venv"));
+    expect(resolveSetupCopy("ar", "onboarding.optionalCapabilities.webSearch.description")).toContain(isolateLtr("web.search"));
+    expect(resolveSetupCopy("ar", "onboarding.optionalCapabilities.webSearch.description")).toContain(isolateLtr("Brave Search"));
+    expect(resolveSetupCopy("ar", "onboarding.optionalCapabilities.webSearch.description")).toContain(isolateLtr("DDGS"));
+    expect(resolveSetupCopy("ar", "onboarding.optionalCapabilities.webSearch.ddgsSkipped")).toContain(isolateLtr("DDGS"));
+    expect(resolveSetupCopy("ar", "onboarding.optionalCapabilities.webSearch.ddgsSkipped")).toContain(isolateLtr("EstaCoda"));
+    expect(resolveSetupCopy("ar", "onboarding.optionalCapabilities.webSearch.ddgsSkipped")).toContain(isolateLtr("Python"));
     expect(resolveSetupCopy("ar", "setupEditor.prompt.telegram.botToken.body")).toContain(isolateLtr("@BotFather"));
     expect(resolveSetupCopy("ar", "setupEditor.prompt.telegram.botToken.body")).toContain(isolateLtr("BotFather"));
     expect(resolveSetupCopy("ar", "setupEditor.prompt.telegram.botToken.body")).toContain(isolateLtr("/newbot"));
@@ -663,6 +701,20 @@ describe("setup copy", () => {
     );
     expect(rawSetupCopy("ar", "onboarding.optionalCapabilities.voice.localSttSkipped")).toBe(
       "اكتمل الإعداد، لكن تم تخطي STT المحلي عبر faster-whisper لأن EstaCoda لم تتمكن من إنشاء بيئة Python المُدارة. أصلح دعم Python venv، ثم أعد ضبط STT المحلي من الإعداد."
+    );
+  });
+
+  it("resolves onboarding Search copy", () => {
+    expect(resolveSetupCopy("en", "onboarding.optionalCapabilities.webSearch")).toBe("Search");
+    expect(resolveSetupCopy("ar", "onboarding.optionalCapabilities.webSearch")).toBe("بحث الويب");
+    expect(resolveSetupCopy("en", "onboarding.optionalCapabilities.webSearch.description")).toBe(
+      "Configure web.search with Brave Search or DDGS."
+    );
+    expect(rawSetupCopy("ar", "onboarding.optionalCapabilities.webSearch.description")).toBe(
+      "اضبط web.search باستخدام Brave Search أو DDGS."
+    );
+    expect(resolveSetupCopy("en", "onboarding.optionalCapabilities.webSearch.ddgsSkipped")).toBe(
+      "Setup completed, but DDGS Search was skipped because EstaCoda could not create its managed Python capability environment. Fix Python setup, then configure Search from setup."
     );
   });
 

@@ -196,6 +196,8 @@ export type StructuredToolHistoryDiagnosticEvent = {
   echoMissing?: number;
   echoOversized?: number;
   nativeReplayUnsafeTurns?: number;
+  historicalToolResultsLabeled?: number;
+  mutableStateToolResultsLabeled?: number;
   reason?: StructuredToolHistoryDiagnosticReason;
 };
 
@@ -572,7 +574,9 @@ export type SessionEvent =
         tools: string[];
         requiredToolsets: string[];
         bounded: boolean;
-        status: "observed" | "candidate" | "created";
+        status: "observed" | "candidate" | "created" | "stale";
+        staleReason?: "created-path-missing" | "created-path-outside-profile";
+        staleDetectedAt?: string;
         evidenceIds?: string[];
         candidateId?: string;
         candidateKind?: string;

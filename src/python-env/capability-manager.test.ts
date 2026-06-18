@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
+  DDGS_CAPABILITY_ID,
   registerPythonCapabilitySpecForTest,
   resetPythonCapabilityRegistryForTest
 } from "./capability-registry.js";
@@ -144,6 +145,40 @@ describe("managed Python capability manager", () => {
           PIP_CACHE_DIR: join(tempDir, "cache", "pip", "fake-package")
         })
       })
+    }));
+  });
+
+  it("can status and plan setup for the registered DDGS capability without arbitrary package input", async () => {
+    await expect(checkManagedPythonCapabilityStatus({
+      stateRoot: tempDir,
+      capabilityId: DDGS_CAPABILITY_ID
+    })).resolves.toMatchObject({
+      ok: false,
+      capabilityId: DDGS_CAPABILITY_ID,
+      reason: "install_required"
+    });
+
+    const runner = createRunner(tempDir);
+    const result = await installManagedPythonCapabilityEnvironment({
+      stateRoot: tempDir,
+      capabilityId: DDGS_CAPABILITY_ID,
+      runner,
+      now: fixedNow()
+    });
+
+    expect(result).toMatchObject({
+      ok: true,
+      capabilityId: DDGS_CAPABILITY_ID,
+      version: "9.14.4",
+      installedPackages: ["ddgs==9.14.4"]
+    });
+    expect(runner.calls).toContainEqual(expect.objectContaining({
+      command: join(tempDir, "python-envs", "ddgs", "bin", "python"),
+      args: ["-m", "pip", "install", "ddgs==9.14.4"]
+    }));
+    expect(runner.calls).toContainEqual(expect.objectContaining({
+      command: join(tempDir, "python-envs", "ddgs", "bin", "python"),
+      args: expect.arrayContaining(["-c"])
     }));
   });
 

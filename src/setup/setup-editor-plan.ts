@@ -411,7 +411,7 @@ function optionalCapabilitiesSection(): SetupEditorSection {
     status: "skipped",
     data: {
       independentlyReviewable: true,
-      capabilities: ["channels", "voice", "vision", "browser"],
+      capabilities: ["channels", "voice", "vision", "web-search", "browser"],
     },
     warnings: [],
     blockers: [],
@@ -442,6 +442,15 @@ function optionalCapabilitiesSection(): SetupEditorSection {
         readOnly: false,
         requiresExplicitApply: true,
         patch: scopedPatch(["vision"]),
+      }),
+      setupEditorAction({
+        id: "configure-web-search",
+        copyKey: "setupEditor.actions.configureWebSearch",
+        sectionId: "optional-capabilities",
+        effect: "draft-config-patch",
+        readOnly: false,
+        requiresExplicitApply: true,
+        patch: scopedPatch(["web"]),
       }),
       setupEditorAction({
         id: "configure-browser",

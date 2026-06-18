@@ -29,6 +29,7 @@ import {
   setupTelegramConfig,
   setupUiConfig,
   setupWhatsAppConfig,
+  setupWebConfig,
   setupVoiceConfig,
   type ActivityLabelsLocale,
   type ImageGenerationProvider,
@@ -43,6 +44,11 @@ import {
 } from "../../config/runtime-config.js";
 import { defaultProfileId, readActiveProfile, resolveGlobalStateHome, resolveProfileStateHome } from "../../config/profile-home.js";
 import { createManagedEnvironment } from "../../python-env/manager.js";
+import { DDGS_CAPABILITY_ID } from "../../python-env/capability-registry.js";
+import {
+  checkManagedPythonCapabilityStatus,
+  installManagedPythonCapabilityEnvironment,
+} from "../../python-env/capability-manager.js";
 import {
   registerProviderConfig,
   registerProviderModel,
@@ -271,6 +277,8 @@ async function applyConfigPatch(
     case "setupModules.vision.draft":
       await applyVisionCapability(operation, options);
       return [];
+    case "setupModules.webSearch.draft":
+      return applyWebSearchCapability(operation, options);
     case "setupModules.browser.draft":
       await applyBrowserCapability(operation, options);
       return [];
@@ -528,6 +536,9 @@ async function applyFirstRunOptionalCapabilities(
       case "browser":
         await applyBrowserCapability(operation, options);
         break;
+      case "web-search":
+        warnings.push(...await applyWebSearchCapability(operation, options));
+        break;
       default:
         throw new Error(`Unsupported optional capability: ${capability}`);
     }
@@ -725,6 +736,89 @@ async function applyBrowserCapability(
   });
 }
 
+async function applyWebSearchCapability(
+  operation: SetupApplyOperation,
+  options: ReviewedSetupApplyExecutorOptions
+): Promise<readonly OptionalCapabilityApplyWarning[]> {
+  if (operation.review.values.skipped === true) return [];
+
+  const searchBackend = stringValue(operation.review.values.searchBackend);
+  if (searchBackend === "ddgs") {
+    const warning = await ensureReviewedDdgsCapability(operation, options);
+    if (warning !== undefined) {
+      return [warning];
+    }
+  }
+
+  const target = configApplyTarget(operation, options);
+  await setupWebConfig({
+    ...target,
+    input: {
+      backend: stringValue(operation.review.values.backend),
+      searchBackend,
+      extractBackend: stringValue(operation.review.values.extractBackend),
+      crawlBackend: stringValue(operation.review.values.crawlBackend),
+      brave: {
+        apiKeyEnv: stringValue(operation.review.values.braveApiKeyEnv),
+      },
+    },
+  });
+  return [];
+}
+
+async function ensureReviewedDdgsCapability(
+  operation: SetupApplyOperation,
+  options: ReviewedSetupApplyExecutorOptions
+): Promise<OptionalCapabilityApplyWarning | undefined> {
+  const capabilityId = stringValue(operation.review.values.ddgsCapabilityId);
+  if (capabilityId !== undefined && capabilityId !== DDGS_CAPABILITY_ID) {
+    throw new Error("DDGS setup apply only supports the registered ddgs managed Python capability.");
+  }
+  const stateRoot = resolveGlobalStateHome({ homeDir: options.homeDir }).stateRoot;
+  const status = await checkManagedPythonCapabilityStatus({
+    stateRoot,
+    capabilityId: DDGS_CAPABILITY_ID,
+  });
+  if (status.ok) return undefined;
+
+  if (operation.review.values.ddgsSetupConfirmed !== true) {
+    throw new Error("DDGS search setup requires explicit managed Python capability setup confirmation.");
+  }
+
+  const install = await installManagedPythonCapabilityEnvironment({
+    stateRoot,
+    capabilityId: DDGS_CAPABILITY_ID,
+  });
+  if (!install.ok) {
+    if (isDdgsTolerantWebSearchOperation(operation, options)) {
+      return {
+        operationId: operation.id,
+        capability: "web-search",
+        subCapability: "search",
+        code: "managed_python_setup_failed",
+        message: resolveSetupCopy("en", "onboarding.optionalCapabilities.webSearch.ddgsSkipped"),
+        cause: install.message,
+      };
+    }
+    throw new Error([
+      resolveSetupCopy("en", "setupEditor.apply.webSearch.ddgs.failed"),
+      install.message,
+      install.diagnostic,
+    ].filter((line): line is string => line !== undefined && line.trim().length > 0).join("\n"));
+  }
+  return undefined;
+}
+
+function isDdgsTolerantWebSearchOperation(
+  operation: SetupApplyOperation,
+  options: ReviewedSetupApplyExecutorOptions
+): boolean {
+  return options.mode === "firstRunTolerant" &&
+    operation.kind === "config-patch" &&
+    operation.target?.kind === "config-scope" &&
+    operation.target.scope.includes("web");
+}
+
 async function applyWorkspaceTrustGrant(
   operation: SetupApplyOperation,
   options: ReviewedSetupApplyExecutorOptions
@@ -748,6 +842,9 @@ function ensureCredentialReferenceCanApply(
     throw new Error("Credential reference apply requires env-var review values.");
   }
   if (operation.review.values.credentialSurface === "browserbase") {
+    return;
+  }
+  if (operation.review.values.credentialSurface === "web-search-brave") {
     return;
   }
   if (context.provider === undefined || context.model === undefined) {
@@ -790,6 +887,7 @@ function reviewedSecretEnvVarsFromPlan(plan: SetupApplyPlan): string[] {
       "botTokenEnv",
       "ttsApiKeyEnv",
       "sttApiKeyEnv",
+      "braveApiKeyEnv",
     ] as const) {
       const envVar = stringValue(operation.review.values[key]);
       if (envVar !== undefined) {

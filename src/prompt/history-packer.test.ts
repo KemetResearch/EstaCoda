@@ -308,6 +308,63 @@ describe("packSessionHistory", () => {
     ]);
   });
 
+  it("labels deterministic summaries and older tool outputs as historical reference", () => {
+    const packed = packSessionHistory([
+      {
+        id: "old-user",
+        sessionId: "s",
+        role: "user" as const,
+        content: "Older setup."
+      },
+      {
+        id: "old-tool",
+        sessionId: "s",
+        role: "tool" as const,
+        content: "src/index.ts exists",
+        createdAt: "2026-06-08T02:51:15.049Z"
+      },
+      {
+        id: "active-user",
+        sessionId: "s",
+        role: "user" as const,
+        content: "ACTIVE TASK: answer now"
+      }
+    ], {
+      maxProtectedMessages: 1,
+      maxEstimatedTokens: 2_000
+    });
+
+    expect(packed.summary).toContain("Historical session summary of 2 older turn(s):");
+    expect(packed.summary).toContain("- historical tool result (2026-06-08T02:51:15.049Z): src/index.ts exists [verify before current-state claim]");
+    expect(packed.messages).toContainEqual(expect.objectContaining({
+      role: "user",
+      content: "ACTIVE TASK: answer now"
+    }));
+    expect(packed.messages.find((message) => message.role === "user")?.content).not.toContain("historical tool result");
+  });
+
+  it("uses an unknown timestamp for summarized tool outputs without createdAt", () => {
+    const packed = packSessionHistory([
+      {
+        id: "old-tool",
+        sessionId: "s",
+        role: "tool" as const,
+        content: "tool output without timestamp"
+      },
+      {
+        id: "active-user",
+        sessionId: "s",
+        role: "user" as const,
+        content: "ACTIVE TASK: keep me"
+      }
+    ], {
+      maxProtectedMessages: 1,
+      maxEstimatedTokens: 2_000
+    });
+
+    expect(packed.summary).toContain("- historical tool result (unknown time): tool output without timestamp [verify before current-state claim]");
+  });
+
   it("preserves sanitized provider execution metadata on protected assistant messages", () => {
     const packed = packSessionHistory([
       {

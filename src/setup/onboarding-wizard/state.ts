@@ -13,7 +13,7 @@ export type OnboardingWorkspaceTrustStatus = "trusted" | "untrusted";
 
 export type OnboardingOptionalCapabilitySummaryStatus = "configured" | "not_set" | "skipped" | "incomplete" | "disabled";
 
-export type OnboardingSupportedOptionalCapabilityId = "channels" | "voice" | "browser";
+export type OnboardingSupportedOptionalCapabilityId = "channels" | "voice" | "browser" | "web-search";
 
 export type OnboardingCredentialReference =
   | {
@@ -61,6 +61,7 @@ export type OnboardingOptionalCapabilitySummaries = {
     readonly tts?: OnboardingOptionalCapabilitySummaryStatus;
   };
   readonly browser?: OnboardingOptionalCapabilitySummaryStatus;
+  readonly webSearch?: OnboardingOptionalCapabilitySummaryStatus;
   readonly selected?: readonly OnboardingOptionalCapabilityDraftId[];
 };
 

@@ -32,6 +32,7 @@ import { ChannelApprovalStore } from "../channels/channel-approval-store.js";
 import { ChannelGateway, telegramGatewayCommands } from "../channels/channel-gateway.js";
 import { PersistentChannelSessionStore } from "../channels/channel-session-store.js";
 import { DeliveryRouter } from "../channels/delivery-router.js";
+import { sendGatewayLifecycleNotification } from "../channels/gateway-lifecycle-notifications.js";
 import { GATEWAY_HYGIENE_THRESHOLD, SessionHygieneService } from "../channels/session-hygiene-service.js";
 import { FileHandoffStore } from "../channels/handoff-store.js";
 import { FileSurfacePointerStore } from "../channels/surface-pointer-store.js";
@@ -83,6 +84,10 @@ import {
   removeCleanShutdownMarker,
   isCleanShutdownTrustworthy,
 } from "./supervisor-lifecycle.js";
+import {
+  clearGatewayRestartPlannedMarker,
+  readGatewayRestartPlannedMarker,
+} from "../runtime/gateway-restart-marker.js";
 
 export type { GatewayRunOptions, GatewayRunResult };
 
@@ -161,7 +166,8 @@ export function buildGatewayCronRuntimeOptions(input: GatewayCronRuntimeBaseInpu
       backend: latestConfig.web.backend,
       searchBackend: latestConfig.web.searchBackend,
       extractBackend: latestConfig.web.extractBackend,
-      crawlBackend: latestConfig.web.crawlBackend
+      crawlBackend: latestConfig.web.crawlBackend,
+      brave: latestConfig.web.brave
     },
     securityConfig: {
       allowPrivateUrls: latestConfig.security.allowPrivateUrls,
@@ -212,7 +218,8 @@ export function buildGatewayCronRuntimeOptions(input: GatewayCronRuntimeBaseInpu
       backend: latestConfig.web.backend,
       searchBackend: latestConfig.web.searchBackend,
       extractBackend: latestConfig.web.extractBackend,
-      crawlBackend: latestConfig.web.crawlBackend
+      crawlBackend: latestConfig.web.crawlBackend,
+      brave: latestConfig.web.brave
     },
     securityConfig: {
       allowPrivateUrls: latestConfig.security.allowPrivateUrls,
@@ -303,6 +310,7 @@ export type SupervisorInternalState = {
   hookRegistry?: HookRegistry;
   gatewayLocalWhisper?: ManagedFasterWhisperWorker;
   gatewayLocalWhisperConfigKey?: string;
+  notifyGatewayRestarting?: () => Promise<void>;
 };
 
 function logInfo(message: string): void {
@@ -329,6 +337,32 @@ function emitSupervisorHook<N extends GatewayHookEventName>(
     }
   } catch {
     // HookRegistry.emit threw synchronously — ignore
+  }
+}
+
+async function maybeSendGatewayOnlineNotification(input: {
+  profilePaths: ProfileStatePaths;
+  router: DeliveryRouter;
+  config: LoadedRuntimeConfig;
+  logWarning?: (message: string) => void;
+}): Promise<void> {
+  if (input.config.gateway.lifecycleNotifications.enabled !== true) {
+    return;
+  }
+
+  const planned = await readGatewayRestartPlannedMarker(input.profilePaths);
+  try {
+    if (planned !== undefined) {
+      await sendGatewayLifecycleNotification({
+        router: input.router,
+        config: input.config,
+        phase: "startup",
+        state: "online",
+        logWarning: input.logWarning
+      });
+    }
+  } finally {
+    await clearGatewayRestartPlannedMarker(input.profilePaths);
   }
 }
 
@@ -604,6 +638,7 @@ export async function runGatewaySupervisor(options: GatewaySupervisorOptions): P
         activeTurnCount: state.activeTurnRegistry?.stats().activeTurnCount ?? 0,
         timeoutMs: options.drainTimeoutMs ?? 30_000,
       });
+      await state.notifyGatewayRestarting?.();
       await state.channelGateway?.flushPendingDebounces?.();
 
       const drainStartMs = Date.now();
@@ -727,7 +762,8 @@ export async function runGatewaySupervisor(options: GatewaySupervisorOptions): P
         backend: latestConfig.web.backend,
         searchBackend: latestConfig.web.searchBackend,
         extractBackend: latestConfig.web.extractBackend,
-        crawlBackend: latestConfig.web.crawlBackend
+        crawlBackend: latestConfig.web.crawlBackend,
+        brave: latestConfig.web.brave
       },
       securityConfig: {
         allowPrivateUrls: latestConfig.security.allowPrivateUrls,
@@ -894,6 +930,20 @@ export async function runGatewaySupervisor(options: GatewaySupervisorOptions): P
           deliveryErrorLogPath: join(profilePaths.gatewayStatePath, "logs", "delivery-errors.jsonl"),
           hookRegistry,
         });
+
+    state.notifyGatewayRestarting = async () => {
+      const planned = await readGatewayRestartPlannedMarker(profilePaths);
+      if (planned === undefined) {
+        return;
+      }
+      await sendGatewayLifecycleNotification({
+        router,
+        config,
+        phase: "shutdown",
+        state: "restarting",
+        logWarning
+      });
+    };
 
     for (const cap of configured) {
       let adapter: ChannelAdapter;
@@ -1358,6 +1408,12 @@ export async function runGatewaySupervisor(options: GatewaySupervisorOptions): P
     // 12. Start adapters through ChannelGateway (wrappers swallow errors)
     await gateway.start();
     state.startupComplete = true;
+    await maybeSendGatewayOnlineNotification({
+      profilePaths,
+      router,
+      config,
+      logWarning
+    });
 
     if (configured.length > 0) {
       logInfo(`Started ${configured.length} adapter(s): ${configured.map((c) => c.kind).join(", ")}`);

@@ -159,7 +159,7 @@ export type RuntimeOptions = {
   currentPlatform?: string;
   enableWebNetwork?: boolean;
   webMaxContentChars?: number;
-  webConfig?: Pick<LoadedRuntimeConfig["web"], "backend" | "searchBackend" | "extractBackend" | "crawlBackend">;
+  webConfig?: Pick<LoadedRuntimeConfig["web"], "backend" | "searchBackend" | "extractBackend" | "crawlBackend" | "brave">;
   securityConfig?: Pick<LoadedRuntimeConfig["security"], "allowPrivateUrls" | "websiteBlocklist">;
   securityPolicy?: SecurityPolicy;
   securityMode?: import("../contracts/security.js").SecurityApprovalMode;
@@ -600,6 +600,11 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
     sessionDb,
     skillEvolutionStore
   });
+  try {
+    await skillLearningManager.reconcileCreatedPaths();
+  } catch {
+    // Old learning records are best-effort startup hygiene; runtime creation should continue.
+  }
   const memoryPromptContextBuilder = new MemoryPromptContextBuilder({
     store: memoryStore,
     promotionStore: memoryPromotionStore

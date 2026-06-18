@@ -210,12 +210,13 @@ Network read operations. They do not mutate remote state.
 | `web.extract` | `read-only-network` | None |
 | `web.crawl` | `read-only-network` | None |
 
-**Availability:** Requires a configured web backend or provider. `web.search` depends on a web research provider registry.
+**Availability:** Requires an available configured or auto-detected web provider. `web.search` can use Brave Search with a resolved `web.brave.apiKeyEnv` credential, or DDGS when the managed Python capability `ddgs` is installed and verified. `web.extract` can use the guarded `fetch` fallback.
 
 **Failure modes:**
 - Missing provider key returns a clear error with the expected env var.
+- Missing DDGS capability returns a repair hint for `estacoda python-env setup ddgs`.
 - Rate limits surface as tool errors with retry guidance.
-- Unsupported provider stubs return "not implemented" errors.
+- Unsupported provider stubs return unavailable errors.
 
 ### Browser tools
 
@@ -445,7 +446,7 @@ A tool may be registered but unavailable. The runtime checks `isAvailable()` bef
 ### Provider readiness
 
 Tools that depend on a provider route require the route to be configured and credential-ready.
-- `web.search` requires a web research provider key.
+- `web.search` requires an available Search provider: Brave needs a credential env reference, while DDGS needs the managed Python capability `ddgs`.
 - `image.generate` requires an image generation provider key.
 - `voice.speak` requires a TTS provider key.
 - `voice.transcribe` requires an STT provider, managed local faster-whisper, or an explicit local command.
