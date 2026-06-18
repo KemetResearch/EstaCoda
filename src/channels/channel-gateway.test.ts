@@ -521,7 +521,7 @@ describe("ChannelGateway Telegram streaming", () => {
     expect(adapter.records.filter((record) => record.kind === "text").map((record) => record.text)).toEqual(["final answer"]);
   });
 
-  it("provider failure/fallback cleanup result causes final fallback delivery", async () => {
+  it("stream finish fallbackRequired result causes final fallback delivery", async () => {
     const { adapter, gateway } = createStreamingGatewayHarness({
       events: [providerResult({ ok: false, willFallback: true })],
       handle: createStreamingHandleSpy({ finishResult: { delivered: false, fallbackRequired: true } })
