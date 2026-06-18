@@ -5,6 +5,7 @@ import { mkdtemp } from "node:fs/promises";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { runCliCommand } from "./cli.js";
 import {
+  DDGS_CAPABILITY_ID,
   registerPythonCapabilitySpecForTest,
   resetPythonCapabilityRegistryForTest
 } from "../python-env/capability-registry.js";
@@ -240,6 +241,97 @@ describe("python-env CLI commands", () => {
     expect(result.output).toContain("verify complete");
     expect(capabilityManagerMock.verifyManagedPythonCapabilityEnvironment).toHaveBeenCalledTimes(1);
     expect(capabilityManagerMock.installManagedPythonCapabilityEnvironment).not.toHaveBeenCalled();
+  });
+
+  it("accepts DDGS status setup and verify through the registered capability list", async () => {
+    const stateRoot = resolveGlobalStateHome({ homeDir }).stateRoot;
+    const paths = resolveManagedPythonCapabilityPaths({ stateRoot, capabilityId: DDGS_CAPABILITY_ID });
+    capabilityManagerMock.installManagedPythonCapabilityEnvironment.mockResolvedValue({
+      ok: true,
+      capabilityId: DDGS_CAPABILITY_ID,
+      version: "9.14.4",
+      specHash: "ddgs-hash",
+      installedGroups: [],
+      installedPackages: ["ddgs==9.14.4"],
+      pythonPath: paths.pythonPath,
+      envPath: paths.envPath,
+      manifest: {
+        id: DDGS_CAPABILITY_ID,
+        version: "9.14.4",
+        specHash: "ddgs-hash",
+        installedPackages: ["ddgs==9.14.4"],
+        installedGroups: [],
+        pythonPath: paths.pythonPath,
+        envPath: paths.envPath,
+        createdAt: "2026-06-13T00:00:00.000Z",
+        updatedAt: "2026-06-13T00:00:00.000Z",
+        status: "verified"
+      }
+    });
+    capabilityManagerMock.verifyManagedPythonCapabilityEnvironment.mockResolvedValue({
+      ok: true,
+      capabilityId: DDGS_CAPABILITY_ID,
+      version: "9.14.4",
+      specHash: "ddgs-hash",
+      installedGroups: [],
+      installedPackages: ["ddgs==9.14.4"],
+      pythonPath: paths.pythonPath,
+      envPath: paths.envPath,
+      manifest: {
+        id: DDGS_CAPABILITY_ID,
+        version: "9.14.4",
+        specHash: "ddgs-hash",
+        installedPackages: ["ddgs==9.14.4"],
+        installedGroups: [],
+        pythonPath: paths.pythonPath,
+        envPath: paths.envPath,
+        createdAt: "2026-06-13T00:00:00.000Z",
+        updatedAt: "2026-06-13T00:00:00.000Z",
+        status: "verified"
+      }
+    });
+
+    const status = await runCliCommand({
+      argv: ["python-env", "status", DDGS_CAPABILITY_ID],
+      workspaceRoot: homeDir,
+      homeDir
+    });
+    expect(status.exitCode).toBe(0);
+    expect(status.output).toContain("Capability: ddgs");
+    expect(status.output).toContain("Version: 9.14.4");
+
+    const deniedSetup = await runCliCommand({
+      argv: ["python-env", "setup", DDGS_CAPABILITY_ID],
+      workspaceRoot: homeDir,
+      homeDir
+    });
+    expect(deniedSetup.exitCode).toBe(1);
+    expect(deniedSetup.output).toContain("Packages: ddgs==9.14.4");
+    expect(capabilityManagerMock.installManagedPythonCapabilityEnvironment).not.toHaveBeenCalled();
+
+    const setup = await runCliCommand({
+      argv: ["python-env", "setup", DDGS_CAPABILITY_ID, "--yes"],
+      workspaceRoot: homeDir,
+      homeDir
+    });
+    expect(setup.exitCode).toBe(0);
+    expect(capabilityManagerMock.installManagedPythonCapabilityEnvironment).toHaveBeenCalledWith(expect.objectContaining({
+      stateRoot,
+      capabilityId: DDGS_CAPABILITY_ID,
+      groups: []
+    }));
+
+    const verify = await runCliCommand({
+      argv: ["python-env", "verify", DDGS_CAPABILITY_ID],
+      workspaceRoot: homeDir,
+      homeDir
+    });
+    expect(verify.exitCode).toBe(0);
+    expect(capabilityManagerMock.verifyManagedPythonCapabilityEnvironment).toHaveBeenCalledWith(expect.objectContaining({
+      stateRoot,
+      capabilityId: DDGS_CAPABILITY_ID,
+      groups: []
+    }));
   });
 
   it("handles upgrade-required and current upgrade states", async () => {
