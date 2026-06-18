@@ -1,4 +1,4 @@
-import type { LoadedRuntimeConfig } from "../config/runtime-config.js";
+import type { EstaCodaConfig, LoadedRuntimeConfig } from "../config/runtime-config.js";
 import { loadRuntimeConfig } from "../config/runtime-config.js";
 import { defaultProfileId, readActiveProfile, resolveProfileStateHome } from "../config/profile-home.js";
 import type { ProviderDiagnostic } from "../config/provider-diagnostics.js";
@@ -111,8 +111,10 @@ export async function collectSetupEntryState(
   });
   const missingCredentials = collectMissingCredentials(verificationReport.providerDiagnostic);
   const hasConfiguredModel = loaded.model.provider !== "unconfigured" && loaded.model.id !== "unconfigured";
+  const hasNoSetupIntentYet = isFirstRunSetupSkeleton(loaded.config);
   const kind = classifySetupEntryState({
     hasConfigSources: loaded.sources.length > 0,
+    hasNoSetupIntentYet,
     hasConfiguredModel,
     stateDirectoryWritable: verificationReport.stateWritable,
     workspaceTrusted: verificationReport.workspaceTrusted,
@@ -144,6 +146,7 @@ export async function collectSetupEntryState(
 
 function classifySetupEntryState(input: {
   readonly hasConfigSources: boolean;
+  readonly hasNoSetupIntentYet: boolean;
   readonly hasConfiguredModel: boolean;
   readonly stateDirectoryWritable: boolean;
   readonly workspaceTrusted: boolean;
@@ -151,7 +154,7 @@ function classifySetupEntryState(input: {
   readonly missingCredentials: MissingCredentialInfo;
 }): SetupEntryStateKind {
   if (!input.stateDirectoryWritable) return "state-not-writable";
-  if (!input.hasConfigSources) return "new-user";
+  if (!input.hasConfigSources || input.hasNoSetupIntentYet) return "new-user";
   if (!input.hasConfiguredModel) return "partial-provider";
   if (input.missingCredentials.envVars.length > 0 || input.missingCredentials.providers.length > 0) {
     return "missing-secret";
@@ -160,6 +163,105 @@ function classifySetupEntryState(input: {
   if (!input.workspaceTrusted) return "untrusted-workspace";
   if (input.providerStatus === "warning") return "configured-degraded";
   return "configured-ready";
+}
+
+function isFirstRunSetupSkeleton(config: EstaCodaConfig): boolean {
+  return isUnconfiguredPrimaryModelOnly(config.model)
+    && hasNoConfiguredProviders(config)
+    && config.modelAliases === undefined
+    && config.model_aliases === undefined
+    && config.auxiliaryModels === undefined
+    && config.web === undefined
+    && config.browser === undefined
+    && config.imageGen === undefined
+    && config.image_gen === undefined
+    && config.gateway === undefined
+    && config.tts === undefined
+    && config.stt === undefined
+    && config.voice === undefined
+    && config.mcpServers === undefined
+    && config.mcp_servers === undefined
+    && config.memory === undefined
+    && config.compression === undefined
+    && config.externalMemory === undefined
+    && config.external_memory === undefined
+    && config.delegation === undefined
+    && hasNoChannelConfig(config)
+    && hasNoCredentialRefs(config)
+    && hasDefaultSetupSensitivePrefs(config);
+}
+
+function isUnconfiguredPrimaryModelOnly(config: EstaCodaConfig["model"]): boolean {
+  if (config === undefined) return true;
+  return (config.provider === undefined || config.provider === "unconfigured")
+    && (config.id === undefined || config.id === "unconfigured")
+    && config.contextWindowTokens === undefined
+    && config.maxTokens === undefined
+    && config.timeoutMs === undefined
+    && config.staleTimeoutMs === undefined
+    && (config.fallbacks?.length ?? 0) === 0;
+}
+
+function hasNoConfiguredProviders(config: EstaCodaConfig): boolean {
+  return Object.keys(config.providers ?? {}).length === 0;
+}
+
+function hasNoChannelConfig(config: EstaCodaConfig): boolean {
+  return Object.keys(config.channels ?? {}).length === 0;
+}
+
+function hasNoCredentialRefs(config: EstaCodaConfig): boolean {
+  return !containsCredentialRef(config);
+}
+
+function containsCredentialRef(value: unknown): boolean {
+  if (Array.isArray(value)) {
+    return value.some(containsCredentialRef);
+  }
+  if (typeof value !== "object" || value === null) {
+    return false;
+  }
+
+  for (const [key, child] of Object.entries(value)) {
+    if (
+      /^(?:apiKeyEnv|api_key_env|botTokenEnv|passwordEnv)$/u.test(key) &&
+      typeof child === "string" &&
+      child.trim().length > 0
+    ) {
+      return true;
+    }
+    if (containsCredentialRef(child)) return true;
+  }
+
+  return false;
+}
+
+function hasDefaultSetupSensitivePrefs(config: EstaCodaConfig): boolean {
+  return hasDefaultSecurityConfig(config.security) && hasDefaultSkillsConfig(config.skills);
+}
+
+function hasDefaultSecurityConfig(config: EstaCodaConfig["security"]): boolean {
+  if (config === undefined) return true;
+  return (config.approvalMode === undefined || config.approvalMode === "strict")
+    && (config.approvals === undefined || (
+      (config.approvals.mode === undefined || config.approvals.mode === "strict") &&
+      Object.keys(config.approvals).every((key) => key === "mode")
+    ))
+    && config.allowPrivateUrls === undefined
+    && config.websiteBlocklist === undefined
+    && config.assessor === undefined
+    && Object.keys(config).every((key) => [
+      "approvalMode",
+      "approvals",
+    ].includes(key));
+}
+
+function hasDefaultSkillsConfig(config: EstaCodaConfig["skills"]): boolean {
+  if (config === undefined) return true;
+  return (config.autonomy === undefined || config.autonomy === "suggest")
+    && config.externalDirs === undefined
+    && config.config === undefined
+    && Object.keys(config).every((key) => key === "autonomy");
 }
 
 function recommendedActionFor(kind: SetupEntryStateKind): SetupEntryRecommendedAction {
@@ -220,7 +322,7 @@ function collectBlockers(
   const blockers = new Set<string>();
 
   if (kind === "new-user") {
-    blockers.add("No setup config exists yet.");
+    blockers.add("First-run setup has not completed yet.");
   }
   if (kind === "partial-provider") {
     blockers.add("Provider setup is incomplete.");

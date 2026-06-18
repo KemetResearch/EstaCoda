@@ -8,6 +8,7 @@ import type { Prompt } from "./readline-prompt.js";
 import type { SelectPromptInput } from "./interactive-select.js";
 import { WorkspaceTrustStore } from "../security/workspace-trust-store.js";
 import { resolveProfileStateHome } from "../config/profile-home.js";
+import { runInitCommand } from "./init-command.js";
 
 async function makeTempDir(): Promise<string> {
   return mkdtemp(join(tmpdir(), "estacoda-cli-setup-test-"));
@@ -205,6 +206,23 @@ describe("cli setup command", () => {
     expect(result.stdout).toContain("Setup language");
     expect(result.stderr).not.toContain("unsettled top-level await");
     expect(result.stderr).not.toContain("Warning: Detected unsettled");
+  });
+
+  it("routes init-created default profile state through the real entrypoint to onboarding", async () => {
+    const init = await runInitCommand({ homeDir: tempDir });
+    const result = await runEntrypoint({
+      argv: ["setup", "--interactive"],
+      cwd: process.cwd(),
+      homeDir: tempDir,
+      input: "n\n",
+    });
+
+    expect(init.ok).toBe(true);
+    expect(result.code).toBe(0);
+    expect(result.stdout).toContain("EstaCoda Onboarding Wizard");
+    expect(result.stdout).toContain("Setup language");
+    expect(result.stdout).not.toContain("Setup editor");
+    expect(result.stderr).not.toContain("unsettled top-level await");
   });
 
   it("routes configured-ready interactive setup through the guided editor shell", async () => {

@@ -7,6 +7,7 @@ import type { ProviderDiagnostic } from "../config/provider-diagnostics.js";
 import type { SetupVerificationReport } from "./verification.js";
 import type { SetupEntryRecommendedAction, SetupEntryState, SetupEntryStateKind } from "./setup-entry-state.js";
 import { collectSetupRoute, renderSetupRouteDecision, routeSetupEntryState, type SetupRouteKind } from "./setup-router.js";
+import { runInitCommand } from "../cli/init-command.js";
 
 function providerDiagnostic(status: ProviderDiagnostic["status"] = "ready"): ProviderDiagnostic {
   return {
@@ -263,6 +264,19 @@ describe("collectSetupRoute", () => {
     expect(decision.state.kind).toBe("new-user");
     expect(decision.actions[0]?.id).toBe("run-guided-onboarding");
     expect(existsSync(join(homeDir, ".estacoda", "config.json"))).toBe(false);
+  });
+
+  it("routes init-created default profile state to first-run onboarding", async () => {
+    const homeDir = await mkdtemp(join(tmpdir(), "estacoda-setup-router-"));
+    const workspaceRoot = join(homeDir, "workspace");
+    await mkdir(workspaceRoot, { recursive: true });
+    await runInitCommand({ homeDir });
+
+    const decision = await collectSetupRoute({ homeDir, workspaceRoot });
+
+    expect(decision.kind).toBe("first-run-onboarding");
+    expect(decision.state.kind).toBe("new-user");
+    expect(decision.actions[0]?.id).toBe("run-guided-onboarding");
   });
 });
 

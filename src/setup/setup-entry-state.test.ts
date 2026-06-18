@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { collectSetupEntryState } from "./setup-entry-state.js";
 import { WorkspaceTrustStore } from "../security/workspace-trust-store.js";
 import { resolveProfileStateHome } from "../config/profile-home.js";
+import { runInitCommand } from "../cli/init-command.js";
 
 async function makeTempDir(): Promise<string> {
   return mkdtemp(join(tmpdir(), "estacoda-setup-entry-state-"));
@@ -80,10 +81,23 @@ describe("collectSetupEntryState", () => {
     expect(state.recommendedAction).toBe("start-first-run");
     expect(state.configSources).toEqual([]);
     expect(state.providerReadiness).toBe("missing-config");
-    expect(state.blockers).toContain("No setup config exists yet.");
+    expect(state.blockers).toContain("First-run setup has not completed yet.");
   });
 
-  it("classifies an unconfigured provider in an existing config as partial-provider", async () => {
+  it("classifies init-created default profile state as new-user", async () => {
+    const { homeDir, workspaceRoot } = await makeHomeAndWorkspace();
+    const result = await runInitCommand({ homeDir });
+
+    const state = await collectSetupEntryState({ homeDir, workspaceRoot });
+
+    expect(result.ok).toBe(true);
+    expect(state.kind).toBe("new-user");
+    expect(state.recommendedAction).toBe("start-first-run");
+    expect(state.configSources).toHaveLength(1);
+    expect(state.blockers).toContain("First-run setup has not completed yet.");
+  });
+
+  it("classifies unconfigured config with no setup intent as new-user", async () => {
     const { homeDir, workspaceRoot } = await makeHomeAndWorkspace();
     await writeUserConfig(homeDir, {
       model: { provider: "unconfigured", id: "unconfigured" },
@@ -91,9 +105,52 @@ describe("collectSetupEntryState", () => {
 
     const state = await collectSetupEntryState({ homeDir, workspaceRoot });
 
+    expect(state.kind).toBe("new-user");
+    expect(state.recommendedAction).toBe("start-first-run");
+    expect(state.configSources).toHaveLength(1);
+  });
+
+  it("keeps harmless UI preferences on the first-run path", async () => {
+    const { homeDir, workspaceRoot } = await makeHomeAndWorkspace();
+    await writeUserConfig(homeDir, {
+      model: { provider: "unconfigured", id: "unconfigured" },
+      providers: {},
+      skills: { autonomy: "suggest" },
+      ui: {
+        language: "ar",
+        flavor: "arabic-light",
+        activityLabels: "ar",
+      },
+      security: { approvalMode: "strict" },
+    });
+
+    const state = await collectSetupEntryState({ homeDir, workspaceRoot });
+
+    expect(state.kind).toBe("new-user");
+    expect(state.recommendedAction).toBe("start-first-run");
+  });
+
+  it.each([
+    ["provider entry", { providers: { local: { models: ["local-test-model"] } } }],
+    ["fallback model", { model: { provider: "unconfigured", id: "unconfigured", fallbacks: [{ provider: "local", id: "backup" }] } }],
+    ["auxiliary model", { auxiliaryModels: { assessor: { provider: "local", id: "assessor-local", enabled: true } } }],
+    ["credential reference", { web: { brave: { apiKeyEnv: "BRAVE_API_KEY" } } }],
+    ["browser config", { browser: { backend: "local-cdp" } }],
+    ["search config", { web: { searchBackend: "brave" } }],
+    ["channel config", { channels: { telegram: { enabled: false } } }],
+    ["security mode change", { security: { approvalMode: "adaptive" } }],
+    ["Agent Evolution mode change", { skills: { autonomy: "proactive" } }],
+  ])("classifies unconfigured config with %s as partial-provider", async (_label, patch) => {
+    const { homeDir, workspaceRoot } = await makeHomeAndWorkspace();
+    await writeUserConfig(homeDir, {
+      model: { provider: "unconfigured", id: "unconfigured" },
+      ...patch,
+    });
+
+    const state = await collectSetupEntryState({ homeDir, workspaceRoot });
+
     expect(state.kind).toBe("partial-provider");
     expect(state.recommendedAction).toBe("repair-provider");
-    expect(state.configSources).toHaveLength(1);
   });
 
   it("classifies a configured provider with a missing env secret as missing-secret", async () => {
