@@ -40,7 +40,9 @@ Browserbase is implemented behind explicit cloud spend approval. It requires `BR
 
 ## Are web research providers live-supported?
 
-No. Only guarded built-in `fetch` extraction is live. Firecrawl, Parallel, Tavily, Exa, SearXNG, Brave, and DDGS are registered stubs and report unavailable even when configured.
+Partly. Brave Search and DDGS are implemented for `web.search`, and guarded built-in `fetch` extraction is live for `web.extract`. Firecrawl, Parallel, Tavily, Exa, and SearXNG remain registered stubs.
+
+Brave needs `web.brave.apiKeyEnv`, defaulting to `BRAVE_SEARCH_API_KEY`. DDGS needs the managed Python capability installed with `estacoda python-env setup ddgs`; runtime search does not install packages automatically.
 
 ## Is session compression stable?
 

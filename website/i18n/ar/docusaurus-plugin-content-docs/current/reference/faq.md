@@ -38,9 +38,11 @@ Telegram هي القناة البعيدة الأولية الوحيدة المث
 
 Browserbase مُنفّذ خلف موافقة صريحة على إنفاق السحابة. يتطلب `BROWSERBASE_API_KEY` و`BROWSERBASE_PROJECT_ID` وتشغيل `estacoda browser approve-cloud` قبل إنشاء جلسات سحابية قابلة للفوترة. يبقى `local-cdp` الخلفية المحلية. تبقى browser-use وFirecrawl وCamofox نماذج مسجلة مؤجلة.
 
-## هل مزودو أبحاث الويب مدعومون مباشرة؟
+## هل مزودو بحث الويب مدعومون مباشرة؟
 
-لا. فقط الاستخراج المضمن `fetch` المباشر. Firecrawl وParallel وTavily وExa وSearXNG وBrave وDDGS هم أطروحات مسجلة ويبلغون عن أنهم غير متاحين حتى عند تكوينهم.
+جزئيًا. Brave Search وDDGS مُنفّذان لـ `web.search`، والاستخراج المضمن الحارس `fetch` حي لـ `web.extract`. تبقى Firecrawl وParallel وTavily وExa وSearXNG أطرًا مسجلة.
+
+يحتاج Brave إلى `web.brave.apiKeyEnv`، وافتراضيه `BRAVE_SEARCH_API_KEY`. يحتاج DDGS إلى قدرة Python المُدارة المثبتة عبر `estacoda python-env setup ddgs`؛ لا يثبت البحث أثناء التشغيل الحزم تلقائيًا.
 
 ## هل ضغط الجلسة مستقر؟
 

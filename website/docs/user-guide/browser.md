@@ -25,6 +25,12 @@ Browserbase sessions are created only through the browser backend so `browser.cl
 
 ---
 
+## Search Is Separate
+
+`web.search` and `web.extract` are web research tools, not browser automation backends. Brave Search and DDGS can provide live `web.search`; guarded `fetch` provides extraction. Browser configuration does not configure Brave or DDGS, and Search setup does not approve Browserbase spend or launch a browser session.
+
+---
+
 ## Local CDP Operations
 
 When local CDP is configured and connected, the following operations are supported:

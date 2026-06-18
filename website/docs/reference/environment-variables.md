@@ -73,6 +73,19 @@ Managed local STT defaults to `~/.estacoda/cache/huggingface` for faster-whisper
 
 These credentials satisfy Browserbase readiness only. They do not approve billable session creation. Browserbase sessions remain blocked until `browser.cloudSpendApproved === true`, normally set with `estacoda browser approve-cloud` and revoked with `estacoda browser revoke-cloud`.
 
+## Web search provider keys
+
+| Variable | Provider | Purpose |
+|----------|----------|---------|
+| `BRAVE_SEARCH_API_KEY` | Brave Search | Default env var for Brave Search API authentication. |
+
+Brave config stores the env var reference at `web.brave.apiKeyEnv`; it does not store the raw key. DDGS does not use an API key. DDGS readiness comes from the managed Python capability:
+
+```bash
+estacoda python-env setup ddgs
+estacoda python-env verify ddgs
+```
+
 ## Channel keys
 
 | Variable | Channel |

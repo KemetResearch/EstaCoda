@@ -378,8 +378,8 @@ A turn can also attach to larger orchestration:
 | ACP | `implemented` | ACP server integration exists. |
 | Knowledge graph | `implemented` | Code dependency graph and cache. |
 | Browser, local CDP | `live-proven` | Local Chrome DevTools Protocol. |
-| Browser, cloud | `unsupported` | Registered stubs only. |
-| Web search | `unsupported` | No first-party search provider baseline. Guarded fetch paths may exist for limited extraction. |
+| Browser, cloud | `implemented` | Browserbase is implemented behind explicit cloud-spend approval; other cloud browser providers remain stubs. |
+| Web search | `implemented` | Brave Search and DDGS search are implemented. Guarded `fetch` extraction is implemented; crawl and other search providers remain stubs. |
 | Eval runner | `implemented` | Deterministic fixtures exist. |
 
 ---

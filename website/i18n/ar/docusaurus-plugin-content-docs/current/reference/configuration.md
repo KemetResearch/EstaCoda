@@ -165,19 +165,42 @@ model.staleTimeoutMs / model.fallbacks[].staleTimeoutMs
 
 ### web
 
-اختيار خلفية أبحاث الويب.
+اختيار خلفية بحث الويب.
 
 ```json
 {
   "web": {
-    "backend": "fetch",
-    "searchBackend": "fetch",
-    "extractBackend": "fetch"
+    "searchBackend": "brave",
+    "extractBackend": "fetch",
+    "brave": {
+      "apiKeyEnv": "BRAVE_SEARCH_API_KEY"
+    }
   }
 }
 ```
 
-فقط `fetch` مُنفذ مباشرة. Firecrawl وParallel وTavily وExa وSearXNG وBrave وDDGS هي أطر مسجلة وستُبلّغ أنها غير متاحة حتى لو تم تكوينها.
+الاختيار خاص بكل قدرة:
+
+```text
+web.searchBackend / web.extractBackend / web.crawlBackend
+→ web.backend
+→ auto-detect available providers
+→ unavailable
+```
+
+الإعداد الصريح يفوز. إذا سمّى `web.searchBackend` مزودًا غير متاح، تُرجع `web.search` سبب عدم توفر ذلك المزود بدل الرجوع بصمت إلى مزود آخر.
+
+| المفتاح | النوع | ملاحظات |
+|---|---|---|
+| `web.backend` | string | تفضيل عام/قديم لمزود الويب يُستخدم عندما لا يوجد backend خاص بالقدرة. |
+| `web.searchBackend` | string | تفضيل مزود البحث. مزودا البحث الحيّان هما `brave` و`ddgs`. |
+| `web.extractBackend` | string | تفضيل مزود الاستخراج. `fetch` هو fallback الاستخراج الحارس الحي. |
+| `web.crawlBackend` | string | تفضيل مزود الزحف. لا يوجد مزود زحف حي في هذا الإصدار. |
+| `web.brave.apiKeyEnv` | string | مرجع متغير البيئة لـ Brave Search. الافتراضي `BRAVE_SEARCH_API_KEY`. لا تخزن مفتاح API الخام في الإعدادات. |
+
+Brave Search مزود خارجي ببيانات اعتماد ويستخدم نمط مرجع البيئة/السر المؤجل نفسه مثل مزودي النماذج. يستخدم DDGS قدرة Python المُدارة `ddgs`؛ ثبّتها أو تحقق منها صراحةً عبر `estacoda python-env setup ddgs` و`estacoda python-env verify ddgs`. لا تثبت `web.search` حزم Python تلقائيًا أثناء التشغيل.
+
+تبقى Firecrawl وParallel وTavily وExa وSearXNG أطرًا مسجلة وتُبلغ أنها غير متاحة عند تكوينها.
 
 ### compression
 

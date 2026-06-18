@@ -400,16 +400,18 @@ Current provider state:
 
 | Provider | Capabilities declared | Status |
 |----------|-----------------------|--------|
+| Brave | search | Implemented live provider; requires `web.brave.apiKeyEnv` and defaults to `BRAVE_SEARCH_API_KEY` |
+| DDGS | search | Implemented managed Python provider; requires registered capability `ddgs` to be installed and verified |
+| fetch | extract | Implemented fallback for guarded raw fetch extraction |
 | Firecrawl | search, extract, crawl | Stub only; unavailable even when configured |
 | Parallel | search | Stub only; unavailable even when configured |
 | Tavily | search, extract | Stub only; unavailable even when configured |
 | Exa | search | Stub only; unavailable even when configured |
 | SearXNG | search | Stub only; unavailable even when configured |
-| Brave | search | Stub only; unavailable even when configured |
-| DDGS | search | Stub only; unavailable |
-| fetch | extract | Implemented fallback for guarded raw fetch extraction |
 
-`web.search` and `web.crawl` exist as tool infrastructure, but no hosted search/crawl API calls are implemented yet. Explicit unavailable providers do not silently fall back. `web.extract` falls back to the guarded fetch extractor only when no explicit unavailable extract provider was configured and no available extract provider was auto-detected.
+Provider selection checks the capability-specific key first, then `web.backend`, then auto-detection. Explicit unavailable providers do not silently fall back. `web.extract` falls back to the guarded fetch extractor only when no explicit unavailable extract provider was configured and no available extract provider was auto-detected. `web.crawl` exists as tool infrastructure, but no live crawl provider is implemented yet.
+
+Brave credentials use the same `apiKeyEnv` reference model as other credentialed providers; raw API keys do not belong in config. DDGS uses the managed Python capability registry and must not install packages during runtime search.
 
 ## Cloud Browser Providers
 

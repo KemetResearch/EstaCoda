@@ -21,5 +21,6 @@ description: "Per-subsystem deep dives for the EstaCoda agent runtime."
 | [Voice](./voice.md) | TTS/STT providers, gateway voice policy, CLI voice mode, Discord voice-channel support |
 | [Cron](./cron.md) | Scheduled tasks, tick locking, persistence |
 | [Browser](./browser.md) | Chrome DevTools Protocol automation |
+| [Web Research](./web-research.md) | Search providers, guarded extraction, Brave credentials, DDGS managed Python setup |
 | [MCP](./mcp.md) | MCP client for stdio and HTTP servers |
 | [ACP](./acp.md) | ACP stdio server foundation for editor clients |

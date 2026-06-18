@@ -106,22 +106,24 @@ sidebar_position: 5
 
 ---
 
-## مزوّد البحث على الويب
+## مزوّد بحث الويب
 
-فقط مسار واحد للبحث على الويب هو حيّ في v0.1.0. الباقي نماذج مسجّلة.
+Brave Search وDDGS مزودا بحث مُنفّذان. `fetch` هو خط أساس الاستخراج الحارس. تبقى بقية المزودات المسماة أطرًا مسجلة.
 
 | المزوّد | القدرات المعلنة | النضج | ملاحظات |
 |---|---|---|---|
 | **fetch** | extract | `live-proven` | المسار الافتراضي للاستخراج المحمي. لا يتطلب مفتاح API. |
+| **Brave** | search | `implemented` | مزود حي عبر Brave Search API. يتطلب مرجع بيئة تحت `web.brave.apiKeyEnv`، وافتراضيه `BRAVE_SEARCH_API_KEY`. |
+| **DDGS** | search | `implemented` | مزود حي عبر subprocess مدعوم بقدرة Python المُدارة `ddgs`. شغّل `estacoda python-env setup ddgs` قبل الاستخدام. |
 | **Firecrawl** | search, extract, crawl | `unsupported` | نموذج مسجّل. غير متوفّر حتى بعد الإعداد. |
 | **Parallel** | search | `unsupported` | نموذج مسجّل. |
 | **Tavily** | search, extract | `unsupported` | نموذج مسجّل. |
 | **Exa** | search | `unsupported` | نموذج مسجّل. |
 | **SearXNG** | search | `unsupported` | نموذج مسجّل. |
-| **Brave** | search | `unsupported` | نموذج مسجّل. |
-| **DDGS** | search | `unsupported` | نموذج مسجّل. |
 
-يوجد `web.search` و `web.crawl` كبنية أدوات، لكن لا توجد استدعاءات بحث أو زحف مستضافة مُنفّذة. يرجع `web.extract` إلى الاستخراج المحمي فقط عندما لا يكون هناك مزوّد مصرّح مكوّن.
+يمكن لـ `web.search` استخدام Brave أو DDGS عندما يكون المزود المحدد متاحًا. يرجع `web.extract` إلى الاستخراج الحارس عبر `fetch` فقط عندما لا يكون هناك مزود استخراج صريح غير متاح ولا مزود استخراج متاح مكتشف تلقائيًا. توجد `web.crawl` كبنية أدوات، لكن لا يوجد مزود زحف حي.
+
+يفحص اختيار المزود `web.searchBackend` أو `web.extractBackend` أو `web.crawlBackend` أولًا، ثم `web.backend`، ثم يكتشف المزودين المتاحين تلقائيًا. المزود الصريح غير المتاح لا يؤدي إلى fallback صامت.
 
 ---
 
@@ -172,7 +174,7 @@ sidebar_position: 5
 
 - محوّل Anthropic Messages API كمسار رئيسي
 - محوّلات MiniMax أو Nous
-- البحث الحيّ عبر Firecrawl، Parallel، Tavily، Exa، SearXNG، Brave، أو DDGS
+- البحث الحيّ عبر Firecrawl، Parallel، Tavily، Exa، أو SearXNG
 - جلسات المتصفّح السحابي عبر browser-use، Firecrawl، أو Camofox
 - مزوّدات ذاكرة خارجية مُعدّة بالاسم دون تنفيذ مدمج
 

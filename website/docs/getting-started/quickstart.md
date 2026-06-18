@@ -28,7 +28,7 @@ Pick the row that matches your goal:
 | I already installed it | `estacoda verify` | Check `estacoda model status` |
 | I ran `estacoda` and setup appears | Continue the setup prompt | Use `estacoda setup` if you exit early |
 | I want Telegram or WhatsApp | Get one local CLI session working first | Configure channels after verification |
-| I want voice, browser, or image generation | Finish the base setup first | Add optional capabilities one at a time |
+| I want voice, Search, browser, or image generation | Finish the base setup first | Add optional capabilities one at a time |
 | I want to modify the source | Clone the repo | Run `./scripts/setup-estacoda.sh` |
 | Something feels broken | `estacoda doctor` | Fix the first blocker before adding features |
 
@@ -73,13 +73,13 @@ The Onboarding Wizard walks through the setup in this order:
 | Credential reference | Stores or reuses credential configuration | Secrets remain out of review output |
 | Security mode | Chooses approval behavior | Risky actions require the configured approval level |
 | Agent Evolution | Chooses learning behavior | Evolution behavior follows review settings |
-| Optional capabilities | Channels, voice, and browser setup | Extra surfaces are configured only when selected |
+| Optional capabilities | Channels, voice, Search, and browser setup | Extra surfaces are configured only when selected |
 | Review and apply | Shows a final summary before writing | Changes are applied after confirmation |
 | Verify and launch | Checks readiness and offers launch | You reach a local session |
 
 Setup is reviewed before apply. The wizard shows a summary before committing configuration changes, and raw secrets are not displayed in review output.
 
-First-run onboarding can configure Channels, Voice, and Browser. Image generation, fallback models, and deeper provider configuration are available after the base setup through the Setup Editor and dedicated CLI commands.
+First-run onboarding can configure Channels, Voice, Search, and Browser. Image generation, fallback models, and deeper provider configuration are available after the base setup through the Setup Editor and dedicated CLI commands.
 
 ## 3. Configure one working model
 
@@ -159,6 +159,7 @@ Only add optional surfaces after the local CLI works.
 | Telegram | You want remote access from Telegram | [Channels](../user-guide/channels.md) |
 | WhatsApp | You want QR-linked WhatsApp access | [Channels](../user-guide/channels.md) |
 | Voice | You want STT/TTS | [Voice](../user-guide/voice.md) |
+| Search | You want live web search from Brave or DDGS | [Provider Reference](../reference/provider-reference.md#web-research-providers) |
 | Browser | You want browser-backed work | [Browser](../user-guide/browser.md) |
 | Image generation | You want provider-backed image tools | [Image Generation](../user-guide/image-generation.md) |
 | Skills | You want reusable task procedures | [Skills](../user-guide/skills.md) |

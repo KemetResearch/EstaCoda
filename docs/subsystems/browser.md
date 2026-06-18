@@ -115,7 +115,9 @@ Snapshot summarization settings:
 
 ## Web Research Tools
 
-`web.search` and `web.crawl` are available as infrastructure tools backed by the web research provider registry. Hosted provider stubs exist for Firecrawl, Parallel, Tavily, Exa, SearXNG, Brave, and DDGS, but those hosted API integrations are not implemented and cannot appear available in this release. `web.extract` can use the registry, and falls back to the guarded raw fetch extractor only when no explicit unavailable extract provider was configured.
+`web.search`, `web.extract`, and `web.crawl` are infrastructure tools backed by the web research provider registry, but they are not browser backends. Brave Search and DDGS are implemented search providers. `fetch` is the implemented guarded extraction fallback. Firecrawl, Parallel, Tavily, Exa, and SearXNG remain registered unavailable stubs, and no live crawl provider is implemented in this release.
+
+Brave uses the normal credential reference flow through `web.brave.apiKeyEnv`, defaulting to `BRAVE_SEARCH_API_KEY`. DDGS uses the managed Python capability `ddgs` and is available only after `estacoda python-env setup ddgs` and verification. Runtime `web.search` does not install Python packages automatically.
 
 ## Tools
 
@@ -235,7 +237,8 @@ When enabled, debug data is attached to individual tool results only. It is reda
 
 ## Limitations
 
-- Real hosted web research provider API calls are not implemented.
+- Web research beyond Brave Search, DDGS search, and guarded fetch extraction remains registered but unavailable.
+- No live `web.crawl` provider is implemented.
 - browser-use, Firecrawl browser, and Camofox browser providers remain deferred/stubbed.
 - Optional `agent-browser` engine support is not implemented.
 - Lightpanda support is not implemented.

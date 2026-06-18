@@ -108,20 +108,22 @@ Precedence is route-specific: `model` or fallback route value, then `providers.<
 
 ## Web Research Providers
 
-Only one web research path is live in v0.1.0. The rest are registered stubs.
+Brave Search and DDGS are implemented search providers. `fetch` is the guarded extraction baseline. The remaining named providers are registered stubs.
 
 | Provider | Capabilities Declared | Maturity | Notes |
 |---|---|---|---|
 | **fetch** | extract | `live-proven` | Guarded built-in extraction fallback. No API key required. |
+| **Brave** | search | `implemented` | Live Brave Search API provider. Requires an env reference under `web.brave.apiKeyEnv`, defaulting to `BRAVE_SEARCH_API_KEY`. |
+| **DDGS** | search | `implemented` | Live subprocess provider backed by the managed Python capability `ddgs`. Run `estacoda python-env setup ddgs` before use. |
 | **Firecrawl** | search, extract, crawl | `unsupported` | Registered stub. Unavailable even when configured. |
 | **Parallel** | search | `unsupported` | Registered stub. |
 | **Tavily** | search, extract | `unsupported` | Registered stub. |
 | **Exa** | search | `unsupported` | Registered stub. |
 | **SearXNG** | search | `unsupported` | Registered stub. |
-| **Brave** | search | `unsupported` | Registered stub. |
-| **DDGS** | search | `unsupported` | Registered stub. |
 
-`web.search` and `web.crawl` exist as tool infrastructure, but no hosted search or crawl API calls are implemented. `web.extract` falls back to the guarded fetch extractor only when no explicit provider was configured or auto-detected.
+`web.search` can use Brave or DDGS when the selected provider is available. `web.extract` falls back to the guarded fetch extractor only when no explicit unavailable extract provider was configured and no available extract provider was auto-detected. `web.crawl` exists as tool infrastructure, but no live crawl provider is implemented.
+
+Provider selection checks `web.searchBackend`, `web.extractBackend`, or `web.crawlBackend` first, then `web.backend`, then auto-detects available providers. Explicit unavailable providers do not silently fall back.
 
 ---
 
@@ -172,7 +174,7 @@ The following are explicitly out of scope for this release:
 
 - Runnable Anthropic Messages API adapter as a primary route
 - Runnable MiniMax or Nous LLM adapters
-- Live web search via Firecrawl, Parallel, Tavily, Exa, SearXNG, Brave, or DDGS
+- Live web search via Firecrawl, Parallel, Tavily, Exa, or SearXNG
 - Live cloud browser sessions via browser-use, Firecrawl, or Camofox
 - Arbitrary external memory providers configured by name without a built-in implementation
 
