@@ -440,6 +440,67 @@ describe("normalizeExternalMemoryConfig", () => {
   });
 });
 
+describe("loadRuntimeConfig gateway lifecycle notifications", () => {
+  it("defaults lifecycle notifications to disabled when gateway config is absent", async () => {
+    const workspace = await mkdtemp(join(tmpdir(), "estacoda-config-test-"));
+    await mkdir(dirname(profileConfigPath(workspace)), { recursive: true });
+    await writeFile(profileConfigPath(workspace), JSON.stringify({
+      model: { provider: "openai", id: "gpt-4o" }
+    }));
+
+    const loaded = await loadRuntimeConfig({ workspaceRoot: workspace, homeDir: workspace });
+    expect(loaded.gateway.lifecycleNotifications.enabled).toBe(false);
+    await rm(workspace, { recursive: true, force: true });
+  });
+
+  it("parses explicitly enabled lifecycle notifications", async () => {
+    const workspace = await mkdtemp(join(tmpdir(), "estacoda-config-test-"));
+    await mkdir(dirname(profileConfigPath(workspace)), { recursive: true });
+    await writeFile(profileConfigPath(workspace), JSON.stringify({
+      model: { provider: "openai", id: "gpt-4o" },
+      gateway: {
+        lifecycleNotifications: {
+          enabled: true
+        }
+      }
+    }));
+
+    const loaded = await loadRuntimeConfig({ workspaceRoot: workspace, homeDir: workspace });
+    expect(loaded.gateway.lifecycleNotifications.enabled).toBe(true);
+    await rm(workspace, { recursive: true, force: true });
+  });
+
+  it("preserves existing channel config behavior when gateway config is present", async () => {
+    const workspace = await mkdtemp(join(tmpdir(), "estacoda-config-test-"));
+    await mkdir(dirname(profileConfigPath(workspace)), { recursive: true });
+    await writeFile(profileConfigPath(workspace), JSON.stringify({
+      model: { provider: "openai", id: "gpt-4o" },
+      gateway: {
+        lifecycleNotifications: {
+          enabled: true
+        }
+      },
+      channels: {
+        telegram: {
+          enabled: false,
+          streaming: {
+            enabled: false
+          }
+        }
+      }
+    }));
+
+    const loaded = await loadRuntimeConfig({ workspaceRoot: workspace, homeDir: workspace });
+    expect(loaded.gateway.lifecycleNotifications.enabled).toBe(true);
+    expect(loaded.channels.telegram.ready).toBe(false);
+    expect(loaded.channels.telegram.streaming).toMatchObject({
+      enabled: false,
+      transport: "auto"
+    });
+    await rm(workspace, { recursive: true, force: true });
+  });
+});
+
 describe("loadRuntimeConfig auxiliaryModels", () => {
   it("normalizes missing tasks to auto/enabled at load time", async () => {
     const workspace = await mkdtemp(join(tmpdir(), "estacoda-config-test-"));

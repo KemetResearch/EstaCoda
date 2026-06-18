@@ -292,6 +292,14 @@ export type ImageGenerationConfig = {
   };
 };
 
+export type GatewayLifecycleNotificationsConfig = {
+  enabled?: boolean;
+};
+
+export type GatewayConfig = {
+  lifecycleNotifications?: GatewayLifecycleNotificationsConfig;
+};
+
 export type MCPServerToolsConfig = {
   include?: string[];
   exclude?: string[];
@@ -405,6 +413,7 @@ export type EstaCodaConfig = {
   };
   imageGen?: ImageGenerationConfig;
   image_gen?: ImageGenerationConfig;
+  gateway?: GatewayConfig;
   tts?: TtsConfig;
   stt?: SttConfig;
   voice?: VoiceConfig;
@@ -571,6 +580,11 @@ export type LoadedRuntimeConfig = {
     snapshotSummarizeThreshold?: number;
   };
   imageGen: Required<Pick<ImageGenerationConfig, "provider" | "model" | "useGateway">> & ImageGenerationConfig;
+  gateway: {
+    lifecycleNotifications: {
+      enabled: boolean;
+    };
+  };
   tts: Required<Pick<TtsConfig, "provider" | "speed">> & TtsConfig;
   stt: Required<Pick<SttConfig, "provider">> & SttConfig;
   voice: Required<Pick<VoiceConfig, "autoTts">> & VoiceConfig;
@@ -940,6 +954,7 @@ export async function loadRuntimeConfig(options: LoadRuntimeConfigOptions): Prom
     delegation: normalizeDelegationConfig(config.delegation),
     browser: normalizeBrowserConfig(config.browser),
     imageGen: normalizeImageGenerationConfig(config.imageGen ?? config.image_gen),
+    gateway: normalizeGatewayConfig(config.gateway),
     tts: normalizeTtsConfig(config.tts),
     stt: normalizeSttConfig(config.stt),
     voice: normalizeVoiceConfig(config.voice),
@@ -1049,6 +1064,14 @@ function patchConfig(...configs: EstaCodaConfig[]): EstaCodaConfig {
       ...(config.browser ?? {})
     },
     imageGen: mergeImageGenerationConfig(merged.imageGen ?? merged.image_gen, config.imageGen ?? config.image_gen),
+    gateway: {
+      ...(merged.gateway ?? {}),
+      ...(config.gateway ?? {}),
+      lifecycleNotifications: {
+        ...(merged.gateway?.lifecycleNotifications ?? {}),
+        ...(config.gateway?.lifecycleNotifications ?? {})
+      }
+    },
     tts: mergeTtsConfig(merged.tts, config.tts),
     stt: mergeSttConfig(merged.stt, config.stt),
     voice: {
@@ -1936,6 +1959,14 @@ function mergeImageGenerationConfig(left: EstaCodaConfig["imageGen"], right: Est
     ...(right ?? {}),
     fal: { ...(left?.fal ?? {}), ...(right?.fal ?? {}) },
     byteplus: { ...(left?.byteplus ?? {}), ...(right?.byteplus ?? {}) }
+  };
+}
+
+function normalizeGatewayConfig(value: EstaCodaConfig["gateway"]): LoadedRuntimeConfig["gateway"] {
+  return {
+    lifecycleNotifications: {
+      enabled: value?.lifecycleNotifications?.enabled === true
+    }
   };
 }
 
