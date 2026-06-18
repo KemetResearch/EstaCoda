@@ -1023,11 +1023,16 @@ class TelegramStreamingTextWorker implements ChannelStreamingTextHandle {
     provider: string;
     model: string;
   }): void {
-    if (!this.#canStream() || (result.ok && !result.willFallback)) {
+    if (!this.#canStream() || result.ok) {
       return;
     }
 
     const segment = this.#segment;
+    if (result.willFallback) {
+      this.#resetForProviderFallback(segment);
+      return;
+    }
+
     this.#degrade(segment);
     this.#runSafely(async () => {
       await this.#cleanupFailedAttempt(segment);
@@ -1581,6 +1586,21 @@ class TelegramStreamingTextWorker implements ChannelStreamingTextHandle {
       this.#clearSegmentTimers(segment);
     }
     this.#clearTimers();
+  }
+
+  #resetForProviderFallback(segment: TelegramStreamingTextSegment): void {
+    this.#clearSegmentTimers(segment);
+    this.#segment = createStreamingTextSegment();
+    this.#messageCreatedTs = undefined;
+    this.#lastDraftText = "";
+    this.#floodStrikes = 0;
+    if (this.#useDraftStreaming) {
+      this.#assignNextDraftId();
+    }
+    this.#input.clearProgress();
+    this.#runSafely(async () => {
+      await this.#cleanupFailedAttempt(segment);
+    });
   }
 
   #canStream(): boolean {
