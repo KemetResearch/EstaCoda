@@ -14,6 +14,7 @@ export type SetupEditorActionId =
   | "configure-channels"
   | "configure-voice"
   | "configure-image-generation"
+  | "configure-web-search"
   | "configure-browser"
   | "run-readonly-verification"
   | "repair-broken-config"
@@ -37,6 +38,7 @@ export type SetupEditorPatchField =
   | "channels"
   | "voice"
   | "vision"
+  | "web"
   | "browser";
 
 export type SetupEditorActionEffect =

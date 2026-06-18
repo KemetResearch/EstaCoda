@@ -255,18 +255,20 @@ describe("buildSetupEditorPlan", () => {
     expect(capabilities.status).toBe("skipped");
     expect(capabilities.data).toEqual({
       independentlyReviewable: true,
-      capabilities: ["channels", "voice", "vision", "browser"],
+      capabilities: ["channels", "voice", "vision", "web-search", "browser"],
     });
     expect(capabilities.actions.map((action) => action.id)).toEqual([
       "configure-channels",
       "configure-voice",
       "configure-image-generation",
+      "configure-web-search",
       "configure-browser",
     ]);
     expect(capabilities.actions.map((action) => action.patch?.fields)).toEqual([
       ["channels"],
       ["voice"],
       ["vision"],
+      ["web"],
       ["browser"],
     ]);
     expect(capabilities.actions.some((action) => action.id === "review-optional-capabilities")).toBe(false);
@@ -285,6 +287,7 @@ describe("buildSetupEditorPlan", () => {
       "configure-channels",
       "configure-voice",
       "configure-image-generation",
+      "configure-web-search",
       "configure-browser",
       "run-readonly-verification",
       "cancel-setup-editor",

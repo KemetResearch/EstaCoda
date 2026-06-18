@@ -29,6 +29,7 @@ import {
   setupTelegramConfig,
   setupUiConfig,
   setupWhatsAppConfig,
+  setupWebConfig,
   setupVoiceConfig,
   type ActivityLabelsLocale,
   type ImageGenerationProvider,
@@ -43,6 +44,11 @@ import {
 } from "../../config/runtime-config.js";
 import { defaultProfileId, readActiveProfile, resolveGlobalStateHome, resolveProfileStateHome } from "../../config/profile-home.js";
 import { createManagedEnvironment } from "../../python-env/manager.js";
+import { DDGS_CAPABILITY_ID } from "../../python-env/capability-registry.js";
+import {
+  checkManagedPythonCapabilityStatus,
+  installManagedPythonCapabilityEnvironment,
+} from "../../python-env/capability-manager.js";
 import {
   registerProviderConfig,
   registerProviderModel,
@@ -270,6 +276,9 @@ async function applyConfigPatch(
       return applyVoiceCapability(operation, options);
     case "setupModules.vision.draft":
       await applyVisionCapability(operation, options);
+      return [];
+    case "setupModules.webSearch.draft":
+      await applyWebSearchCapability(operation, options);
       return [];
     case "setupModules.browser.draft":
       await applyBrowserCapability(operation, options);
@@ -725,6 +734,64 @@ async function applyBrowserCapability(
   });
 }
 
+async function applyWebSearchCapability(
+  operation: SetupApplyOperation,
+  options: ReviewedSetupApplyExecutorOptions
+): Promise<void> {
+  if (operation.review.values.skipped === true) return;
+
+  const searchBackend = stringValue(operation.review.values.searchBackend);
+  if (searchBackend === "ddgs") {
+    await ensureReviewedDdgsCapability(operation, options);
+  }
+
+  const target = configApplyTarget(operation, options);
+  await setupWebConfig({
+    ...target,
+    input: {
+      backend: stringValue(operation.review.values.backend),
+      searchBackend,
+      extractBackend: stringValue(operation.review.values.extractBackend),
+      crawlBackend: stringValue(operation.review.values.crawlBackend),
+      brave: {
+        apiKeyEnv: stringValue(operation.review.values.braveApiKeyEnv),
+      },
+    },
+  });
+}
+
+async function ensureReviewedDdgsCapability(
+  operation: SetupApplyOperation,
+  options: ReviewedSetupApplyExecutorOptions
+): Promise<void> {
+  const capabilityId = stringValue(operation.review.values.ddgsCapabilityId);
+  if (capabilityId !== undefined && capabilityId !== DDGS_CAPABILITY_ID) {
+    throw new Error("DDGS setup apply only supports the registered ddgs managed Python capability.");
+  }
+  const stateRoot = resolveGlobalStateHome({ homeDir: options.homeDir }).stateRoot;
+  const status = await checkManagedPythonCapabilityStatus({
+    stateRoot,
+    capabilityId: DDGS_CAPABILITY_ID,
+  });
+  if (status.ok) return;
+
+  if (operation.review.values.ddgsSetupConfirmed !== true) {
+    throw new Error("DDGS search setup requires explicit managed Python capability setup confirmation.");
+  }
+
+  const install = await installManagedPythonCapabilityEnvironment({
+    stateRoot,
+    capabilityId: DDGS_CAPABILITY_ID,
+  });
+  if (!install.ok) {
+    throw new Error([
+      resolveSetupCopy("en", "setupEditor.apply.webSearch.ddgs.failed"),
+      install.message,
+      install.diagnostic,
+    ].filter((line): line is string => line !== undefined && line.trim().length > 0).join("\n"));
+  }
+}
+
 async function applyWorkspaceTrustGrant(
   operation: SetupApplyOperation,
   options: ReviewedSetupApplyExecutorOptions
@@ -748,6 +815,9 @@ function ensureCredentialReferenceCanApply(
     throw new Error("Credential reference apply requires env-var review values.");
   }
   if (operation.review.values.credentialSurface === "browserbase") {
+    return;
+  }
+  if (operation.review.values.credentialSurface === "web-search-brave") {
     return;
   }
   if (context.provider === undefined || context.model === undefined) {
@@ -790,6 +860,7 @@ function reviewedSecretEnvVarsFromPlan(plan: SetupApplyPlan): string[] {
       "botTokenEnv",
       "ttsApiKeyEnv",
       "sttApiKeyEnv",
+      "braveApiKeyEnv",
     ] as const) {
       const envVar = stringValue(operation.review.values[key]);
       if (envVar !== undefined) {

@@ -21,6 +21,8 @@ import { resolveSetupCopy } from "../setup-copy.js";
 import type { SetupApplyMode, SetupDeferredSecretWrite } from "../setup-apply-plan.js";
 import type { WhatsAppPairDeviceOptions, WhatsAppSetupDependencies } from "../whatsapp-setup-flow.js";
 import * as pythonEnvManager from "../../python-env/manager.js";
+import * as capabilityManager from "../../python-env/capability-manager.js";
+import { DDGS_CAPABILITY_ID } from "../../python-env/capability-registry.js";
 
 async function makeTempDir(): Promise<string> {
   return mkdtemp(join(tmpdir(), "estacoda-config-editor-"));
@@ -51,6 +53,7 @@ describe("runConfigEditor", () => {
     delete process.env.DISCORD_BOT_TOKEN;
     delete process.env.BROWSERBASE_API_KEY;
     delete process.env.BROWSERBASE_PROJECT_ID;
+    delete process.env.BRAVE_SEARCH_API_KEY;
     await chmod(join(tempDir, ".estacoda"), 0o700).catch(() => undefined);
     await rm(tempDir, { recursive: true, force: true });
   });
@@ -2921,6 +2924,114 @@ describe("runConfigEditor", () => {
     expect(applyCalled).toBe(false);
   });
 
+  it("configures Brave Search credentials through reviewed deferred secret writes", async () => {
+    await writeUserConfig(tempDir, localReadyConfig());
+    await trustWorkspace(tempDir, workspaceRoot);
+
+    const result = await runConfigEditor({
+      homeDir: tempDir,
+      workspaceRoot,
+      prompt: fakePrompt({
+        values: ["enable", "brave", "BRAVE_SEARCH_API_KEY", true],
+        secret: "brave-secret",
+      }),
+      defaultActionId: "configure-web-search",
+      applyExecutor: createReviewedSetupApplyExecutor({
+        homeDir: tempDir,
+        workspaceRoot,
+      }),
+    });
+    const envFile = await readFile(profileEnvPath(tempDir), "utf8");
+    const config = JSON.parse(await readFile(profileConfigPath(tempDir), "utf8")) as {
+      web?: { searchBackend?: string; brave?: { apiKeyEnv?: string; apiKey?: string } };
+    };
+    const braveCredentialLine = result.reviewManifest?.sections["secret-refs-to-store"]
+      .find((line) => line.sourceDraftIds.includes("setup-module.web-search.brave-credential"));
+
+    expect(result.completed).toBe(true);
+    expect(result.selectedActionId).toBe("configure-web-search");
+    expect(config.web).toEqual({
+      enableNetwork: true,
+      searchBackend: "brave",
+      brave: {
+        apiKeyEnv: "BRAVE_SEARCH_API_KEY",
+      },
+    });
+    expect(config.web?.brave?.apiKey).toBeUndefined();
+    expect(braveCredentialLine?.review.values).toMatchObject({
+      credentialSurface: "web-search-brave",
+      envVars: ["BRAVE_SEARCH_API_KEY"],
+      credentialValuesIncluded: false,
+    });
+    expect(envFile).toContain('BRAVE_SEARCH_API_KEY="brave-secret"');
+    expect(JSON.stringify(result)).not.toContain("brave-secret");
+  });
+
+  it("configures DDGS Search when the managed capability is ready", async () => {
+    await writeUserConfig(tempDir, localReadyConfig());
+    await trustWorkspace(tempDir, workspaceRoot);
+    vi.spyOn(capabilityManager, "checkManagedPythonCapabilityStatus").mockResolvedValue(readyDdgsStatus(tempDir));
+    const installSpy = vi.spyOn(capabilityManager, "installManagedPythonCapabilityEnvironment").mockResolvedValue(readyDdgsInstallResult(tempDir));
+
+    const result = await runConfigEditor({
+      homeDir: tempDir,
+      workspaceRoot,
+      prompt: fakePrompt({
+        values: ["enable", "ddgs", true],
+      }),
+      defaultActionId: "configure-web-search",
+      applyExecutor: createReviewedSetupApplyExecutor({
+        homeDir: tempDir,
+        workspaceRoot,
+      }),
+    });
+    const config = JSON.parse(await readFile(profileConfigPath(tempDir), "utf8")) as {
+      web?: { searchBackend?: string };
+    };
+
+    expect(result.completed).toBe(true);
+    expect(result.selectedActionId).toBe("configure-web-search");
+    expect(config.web?.searchBackend).toBe("ddgs");
+    expect(installSpy).not.toHaveBeenCalled();
+  });
+
+  it("plans reviewed DDGS managed capability setup only after explicit confirmation", async () => {
+    await writeUserConfig(tempDir, localReadyConfig());
+    await trustWorkspace(tempDir, workspaceRoot);
+    vi.spyOn(capabilityManager, "checkManagedPythonCapabilityStatus").mockResolvedValue({
+      ok: false,
+      capabilityId: DDGS_CAPABILITY_ID,
+      reason: "install_required",
+      message: "Managed Python capability environment has not been installed.",
+    });
+    const installSpy = vi.spyOn(capabilityManager, "installManagedPythonCapabilityEnvironment").mockResolvedValue(readyDdgsInstallResult(tempDir));
+
+    const result = await runConfigEditor({
+      homeDir: tempDir,
+      workspaceRoot,
+      prompt: fakePrompt({
+        values: ["enable", "ddgs", true, true],
+      }),
+      defaultActionId: "configure-web-search",
+      applyExecutor: createReviewedSetupApplyExecutor({
+        homeDir: tempDir,
+        workspaceRoot,
+      }),
+    });
+    const config = JSON.parse(await readFile(profileConfigPath(tempDir), "utf8")) as {
+      web?: { searchBackend?: string };
+    };
+
+    expect(result.completed).toBe(true);
+    expect(config.web?.searchBackend).toBe("ddgs");
+    expect(installSpy).toHaveBeenCalledWith({
+      stateRoot: expect.stringContaining(".estacoda"),
+      capabilityId: DDGS_CAPABILITY_ID,
+    });
+    expect(JSON.stringify(result.reviewManifest)).toContain(DDGS_CAPABILITY_ID);
+    expect(JSON.stringify(result.reviewManifest)).not.toContain("ddgs==9.14.4");
+  });
+
   it("renders broken config as a repair-first diagnostic surface", async () => {
     await mkdir(dirname(profileConfigPath(tempDir)), { recursive: true });
     await writeFile(profileConfigPath(tempDir), "{not-json", "utf8");
@@ -3060,6 +3171,52 @@ function fakePrompt(options: { readonly values?: readonly unknown[]; readonly se
   prompt.onboardingCard = () => undefined;
   prompt.close = () => undefined;
   return prompt;
+}
+
+function readyDdgsStatus(homeDir: string): Awaited<ReturnType<typeof capabilityManager.checkManagedPythonCapabilityStatus>> {
+  const stateRoot = join(homeDir, ".estacoda");
+  const envPath = join(stateRoot, "python-capabilities", DDGS_CAPABILITY_ID);
+  const pythonPath = join(envPath, "bin", "python");
+  return {
+    ok: true,
+    status: "verified",
+    capabilityId: DDGS_CAPABILITY_ID,
+    version: "9.14.4",
+    specHash: "hash",
+    installedGroups: [],
+    installedPackages: ["ddgs==9.14.4"],
+    pythonPath,
+    envPath,
+    manifest: {
+      id: DDGS_CAPABILITY_ID,
+      version: "9.14.4",
+      specHash: "hash",
+      installedPackages: ["ddgs==9.14.4"],
+      installedGroups: [],
+      pythonPath,
+      envPath,
+      createdAt: "2026-01-01T00:00:00.000Z",
+      updatedAt: "2026-01-01T00:00:00.000Z",
+      verifiedAt: "2026-01-01T00:00:00.000Z",
+      status: "verified",
+    },
+  };
+}
+
+function readyDdgsInstallResult(homeDir: string): Awaited<ReturnType<typeof capabilityManager.installManagedPythonCapabilityEnvironment>> {
+  const status = readyDdgsStatus(homeDir);
+  if (!status.ok) throw new Error("expected ready status");
+  return {
+    ok: true,
+    capabilityId: status.capabilityId,
+    version: status.version,
+    specHash: status.specHash,
+    installedGroups: status.installedGroups,
+    installedPackages: status.installedPackages,
+    pythonPath: status.pythonPath,
+    envPath: status.envPath,
+    manifest: status.manifest,
+  };
 }
 
 function whatsappDepsWithMissingBridge(options: { readonly installError?: unknown } = {}): WhatsAppSetupDependencies & {

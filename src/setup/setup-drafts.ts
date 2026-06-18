@@ -719,6 +719,7 @@ function kindForEditorAction(action: SetupEditorActionDraft): SetupDraftKind {
     case "configure-channels":
     case "configure-voice":
     case "configure-image-generation":
+    case "configure-web-search":
     case "configure-browser":
       return "optional-capability";
     case "repair-state-directory":

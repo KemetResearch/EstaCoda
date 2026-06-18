@@ -29,6 +29,7 @@ export type SetupModuleId =
   | "whatsapp"
   | "voice"
   | "vision"
+  | "web-search"
   | "browser";
 
 export type SetupModuleDetectionStatus = "configured" | "missing" | "skipped" | "blocked" | "warning";
@@ -110,6 +111,17 @@ export type SetupModuleContext = SetupDraftBundleOptions & {
     readonly apiKeyEnv?: string;
     readonly apiKey?: string;
     readonly useGateway?: boolean;
+  };
+  readonly web?: {
+    readonly searchBackend?: string;
+    readonly extractBackend?: string;
+    readonly crawlBackend?: string;
+    readonly braveApiKeyEnv?: string;
+    readonly braveCredentialReady?: boolean;
+    readonly braveCredentialValuesIncluded?: boolean;
+    readonly ddgsCapabilityId?: string;
+    readonly ddgsCapabilityStatus?: "ready" | "missing" | "failed" | "unknown";
+    readonly ddgsSetupConfirmed?: boolean;
   };
 };
 
@@ -446,6 +458,51 @@ export const visionSetupModule: SetupModule = optionalCapabilityModule({
   }),
 });
 
+export const webSearchSetupModule: SetupModule = optionalCapabilityModule({
+  id: "web-search",
+  titleKey: "setupModules.webSearch.title",
+  reviewKey: "setupModules.webSearch.review",
+  draftKey: "setupModules.webSearch.draft",
+  scope: ["web"],
+  value: (context) => ({
+    searchBackend: context.web?.searchBackend,
+    extractBackend: context.web?.extractBackend,
+    crawlBackend: context.web?.crawlBackend,
+    braveApiKeyEnv: context.web?.braveApiKeyEnv,
+    braveCredentialReady: context.web?.braveCredentialReady,
+    braveCredentialValuesIncluded: context.web?.braveCredentialValuesIncluded,
+    ddgsCapabilityId: context.web?.ddgsCapabilityId,
+    ddgsCapabilityStatus: context.web?.ddgsCapabilityStatus,
+    ddgsSetupConfirmed: context.web?.ddgsSetupConfirmed,
+  }),
+  blockers: (context) => [
+    ...(context.web?.searchBackend === "brave" && context.web.braveApiKeyEnv === undefined
+      ? ["Brave Search requires a credential environment-variable reference."]
+      : []),
+    ...(context.web?.searchBackend === "brave" && context.web.braveApiKeyEnv !== undefined && context.web.braveCredentialReady === false
+      ? [`Brave Search requires ${context.web.braveApiKeyEnv} from the environment, profile secret store, or reviewed setup entry.`]
+      : []),
+    ...(context.web?.searchBackend === "ddgs" &&
+      context.web.ddgsCapabilityStatus !== "ready" &&
+      context.web.ddgsSetupConfirmed !== true
+      ? ["DDGS requires explicit managed Python capability setup confirmation before apply."]
+      : []),
+  ],
+  extraDrafts: (context) => context.web?.searchBackend === "brave" &&
+    context.web.braveCredentialReady === true &&
+    context.web.braveApiKeyEnv !== undefined
+    ? [
+        credentialDraft({
+          id: "setup-module.web-search.brave-credential",
+          moduleId: "web-search",
+          envVars: [context.web.braveApiKeyEnv],
+          credentialSurface: "web-search-brave",
+          configPath: context.configPath,
+        }),
+      ]
+    : [],
+});
+
 export const browserSetupModule: SetupModule = optionalCapabilityModule({
   id: "browser",
   titleKey: "setupModules.browser.title",
@@ -512,6 +569,7 @@ export const SETUP_MODULES: readonly SetupModule[] = [
   whatsappSetupModule,
   voiceSetupModule,
   visionSetupModule,
+  webSearchSetupModule,
   browserSetupModule,
 ] as const;
 
@@ -606,8 +664,10 @@ function simpleConfigModule(input: {
 }
 
 function optionalCapabilityModule(input: {
-  readonly id: Extract<SetupModuleId, "telegram" | "discord" | "whatsapp" | "voice" | "vision" | "browser">;
+  readonly id: Extract<SetupModuleId, "telegram" | "discord" | "whatsapp" | "voice" | "vision" | "web-search" | "browser">;
   readonly titleKey: SetupModule["titleKey"];
+  readonly reviewKey?: SetupModuleReview["copyKey"];
+  readonly draftKey?: string;
   readonly scope: readonly SetupEditorPatchField[];
   readonly value: (context: SetupModuleContext) => SetupDraftReviewMetadata["values"];
   readonly blockers?: (context: SetupModuleContext) => readonly string[];
@@ -642,7 +702,7 @@ function optionalCapabilityModule(input: {
       return configurationFromDetection(module.detect(context), options);
     },
     review(context, configuration = module.configure(context)) {
-      return reviewFromConfiguration(`setupModules.${input.id}.review`, configuration);
+      return reviewFromConfiguration(input.reviewKey ?? `setupModules.${input.id}.review`, configuration);
     },
     toDrafts(context, configuration = module.configure(context)) {
       if (context.brokenConfig === true) return [diagnosticDraft(input.id, configuration.blockers)];
@@ -655,7 +715,7 @@ function optionalCapabilityModule(input: {
           riskSurface: "optional-capability",
           scope: input.scope,
           configPath: context.configPath,
-          summaryKey: `setupModules.${input.id}.draft`,
+          summaryKey: input.draftKey ?? `setupModules.${input.id}.draft`,
           values: {
             ...configuration.data,
             skipped: configuration.skipped,
@@ -746,14 +806,14 @@ function credentialDraft(input: {
   readonly envVars: readonly string[];
   readonly configPath?: string;
   readonly blockers?: readonly string[];
-  readonly credentialSurface?: "browserbase";
+  readonly credentialSurface?: "browserbase" | "web-search-brave";
 }): SetupDraft {
   return {
     id: input.id,
     kind: "credential-reference",
     source: moduleSource(input.moduleId, "configure-env-refs"),
     riskSurface: "credential-reference",
-    target: input.credentialSurface === "browserbase"
+    target: input.credentialSurface === "browserbase" || input.credentialSurface === "web-search-brave"
       ? { kind: "diagnostic-only" }
       : configTarget(["providers.*.apiKeyEnv"], input.configPath),
     review: review("setupModules.credentials.draft", {

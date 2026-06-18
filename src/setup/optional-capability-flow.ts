@@ -8,7 +8,9 @@ import type {
   TtsProvider,
 } from "../config/runtime-config.js";
 import { hasSavedEnvSecret } from "../config/env-secret-store.js";
-import { defaultProfileId, readActiveProfile, resolveProfileStateHome } from "../config/profile-home.js";
+import { defaultProfileId, readActiveProfile, resolveGlobalStateHome, resolveProfileStateHome } from "../config/profile-home.js";
+import { DDGS_CAPABILITY_ID } from "../python-env/capability-registry.js";
+import { checkManagedPythonCapabilityStatus } from "../python-env/capability-manager.js";
 import type { Prompt } from "../cli/readline-prompt.js";
 import type { SecurityApprovalMode } from "../contracts/security.js";
 import type { SkillAutonomy } from "../skills/skill-learning.js";
@@ -23,6 +25,7 @@ import {
   telegramSetupModule,
   visionSetupModule,
   voiceSetupModule,
+  webSearchSetupModule,
   whatsappSetupModule,
   type SetupModuleContext,
 } from "./setup-modules.js";
@@ -37,6 +40,7 @@ import {
   promptTelegramCapability,
   promptTtsCapability,
   promptVisionCapability,
+  promptWebSearchCapability,
   promptWhatsAppCapability,
   type OptionalCapabilityPromptId,
   type VoiceCapabilityPromptId,
@@ -48,6 +52,7 @@ export type OptionalCapabilityModule =
   | typeof whatsappSetupModule
   | typeof voiceSetupModule
   | typeof visionSetupModule
+  | typeof webSearchSetupModule
   | typeof browserSetupModule;
 
 export type OptionalCapabilityPromptContext = {
@@ -91,6 +96,8 @@ export function setupModuleContextFromConfig(
   const discord = recordValue(recordValue(config.channels)?.discord);
   const whatsapp = recordValue(recordValue(config.channels)?.whatsapp);
   const browser = recordValue(config.browser);
+  const web = recordValue(config.web);
+  const brave = recordValue(web?.brave);
   const voice = voiceContext(config);
   const vision = visionContext(config);
 
@@ -151,6 +158,14 @@ export function setupModuleContextFromConfig(
         },
     voice,
     vision,
+    web: web === undefined
+      ? undefined
+      : {
+          searchBackend: stringValue(web.searchBackend ?? web.search_backend),
+          extractBackend: stringValue(web.extractBackend ?? web.extract_backend),
+          crawlBackend: stringValue(web.crawlBackend ?? web.crawl_backend),
+          braveApiKeyEnv: stringValue(brave?.apiKeyEnv ?? brave?.api_key_env),
+        },
   };
 }
 
@@ -189,6 +204,8 @@ export function optionalCapabilityModuleForAction(actionId: string): OptionalCap
       return voiceSetupModule;
     case "configure-image-generation":
       return visionSetupModule;
+    case "configure-web-search":
+      return webSearchSetupModule;
     case "configure-browser":
       return browserSetupModule;
     default:
@@ -345,6 +362,66 @@ export async function collectOptionalCapabilityContext(
         },
       };
     }
+    case "web-search": {
+      const ddgsCapabilityStatus = await detectDdgsCapabilityStatus(options);
+      const values = await promptWebSearchCapability(options.prompt, {
+        ...baseContext.web,
+        ddgsCapabilityStatus,
+      }, options.locale);
+
+      if (values.provider === "none") {
+        return { kind: "skip" };
+      }
+
+      if (values.provider === "brave") {
+        const profileId = options.profileId ?? readActiveProfile({ homeDir: options.homeDir }).profileId ?? defaultProfileId();
+        const hasCredentialSource = await hasExistingEnvCredentialSource({
+          homeDir: options.homeDir,
+          profileId,
+          envVarName: values.braveApiKeyEnv,
+        });
+        const pendingCredentialWrites: SetupDeferredSecretWrite[] = [];
+        if (!hasCredentialSource) {
+          const entered = await options.prompt(braveSearchCredentialQuestion(options.locale, values.braveApiKeyEnv), { secret: true });
+          if (entered.trim().length > 0) {
+            pendingCredentialWrites.push({ envVarName: values.braveApiKeyEnv, value: entered });
+          }
+        }
+
+        return {
+          kind: "configured",
+          context: {
+            ...baseContext,
+            web: {
+              ...baseContext.web,
+              searchBackend: "brave",
+              braveApiKeyEnv: values.braveApiKeyEnv,
+              braveCredentialReady: hasCredentialSource || pendingCredentialWrites.length > 0,
+              braveCredentialValuesIncluded: false,
+            },
+          },
+          pendingCredentialWrites,
+        };
+      }
+
+      if (ddgsCapabilityStatus !== "ready" && !values.ddgsSetupConfirmed) {
+        return { kind: "skip" };
+      }
+
+      return {
+        kind: "configured",
+        context: {
+          ...baseContext,
+          web: {
+            ...baseContext.web,
+            searchBackend: "ddgs",
+            ddgsCapabilityId: DDGS_CAPABILITY_ID,
+            ddgsCapabilityStatus,
+            ddgsSetupConfirmed: values.ddgsSetupConfirmed,
+          },
+        },
+      };
+    }
     case "browser": {
       const values = await promptBrowserCapability(options.prompt, baseContext.browser ?? {}, options.locale);
       const browserbaseCredentials = values.backend === "browserbase"
@@ -413,7 +490,29 @@ async function collectBrowserbaseCredentials(options: OptionalCapabilityContextO
   };
 }
 
+async function detectDdgsCapabilityStatus(options: Pick<OptionalCapabilityContextOptions, "homeDir">): Promise<NonNullable<SetupModuleContext["web"]>["ddgsCapabilityStatus"]> {
+  const stateRoot = resolveGlobalStateHome({ homeDir: options.homeDir }).stateRoot;
+  try {
+    const status = await checkManagedPythonCapabilityStatus({
+      stateRoot,
+      capabilityId: DDGS_CAPABILITY_ID,
+    });
+    if (status.ok) return "ready";
+    return status.reason === "install_required" || status.reason === "upgrade_required" ? "missing" : "failed";
+  } catch {
+    return "unknown";
+  }
+}
+
 async function hasExistingBrowserbaseCredentialSource(input: {
+  readonly homeDir?: string;
+  readonly profileId: string;
+  readonly envVarName: string;
+}): Promise<boolean> {
+  return hasExistingEnvCredentialSource(input);
+}
+
+async function hasExistingEnvCredentialSource(input: {
   readonly homeDir?: string;
   readonly profileId: string;
   readonly envVarName: string;
@@ -433,6 +532,13 @@ function browserbaseCredentialQuestion(locale: SetupCopyLocale, envVarName: stri
   return setupOutputLine(locale, `${formatSetupCopy(locale, "setupEditor.prompt.browser.browserbaseCredential", {
     envVar: setupTechnicalToken(locale, envVarName),
     serviceName: setupTechnicalToken(locale, "Browserbase"),
+  })} `);
+}
+
+function braveSearchCredentialQuestion(locale: SetupCopyLocale, envVarName: string): string {
+  return setupOutputLine(locale, `${formatSetupCopy(locale, "setupEditor.prompt.webSearch.brave.secretValue", {
+    envVar: setupTechnicalToken(locale, envVarName),
+    serviceName: setupTechnicalToken(locale, "Brave Search"),
   })} `);
 }
 
@@ -457,7 +563,7 @@ export function buildOptionalCapabilityDraftBundle(
 }
 
 export function optionalPromptId(moduleId: string): OptionalCapabilityPromptId {
-  if (moduleId === "telegram" || moduleId === "discord" || moduleId === "whatsapp" || moduleId === "voice" || moduleId === "vision" || moduleId === "browser") {
+  if (moduleId === "telegram" || moduleId === "discord" || moduleId === "whatsapp" || moduleId === "voice" || moduleId === "vision" || moduleId === "web-search" || moduleId === "browser") {
     return moduleId;
   }
   throw new Error(`Unsupported optional capability module: ${moduleId}`);
@@ -476,6 +582,8 @@ export function optionalCapabilityTitle(moduleId: string, locale: SetupCopyLocal
         return "Voice";
       case "vision":
         return "Vision and image generation";
+      case "web-search":
+        return "Search";
       case "browser":
         return "Browser";
       default:
@@ -494,6 +602,8 @@ export function optionalCapabilityTitle(moduleId: string, locale: SetupCopyLocal
       return setupCopyText(locale, "setupModules.voice.title");
     case "vision":
       return setupCopyText(locale, "setupModules.vision.title");
+    case "web-search":
+      return setupCopyText(locale, "setupModules.webSearch.title");
     case "browser":
       return setupCopyText(locale, "setupModules.browser.title");
     default:

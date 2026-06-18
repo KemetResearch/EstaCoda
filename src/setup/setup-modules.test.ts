@@ -12,6 +12,7 @@ import {
   telegramSetupModule,
   visionSetupModule,
   voiceSetupModule,
+  webSearchSetupModule,
   workflowLearningSetupModule,
   workspaceTrustSetupModule,
   type SetupModuleContext,
@@ -270,6 +271,111 @@ describe("setup modules", () => {
     expect(drafts[0]?.blockers).toEqual([
       "Browserbase requires BROWSERBASE_API_KEY from the environment, profile secret store, or reviewed setup entry.",
     ]);
+  });
+
+  it("Search module uses explicit camelCase copy keys with a kebab-case module id", () => {
+    const draft = webSearchSetupModule.toDrafts(context({
+      web: {
+        searchBackend: "brave",
+        braveApiKeyEnv: "BRAVE_SEARCH_API_KEY",
+        braveCredentialReady: true,
+        braveCredentialValuesIncluded: false,
+      },
+    }))[0];
+    const review = webSearchSetupModule.review(context({
+      web: {
+        searchBackend: "brave",
+        braveApiKeyEnv: "BRAVE_SEARCH_API_KEY",
+        braveCredentialReady: true,
+      },
+    }));
+
+    expect(webSearchSetupModule.id).toBe("web-search");
+    expect(review.copyKey).toBe("setupModules.webSearch.review");
+    expect(draft?.review.summaryKey).toBe("setupModules.webSearch.draft");
+  });
+
+  it("Search module redacts Brave credentials and drafts a non-provider credential reference", () => {
+    const drafts = webSearchSetupModule.toDrafts(context({
+      web: {
+        searchBackend: "brave",
+        braveApiKeyEnv: "BRAVE_SEARCH_API_KEY",
+        braveCredentialReady: true,
+        braveCredentialValuesIncluded: false,
+      },
+    }));
+    const capabilityDraft = drafts.find((draft) => draft.id === "setup-module.web-search.capability");
+    const credentialDraft = drafts.find((draft) => draft.id === "setup-module.web-search.brave-credential");
+    const json = JSON.stringify(drafts);
+
+    expect(capabilityDraft?.review.values).toMatchObject({
+      searchBackend: "brave",
+      braveApiKeyEnv: "BRAVE_SEARCH_API_KEY",
+      braveCredentialReady: true,
+      braveCredentialValuesIncluded: false,
+    });
+    expect(credentialDraft?.kind).toBe("credential-reference");
+    expect(credentialDraft?.target.kind).toBe("diagnostic-only");
+    expect(credentialDraft?.review.values).toMatchObject({
+      credentialSurface: "web-search-brave",
+      envVars: ["BRAVE_SEARCH_API_KEY"],
+      credentialValuesIncluded: false,
+    });
+    expect(json).not.toContain("secretValue");
+    expect(json).not.toContain("brave-secret");
+  });
+
+  it("Search module blocks missing Brave credential sources and unconfirmed DDGS setup", () => {
+    const braveDraft = webSearchSetupModule.toDrafts(context({
+      web: {
+        searchBackend: "brave",
+        braveApiKeyEnv: "BRAVE_SEARCH_API_KEY",
+        braveCredentialReady: false,
+        braveCredentialValuesIncluded: false,
+      },
+    }))[0];
+    const ddgsDraft = webSearchSetupModule.toDrafts(context({
+      web: {
+        searchBackend: "ddgs",
+        ddgsCapabilityId: "ddgs",
+        ddgsCapabilityStatus: "missing",
+        ddgsSetupConfirmed: false,
+      },
+    }))[0];
+
+    expect(braveDraft?.blockers).toContain(
+      "Brave Search requires BRAVE_SEARCH_API_KEY from the environment, profile secret store, or reviewed setup entry."
+    );
+    expect(ddgsDraft?.blockers).toContain(
+      "DDGS requires explicit managed Python capability setup confirmation before apply."
+    );
+  });
+
+  it("Search module configures DDGS when ready or explicitly confirmed", () => {
+    const ready = webSearchSetupModule.toDrafts(context({
+      web: {
+        searchBackend: "ddgs",
+        ddgsCapabilityId: "ddgs",
+        ddgsCapabilityStatus: "ready",
+        ddgsSetupConfirmed: false,
+      },
+    }))[0];
+    const confirmed = webSearchSetupModule.toDrafts(context({
+      web: {
+        searchBackend: "ddgs",
+        ddgsCapabilityId: "ddgs",
+        ddgsCapabilityStatus: "missing",
+        ddgsSetupConfirmed: true,
+      },
+    }))[0];
+
+    expect(ready?.blockers).toEqual([]);
+    expect(confirmed?.blockers).toEqual([]);
+    expect(ready?.review.values).toMatchObject({
+      searchBackend: "ddgs",
+      ddgsCapabilityId: "ddgs",
+      ddgsCapabilityStatus: "ready",
+    });
   });
 
   it("voice module does not print hosted secrets", () => {

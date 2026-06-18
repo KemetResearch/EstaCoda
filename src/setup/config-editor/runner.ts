@@ -313,6 +313,7 @@ async function handleAction(
     case "configure-channels":
     case "configure-voice":
     case "configure-image-generation":
+    case "configure-web-search":
     case "configure-browser":
       return handleOptionalCapabilityAction(options, initialDecision, session, action);
     default: {

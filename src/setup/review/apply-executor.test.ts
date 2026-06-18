@@ -13,6 +13,8 @@ import {
 } from "./apply-executor.js";
 import { resolveGlobalStateHome, resolveProfileStateHome } from "../../config/profile-home.js";
 import * as pythonEnvManager from "../../python-env/manager.js";
+import * as capabilityManager from "../../python-env/capability-manager.js";
+import { DDGS_CAPABILITY_ID } from "../../python-env/capability-registry.js";
 
 type ReviewValues = Record<string, string | readonly string[] | boolean | number | undefined>;
 
@@ -347,6 +349,93 @@ function voiceCapabilityPlan(values: ReviewValues, input: { readonly homeDir: st
       trustOperationCount: 0,
       credentialOperationCount: 0,
     },
+  };
+}
+
+function webSearchCapabilityPlan(values: ReviewValues, input: { readonly homeDir: string }): SetupApplyPlan {
+  return {
+    kind: "setup-save-apply-plan",
+    manifestSourceBundleIds: ["test-web-search-bundle"],
+    operations: [{
+      id: "test-web-search",
+      kind: "config-patch",
+      sourceLineIds: ["test-web-search-line"],
+      target: {
+        kind: "config-scope",
+        scope: ["web"],
+        path: profileConfigPath(input.homeDir),
+        preserveUnrelatedConfig: true,
+      },
+      review: {
+        copyKey: "setupModules.webSearch.review",
+        summaryKey: "setupModules.webSearch.draft",
+        redacted: true,
+        values,
+      },
+      preserveUnrelatedConfig: true,
+      writesConfig: false,
+      writesTrustStore: false,
+      dryRunOnly: true,
+    }],
+    eligibility: {
+      eligible: true,
+      blockers: [],
+      repairIntents: [],
+    },
+    preservesUnrelatedConfig: true,
+    writesConfig: false,
+    writesTrustStore: false,
+    dryRunOnly: true,
+    metadata: {
+      operationCount: 1,
+      configOperationCount: 1,
+      trustOperationCount: 0,
+      credentialOperationCount: 0,
+    },
+  };
+}
+
+function readyDdgsStatus(homeDir: string): Awaited<ReturnType<typeof capabilityManager.checkManagedPythonCapabilityStatus>> {
+  const stateRoot = resolveGlobalStateHome({ homeDir }).stateRoot;
+  return {
+    ok: true,
+    status: "verified",
+    capabilityId: DDGS_CAPABILITY_ID,
+    version: "9.14.4",
+    specHash: "hash",
+    installedGroups: [],
+    installedPackages: ["ddgs==9.14.4"],
+    pythonPath: join(stateRoot, "python-capabilities", DDGS_CAPABILITY_ID, "bin", "python"),
+    envPath: join(stateRoot, "python-capabilities", DDGS_CAPABILITY_ID),
+    manifest: {
+      id: DDGS_CAPABILITY_ID,
+      version: "9.14.4",
+      specHash: "hash",
+      installedPackages: ["ddgs==9.14.4"],
+      installedGroups: [],
+      pythonPath: join(stateRoot, "python-capabilities", DDGS_CAPABILITY_ID, "bin", "python"),
+      envPath: join(stateRoot, "python-capabilities", DDGS_CAPABILITY_ID),
+      createdAt: "2026-01-01T00:00:00.000Z",
+      updatedAt: "2026-01-01T00:00:00.000Z",
+      verifiedAt: "2026-01-01T00:00:00.000Z",
+      status: "verified",
+    },
+  };
+}
+
+function readyDdgsInstallResult(homeDir: string): Awaited<ReturnType<typeof capabilityManager.installManagedPythonCapabilityEnvironment>> {
+  const status = readyDdgsStatus(homeDir);
+  if (!status.ok) throw new Error("expected ready status");
+  return {
+    ok: true,
+    capabilityId: status.capabilityId,
+    version: status.version,
+    specHash: status.specHash,
+    installedGroups: status.installedGroups,
+    installedPackages: status.installedPackages,
+    pythonPath: status.pythonPath,
+    envPath: status.envPath,
+    manifest: status.manifest,
   };
 }
 
@@ -1022,6 +1111,179 @@ describe("reviewed setup apply executor", () => {
       summarizeSnapshots: false,
       snapshotSummarizeThreshold: 16_000,
     });
+  });
+
+  it("applies reviewed Brave Search config without writing raw secrets", async () => {
+    await mkdir(dirname(profileConfigPath(tempDir)), { recursive: true });
+    await writeFile(profileConfigPath(tempDir), JSON.stringify({
+      web: {
+        enableNetwork: true,
+        maxContentChars: 12345,
+        extractBackend: "stub",
+      },
+    }, null, 2), "utf8");
+    const plan = webSearchCapabilityPlan({
+      searchBackend: "brave",
+      extractBackend: "stub",
+      braveApiKeyEnv: "BRAVE_SEARCH_API_KEY",
+      braveCredentialReady: true,
+      braveCredentialValuesIncluded: false,
+      secretValue: "must-not-be-written",
+    }, { homeDir: tempDir });
+
+    const result = await applyReviewedSetupPlanOperations(plan, {
+      homeDir: tempDir,
+      workspaceRoot,
+    });
+    const rawConfig = await readFile(profileConfigPath(tempDir), "utf8");
+    const config = JSON.parse(rawConfig) as {
+      web?: {
+        enableNetwork?: boolean;
+        maxContentChars?: number;
+        searchBackend?: string;
+        extractBackend?: string;
+        brave?: { apiKeyEnv?: string; apiKey?: string };
+      };
+    };
+
+    expect(result.ok).toBe(true);
+    expect(config.web).toEqual({
+      enableNetwork: true,
+      maxContentChars: 12345,
+      searchBackend: "brave",
+      extractBackend: "stub",
+      brave: {
+        apiKeyEnv: "BRAVE_SEARCH_API_KEY",
+      },
+    });
+    expect(rawConfig).not.toContain("must-not-be-written");
+    expect(config.web?.brave?.apiKey).toBeUndefined();
+  });
+
+  it("applies DDGS Search config when the registered capability is already ready", async () => {
+    const statusSpy = vi.spyOn(capabilityManager, "checkManagedPythonCapabilityStatus").mockResolvedValue(readyDdgsStatus(tempDir));
+    const installSpy = vi.spyOn(capabilityManager, "installManagedPythonCapabilityEnvironment").mockResolvedValue(readyDdgsInstallResult(tempDir));
+    const plan = webSearchCapabilityPlan({
+      searchBackend: "ddgs",
+      ddgsCapabilityId: DDGS_CAPABILITY_ID,
+      ddgsCapabilityStatus: "ready",
+      ddgsSetupConfirmed: false,
+    }, { homeDir: tempDir });
+
+    const result = await applyReviewedSetupPlanOperations(plan, {
+      homeDir: tempDir,
+      workspaceRoot,
+    });
+    const config = JSON.parse(await readFile(profileConfigPath(tempDir), "utf8")) as {
+      web?: { searchBackend?: string };
+    };
+
+    expect(result.ok).toBe(true);
+    expect(statusSpy).toHaveBeenCalledWith({
+      stateRoot: resolveGlobalStateHome({ homeDir: tempDir }).stateRoot,
+      capabilityId: DDGS_CAPABILITY_ID,
+    });
+    expect(installSpy).not.toHaveBeenCalled();
+    expect(config.web?.searchBackend).toBe("ddgs");
+  });
+
+  it("installs only the registered DDGS capability when explicitly confirmed", async () => {
+    const stateRoot = resolveGlobalStateHome({ homeDir: tempDir }).stateRoot;
+    vi.spyOn(capabilityManager, "checkManagedPythonCapabilityStatus").mockResolvedValue({
+      ok: false,
+      capabilityId: DDGS_CAPABILITY_ID,
+      reason: "install_required",
+      message: "Managed Python capability environment has not been installed.",
+    });
+    const installSpy = vi.spyOn(capabilityManager, "installManagedPythonCapabilityEnvironment").mockResolvedValue(readyDdgsInstallResult(tempDir));
+    const plan = webSearchCapabilityPlan({
+      searchBackend: "ddgs",
+      ddgsCapabilityId: DDGS_CAPABILITY_ID,
+      ddgsCapabilityStatus: "missing",
+      ddgsSetupConfirmed: true,
+    }, { homeDir: tempDir });
+
+    const result = await applyReviewedSetupPlanOperations(plan, {
+      homeDir: tempDir,
+      workspaceRoot,
+    });
+    const config = JSON.parse(await readFile(profileConfigPath(tempDir), "utf8")) as {
+      web?: { searchBackend?: string };
+    };
+
+    expect(result.ok).toBe(true);
+    expect(installSpy).toHaveBeenCalledWith({
+      stateRoot,
+      capabilityId: DDGS_CAPABILITY_ID,
+    });
+    expect(config.web?.searchBackend).toBe("ddgs");
+  });
+
+  it("does not install DDGS without explicit confirmation and preserves existing web config", async () => {
+    await mkdir(dirname(profileConfigPath(tempDir)), { recursive: true });
+    const initialConfig = {
+      web: {
+        enableNetwork: true,
+        searchBackend: "stub",
+        maxContentChars: 5000,
+      },
+    };
+    await writeFile(profileConfigPath(tempDir), JSON.stringify(initialConfig, null, 2), "utf8");
+    vi.spyOn(capabilityManager, "checkManagedPythonCapabilityStatus").mockResolvedValue({
+      ok: false,
+      capabilityId: DDGS_CAPABILITY_ID,
+      reason: "install_required",
+      message: "Managed Python capability environment has not been installed.",
+    });
+    const installSpy = vi.spyOn(capabilityManager, "installManagedPythonCapabilityEnvironment").mockResolvedValue(readyDdgsInstallResult(tempDir));
+    const plan = webSearchCapabilityPlan({
+      searchBackend: "ddgs",
+      ddgsCapabilityId: DDGS_CAPABILITY_ID,
+      ddgsCapabilityStatus: "missing",
+      ddgsSetupConfirmed: false,
+    }, { homeDir: tempDir });
+
+    const result = await applyReviewedSetupPlanOperations(plan, {
+      homeDir: tempDir,
+      workspaceRoot,
+    });
+    const config = JSON.parse(await readFile(profileConfigPath(tempDir), "utf8"));
+
+    expect(result.ok).toBe(false);
+    expect(result.error).toContain("requires explicit managed Python capability setup confirmation");
+    expect(installSpy).not.toHaveBeenCalled();
+    expect(config).toEqual(initialConfig);
+  });
+
+  it("returns actionable copy when confirmed DDGS setup fails", async () => {
+    vi.spyOn(capabilityManager, "checkManagedPythonCapabilityStatus").mockResolvedValue({
+      ok: false,
+      capabilityId: DDGS_CAPABILITY_ID,
+      reason: "install_required",
+      message: "Managed Python capability environment has not been installed.",
+    });
+    vi.spyOn(capabilityManager, "installManagedPythonCapabilityEnvironment").mockResolvedValue({
+      ok: false,
+      capabilityId: DDGS_CAPABILITY_ID,
+      reason: "pip_install_failed",
+      message: "Could not install ddgs.",
+      diagnostic: "pip failed",
+    });
+    const plan = webSearchCapabilityPlan({
+      searchBackend: "ddgs",
+      ddgsCapabilityId: DDGS_CAPABILITY_ID,
+      ddgsCapabilityStatus: "missing",
+      ddgsSetupConfirmed: true,
+    }, { homeDir: tempDir });
+
+    const result = await applyReviewedSetupPlanOperations(plan, {
+      homeDir: tempDir,
+      workspaceRoot,
+    });
+
+    expect(result.ok).toBe(false);
+    expect(result.error).toContain("DDGS managed Python capability setup failed");
+    expect(result.error).toContain("Could not install ddgs.");
   });
 
   it("creates the managed Python environment before applying reviewed local STT", async () => {
