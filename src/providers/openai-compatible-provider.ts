@@ -802,13 +802,15 @@ export async function* streamOpenAICompatibleRequest(input: {
     }
 
     if (sawTransportDone && content.length === 0 && !sawToolCall) {
+      const fallbackBody = { ...input.preparedRequest.body };
+      delete fallbackBody.stream_options;
       const fallback = await executeOpenAICompatibleRequest({
         provider: input.provider,
         model: input.model,
         preparedRequest: {
           ...input.preparedRequest,
           body: {
-            ...input.preparedRequest.body,
+            ...fallbackBody,
             stream: false
           }
         },

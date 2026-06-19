@@ -1089,6 +1089,7 @@ describe("createOpenAICompatibleProvider streaming", () => {
     expect(requestBodies).toHaveLength(2);
     expect(requestBodies[0]?.stream).toBe(true);
     expect(requestBodies[1]?.stream).toBe(false);
+    expect(requestBodies[1]).not.toHaveProperty("stream_options");
     expect(events).toEqual(expect.arrayContaining([
       expect.objectContaining({ kind: "token", text: "fallback ok" }),
       expect.objectContaining({
@@ -1464,6 +1465,7 @@ describe("createOpenAICompatibleProvider streaming", () => {
     expect(requestBodies).toHaveLength(2);
     expect(requestBodies[0]?.stream).toBe(true);
     expect(requestBodies[1]?.stream).toBe(false);
+    expect(requestBodies[1]).not.toHaveProperty("stream_options");
     expect(events).toEqual(expect.arrayContaining([
       expect.objectContaining({ kind: "token", text: "fallback after empty finish" }),
       expect.objectContaining({

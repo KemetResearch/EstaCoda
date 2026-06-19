@@ -1267,6 +1267,7 @@ describe("ProviderTurnLoop OpenAI-compatible stream recovery", () => {
       expect(requestBodies).toHaveLength(2);
       expect(requestBodies[0]?.stream).toBe(true);
       expect(requestBodies[1]?.stream).toBe(false);
+      expect(requestBodies[1]).not.toHaveProperty("stream_options");
       expect(result.iterations).toBe(1);
       expect(result.providerExecution?.response?.content).toBe("Recovered visible answer.");
       expect(result.providerExecution?.response?.usage).toEqual({
