@@ -219,6 +219,19 @@ export class TelegramAdapter implements ChannelAdapter {
       this.#progressByChat.delete(sessionKey.chatId);
       const formatted = formatTelegramReply(text, options);
       const chunks = chunkTelegramText(formatted.text, formatted.format);
+      const editMessageId = parseTelegramEditMessageId(options?.editMessageId);
+
+      if (chunks.length === 1 && editMessageId !== undefined) {
+        try {
+          await this.#editMessageText(sessionKey.chatId, editMessageId, chunks[0] ?? "", {
+            ...options,
+            format: formatted.format
+          });
+          return;
+        } catch {
+          // Stale or deleted callback messages should not break delivery; send a fresh card instead.
+        }
+      }
 
       for (const [index, chunk] of chunks.entries()) {
         await this.#sendMessage(sessionKey.chatId, chunk, {
@@ -558,7 +571,10 @@ export class TelegramAdapter implements ChannelAdapter {
       message_id: messageId,
       text,
       disable_web_page_preview: true,
-      parse_mode: options?.format === "html" ? "HTML" : undefined
+      parse_mode: options?.format === "html" ? "HTML" : undefined,
+      reply_markup: options?.actions === undefined
+        ? undefined
+        : this.#inlineKeyboardPayload(options.actions)
     });
   }
 
@@ -2033,6 +2049,15 @@ function renderVideoArtifactCaption(artifact: ArtifactRecord): string {
     artifact.summary ?? `Generated ${artifact.kind}`,
     `Artifact: ${artifact.id}`
   ].join("\n").slice(0, 1024);
+}
+
+function parseTelegramEditMessageId(value: string | null | undefined): number | undefined {
+  if (value === undefined || value === null) {
+    return undefined;
+  }
+
+  const parsed = Number(value);
+  return Number.isInteger(parsed) && parsed > 0 ? parsed : undefined;
 }
 
 function chunkTelegramText(

@@ -306,6 +306,51 @@ describe("TelegramAdapter", () => {
     expect(JSON.stringify(bodies[0]?.reply_markup)).not.toContain("rm -rf");
   });
 
+  it("delivery.sendText edits a single message with updated inline keyboard", async () => {
+    const { adapter, calls } = createTelegramStreamingHarness();
+    const actions = renderApprovalActions("gateway-approval-1");
+
+    await adapter.delivery.sendText(
+      { platform: "telegram", chatId: "123" },
+      "edited",
+      { editMessageId: "42", actions, format: "plain" }
+    );
+
+    expect(callsFor(calls, "editMessageText")).toHaveLength(1);
+    expect(callsFor(calls, "sendMessage")).toHaveLength(0);
+    expect(callsFor(calls, "editMessageText")[0]?.body).toMatchObject({
+      chat_id: "123",
+      message_id: 42,
+      text: "edited",
+      reply_markup: {
+        inline_keyboard: actions.map((row) =>
+          row.map((action) => ({
+            text: action.label,
+            callback_data: action.value
+          }))
+        )
+      }
+    });
+    expect(callsFor(calls, "editMessageText")[0]?.body).not.toHaveProperty("parse_mode");
+  });
+
+  it("delivery.sendText preserves HTML formatting when editing", async () => {
+    const { adapter, calls } = createTelegramStreamingHarness();
+
+    await adapter.delivery.sendText(
+      { platform: "telegram", chatId: "123" },
+      "<>&",
+      { editMessageId: "42" }
+    );
+
+    expect(callsFor(calls, "editMessageText")).toHaveLength(1);
+    expect(callsFor(calls, "editMessageText")[0]?.body).toMatchObject({
+      message_id: 42,
+      text: "&lt;&gt;&amp;",
+      parse_mode: "HTML"
+    });
+  });
+
   it("delivery.sendText sends short messages once", async () => {
     const { adapter, bodies } = createTelegramTextHarness();
 
@@ -419,6 +464,46 @@ describe("TelegramAdapter", () => {
           callback_data: action.value
         }))
       )
+    });
+  });
+
+  it("delivery.sendText sends chunks normally instead of editing", async () => {
+    const { adapter, calls } = createTelegramStreamingHarness();
+
+    await adapter.delivery.sendText(
+      { platform: "telegram", chatId: "123" },
+      "Long chunk ".repeat(2_000),
+      { editMessageId: "42", format: "plain" }
+    );
+
+    expect(callsFor(calls, "editMessageText")).toHaveLength(0);
+    expect(callsFor(calls, "sendMessage").length).toBeGreaterThan(1);
+  });
+
+  it("delivery.sendText falls back to sendMessage when edit target is stale", async () => {
+    const { adapter, calls } = createTelegramStreamingHarness({
+      failResponses: {
+        editMessageText: {
+          1: {
+            status: 400,
+            statusText: "Bad Request",
+            description: "Bad Request: message to edit not found"
+          }
+        }
+      }
+    });
+
+    await adapter.delivery.sendText(
+      { platform: "telegram", chatId: "123" },
+      "fallback",
+      { editMessageId: "42", format: "plain" }
+    );
+
+    expect(callsFor(calls, "editMessageText")).toHaveLength(1);
+    expect(callsFor(calls, "sendMessage")).toHaveLength(1);
+    expect(callsFor(calls, "sendMessage")[0]?.body).toMatchObject({
+      chat_id: "123",
+      text: "fallback"
     });
   });
 
@@ -2057,6 +2142,61 @@ describe("TelegramAdapter", () => {
       chatId: "chat-1",
       userId: "user-1",
       chatType: "dm"
+    });
+  });
+
+  it("acknowledges callback queries after polling", async () => {
+    const calls: TelegramHarnessCall[] = [];
+    const fetch = vi.fn(async (url: string, init?: { body?: string }) => {
+      const method = url.split("/").at(-1) ?? "";
+      const body = JSON.parse(init?.body ?? "{}") as Record<string, unknown>;
+      calls.push({ method, body });
+
+      if (method === "getUpdates") {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            ok: true,
+            result: [{
+              update_id: 44,
+              callback_query: {
+                id: "callback-ack",
+                data: "ecmodel1:x",
+                from: {
+                  id: "user-1",
+                  first_name: "Ada"
+                },
+                message: {
+                  message_id: 9,
+                  date: 1700000000,
+                  chat: {
+                    id: "chat-1",
+                    type: "private"
+                  }
+                }
+              }
+            }]
+          })
+        };
+      }
+
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({ ok: true, result: true })
+      };
+    });
+    const adapter = new TelegramAdapter({ botToken: "test-token", fetch });
+    const handler = vi.fn(async () => undefined);
+
+    await adapter.start(handler);
+    const count = await adapter.pollOnce();
+
+    expect(count).toBe(1);
+    expect(handler).toHaveBeenCalledOnce();
+    expect(callsFor(calls, "answerCallbackQuery")[0]?.body).toEqual({
+      callback_query_id: "callback-ack"
     });
   });
 

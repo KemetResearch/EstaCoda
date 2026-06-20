@@ -821,6 +821,17 @@ function makeMessage(text: string, overrides?: Partial<ChannelMessage>): Channel
   };
 }
 
+function makeTelegramCallbackMessage(text: string, messageId = "77", callbackQueryId = "callback-1"): ChannelMessage {
+  return makeMessage(text, {
+    metadata: {
+      telegram: {
+        messageId,
+        callbackQueryId
+      }
+    }
+  });
+}
+
 async function waitFor(predicate: () => boolean, timeoutMs = 500): Promise<void> {
   const startedAt = Date.now();
   while (Date.now() - startedAt < timeoutMs) {
@@ -1592,10 +1603,11 @@ describe("ChannelGateway commands", () => {
       const values = actions?.flat().map((action) => action.value) ?? [];
       expect(values.every((value) => value.length <= 64)).toBe(true);
       expect(JSON.stringify(actions)).not.toContain("sk-secret");
+      expect(adapter.records.at(-1)?.options?.editMessageId).toBeUndefined();
 
       const localAction = actions?.flat().find((action) => action.label === "Local");
       expect(localAction).toBeDefined();
-      const providerResult = await gateway.receive(makeMessage(localAction?.value ?? ""));
+      const providerResult = await gateway.receive(makeTelegramCallbackMessage(localAction?.value ?? "", "81"));
       expect(providerResult.replyText).toContain("Model Configuration");
       expect(providerResult.replyText).toMatch(/Provider: Local \(1-\d+ of \d+\)/u);
       expect(providerResult.replyText).toContain("Select a model:");
@@ -1607,9 +1619,11 @@ describe("ChannelGateway commands", () => {
       expect(modelLabels).not.toContain("Local");
       expect(modelLabels.at(-2)).toBe("< Back");
       expect(modelLabels.at(-1)).toBe("Cancel");
+      expect(adapter.records.at(-1)?.options?.editMessageId).toBe("81");
 
       await gateway.receive(makeMessage("model-select local/phi4:latest"));
       expect(adapter.records.at(-1)?.text).toContain("Session model override set: local/phi4:latest");
+      expect(adapter.records.at(-1)?.options?.editMessageId).toBeUndefined();
     } finally {
       await rm(tempHome, { recursive: true, force: true });
     }
@@ -1892,12 +1906,14 @@ describe("ChannelGateway commands", () => {
       const localProvider = providerActions.find((action) => action.label === "Local");
       expect(localProvider).toBeDefined();
 
-      await gateway.receive(makeMessage(localProvider?.value ?? ""));
+      await gateway.receive(makeTelegramCallbackMessage(localProvider?.value ?? "", "82"));
+      expect(adapter.records.at(-1)?.options?.editMessageId).toBe("82");
       const actions = adapter.records.at(-1)?.options?.actions?.flat() ?? [];
       const selectPhi = actions.find((action) => action.label === "phi4:latest");
       expect(selectPhi).toBeDefined();
 
-      await gateway.receive(makeMessage(selectPhi?.value ?? ""));
+      await gateway.receive(makeTelegramCallbackMessage(selectPhi?.value ?? "", "82", "callback-2"));
+      expect(adapter.records.at(-1)?.options?.editMessageId).toBe("82");
       const callbackOverride = await db.getSessionModelOverride(picker.sessionId);
       expect(callbackOverride?.route.id).toBe("phi4:latest");
 
@@ -1909,15 +1925,18 @@ describe("ChannelGateway commands", () => {
         id: callbackOverride?.route.id
       });
 
-      await gateway.receive(makeMessage(modelPickerCancelActionValue()));
+      await gateway.receive(makeTelegramCallbackMessage(modelPickerCancelActionValue(), "82", "callback-3"));
+      expect(adapter.records.at(-1)?.options?.editMessageId).toBe("82");
       expect((await db.getSessionModelOverride(picker.sessionId))?.route.id).toBe("phi4:latest");
 
-      await gateway.receive(makeMessage(modelPickerClearActionValue()));
+      await gateway.receive(makeTelegramCallbackMessage(modelPickerClearActionValue(), "82", "callback-4"));
+      expect(adapter.records.at(-1)?.options?.editMessageId).toBe("82");
       expect(await db.getSessionModelOverride(picker.sessionId)).toBeUndefined();
       expect(invalidate).toHaveBeenCalledWith(picker.sessionId);
 
-      const malformed = await gateway.receive(makeMessage("ecmodel1:s:not.a.route"));
+      const malformed = await gateway.receive(makeTelegramCallbackMessage("ecmodel1:s:not.a.route", "82", "callback-5"));
       expect(malformed.replyText).toContain("Invalid model picker action key.");
+      expect(adapter.records.at(-1)?.options?.editMessageId).toBe("82");
       expect(await db.getSessionModelOverride(picker.sessionId)).toBeUndefined();
     } finally {
       await rm(tempHome, { recursive: true, force: true });
@@ -1956,7 +1975,7 @@ describe("ChannelGateway commands", () => {
       const localProvider = adapter.records.at(-1)?.options?.actions?.flat()
         .find((action) => action.label === "Local");
       expect(localProvider).toBeDefined();
-      const modelPicker = await gateway.receive(makeMessage(localProvider?.value ?? ""));
+      const modelPicker = await gateway.receive(makeTelegramCallbackMessage(localProvider?.value ?? "", "83"));
 
       expect(modelPicker.replyText).toMatch(/Provider: Local \(1-8 of \d+\)/u);
       expect(modelPicker.replyText).toContain("Select a model:");
@@ -1967,6 +1986,7 @@ describe("ChannelGateway commands", () => {
       expect(JSON.stringify(actions.map((action) => action.value))).not.toContain(longModel);
       expect(actions.map((action) => action.label)).toContain("1/4");
       expect(actions.map((action) => action.label)).toContain("Next >");
+      expect(adapter.records.at(-1)?.options?.editMessageId).toBe("83");
 
       const longAction = actions.find((action) => action.label === compactModelPickerLabel(longModel));
       expect(longAction).toBeDefined();
@@ -1974,18 +1994,21 @@ describe("ChannelGateway commands", () => {
 
       const nextAction = actions.find((action) => action.label === "Next >");
       expect(nextAction).toBeDefined();
-      const nextPage = await gateway.receive(makeMessage(nextAction?.value ?? ""));
+      const nextPage = await gateway.receive(makeTelegramCallbackMessage(nextAction?.value ?? "", "83", "callback-2"));
       expect(nextPage.replyText).toMatch(/Provider: Local \(9-16 of \d+\)/u);
       expect(adapter.records.at(-1)?.options?.actions?.flat().map((action) => action.label)).toContain("< Prev");
+      expect(adapter.records.at(-1)?.options?.editMessageId).toBe("83");
 
       const backAction = adapter.records.at(-1)?.options?.actions?.flat()
         .find((action) => action.label === "< Back");
       expect(backAction).toBeDefined();
-      const backResult = await gateway.receive(makeMessage(backAction?.value ?? ""));
+      const backResult = await gateway.receive(makeTelegramCallbackMessage(backAction?.value ?? "", "83", "callback-3"));
       expect(backResult.replyText).toContain("Select a provider:");
+      expect(adapter.records.at(-1)?.options?.editMessageId).toBe("83");
 
-      const selected = await gateway.receive(makeMessage(longAction?.value ?? ""));
+      const selected = await gateway.receive(makeTelegramCallbackMessage(longAction?.value ?? "", "83", "callback-4"));
       expect(selected.replyText).toContain(`Session model override set: local/${longModel}`);
+      expect(adapter.records.at(-1)?.options?.editMessageId).toBe("83");
       expect((await db.getSessionModelOverride(selected.sessionId))?.route.id).toBe(longModel);
 
       await writeGatewayModelConfig(tempHome, {
@@ -1999,8 +2022,9 @@ describe("ChannelGateway commands", () => {
         },
         model: { provider: "local", id: "qwen2.5:3b" }
       });
-      const stalePage = await gateway.receive(makeMessage(nextAction?.value ?? ""));
+      const stalePage = await gateway.receive(makeTelegramCallbackMessage(nextAction?.value ?? "", "83", "callback-5"));
       expect(stalePage.replyText).toContain("Model picker action is no longer available. Run /model again.");
+      expect(adapter.records.at(-1)?.options?.editMessageId).toBe("83");
       expect((await db.getSessionModelOverride(stalePage.sessionId))?.route.id).toBe(longModel);
     } finally {
       await rm(tempHome, { recursive: true, force: true });
