@@ -11,6 +11,7 @@ import {
   resetModelsDevRegistryForTest,
   type CreateModelSelectionCatalogOptions
 } from "./model-selection-catalog.js";
+import type { ModelCatalogOverrideRegistry } from "../model-catalog/model-catalog-policy.js";
 
 function createMockSnapshot(): Record<string, unknown> {
   return {
@@ -82,11 +83,18 @@ function createMockSnapshot(): Record<string, unknown> {
 }
 
 function withFixture(testFn: (fixturePath: string, cachePath: string) => Promise<void>): () => Promise<void> {
+  return withSnapshot(createMockSnapshot(), testFn);
+}
+
+function withSnapshot(
+  snapshot: Record<string, unknown>,
+  testFn: (fixturePath: string, cachePath: string) => Promise<void>
+): () => Promise<void> {
   return async () => {
     const dir = mkdtempSync(join(tmpdir(), "estacoda-catalog-test-"));
     const fixturePath = join(dir, "models_dev_snapshot.json");
     const cachePath = join(dir, "models_dev_cache.json");
-    writeFileSync(fixturePath, JSON.stringify(createMockSnapshot(), null, 2), "utf8");
+    writeFileSync(fixturePath, JSON.stringify(snapshot, null, 2), "utf8");
 
     try {
       await testFn(fixturePath, cachePath);
@@ -96,9 +104,113 @@ function withFixture(testFn: (fixturePath: string, cachePath: string) => Promise
   };
 }
 
+function createLifecycleSnapshot(): Record<string, unknown> {
+  return {
+    providers: [
+      { id: "openai", name: "OpenAI" },
+      { id: "deepseek", name: "DeepSeek" }
+    ],
+    models: [
+      {
+        id: "gpt-4o",
+        provider_id: "openai",
+        context_window: 128_000,
+        input_modalities: ["text"],
+        output_modalities: ["text"],
+        reasoning: false,
+        tool_call: true,
+        structured_output: true,
+        status: "stable"
+      },
+      {
+        id: "gpt-retired",
+        provider_id: "openai",
+        context_window: 128_000,
+        input_modalities: ["text"],
+        output_modalities: ["text"],
+        reasoning: false,
+        tool_call: true,
+        structured_output: true,
+        status: "stable"
+      },
+      {
+        id: "gpt-4o-deprecated",
+        provider_id: "openai",
+        context_window: 128_000,
+        input_modalities: ["text"],
+        output_modalities: ["text"],
+        reasoning: false,
+        tool_call: true,
+        structured_output: true,
+        status: "deprecated"
+      },
+      {
+        id: "gpt-image-test",
+        provider_id: "openai",
+        context_window: 0,
+        input_modalities: ["text"],
+        output_modalities: ["image"],
+        reasoning: false,
+        tool_call: false,
+        structured_output: false,
+        status: "stable"
+      },
+      {
+        id: "text-embedding-test",
+        provider_id: "openai",
+        context_window: 8192,
+        input_modalities: ["text"],
+        output_modalities: ["text"],
+        reasoning: false,
+        tool_call: false,
+        structured_output: false,
+        status: "stable"
+      },
+      {
+        id: "o3-deep-research",
+        provider_id: "openai",
+        context_window: 128_000,
+        input_modalities: ["text"],
+        output_modalities: ["text"],
+        reasoning: true,
+        tool_call: true,
+        structured_output: true,
+        status: "stable"
+      },
+      {
+        id: "deepseek-image-test",
+        provider_id: "deepseek",
+        context_window: 0,
+        input_modalities: ["text"],
+        output_modalities: ["image"],
+        reasoning: false,
+        tool_call: false,
+        structured_output: false,
+        status: "stable"
+      }
+    ],
+    fetchedAt: "2024-01-01T00:00:00.000Z",
+    source: "bundled"
+  };
+}
+
+function lifecycleOverrides(): ModelCatalogOverrideRegistry {
+  return {
+    version: 1,
+    models: [{
+      provider: "openai",
+      model: "gpt-retired",
+      lifecycle: "retired",
+      usageClass: "primary-chat",
+      note: "Retired by reviewed test policy."
+    }]
+  };
+}
+
 function buildOptions(fixturePath: string, cachePath: string, overrides?: {
   config?: CreateModelSelectionCatalogOptions["config"];
   registry?: ProviderRegistry;
+  modelCatalogOverrides?: ModelCatalogOverrideRegistry;
 }): CreateModelSelectionCatalogOptions {
   return {
     config: overrides?.config ?? {},
@@ -108,7 +220,8 @@ function buildOptions(fixturePath: string, cachePath: string, overrides?: {
       bundledSnapshotPath: fixturePath,
       cachePath,
       allowNetwork: false
-    }
+    },
+    modelCatalogOverrides: overrides?.modelCatalogOverrides
   };
 }
 
@@ -416,6 +529,172 @@ describe("ModelSelectionCatalog filtering", () => {
     const catalog = await createModelSelectionCatalog(buildOptions(fixturePath, cachePath));
     const models = await catalog.listModels();
     expect(models.some((m) => m.id === "dall-e-3")).toBe(false);
+  }));
+
+  it("excludes retired models by default", withSnapshot(createLifecycleSnapshot(), async (fixturePath, cachePath) => {
+    const catalog = await createModelSelectionCatalog(buildOptions(fixturePath, cachePath, {
+      modelCatalogOverrides: lifecycleOverrides()
+    }));
+
+    const models = await catalog.listModels();
+    expect(models.some((m) => m.id === "gpt-retired")).toBe(false);
+  }));
+
+  it("includes retired models when includeRetired is true", withSnapshot(createLifecycleSnapshot(), async (fixturePath, cachePath) => {
+    const catalog = await createModelSelectionCatalog(buildOptions(fixturePath, cachePath, {
+      modelCatalogOverrides: lifecycleOverrides()
+    }));
+
+    const models = await catalog.listModels({ includeRetired: true });
+    const retired = models.find((m) => m.id === "gpt-retired");
+    expect(retired).toBeDefined();
+    expect(retired!.lifecycle).toBe("retired");
+  }));
+
+  it("excludes image, embedding, and deep-research models by default", withSnapshot(createLifecycleSnapshot(), async (fixturePath, cachePath) => {
+    const catalog = await createModelSelectionCatalog(buildOptions(fixturePath, cachePath, {
+      modelCatalogOverrides: lifecycleOverrides()
+    }));
+
+    const models = await catalog.listModels();
+    expect(models.some((m) => m.id === "gpt-image-test")).toBe(false);
+    expect(models.some((m) => m.id === "text-embedding-test")).toBe(false);
+    expect(models.some((m) => m.id === "o3-deep-research")).toBe(false);
+  }));
+
+  it("includes non-chat models when includeNonChat is true", withSnapshot(createLifecycleSnapshot(), async (fixturePath, cachePath) => {
+    const catalog = await createModelSelectionCatalog(buildOptions(fixturePath, cachePath, {
+      modelCatalogOverrides: lifecycleOverrides()
+    }));
+
+    const models = await catalog.listModels({ includeNonChat: true });
+    expect(models.find((m) => m.id === "gpt-image-test")?.usageClass).toBe("image");
+    expect(models.find((m) => m.id === "text-embedding-test")?.usageClass).toBe("embedding");
+    expect(models.find((m) => m.id === "o3-deep-research")?.usageClass).toBe("deep-research");
+  }));
+
+  it("preserves configured stale models with deterministic warnings", withSnapshot(createLifecycleSnapshot(), async (fixturePath, cachePath) => {
+    const catalog = await createModelSelectionCatalog(buildOptions(fixturePath, cachePath, {
+      config: {
+        providers: {
+          openai: {
+            kind: "openai-compatible",
+            models: ["gpt-retired"]
+          }
+        }
+      },
+      modelCatalogOverrides: lifecycleOverrides()
+    }));
+
+    const models = await catalog.listModels();
+    const retired = models.find((m) => m.id === "gpt-retired");
+    expect(retired).toBeDefined();
+    expect(retired!.source).toBe("configured");
+    expect(retired!.configured).toBe(true);
+    expect(retired!.warnings).toEqual(["Model is retired."]);
+    expect(JSON.stringify(retired!.warnings)).not.toContain("sk-");
+  }));
+
+  it("preserves manual stale models", withSnapshot(createLifecycleSnapshot(), async (fixturePath, cachePath) => {
+    const catalog = await createModelSelectionCatalog(buildOptions(fixturePath, cachePath, {
+      config: {
+        model: {
+          provider: "openai" as ProviderId,
+          id: "gpt-retired"
+        }
+      },
+      modelCatalogOverrides: lifecycleOverrides()
+    }));
+
+    const models = await catalog.listModels();
+    const retired = models.find((m) => m.id === "gpt-retired");
+    expect(retired).toBeDefined();
+    expect(retired!.source).toBe("manual");
+    expect(retired!.warnings).toEqual(["Model is retired."]);
+  }));
+
+  it("preserves current stale models when the current route is available", withSnapshot(createLifecycleSnapshot(), async (fixturePath, cachePath) => {
+    const catalog = await createModelSelectionCatalog(buildOptions(fixturePath, cachePath, {
+      config: {
+        model: {
+          provider: "openai" as ProviderId,
+          id: "gpt-retired"
+        }
+      },
+      modelCatalogOverrides: lifecycleOverrides()
+    }));
+
+    await expect(catalog.resolveModel("openai", "gpt-retired")).resolves.toMatchObject({
+      id: "gpt-retired",
+      lifecycle: "retired",
+      source: "manual"
+    });
+  }));
+
+  it("preserves snapshot and configured duplicates because one source is configured", withSnapshot(createLifecycleSnapshot(), async (fixturePath, cachePath) => {
+    const catalog = await createModelSelectionCatalog(buildOptions(fixturePath, cachePath, {
+      config: {
+        providers: {
+          openai: {
+            kind: "openai-compatible",
+            models: ["gpt-retired"]
+          }
+        }
+      },
+      modelCatalogOverrides: lifecycleOverrides()
+    }));
+
+    const models = await catalog.listModels();
+    const matches = models.filter((m) => m.id === "gpt-retired");
+    expect(matches.length).toBe(1);
+    expect(matches[0]!.source).toBe("configured");
+  }));
+
+  it("hides snapshot-only images but preserves manual images", withSnapshot(createLifecycleSnapshot(), async (fixturePath, cachePath) => {
+    const snapshotOnly = await createModelSelectionCatalog(buildOptions(fixturePath, cachePath, {
+      modelCatalogOverrides: lifecycleOverrides()
+    }));
+    expect((await snapshotOnly.listModels()).some((m) => m.id === "gpt-image-test")).toBe(false);
+
+    const manual = await createModelSelectionCatalog(buildOptions(fixturePath, cachePath, {
+      config: {
+        model: {
+          provider: "openai" as ProviderId,
+          id: "gpt-image-test"
+        }
+      },
+      modelCatalogOverrides: lifecycleOverrides()
+    }));
+    const image = (await manual.listModels()).find((m) => m.id === "gpt-image-test");
+    expect(image).toBeDefined();
+    expect(image!.source).toBe("manual");
+    expect(image!.usageClass).toBe("image");
+    expect(image!.warnings).toEqual(["Model is not a primary chat model."]);
+  }));
+
+  it("applies lifecycle filtering without OpenAI-specific logic", withSnapshot(createLifecycleSnapshot(), async (fixturePath, cachePath) => {
+    const catalog = await createModelSelectionCatalog(buildOptions(fixturePath, cachePath, {
+      modelCatalogOverrides: lifecycleOverrides()
+    }));
+
+    expect((await catalog.listModels()).some((m) => m.id === "deepseek-image-test")).toBe(false);
+    expect((await catalog.listModels({ includeNonChat: true })).find((m) => m.id === "deepseek-image-test")).toMatchObject({
+      provider: "deepseek",
+      usageClass: "image"
+    });
+  }));
+
+  it("attaches lifecycle fields to returned entries", withSnapshot(createLifecycleSnapshot(), async (fixturePath, cachePath) => {
+    const catalog = await createModelSelectionCatalog(buildOptions(fixturePath, cachePath, {
+      modelCatalogOverrides: lifecycleOverrides()
+    }));
+
+    const models = await catalog.listModels();
+    const gpt4o = models.find((m) => m.id === "gpt-4o");
+    expect(gpt4o).toBeDefined();
+    expect(gpt4o!.lifecycle).toBe("available");
+    expect(gpt4o!.usageClass).toBe("primary-chat");
+    expect(gpt4o!.warnings).toEqual([]);
   }));
 });
 

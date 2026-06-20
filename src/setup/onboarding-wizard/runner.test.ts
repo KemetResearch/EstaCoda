@@ -138,6 +138,8 @@ function flowEngine(overrides: {
           executable: true,
           catalogOnly: false,
           supportsVision: false,
+          lifecycle: "available",
+          usageClass: "primary-chat",
         }]
       : [{
           id: "gpt-5.5",
@@ -155,6 +157,8 @@ function flowEngine(overrides: {
           executable: true,
           catalogOnly: false,
           supportsVision: true,
+          lifecycle: "available",
+          usageClass: "primary-chat",
         }],
     resolveSelection: async (providerId: ProviderId, modelId: string) => {
       if (providerId === "local") {
@@ -252,6 +256,8 @@ function modelStatusCandidate(
     executable: true,
     catalogOnly: false,
     supportsVision: false,
+    lifecycle: "available",
+    usageClass: "primary-chat",
   };
 }
 
@@ -2565,6 +2571,8 @@ describe("runFirstRunSetup", () => {
         executable: true,
         catalogOnly: false,
         supportsVision: false,
+        lifecycle: "available",
+        usageClass: "primary-chat",
       }],
       resolveSelection: async () => ({
         kind: "selected" as const,

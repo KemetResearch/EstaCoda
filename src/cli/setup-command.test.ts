@@ -444,6 +444,7 @@ type FirstRunPromptOptions = {
   readonly reviewAccepted: boolean;
   readonly launchRequested?: boolean;
   readonly providerId?: string;
+  readonly modelId?: string;
   readonly setupEditorActionId?: string;
 };
 
@@ -459,6 +460,9 @@ function firstRunPrompt(options: FirstRunPromptOptions): Prompt {
     }
     if (title.includes("provider")) {
       return valueWithIdOrDefault(selection, options.providerId ?? "local");
+    }
+    if (title.includes("model")) {
+      return valueWithIdOrDefault(selection, options.modelId ?? "gpt-5.5");
     }
     if (title.includes("setup editor") && options.setupEditorActionId !== undefined) {
       return valueWithIdOrDefault(selection, options.setupEditorActionId);

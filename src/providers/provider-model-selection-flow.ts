@@ -20,6 +20,10 @@ import {
 } from "./provider-metadata.js";
 import { inferModelProfile } from "./model-catalog.js";
 import { resolveRuntimeCredential } from "./runtime-credential-resolver.js";
+import type {
+  ModelLifecycle,
+  ModelUsageClass
+} from "../model-catalog/model-catalog-policy.js";
 
 export type ProviderModelSelectionFlowMode =
   | "normal"
@@ -31,6 +35,7 @@ export type ProviderModelSelectionFlowOptions = {
   providerRegistry: ProviderRegistry;
   homeDir?: string;
   modelsDevOptions?: CreateModelSelectionCatalogOptions["modelsDevOptions"];
+  modelCatalogOverrides?: CreateModelSelectionCatalogOptions["modelCatalogOverrides"];
   allowNetwork?: boolean;
   mode?: ProviderModelSelectionFlowMode;
 };
@@ -54,6 +59,10 @@ export type ModelCandidate = {
   executable: boolean;
   catalogOnly: boolean;
   supportsVision: boolean;
+  lifecycle: ModelLifecycle;
+  usageClass: ModelUsageClass;
+  lifecycleNote?: string;
+  warnings?: string[];
 };
 
 export type CredentialAction =
@@ -115,6 +124,7 @@ export async function createProviderModelSelectionFlow(
     providerRegistry: options.providerRegistry,
     homeDir: options.homeDir,
     modelsDevOptions: options.modelsDevOptions,
+    modelCatalogOverrides: options.modelCatalogOverrides,
     allowNetwork: options.allowNetwork ?? false
   });
 
@@ -233,7 +243,11 @@ async function listModelCandidatesImpl(
     configured: m.configured,
     executable: m.executable,
     catalogOnly: m.catalogOnly,
-    supportsVision: m.profile.supportsVision ?? false
+    supportsVision: m.profile.supportsVision ?? false,
+    lifecycle: m.lifecycle,
+    usageClass: m.usageClass,
+    lifecycleNote: m.lifecycleNote,
+    warnings: m.warnings
   }));
 }
 

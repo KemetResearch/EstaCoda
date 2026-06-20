@@ -79,6 +79,7 @@ export async function promptSetupChoice<T>(target: SetupPromptTarget, input: {
       title: input.title,
       body: input.message.trim(),
       options: input.choices.map((choice) => ({
+        id: choice.id,
         label: choice.label,
         description: choice.description,
         value: choice.value,

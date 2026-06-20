@@ -33,6 +33,12 @@ import type {
   ModelCatalogEntryReport,
   ModelRefreshReport
 } from "../reports/model-reports.js";
+import {
+  buildModelLifecycleWarnings,
+  classifyModelForCatalog,
+  loadBundledModelCatalogOverrides,
+  type ModelCatalogOverrideRegistry
+} from "../model-catalog/model-catalog-policy.js";
 import { resolveHomeDir } from "../config/home-dir.js";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
@@ -43,6 +49,12 @@ export function routeKey(provider: ProviderId, id: string, baseUrl?: string): st
 }
 
 export type SelectableModel = ModelCatalogEntryReport;
+
+type SelectableModelDraft =
+  Omit<SelectableModel, "lifecycle" | "usageClass" | "lifecycleNote"> &
+  Partial<Pick<SelectableModel, "lifecycle" | "usageClass" | "lifecycleNote">>;
+
+type SelectableModelSource = SelectableModel["source"] | "current";
 
 export type CatalogProvider = {
   id: ProviderId;
@@ -62,6 +74,7 @@ export type CatalogListOptions = {
   includeDeprecated?: boolean;
   includeAlpha?: boolean;
   includeBeta?: boolean;
+  includeRetired?: boolean;
   provider?: ProviderId;
   requireTools?: boolean;
   requireVision?: boolean;
@@ -77,6 +90,7 @@ export type CreateModelSelectionCatalogOptions = {
   providerRegistry: ProviderRegistry;
   homeDir?: string;
   modelsDevOptions?: ModelsDevRegistryOptions;
+  modelCatalogOverrides?: ModelCatalogOverrideRegistry;
   allowNetwork?: boolean;
 };
 
@@ -119,12 +133,13 @@ export async function createModelSelectionCatalog(
   }
 
   const profileContext = buildProfileResolutionContext(snapshot);
+  const modelCatalogOverrides = options.modelCatalogOverrides ?? await loadBundledModelCatalogOverrides();
 
   return {
     listProviders: async (listOpts) => listProvidersImpl(options, snapshot, listOpts),
-    listModels: async (listOpts) => listModelsImpl(options, snapshot, snapshotModelMap, snapshotInfoMap, snapshotProviderMap, profileContext, listOpts),
+    listModels: async (listOpts) => listModelsImpl(options, snapshot, snapshotModelMap, snapshotInfoMap, snapshotProviderMap, profileContext, modelCatalogOverrides, listOpts),
     searchModels: async (query, listOpts) => {
-      const all = await listModelsImpl(options, snapshot, snapshotModelMap, snapshotInfoMap, snapshotProviderMap, profileContext, listOpts);
+      const all = await listModelsImpl(options, snapshot, snapshotModelMap, snapshotInfoMap, snapshotProviderMap, profileContext, modelCatalogOverrides, listOpts);
       const normalized = normalizeLookupKey(query);
       return all.filter((model) =>
         normalizeLookupKey(model.id).includes(normalized) ||
@@ -133,7 +148,7 @@ export async function createModelSelectionCatalog(
       );
     },
     resolveModel: async (provider, id, baseUrl) => {
-      const all = await listModelsImpl(options, snapshot, snapshotModelMap, snapshotInfoMap, snapshotProviderMap, profileContext);
+      const all = await listModelsImpl(options, snapshot, snapshotModelMap, snapshotInfoMap, snapshotProviderMap, profileContext, modelCatalogOverrides);
       const key = routeKey(provider, id, baseUrl);
       return all.find((model) => model.routeKey === key);
     },
@@ -280,6 +295,7 @@ async function listModelsImpl(
   snapshotInfoMap: Map<string, ModelInfo>,
   snapshotProviderMap: Map<string, ProviderInfo>,
   profileContext: ProfileResolutionContext,
+  modelCatalogOverrides: ModelCatalogOverrideRegistry,
   listOpts?: CatalogListOptions
 ): Promise<SelectableModel[]> {
   const config = options.config;
@@ -288,9 +304,11 @@ async function listModelsImpl(
   const includeDeprecated = listOpts?.includeDeprecated ?? false;
   const includeAlpha = listOpts?.includeAlpha ?? false;
   const includeBeta = listOpts?.includeBeta ?? false;
+  const includeRetired = listOpts?.includeRetired ?? false;
   const includeNonChat = listOpts?.includeNonChat ?? false;
 
-  const entries = new Map<string, SelectableModel>();
+  const entries = new Map<string, SelectableModelDraft>();
+  const sourceKinds = new Map<string, Set<SelectableModelSource>>();
 
   // 1. Snapshot models
   for (const model of snapshot.models) {
@@ -299,11 +317,7 @@ async function listModelsImpl(
     const baseUrl = config.providers?.[provider]?.baseUrl;
     const key = routeKey(provider, id, baseUrl);
 
-    if (!shouldIncludeStatus(model.status, { includeAlpha, includeBeta, includeDeprecated })) {
-      continue;
-    }
-
-    if (!includeNonChat && !isChatModel(model)) {
+    if (!shouldIncludeStatus(model.status, { includeAlpha, includeBeta })) {
       continue;
     }
 
@@ -327,6 +341,7 @@ async function listModelsImpl(
       apiKeyEnv,
       providerInfo: snapshotProviderMap.get(provider)
     }));
+    addSourceKind(sourceKinds, key, "models-dev");
   }
 
   // 2. Fallback-known models not in snapshot
@@ -338,7 +353,7 @@ async function listModelsImpl(
 
     if (entries.has(key)) continue;
 
-    if (!shouldIncludeStatus(profile.status ?? "", { includeAlpha, includeBeta, includeDeprecated })) {
+    if (!shouldIncludeStatus(profile.status ?? "", { includeAlpha, includeBeta })) {
       continue;
     }
 
@@ -361,6 +376,7 @@ async function listModelsImpl(
       apiKeyEnv,
       providerInfo: snapshotProviderMap.get(provider)
     }));
+    addSourceKind(sourceKinds, key, "fallback-known");
   }
 
   // 3. Configured models (explicit in config.providers[*].models)
@@ -378,12 +394,13 @@ async function listModelsImpl(
         const existing = entries.get(key)!;
         existing.configured = true;
         existing.source = "configured";
+        addSourceKind(sourceKinds, key, "configured");
         continue;
       }
 
       const { profile } = resolveModelProfile(provider, modelId, profileContext);
 
-      if (!shouldIncludeStatus(profile.status ?? "", { includeAlpha, includeBeta, includeDeprecated })) {
+      if (!shouldIncludeStatus(profile.status ?? "", { includeAlpha, includeBeta })) {
         continue;
       }
 
@@ -403,17 +420,19 @@ async function listModelsImpl(
         apiKeyEnv,
         providerInfo: snapshotProviderMap.get(provider)
       }));
+      addSourceKind(sourceKinds, key, "configured");
     }
   }
 
   // 4. Manual models: primary model and fallbacks
-  const manualRoutes: Array<{ provider: ProviderId; id: string; baseUrl?: string; apiKeyEnv?: string }> = [];
+  const manualRoutes: Array<{ provider: ProviderId; id: string; baseUrl?: string; apiKeyEnv?: string; current?: boolean }> = [];
   if (config.model?.provider && config.model?.id) {
     manualRoutes.push({
       provider: config.model.provider,
       id: config.model.id,
       baseUrl: config.providers?.[config.model.provider]?.baseUrl,
-      apiKeyEnv: config.providers?.[config.model.provider]?.apiKeyEnv
+      apiKeyEnv: config.providers?.[config.model.provider]?.apiKeyEnv,
+      current: true
     });
   }
   for (const fallback of config.model?.fallbacks ?? []) {
@@ -433,13 +452,17 @@ async function listModelsImpl(
       if (!existing.configured) {
         existing.source = "manual";
       }
+      addSourceKind(sourceKinds, key, "manual");
+      if (route.current) {
+        addSourceKind(sourceKinds, key, "current");
+      }
       continue;
     }
 
     const { profile } = resolveModelProfile(route.provider, route.id, profileContext);
     const executable = isExecutable(route.provider, registry);
 
-    if (!shouldIncludeStatus(profile.status ?? "", { includeAlpha, includeBeta, includeDeprecated })) {
+    if (!shouldIncludeStatus(profile.status ?? "", { includeAlpha, includeBeta })) {
       continue;
     }
 
@@ -459,9 +482,21 @@ async function listModelsImpl(
       apiKeyEnv: route.apiKeyEnv,
       providerInfo: snapshotProviderMap.get(route.provider)
     }));
+    addSourceKind(sourceKinds, key, "manual");
+    if (route.current) {
+      addSourceKind(sourceKinds, key, "current");
+    }
   }
 
-  let result = [...entries.values()];
+  let result = applyLifecyclePolicy({
+    entries: [...entries.values()],
+    sourceKinds,
+    snapshotInfoMap,
+    overrides: modelCatalogOverrides,
+    includeDeprecated,
+    includeRetired,
+    includeNonChat
+  });
 
   if (listOpts?.provider) {
     result = result.filter((m) => m.provider === listOpts.provider);
@@ -542,7 +577,7 @@ function buildSelectableModel(params: {
   executable: boolean;
   apiKeyEnv?: string;
   providerInfo?: ProviderInfo;
-}): SelectableModel {
+}): SelectableModelDraft {
   const credentialReady = isCredentialReady(params.provider, params.apiKeyEnv);
   const endpointReady = isEndpointReady(params.baseUrl);
   return {
@@ -573,6 +608,87 @@ function buildSelectableModel(params: {
       apiKeyEnv: params.apiKeyEnv
     }
   };
+}
+
+function addSourceKind(
+  sourceKinds: Map<string, Set<SelectableModelSource>>,
+  key: string,
+  source: SelectableModelSource
+): void {
+  const existing = sourceKinds.get(key);
+  if (existing !== undefined) {
+    existing.add(source);
+    return;
+  }
+  sourceKinds.set(key, new Set([source]));
+}
+
+function applyLifecyclePolicy(params: {
+  entries: SelectableModelDraft[];
+  sourceKinds: Map<string, Set<SelectableModelSource>>;
+  snapshotInfoMap: Map<string, ModelInfo>;
+  overrides: ModelCatalogOverrideRegistry;
+  includeDeprecated: boolean;
+  includeRetired: boolean;
+  includeNonChat: boolean;
+}): SelectableModel[] {
+  return params.entries
+    .map((entry) => annotateLifecyclePolicy(entry, params.snapshotInfoMap, params.overrides))
+    .filter((entry) => shouldIncludeLifecyclePolicyEntry(entry, params.sourceKinds.get(entry.routeKey), params));
+}
+
+function annotateLifecyclePolicy(
+  entry: SelectableModelDraft,
+  snapshotInfoMap: Map<string, ModelInfo>,
+  overrides: ModelCatalogOverrideRegistry
+): SelectableModel {
+  const policy = classifyModelForCatalog({
+    provider: entry.provider,
+    model: entry.id,
+    profile: entry.profile,
+    modelInfo: snapshotInfoMap.get(routeKey(entry.provider, entry.id)),
+    overrides
+  });
+  const lifecycleWarnings = buildModelLifecycleWarnings({
+    policy,
+    context: "primary-selection"
+  });
+
+  return {
+    ...entry,
+    lifecycle: policy.lifecycle,
+    usageClass: policy.usageClass,
+    ...(policy.note === undefined ? {} : { lifecycleNote: policy.note }),
+    warnings: [...entry.warnings, ...lifecycleWarnings]
+  };
+}
+
+function shouldIncludeLifecyclePolicyEntry(
+  entry: SelectableModel,
+  sources: ReadonlySet<SelectableModelSource> | undefined,
+  options: {
+    includeDeprecated: boolean;
+    includeRetired: boolean;
+    includeNonChat: boolean;
+  }
+): boolean {
+  if (sources?.has("configured") === true || sources?.has("manual") === true || sources?.has("current") === true) {
+    return true;
+  }
+
+  if (entry.lifecycle === "retired" && !options.includeRetired) {
+    return false;
+  }
+
+  if (entry.lifecycle === "deprecated" && !options.includeDeprecated) {
+    return false;
+  }
+
+  if (entry.usageClass !== "primary-chat" && !options.includeNonChat) {
+    return false;
+  }
+
+  return true;
 }
 
 function inferEndpointType(provider: ProviderId, baseUrl?: string): "openai" | "anthropic" | "custom" | undefined {
@@ -653,16 +769,11 @@ function isCredentialReady(providerId: ProviderId, apiKeyEnv?: string): boolean 
 
 function shouldIncludeStatus(
   status: string,
-  options: { includeAlpha?: boolean; includeBeta?: boolean; includeDeprecated?: boolean }
+  options: { includeAlpha?: boolean; includeBeta?: boolean }
 ): boolean {
-  if (status === "deprecated" && options.includeDeprecated !== true) return false;
   if (status === "alpha" && options.includeAlpha !== true) return false;
   if (status === "beta" && options.includeBeta !== true) return false;
   return true;
-}
-
-function isChatModel(model: ModelInfo): boolean {
-  return model.outputModalities.includes("text");
 }
 
 function normalizeLookupKey(value: string): string {
