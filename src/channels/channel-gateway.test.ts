@@ -1912,31 +1912,49 @@ describe("ChannelGateway commands", () => {
       const selectPhi = actions.find((action) => action.label === "phi4:latest");
       expect(selectPhi).toBeDefined();
 
-      await gateway.receive(makeTelegramCallbackMessage(selectPhi?.value ?? "", "82", "callback-2"));
+      const selected = await gateway.receive(makeTelegramCallbackMessage(selectPhi?.value ?? "", "82", "callback-2"));
       expect(adapter.records.at(-1)?.options?.editMessageId).toBe("82");
+      expect(adapter.records.at(-1)?.options?.actions).toEqual([]);
+      expect(selected.replyText).toBe([
+        "Model Configuration",
+        "Current model: phi4:latest",
+        "Provider: Local",
+        "Session override updated."
+      ].join("\n"));
       const callbackOverride = await db.getSessionModelOverride(picker.sessionId);
       expect(callbackOverride?.route.id).toBe("phi4:latest");
 
       await gateway.receive(makeMessage("model-clear"));
+      expect(adapter.records.at(-1)?.options?.editMessageId).toBeUndefined();
       await gateway.receive(makeMessage("model-select local/phi4:latest"));
+      expect(adapter.records.at(-1)?.options?.editMessageId).toBeUndefined();
       const typedOverride = await db.getSessionModelOverride(picker.sessionId);
       expect(typedOverride?.route).toMatchObject({
         provider: callbackOverride?.route.provider,
         id: callbackOverride?.route.id
       });
 
-      await gateway.receive(makeTelegramCallbackMessage(modelPickerCancelActionValue(), "82", "callback-3"));
+      const canceled = await gateway.receive(makeTelegramCallbackMessage(modelPickerCancelActionValue(), "82", "callback-3"));
       expect(adapter.records.at(-1)?.options?.editMessageId).toBe("82");
+      expect(adapter.records.at(-1)?.options?.actions).toEqual([]);
+      expect(canceled.replyText).toBe("Model picker canceled.");
       expect((await db.getSessionModelOverride(picker.sessionId))?.route.id).toBe("phi4:latest");
 
-      await gateway.receive(makeTelegramCallbackMessage(modelPickerClearActionValue(), "82", "callback-4"));
+      const cleared = await gateway.receive(makeTelegramCallbackMessage(modelPickerClearActionValue(), "82", "callback-4"));
       expect(adapter.records.at(-1)?.options?.editMessageId).toBe("82");
+      expect(adapter.records.at(-1)?.options?.actions).toEqual([]);
+      expect(cleared.replyText).toBe([
+        "Model Configuration",
+        "Session model override cleared.",
+        "Future gateway turns will use the configured primary route."
+      ].join("\n"));
       expect(await db.getSessionModelOverride(picker.sessionId)).toBeUndefined();
       expect(invalidate).toHaveBeenCalledWith(picker.sessionId);
 
       const malformed = await gateway.receive(makeTelegramCallbackMessage("ecmodel1:s:not.a.route", "82", "callback-5"));
-      expect(malformed.replyText).toContain("Invalid model picker action key.");
+      expect(malformed.replyText).toBe("Run /model again.");
       expect(adapter.records.at(-1)?.options?.editMessageId).toBe("82");
+      expect(adapter.records.at(-1)?.options?.actions).toEqual([]);
       expect(await db.getSessionModelOverride(picker.sessionId)).toBeUndefined();
     } finally {
       await rm(tempHome, { recursive: true, force: true });
@@ -2007,8 +2025,14 @@ describe("ChannelGateway commands", () => {
       expect(adapter.records.at(-1)?.options?.editMessageId).toBe("83");
 
       const selected = await gateway.receive(makeTelegramCallbackMessage(longAction?.value ?? "", "83", "callback-4"));
-      expect(selected.replyText).toContain(`Session model override set: local/${longModel}`);
+      expect(selected.replyText).toBe([
+        "Model Configuration",
+        `Current model: ${longModel}`,
+        "Provider: Local",
+        "Session override updated."
+      ].join("\n"));
       expect(adapter.records.at(-1)?.options?.editMessageId).toBe("83");
+      expect(adapter.records.at(-1)?.options?.actions).toEqual([]);
       expect((await db.getSessionModelOverride(selected.sessionId))?.route.id).toBe(longModel);
 
       await writeGatewayModelConfig(tempHome, {
@@ -2023,8 +2047,9 @@ describe("ChannelGateway commands", () => {
         model: { provider: "local", id: "qwen2.5:3b" }
       });
       const stalePage = await gateway.receive(makeTelegramCallbackMessage(nextAction?.value ?? "", "83", "callback-5"));
-      expect(stalePage.replyText).toContain("Model picker action is no longer available. Run /model again.");
+      expect(stalePage.replyText).toBe("Run /model again.");
       expect(adapter.records.at(-1)?.options?.editMessageId).toBe("83");
+      expect(adapter.records.at(-1)?.options?.actions).toEqual([]);
       expect((await db.getSessionModelOverride(stalePage.sessionId))?.route.id).toBe(longModel);
     } finally {
       await rm(tempHome, { recursive: true, force: true });
@@ -2078,7 +2103,12 @@ describe("ChannelGateway commands", () => {
         .find((action) => action.label === "qwen2.5:3b");
       expect(selectQwen).toBeDefined();
       const selectResult = await gateway.receive(makeMessage(selectQwen?.value ?? ""));
-      expect(selectResult.replyText).toContain("Session model override set");
+      expect(selectResult.replyText).toBe([
+        "Model Configuration",
+        "Current model: qwen2.5:3b",
+        "Provider: Local",
+        "Session override updated."
+      ].join("\n"));
 
       const result = await gateway.receive(busyMessage);
 

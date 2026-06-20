@@ -334,6 +334,25 @@ describe("TelegramAdapter", () => {
     expect(callsFor(calls, "editMessageText")[0]?.body).not.toHaveProperty("parse_mode");
   });
 
+  it("delivery.sendText edits a single message and clears inline keyboard for empty actions", async () => {
+    const { adapter, calls } = createTelegramStreamingHarness();
+
+    await adapter.delivery.sendText(
+      { platform: "telegram", chatId: "123" },
+      "final",
+      { editMessageId: "42", actions: [], format: "plain" }
+    );
+
+    expect(callsFor(calls, "editMessageText")).toHaveLength(1);
+    expect(callsFor(calls, "sendMessage")).toHaveLength(0);
+    expect(callsFor(calls, "editMessageText")[0]?.body).toMatchObject({
+      chat_id: "123",
+      message_id: 42,
+      text: "final",
+      reply_markup: { inline_keyboard: [] }
+    });
+  });
+
   it("delivery.sendText preserves HTML formatting when editing", async () => {
     const { adapter, calls } = createTelegramStreamingHarness();
 
@@ -504,6 +523,34 @@ describe("TelegramAdapter", () => {
     expect(callsFor(calls, "sendMessage")[0]?.body).toMatchObject({
       chat_id: "123",
       text: "fallback"
+    });
+  });
+
+  it("delivery.sendText falls back to sendMessage for final states with cleared inline keyboard", async () => {
+    const { adapter, calls } = createTelegramStreamingHarness({
+      failResponses: {
+        editMessageText: {
+          1: {
+            status: 400,
+            statusText: "Bad Request",
+            description: "Bad Request: message to edit not found"
+          }
+        }
+      }
+    });
+
+    await adapter.delivery.sendText(
+      { platform: "telegram", chatId: "123" },
+      "final",
+      { editMessageId: "42", actions: [], format: "plain" }
+    );
+
+    expect(callsFor(calls, "editMessageText")).toHaveLength(1);
+    expect(callsFor(calls, "sendMessage")).toHaveLength(1);
+    expect(callsFor(calls, "sendMessage")[0]?.body).toMatchObject({
+      chat_id: "123",
+      text: "final",
+      reply_markup: { inline_keyboard: [] }
     });
   });
 
