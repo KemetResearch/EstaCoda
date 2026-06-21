@@ -4,6 +4,7 @@ import {
   getSetupCopyEntry,
   hasSetupCopyKey,
   listSetupCopyEntries,
+  modelDescriptionOverride,
   rawSetupCopy,
   resolveSetupCopy,
   setupCopy,
@@ -718,6 +719,13 @@ describe("setup copy", () => {
     expect(resolveSetupCopy("ar", "setupEditor.prompt.telegram.allowedUserIds.body")).toContain(isolateLtr("/start"));
     expect(resolveSetupCopy("ar", "setupEditor.prompt.telegram.allowedChatIds.body")).toContain(isolateLtr("@getidsbot"));
     expect(resolveSetupCopy("ar", "setupEditor.prompt.telegram.allowedChatIds.body")).toContain(isolateLtr("@chatIDrobot"));
+  });
+
+  it("resolves sparse model description overrides by provider and model id", () => {
+    expect(modelDescriptionOverride("en", "openai", "gpt-5-mini")).toBe("Cost-conscious choice for auxiliary tasks.");
+    expect(modelDescriptionOverride("ar", "openai", "gpt-5-mini")).toBe("خيار منخفض التكلفة للمهام المساعدة.");
+    expect(modelDescriptionOverride("en", "google", "gpt-5-mini")).toBeUndefined();
+    expect(modelDescriptionOverride("en", "openai", "unknown-model")).toBeUndefined();
   });
 
   it("resolves onboarding local STT skipped warning copy", () => {

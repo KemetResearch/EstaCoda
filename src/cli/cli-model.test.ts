@@ -216,15 +216,17 @@ describe("cli model", () => {
       expect(openAiOption).toMatchObject({
         label: "OpenAI",
         cells: { name: "OpenAI", details: "Hosted OpenAI models." },
-        badges: ["Current"],
         current: true
       });
+      expect(openAiOption?.badges).toBeUndefined();
       expect(gpt4oOption).toMatchObject({
         label: "gpt-4o",
         cells: { name: "gpt-4o", details: expect.stringContaining("context") },
-        badges: ["Current"],
         current: true
       });
+      expect(gpt4oOption?.badges).toBeUndefined();
+      expect(selectInputs[0]?.showCurrentBadge).toBe(false);
+      expect(selectInputs[1]?.showCurrentBadge).toBe(false);
       expect(selectInputs[0]?.defaultIndex).toBe(selectInputs[0]?.options.findIndex((option) => option.id === "openai"));
       expect(selectInputs[1]?.defaultIndex).toBe(selectInputs[1]?.options.findIndex((option) => option.id === "gpt-4o"));
 

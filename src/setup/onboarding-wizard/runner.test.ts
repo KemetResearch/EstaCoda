@@ -1334,12 +1334,12 @@ describe("runFirstRunSetup", () => {
       "model-missing",
     ]);
     expect(onboardingDescriptions["Primary model"]).toEqual([
-      "Structured output. 128K context. Alpha",
-      "Structured output. 128K context. Beta",
-      "Structured output. 128K context. Deprecated",
-      "Structured output. 128K context",
-      "Structured output. 128K context",
-      "Structured output. 128K context",
+      "128K context | Alpha",
+      "128K context | Beta",
+      "128K context | Deprecated",
+      "128K context",
+      "128K context",
+      "128K context",
     ]);
     expect(onboardingSelects["Primary model"]?.surface).toBe("promptCard");
     expect(onboardingSelects["Primary model"]?.columns).toEqual([
@@ -1402,12 +1402,12 @@ describe("runFirstRunSetup", () => {
     });
 
     expect(seenDescriptions["Primary model"]).toEqual([
-      "Structured output. 128K context. Alpha",
-      "Structured output. 128K context. Beta",
-      "Structured output. 128K context. Deprecated",
-      "Structured output. 128K context",
-      "Structured output. 128K context",
-      "Structured output. 128K context",
+      "128K context | Alpha",
+      "128K context | Beta",
+      "128K context | Deprecated",
+      "128K context",
+      "128K context",
+      "128K context",
     ]);
   });
 

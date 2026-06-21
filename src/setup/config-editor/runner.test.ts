@@ -741,9 +741,14 @@ describe("runConfigEditor", () => {
     expect(routePrompts[0]?.options.map((option) => option.id)).toContain("cancel");
     expect(routePrompts[1]?.options.map((option) => option.id)).toContain("back");
     expect(routePrompts[1]?.options.map((option) => option.id)).toContain("cancel");
-    expect(routePrompts[0]?.technicalLines).toEqual(["Current: local/local-test-model"]);
+    expect(routePrompts[0]?.technicalLines).toBeUndefined();
+    expect(routePrompts[0]?.statusLines).toEqual([
+      { text: "Current: local/local-test-model", tone: "active", direction: "ltr" },
+    ]);
+    expect(routePrompts[0]?.showCurrentBadge).toBe(false);
     expect(routePrompts[0]?.options.find((option) => option.id === "openai")?.cells?.details).toBe("Hosted OpenAI models.");
-    expect(routePrompts[1]?.options.find((option) => option.id === "gpt-5.5")?.cells?.details).toContain("Tools, vision, reasoning, structured output");
+    expect(routePrompts[1]?.showCurrentBadge).toBe(false);
+    expect(routePrompts[1]?.options.find((option) => option.id === "gpt-5.5")?.cells?.details).toContain("Tools | Vision | Reasoning");
     expect(envFile).toContain("PR8_OPENAI_KEY=");
     expect(rawConfig).not.toContain("sk-pr8-provider-route");
     expect(JSON.stringify(result)).not.toContain("sk-pr8-provider-route");

@@ -246,9 +246,11 @@ describe("selectProviderModelRoute", () => {
       label: "alpha-model",
       cells: {
         name: "alpha-model",
-        details: "Tools, vision, structured output. 128K context",
+        details: "128K context | Tools | Vision",
       },
     });
+    expect(providerPrompt.showCurrentBadge).toBe(false);
+    expect(modelPrompt.showCurrentBadge).toBe(false);
     expect(providerPrompt.options.at(-2)?.id).toBe("back");
     expect(providerPrompt.options.at(-1)?.id).toBe("cancel");
   });
@@ -295,13 +297,40 @@ describe("selectProviderModelRoute", () => {
     });
 
     expect(prompt.calls[0]?.defaultIndex).toBe(1);
-    expect(prompt.calls[0]?.technicalLines).toEqual(["Current: local/local-model"]);
+    expect(prompt.calls[0]?.technicalLines).toBeUndefined();
+    expect(prompt.calls[0]?.statusLines).toEqual([
+      { text: "Current: local/local-model", tone: "active", direction: "ltr" },
+    ]);
     expect(prompt.calls[0]?.options[1]).toMatchObject({
       id: "local",
-      badges: ["Current"],
       current: true,
     });
+    expect(prompt.calls[0]?.options[1]?.badges).toBeUndefined();
+    expect(prompt.calls[0]?.showCurrentBadge).toBe(false);
     expect(flow.resolved).toEqual([{ providerId: "local", modelId: "alpha-model" }]);
+  });
+
+  it("builds Arabic current route status from localized label and isolated route token", async () => {
+    const flow = fakeFlow({
+      providers: [
+        providerCandidate("openai", "OpenAI", 1),
+        providerCandidate("local", "Local", 1),
+      ],
+    });
+    const prompt = fakePrompt();
+
+    await selectProviderModelRoute({
+      prompt,
+      flowEngine: flow.engine,
+      locale: "ar",
+      mode: "primary",
+      currentProviderId: "local",
+      currentModelId: "local-model",
+    });
+
+    expect(prompt.calls[0]?.statusLines).toEqual([
+      { text: "الحالي: \u2066local/local-model\u2069", tone: "active", direction: "rtl" },
+    ]);
   });
 
   it("uses visible current model as model default selection and marks it current", async () => {
@@ -327,9 +356,10 @@ describe("selectProviderModelRoute", () => {
     expect(prompt.calls[1]?.defaultIndex).toBe(1);
     expect(prompt.calls[1]?.options[1]).toMatchObject({
       id: "beta-model",
-      badges: ["Current"],
       current: true,
     });
+    expect(prompt.calls[1]?.options[1]?.badges).toBeUndefined();
+    expect(prompt.calls[1]?.showCurrentBadge).toBe(false);
     expect(flow.resolved).toEqual([{ providerId: "openai", modelId: "beta-model" }]);
   });
 
@@ -372,8 +402,10 @@ describe("selectProviderModelRoute", () => {
       currentModelId: "missing-model",
     });
 
+    expect(prompt.calls[1]?.statusLines).toEqual([
+      { text: "Current: openai/missing-model", tone: "active", direction: "ltr" },
+    ]);
     expect(prompt.calls[1]?.technicalLines).toEqual([
-      "Current: openai/missing-model",
       "Current model not shown: openai/missing-model",
     ]);
   });
@@ -389,7 +421,7 @@ describe("selectProviderModelRoute", () => {
 
   it("generates conservative model descriptions from model metadata", () => {
     expect(modelCandidateDescription("en", modelCandidate("openai", "alpha-model"))).toBe(
-      "Tools, vision, structured output. 128K context"
+      "128K context | Tools | Vision"
     );
     expect(modelCandidateDescription("en", {
       ...modelCandidate("openai", "beta-model"),
@@ -405,7 +437,21 @@ describe("selectProviderModelRoute", () => {
       supportsVision: false,
       lifecycleNote: "Use with care.",
       warnings: ["Limited availability."],
-    })).toBe("Reasoning. 1M context. Beta. Use with care. Limited availability");
+    })).toBe("1M context | Reasoning | Beta | Use with care | Limited availability");
+  });
+
+  it("does not display structured output in model descriptions", () => {
+    expect(modelCandidateDescription("en", {
+      ...modelCandidate("openai", "structured-model"),
+      profile: {
+        ...modelCandidate("openai", "structured-model").profile,
+        supportsTools: false,
+        supportsVision: false,
+        supportsStructuredOutput: true,
+        supportsReasoning: false,
+      },
+      supportsVision: false,
+    })).toBe("128K context");
   });
 
   it("does not invent model capabilities when metadata fields are absent", () => {
@@ -418,6 +464,76 @@ describe("selectProviderModelRoute", () => {
         supportsVision: false,
         supportsStructuredOutput: false,
         supportsReasoning: false,
+      },
+      supportsVision: false,
+    })).toBe("");
+  });
+
+  it("preserves local and custom fallback descriptions when no metadata is available", () => {
+    expect(modelCandidateDescription("en", {
+      ...modelCandidate("local", "plain-local"),
+      profile: {
+        ...modelCandidate("local", "plain-local").profile,
+        contextWindowTokens: 0,
+        supportsTools: false,
+        supportsVision: false,
+        supportsStructuredOutput: false,
+        supportsReasoning: false,
+      },
+      supportsVision: false,
+    })).toBe("Local OpenAI-compatible model.");
+
+    expect(modelCandidateDescription("en", {
+      ...modelCandidate("openai-compatible", "plain-custom"),
+      profile: {
+        ...modelCandidate("openai-compatible", "plain-custom").profile,
+        contextWindowTokens: 0,
+        supportsTools: false,
+        supportsVision: false,
+        supportsStructuredOutput: false,
+        supportsReasoning: false,
+      },
+      supportsVision: false,
+    })).toBe("Custom OpenAI-compatible model.");
+  });
+
+  it("appends curated model notes after metadata", () => {
+    expect(modelCandidateDescription("en", {
+      ...modelCandidate("openai", "gpt-5-mini"),
+      profile: {
+        ...modelCandidate("openai", "gpt-5-mini").profile,
+        contextWindowTokens: 400000,
+        supportsTools: true,
+        supportsVision: true,
+        supportsReasoning: true,
+        supportsStructuredOutput: true,
+      },
+    })).toBe("400K context | Tools | Vision | Reasoning | Cost-conscious choice for auxiliary tasks");
+  });
+
+  it("uses curated model notes without metadata and avoids provider/model key collisions", () => {
+    expect(modelCandidateDescription("en", {
+      ...modelCandidate("openai", "gpt-5-mini"),
+      profile: {
+        ...modelCandidate("openai", "gpt-5-mini").profile,
+        contextWindowTokens: 0,
+        supportsTools: false,
+        supportsVision: false,
+        supportsReasoning: false,
+        supportsStructuredOutput: false,
+      },
+      supportsVision: false,
+    })).toBe("Cost-conscious choice for auxiliary tasks");
+
+    expect(modelCandidateDescription("en", {
+      ...modelCandidate("google", "gpt-5-mini"),
+      profile: {
+        ...modelCandidate("google", "gpt-5-mini").profile,
+        contextWindowTokens: 0,
+        supportsTools: false,
+        supportsVision: false,
+        supportsReasoning: false,
+        supportsStructuredOutput: false,
       },
       supportsVision: false,
     })).toBe("");
@@ -462,7 +578,7 @@ describe("selectProviderModelRoute", () => {
     });
     expect(providerDescription).toContain("https://models.example/v1");
     expect(providerDescription).toContain("\u2066https://models.example/v1\u2069");
-    expect(modelCandidateDescription("ar", modelCandidate("local", "llama3"))).toContain("سياق \u2066128K\u2069");
+    expect(modelCandidateDescription("ar", modelCandidate("local", "llama3"))).toContain("سياق \u2066128K\u2069 | أدوات | رؤية");
   });
 
   it("does not resolve or persist anything when navigation exits early", async () => {

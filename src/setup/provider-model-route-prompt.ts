@@ -7,11 +7,12 @@ import type {
   ProviderModelSelectionResult,
 } from "../providers/provider-model-selection-flow.js";
 import type { ProviderId, ModelProfile } from "../contracts/provider.js";
+import { isolateLtr } from "../ui/bidi.js";
 import {
   formatSetupCopy,
   setupCopyText,
 } from "./setup-prompts.js";
-import type { SetupCopyKey, SetupCopyLocale } from "./setup-copy.js";
+import { modelDescriptionOverride, type SetupCopyKey, type SetupCopyLocale } from "./setup-copy.js";
 
 export type ProviderModelRoutePromptMode =
   | "primary"
@@ -99,7 +100,6 @@ async function promptProvider(
         name: candidate.displayName,
         details: providerCandidateDescription(options.locale, candidate),
       },
-      badges: candidate.id === options.currentProviderId ? [currentBadge(options.locale)] : undefined,
       current: candidate.id === options.currentProviderId,
     })),
     ...navigationOptions<ProviderPromptAction>(options),
@@ -108,13 +108,14 @@ async function promptProvider(
   return selectStructuredOption(options.prompt, {
     title: providerTitle(options.locale, options.mode),
     body: `${providerBody(options.locale, options.mode)}\n`,
-    technicalLines: currentRouteLines(options.locale, options.currentProviderId, options.currentModelId),
+    statusLines: currentRouteStatusLines(options.locale, options.currentProviderId, options.currentModelId),
     columns: promptColumns(options.locale),
     options: promptOptions,
     defaultIndex: currentProviderIndex >= 0 ? currentProviderIndex : 0,
     fallbackPrompt: "Choose: ",
     surface: "promptCard",
     hint: PROMPT_HINT,
+    showCurrentBadge: false,
     locale: options.locale,
     direction: options.locale === "ar" ? "rtl" : "ltr",
   });
@@ -141,9 +142,6 @@ async function promptModel(
         name: candidate.id,
         details: modelCandidateDescription(options.locale, candidate),
       },
-      badges: provider.id === options.currentProviderId && candidate.id === options.currentModelId
-        ? [currentBadge(options.locale)]
-        : undefined,
       current: provider.id === options.currentProviderId && candidate.id === options.currentModelId,
     })),
     ...navigationOptions<ModelPromptAction>(options),
@@ -152,13 +150,15 @@ async function promptModel(
   return selectStructuredOption(options.prompt, {
     title: modelTitle(options.locale, options.mode),
     body: `${modelBody(options.locale, options.mode).replace("{providerId}", provider.id)}\n`,
-    technicalLines: currentModelLines(options.locale, provider.id, options.currentProviderId, options.currentModelId, currentModelVisible),
+    statusLines: currentRouteStatusLines(options.locale, options.currentProviderId, options.currentModelId),
+    technicalLines: currentModelNotShownLines(options.locale, provider.id, options.currentProviderId, options.currentModelId, currentModelVisible),
     columns: promptColumns(options.locale),
     options: promptOptions,
     defaultIndex: currentModelIndex >= 0 ? currentModelIndex : 0,
     fallbackPrompt: "Choose: ",
     surface: "promptCard",
     hint: PROMPT_HINT,
+    showCurrentBadge: false,
     locale: options.locale,
     direction: options.locale === "ar" ? "rtl" : "ltr",
   });
@@ -228,29 +228,18 @@ export function providerCandidateDescription(locale: SetupCopyLocale, candidate:
 }
 
 export function modelCandidateDescription(locale: SetupCopyLocale, candidate: ModelCandidate): string {
-  const descriptionParts: string[] = [];
-  if (candidate.provider === "local") {
-    descriptionParts.push(setupCopyText(locale, "onboarding.catalog.model.description.local"));
-  } else if (candidate.provider === "openai-compatible") {
-    descriptionParts.push(setupCopyText(locale, "onboarding.catalog.model.description.custom"));
-  }
-
-  const capabilityParts = [
+  const metadataParts = [
+    candidate.profile.contextWindowTokens > 0
+      ? formatSetupCopy(locale, "onboarding.catalog.model.context", {
+          contextWindow: formatContextWindow(candidate.profile.contextWindowTokens),
+        })
+      : undefined,
     candidate.profile.supportsTools ? setupCopyText(locale, "onboarding.catalog.model.features.tools") : undefined,
     candidate.profile.supportsVision ? setupCopyText(locale, "onboarding.catalog.model.features.vision") : undefined,
     candidate.profile.supportsReasoning ? setupCopyText(locale, "onboarding.catalog.model.features.reasoning") : undefined,
-    candidate.profile.supportsStructuredOutput ? setupCopyText(locale, "onboarding.catalog.model.features.structuredOutput") : undefined,
   ].filter((part): part is string => part !== undefined);
-  if (capabilityParts.length > 0) {
-    descriptionParts.push(capitalizeForLocale(locale, joinDescriptionList(locale, capabilityParts)));
-  }
 
-  if (candidate.profile.contextWindowTokens > 0) {
-    descriptionParts.push(formatSetupCopy(locale, "onboarding.catalog.model.context", {
-      contextWindow: formatContextWindow(candidate.profile.contextWindowTokens),
-    }));
-  }
-
+  const descriptionParts: string[] = [...metadataParts];
   const status = renderableModelStatus(locale, candidate.profile.status);
   if (status !== undefined) {
     descriptionParts.push(status);
@@ -268,7 +257,21 @@ export function modelCandidateDescription(locale: SetupCopyLocale, candidate: Mo
     }
   }
 
-  return descriptionParts.join(". ");
+  const override = modelDescriptionOverride(locale, candidate.provider, candidate.id);
+  if (override !== undefined) {
+    descriptionParts.push(trimSentencePunctuation(override));
+  }
+
+  if (descriptionParts.length === 0) {
+    if (candidate.provider === "local") {
+      return setupCopyText(locale, "onboarding.catalog.model.description.local");
+    }
+    if (candidate.provider === "openai-compatible") {
+      return setupCopyText(locale, "onboarding.catalog.model.description.custom");
+    }
+  }
+
+  return joinMetadataList(descriptionParts);
 }
 
 const PROVIDER_DESCRIPTION_KEYS: Partial<Record<string, SetupCopyKey>> = {
@@ -311,39 +314,33 @@ function formatContextWindow(tokens: number): string {
   return String(tokens);
 }
 
-function capitalizeForLocale(locale: SetupCopyLocale, value: string): string {
-  if (locale === "ar" || value.length === 0) {
-    return value;
-  }
-  return `${value[0]!.toLocaleUpperCase("en-US")}${value.slice(1)}`;
-}
-
-function joinDescriptionList(locale: SetupCopyLocale, parts: readonly string[]): string {
-  return parts.join(locale === "ar" ? "، " : ", ");
-}
-
 function trimSentencePunctuation(value: string): string {
   return value.trim().replace(/[.。]+$/u, "");
 }
 
-function currentBadge(locale: SetupCopyLocale): string {
-  return setupCopyText(locale, "onboarding.providers.current");
+function joinMetadataList(parts: readonly string[]): string {
+  return parts.join(" | ");
 }
 
-function currentRouteLines(
+function currentRouteStatusLines(
   locale: SetupCopyLocale,
   currentProviderId: string | undefined,
   currentModelId: string | undefined
-): readonly string[] | undefined {
+): SelectPromptInput<unknown>["statusLines"] {
   if (currentProviderId === undefined || currentModelId === undefined) {
     return undefined;
   }
-  return [formatSetupCopy(locale, "onboarding.providers.currentRoute", {
-    route: formatRoute(currentProviderId, currentModelId),
-  })];
+  const route = formatRoute(currentProviderId, currentModelId);
+  return [{
+    text: locale === "ar"
+      ? `${setupCopyText(locale, "onboarding.providers.current")}: ${isolateLtr(route)}`
+      : `${setupCopyText(locale, "onboarding.providers.current")}: ${route}`,
+    tone: "active",
+    direction: locale === "ar" ? "rtl" : "ltr",
+  }];
 }
 
-function currentModelLines(
+function currentModelNotShownLines(
   locale: SetupCopyLocale,
   providerId: string,
   currentProviderId: string | undefined,
@@ -353,15 +350,12 @@ function currentModelLines(
   if (currentProviderId === undefined || currentModelId === undefined) {
     return undefined;
   }
-  const lines = [formatSetupCopy(locale, "onboarding.providers.currentRoute", {
-    route: formatRoute(currentProviderId, currentModelId),
-  })];
   if (providerId === currentProviderId && !currentModelVisible) {
-    lines.push(formatSetupCopy(locale, "onboarding.providers.currentModelNotShown", {
+    return [formatSetupCopy(locale, "onboarding.providers.currentModelNotShown", {
       route: formatRoute(currentProviderId, currentModelId),
-    }));
+    })];
   }
-  return lines;
+  return undefined;
 }
 
 function formatRoute(providerId: string, modelId: string): string {

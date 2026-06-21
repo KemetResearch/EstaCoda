@@ -35,6 +35,18 @@ export type SetupCopyResolutionOptions = {
   readonly isolateArabicTechnicalTokens?: boolean;
 };
 
+type ModelDescriptionOverride = {
+  readonly en: string;
+  readonly ar: string;
+};
+
+const MODEL_DESCRIPTION_OVERRIDES: Readonly<Record<string, ModelDescriptionOverride>> = {
+  "openai:gpt-5-mini": {
+    en: "Cost-conscious choice for auxiliary tasks.",
+    ar: "خيار منخفض التكلفة للمهام المساعدة.",
+  },
+};
+
 const TECHNICAL_TOKENS = [
   "estacoda setup --advanced --provider <provider> --model <model> --api-key-env <ENV_NAME>",
   "estacoda setup --provider deepseek --model deepseek-chat --api-key-env DEEPSEEK_API_KEY",
@@ -197,10 +209,10 @@ export const SETUP_COPY_ENTRIES = [
   copy("onboarding.catalog.provider.catalogOnly", "Available in the offline catalog; runtime support may require configuration.", "متاح في الفهرس المحلي؛ قد يحتاج دعم التشغيل إلى إعداد إضافي.", [], "provider-selection"),
   copy("onboarding.catalog.provider.configured", "Configured provider.", "مزوّد مهيأ.", [], "provider-selection"),
   copy("onboarding.catalog.provider.available", "Available provider.", "مزوّد متاح.", [], "provider-selection"),
-  copy("onboarding.catalog.model.features.tools", "tools", "أدوات", [], "provider-selection"),
-  copy("onboarding.catalog.model.features.vision", "vision", "رؤية", [], "provider-selection"),
-  copy("onboarding.catalog.model.features.reasoning", "reasoning", "استدلال", [], "provider-selection"),
-  copy("onboarding.catalog.model.features.structuredOutput", "structured output", "خرج منظّم", [], "provider-selection"),
+  copy("onboarding.catalog.model.features.tools", "Tools", "أدوات", [], "provider-selection"),
+  copy("onboarding.catalog.model.features.vision", "Vision", "رؤية", [], "provider-selection"),
+  copy("onboarding.catalog.model.features.reasoning", "Reasoning", "استدلال", [], "provider-selection"),
+  copy("onboarding.catalog.model.features.structuredOutput", "Structured output", "خرج منظّم", [], "provider-selection"),
   copy("onboarding.catalog.model.context", "{contextWindow} context", "سياق {contextWindow}", ["{contextWindow}"], "provider-selection"),
   copy("onboarding.catalog.model.status.alpha", "Alpha", "تجريبي أولي", [], "provider-selection"),
   copy("onboarding.catalog.model.status.beta", "Beta", "تجريبي", [], "provider-selection"),
@@ -824,6 +836,18 @@ export function setupCopy(locale: SetupCopyLocale | string): Record<SetupCopyKey
 export function rawSetupCopy(locale: SetupCopyLocale, key: SetupCopyKey): string {
   const entry = getSetupCopyEntry(key);
   return locale === "ar" ? entry.ar : entry.en;
+}
+
+export function modelDescriptionOverride(
+  locale: SetupCopyLocale,
+  providerId: string,
+  modelId: string
+): string | undefined {
+  const override = MODEL_DESCRIPTION_OVERRIDES[`${providerId}:${modelId}`];
+  if (override === undefined) {
+    return undefined;
+  }
+  return locale === "ar" ? isolateArabicCopy(override.ar) : override.en;
 }
 
 function copy(
