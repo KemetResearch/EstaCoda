@@ -511,16 +511,28 @@ async function handleLanguageAction(
   initialDecision: SetupRouteDecision,
   session: NonNullable<SetupRouteDecision["setupEditorPlanSession"]>,
   action: ConfigEditorRenderedAction
-): Promise<ConfigEditorRunnerResult> {
+): Promise<RunOnceResult> {
   const editorAction = requireEditorAction(action);
   const loaded = await loadRuntimeConfig(options);
   const ui = loaded.config.ui;
-  const preferences = await promptInterfaceLanguageAndStyle(options.prompt, {
+  const languageResult = await promptInterfaceLanguageAndStyle(options.prompt, {
     initialLocale: options.locale,
     currentLanguage: ui?.language ?? "en",
     currentFlavor: ui?.flavor,
     showCurrentState: true,
+    allowBack: true,
   });
+  if (languageResult.kind === "back") {
+    return {
+      completed: false,
+      exitCode: 0,
+      output: "",
+      initialDecision,
+      selectedActionId: action.id,
+      menuBackRequested: true,
+    };
+  }
+  const preferences = languageResult.selection;
 
   return reviewAndApplyAction(options, initialDecision, session, {
     ...editorAction,

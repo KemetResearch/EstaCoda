@@ -344,7 +344,13 @@ describe("runConfigEditor", () => {
     expect(browser.autoLaunch).toBe(false);
     expect(vision.useGateway).toBe(true);
 
-    expect(selectInputs.find((input) => input.title === "Interface language")?.columns).toBeUndefined();
+    const languageInput = selectInputs.find((input) => input.title === "Setup language");
+    expect(languageInput?.columns).toBeUndefined();
+    expect(languageInput?.options.map((option) => option.label)).toEqual([
+      "English",
+      "العربية",
+    ]);
+    expect(languageInput?.options.some((option) => option.group === "navigation")).toBe(false);
     expect(selectInputs.find((input) => input.title === "Workspace trust")?.columns).toBeUndefined();
     expect(selectInputs.find((input) => input.title === "Finalize configuration")?.columns).toBeUndefined();
     expect(selectInputs.find((input) => input.title === "Setup next action")?.columns).toBeUndefined();
@@ -354,28 +360,42 @@ describe("runConfigEditor", () => {
       input.title === "Image generation" &&
       input.options.some((option) => option.id === "gateway-yes")
     )?.columns).toBeUndefined();
-    expect(selectInputs.find((input) => input.title === "Interface language")?.statusLines).toBeUndefined();
+    expect(languageInput?.statusLines).toBeUndefined();
   });
 
-  it("shows current language in the setup editor language selector without adding columns", async () => {
+  it("shows current language and Back in the setup editor language selector without adding columns", async () => {
     const prompt = fakePrompt();
     const selectInputs = captureSelectInputs(prompt);
 
-    const language = await promptInterfaceLanguageAndStyle(prompt, {
+    const result = await promptInterfaceLanguageAndStyle(prompt, {
       initialLocale: "ar",
       currentLanguage: "ar",
       currentFlavor: "arabic-light",
       showCurrentState: true,
+      allowBack: true,
     });
 
     const input = selectInputs.find((item) => item.title === resolveSetupCopy("ar", "onboarding.interfaceLanguage.title"));
-    expect(language.language).toBe("ar");
+    expect(result).toEqual({
+      kind: "selected",
+      selection: {
+        language: "ar",
+        flavor: "arabic-light",
+        activityLabels: "ar",
+      },
+    });
     expect(input?.columns).toBeUndefined();
     expect(input?.statusLines).toEqual([{ text: "الحالي: العربية", tone: "active", direction: "rtl" }]);
     expect(input?.showCurrentBadge).toBe(false);
     expect(input?.defaultIndex).toBe(1);
     expect(input?.options.find((option) => option.id === "ar")?.current).toBe(true);
     expect(input?.options.find((option) => option.id === "en")?.current).toBe(false);
+    expect(input?.options.find((option) => option.id === "back")).toEqual(expect.objectContaining({
+      label: "رجوع",
+      description: "ارجع إلى الخطوة السابقة.",
+      group: "navigation",
+    }));
+    expect(input?.options.find((option) => option.id === "back")?.current).toBeUndefined();
   });
 
   it("shows current security and Agent Evolution state with current rows", async () => {
@@ -717,7 +737,7 @@ describe("runConfigEditor", () => {
       },
     });
     await trustWorkspace(tempDir, workspaceRoot);
-    const prompts: Array<{ title: string; labels: string[]; descriptions: Array<string | undefined> }> = [];
+    const prompts: Array<{ title: string; labels: string[]; descriptions: Array<string | undefined>; groups: Array<string | undefined> }> = [];
     const prompt = fakePrompt({ values: ["ar"] });
     const baseSelect = prompt.select!;
     prompt.select = async (input) => {
@@ -725,6 +745,7 @@ describe("runConfigEditor", () => {
         title: input.title,
         labels: input.options.map((option) => option.label),
         descriptions: input.options.map((option) => option.description),
+        groups: input.options.map((option) => option.group),
       });
       return baseSelect(input);
     };
@@ -750,7 +771,9 @@ describe("runConfigEditor", () => {
     expect(result.completed).toBe(true);
     expect(result.selectedActionId).toBe("edit-language");
     expect(prompts[0]?.title).toBe("Setup language");
-    expect(prompts[0]?.labels).toEqual(["English", "العربية"]);
+    expect(prompts[0]?.labels).toEqual(["English", "العربية", "Back"]);
+    expect(prompts[0]?.descriptions[2]).toBe("Return to the previous step.");
+    expect(prompts[0]?.groups[2]).toBe("navigation");
     expect(prompts.map((prompt) => prompt.title)).not.toContain("أسلوب الواجهة");
     expect(uiLine?.review.values).toEqual(expect.objectContaining({
       language: "ar",
@@ -764,6 +787,47 @@ describe("runConfigEditor", () => {
     });
     expect(config.security?.approvalMode).toBe("adaptive");
     expect(config.model).toEqual((localReadyConfig() as { model: unknown }).model);
+  });
+
+  it("returns from setup editor language Back to the action menu without applying changes", async () => {
+    const initialConfig = {
+      ...localReadyConfig(),
+      ui: {
+        language: "en",
+        flavor: "standard",
+        activityLabels: "en",
+      },
+    };
+    await writeUserConfig(tempDir, initialConfig);
+    await trustWorkspace(tempDir, workspaceRoot);
+    const promptTitles: string[] = [];
+    const prompt = fakePrompt({ values: ["back", "exit"] });
+    const baseSelect = prompt.select!;
+    prompt.select = async (input) => {
+      promptTitles.push(input.title);
+      return baseSelect(input);
+    };
+    const apply = vi.fn();
+
+    const result = await runConfigEditor({
+      homeDir: tempDir,
+      workspaceRoot,
+      prompt,
+      defaultActionId: "edit-language",
+      applyExecutor: { apply },
+    });
+
+    const config = JSON.parse(await readFile(profileConfigPath(tempDir), "utf8")) as {
+      ui?: { language?: string; flavor?: string; activityLabels?: string };
+    };
+
+    expect(result.completed).toBe(true);
+    expect(result.selectedActionId).toBe("exit");
+    expect(result.reviewManifest).toBeUndefined();
+    expect(result.applyPlanningResult).toBeUndefined();
+    expect(apply).not.toHaveBeenCalled();
+    expect(config.ui).toEqual(initialConfig.ui);
+    expect(promptTitles).toEqual(["Setup language", "Setup editor"]);
   });
 
   it("resets Arabic activity labels when changing language back to English", async () => {
