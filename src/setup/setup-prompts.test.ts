@@ -5,9 +5,13 @@ import { isolateLtr, isolateRtl } from "../ui/bidi.js";
 import type { SetupVerificationReport } from "./verification.js";
 import {
   promptSetupChoice,
+  promptSetupYesNo,
   renderSetupApplyEndState,
+  setupChoiceColumns,
   setupCopyText,
   setupCsvPromptLabel,
+  setupCurrentStatusLine,
+  setupNavigationChoice,
   setupPromptLabel,
   setupPromptWithDefault,
   setupProviderCredentialQuestion,
@@ -40,7 +44,119 @@ describe("setup prompt context", () => {
 
     expect(seen?.locale).toBe("ar");
     expect(seen?.direction).toBe("rtl");
+    expect(seen?.columns).toBeUndefined();
     expect(seen?.options[0]?.id).toBe("yes");
+  });
+
+  it("passes opt-in prompt-card fields through setup choice selectors", async () => {
+    let seen: SelectPromptInput<string> | undefined;
+    const prompt = Object.assign(
+      async () => "",
+      {
+        select: async <T>(input: SelectPromptInput<T>): Promise<T> => {
+          seen = input as SelectPromptInput<string>;
+          return input.options[0]!.value;
+        },
+        close: () => undefined,
+      }
+    ) as Prompt;
+    const statusLine = setupCurrentStatusLine("en", "Alpha");
+
+    const selected = await promptSetupChoice(setupPromptContext(prompt, "en"), {
+      title: "Choose mode",
+      message: "Pick a mode.\n",
+      columns: setupChoiceColumns("en"),
+      statusLines: [statusLine],
+      hint: "Use arrows.",
+      showCurrentBadge: false,
+      choices: [
+        {
+          id: "alpha",
+          label: "Alpha",
+          description: "First option",
+          technical: true,
+          cells: { name: "Alpha", description: "First option" },
+          badges: ["Recommended"],
+          current: true,
+          value: "alpha",
+        },
+        setupNavigationChoice({
+          id: "back",
+          label: "Back",
+          description: "Return to the previous step.",
+          value: "back",
+        }),
+      ],
+      defaultValue: "alpha",
+    });
+
+    expect(selected).toBe("alpha");
+    expect(seen?.columns).toEqual([
+      { key: "name", header: "Name" },
+      { key: "description", header: "Details" },
+    ]);
+    expect(seen?.statusLines).toEqual([statusLine]);
+    expect(seen?.hint).toBe("Use arrows.");
+    expect(seen?.showCurrentBadge).toBe(false);
+    expect(seen?.options[0]).toMatchObject({
+      id: "alpha",
+      label: "Alpha",
+      description: "First option",
+      technical: true,
+      cells: { name: "Alpha", description: "First option" },
+      badges: ["Recommended"],
+      current: true,
+      value: "alpha",
+    });
+    expect(seen?.options[1]).toMatchObject({
+      id: "back",
+      group: "navigation",
+      value: "back",
+    });
+  });
+
+  it("keeps simple setup choice callers stacked unless they opt into columns", async () => {
+    let seen: SelectPromptInput<boolean> | undefined;
+    const prompt = Object.assign(
+      async () => "",
+      {
+        select: async <T>(input: SelectPromptInput<T>): Promise<T> => {
+          seen = input as SelectPromptInput<boolean>;
+          return input.options[1]!.value;
+        },
+        close: () => undefined,
+      }
+    ) as Prompt;
+
+    const selected = await promptSetupYesNo(setupPromptContext(prompt, "en"), {
+      title: "Continue",
+      message: "Continue?\n",
+      yes: { id: "yes", label: "Yes", description: "Continue setup." },
+      no: { id: "no", label: "No", description: "Stop here." },
+      defaultValue: true,
+    });
+
+    expect(selected).toBe(false);
+    expect(seen?.columns).toBeUndefined();
+    expect(seen?.statusLines).toBeUndefined();
+    expect(seen?.hint).toBeUndefined();
+    expect(seen?.showCurrentBadge).toBeUndefined();
+    expect(seen?.options).toEqual([
+      { id: "yes", label: "Yes", description: "Continue setup.", value: true },
+      { id: "no", label: "No", description: "Stop here.", value: false },
+    ]);
+  });
+
+  it("localizes generic setup prompt helper columns and status lines", () => {
+    expect(setupChoiceColumns("ar")).toEqual([
+      { key: "name", header: "الاسم" },
+      { key: "description", header: "التفاصيل" },
+    ]);
+    expect(setupCurrentStatusLine("ar", "English")).toEqual({
+      text: "الحالي: English",
+      tone: "active",
+      direction: "rtl",
+    });
   });
 });
 

@@ -1,5 +1,6 @@
 import type { SelectPromptInput } from "../cli/interactive-select.js";
 import type { Prompt } from "../cli/readline-prompt.js";
+import type { PromptCardStatusLine } from "../contracts/view-model.js";
 import { isolateLtr, isolateRtl } from "../ui/bidi.js";
 import {
   promptUiContextForLocale,
@@ -19,7 +20,17 @@ export type SetupChoice<T> = {
   readonly id: string;
   readonly label: string;
   readonly description?: string;
+  readonly technical?: boolean;
+  readonly cells?: Readonly<Record<string, string>>;
+  readonly badges?: readonly string[];
+  readonly current?: boolean;
+  readonly group?: "main" | "navigation";
   readonly value: T;
+};
+
+export type SetupChoiceColumn = {
+  readonly key: string;
+  readonly header: string;
 };
 
 export type SetupPromptValue = string | number | readonly string[] | boolean | undefined;
@@ -67,6 +78,10 @@ export async function promptSetupChoice<T>(target: SetupPromptTarget, input: {
   readonly message: string;
   readonly choices: readonly SetupChoice<T>[];
   readonly defaultValue?: T;
+  readonly columns?: readonly SetupChoiceColumn[];
+  readonly statusLines?: readonly PromptCardStatusLine[];
+  readonly hint?: string;
+  readonly showCurrentBadge?: boolean;
 }): Promise<T> {
   if (input.choices.length === 0) {
     throw new Error(`${input.title} has no choices.`);
@@ -82,11 +97,20 @@ export async function promptSetupChoice<T>(target: SetupPromptTarget, input: {
         id: choice.id,
         label: choice.label,
         description: choice.description,
+        technical: choice.technical,
+        cells: choice.cells,
+        badges: choice.badges,
+        current: choice.current,
+        group: choice.group,
         value: choice.value,
       })),
       defaultIndex,
       fallbackPrompt: "Choose: ",
       surface: "promptCard",
+      columns: input.columns,
+      statusLines: input.statusLines,
+      hint: input.hint,
+      showCurrentBadge: input.showCurrentBadge,
       locale: uiContext.locale,
       direction: uiContext.direction,
     } satisfies SelectPromptInput<T>);
@@ -96,6 +120,32 @@ export async function promptSetupChoice<T>(target: SetupPromptTarget, input: {
   const raw = await prompt(`${input.message}${options}\nChoose [${(defaultIndex === -1 ? 0 : defaultIndex) + 1}]: `);
   const selectedIndex = Number.parseInt(raw.trim(), 10) - 1;
   return input.choices[selectedIndex]?.value ?? input.choices[defaultIndex === -1 ? 0 : defaultIndex]!.value;
+}
+
+export function setupChoiceColumns(locale: SetupCopyLocale): readonly SetupChoiceColumn[] {
+  return [
+    { key: "name", header: locale === "ar" ? "الاسم" : "Name" },
+    { key: "description", header: locale === "ar" ? "التفاصيل" : "Details" },
+  ];
+}
+
+export function setupCurrentStatusLine(
+  locale: SetupCopyLocale,
+  text: string
+): PromptCardStatusLine {
+  const label = locale === "ar" ? "الحالي" : "Current";
+  return {
+    text: `${label}: ${text}`,
+    tone: "active",
+    direction: locale === "ar" ? "rtl" : "ltr",
+  };
+}
+
+export function setupNavigationChoice<T>(choice: Omit<SetupChoice<T>, "group">): SetupChoice<T> {
+  return {
+    ...choice,
+    group: "navigation",
+  };
 }
 
 export async function promptSetupYesNo(target: SetupPromptTarget, input: {
