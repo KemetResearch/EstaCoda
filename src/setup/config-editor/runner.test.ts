@@ -3,6 +3,7 @@ import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises
 import { dirname, join } from "node:path";
 import { tmpdir } from "node:os";
 import type { Prompt } from "../../cli/readline-prompt.js";
+import type { SelectPromptInput } from "../../cli/interactive-select.js";
 import { WorkspaceTrustStore } from "../../security/workspace-trust-store.js";
 import type { ProviderId, ProviderApiMode, ProviderAuthMethod } from "../../contracts/provider.js";
 import type { FlowEngine, ModelCandidate } from "../../providers/provider-model-selection-flow.js";
@@ -703,10 +704,20 @@ describe("runConfigEditor", () => {
     });
     await trustWorkspace(tempDir, workspaceRoot);
 
+    const prompt = fakePrompt({ values: ["OpenAI", "gpt-5.5", true], secret: "sk-pr8-provider-route" });
+    const routePrompts: SelectPromptInput<unknown>[] = [];
+    const baseSelect = prompt.select!;
+    prompt.select = async (input) => {
+      if (input.title === "Primary provider" || input.title === "Primary model") {
+        routePrompts.push(input as SelectPromptInput<unknown>);
+      }
+      return baseSelect(input);
+    };
+
     const result = await runConfigEditor({
       homeDir: tempDir,
       workspaceRoot,
-      prompt: fakePrompt({ values: ["OpenAI", "gpt-5.5", true], secret: "sk-pr8-provider-route" }),
+      prompt,
       defaultActionId: "edit-primary-model-route",
       flowEngine: flowEngine({ credentialAction: "collect", envVarName: "PR8_OPENAI_KEY" }),
       applyExecutor: createReviewedSetupApplyExecutor({
@@ -743,6 +754,15 @@ describe("runConfigEditor", () => {
     expect(config.providers?.openai?.apiMode).toBeUndefined();
     expect(config.providers?.openai?.authMethod).toBeUndefined();
     expect(config.security?.assessor?.enabled).toBe(true);
+    expect(routePrompts.map((input) => input.title)).toEqual(["Primary provider", "Primary model"]);
+    expect(routePrompts[0]?.columns).toEqual([
+      { key: "name", header: "Name" },
+      { key: "details", header: "Details" },
+    ]);
+    expect(routePrompts[0]?.options.map((option) => option.id)).toContain("back");
+    expect(routePrompts[0]?.options.map((option) => option.id)).toContain("cancel");
+    expect(routePrompts[1]?.options.map((option) => option.id)).toContain("back");
+    expect(routePrompts[1]?.options.map((option) => option.id)).toContain("cancel");
     expect(envFile).toContain("PR8_OPENAI_KEY=");
     expect(rawConfig).not.toContain("sk-pr8-provider-route");
     expect(JSON.stringify(result)).not.toContain("sk-pr8-provider-route");
@@ -800,11 +820,11 @@ describe("runConfigEditor", () => {
       values: ["OpenAI", "gpt-5.5", true],
       secret: "sk-fallback-add-secret",
     });
-    const fallbackChoiceTitles: string[] = [];
+    const promptTitles: string[] = [];
     const baseSelect = prompt.select!;
     prompt.select = async (input) => {
-      if (input.title === "Fallback models") {
-        fallbackChoiceTitles.push(input.title);
+      if (input.title === "Fallback models" || input.title === "Fallback provider" || input.title === "Fallback model") {
+        promptTitles.push(input.title);
       }
       return baseSelect(input);
     };
@@ -828,7 +848,7 @@ describe("runConfigEditor", () => {
 
     expect(result.completed).toBe(true);
     expect(result.selectedActionId).toBe("edit-fallback-model-route");
-    expect(fallbackChoiceTitles).toEqual([]);
+    expect(promptTitles).toEqual(["Fallback provider", "Fallback model"]);
     expect(result.reviewManifest?.sections["provider-model-network"][0]?.review.values).toEqual(expect.objectContaining({
       fallbackOperation: "add",
       provider: "openai",
@@ -865,9 +885,13 @@ describe("runConfigEditor", () => {
     });
     await trustWorkspace(tempDir, workspaceRoot);
     const prompt = fakePrompt({ values: ["fallback-add", "Anthropic", "claude-sonnet-4-5", true] });
+    const promptTitles: string[] = [];
     const fallbackChoiceLabels: string[][] = [];
     const baseSelect = prompt.select!;
     prompt.select = async (input) => {
+      if (input.title === "Fallback models" || input.title === "Fallback provider" || input.title === "Fallback model") {
+        promptTitles.push(input.title);
+      }
       if (input.title === "Fallback models") {
         fallbackChoiceLabels.push(input.options.map((option) => option.label));
       }
@@ -887,6 +911,7 @@ describe("runConfigEditor", () => {
     });
 
     expect(result.completed).toBe(true);
+    expect(promptTitles).toEqual(["Fallback models", "Fallback provider", "Fallback model"]);
     expect(fallbackChoiceLabels).toEqual([[
       "Edit fallback 1: openai/gpt-5.5",
       "Edit fallback 2: kimi/kimi-k2",
@@ -961,8 +986,12 @@ describe("runConfigEditor", () => {
       secret: "sk-auxiliary-compression-secret",
     });
     const taskOptions: Array<{ labels: string[]; values: unknown[] }> = [];
+    const promptTitles: string[] = [];
     const baseSelect = prompt.select!;
     prompt.select = async (input) => {
+      if (input.title === "Choose auxiliary model." || input.title === "Auxiliary provider" || input.title === "Auxiliary model") {
+        promptTitles.push(input.title);
+      }
       if (input.title === "Choose auxiliary model.") {
         taskOptions.push({
           labels: input.options.map((option) => option.label),
@@ -993,6 +1022,7 @@ describe("runConfigEditor", () => {
 
     expect(result.completed).toBe(true);
     expect(result.selectedActionId).toBe("edit-auxiliary-model-route");
+    expect(promptTitles).toEqual(["Choose auxiliary model.", "Auxiliary provider", "Auxiliary model"]);
     expect(taskOptions).toEqual([{
       labels: ["Assessor", "Compression", "Session search", "Memory compaction", "Profile context"],
       values: ["assessor", "compression", "session_search", "memory_compaction", "profile_context"],

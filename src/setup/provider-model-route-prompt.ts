@@ -212,7 +212,7 @@ function renderableModelStatus(status: ModelProfile["status"]): ModelProfile["st
 }
 
 function modelCountLabel(count: number): string {
-  return count === 1 ? "model" : "models";
+  return "models";
 }
 
 function providerTitle(locale: SetupCopyLocale, mode: ProviderModelRoutePromptMode): string {

@@ -17,7 +17,6 @@ import { isolateLtr } from "../../ui/bidi.js";
 import { createReviewedSetupApplyExecutor } from "../review/apply-executor.js";
 import { runFirstRunSetup } from "./runner.js";
 import { renderOnboardingWizardSummary } from "./summary.js";
-import { promptModelCandidate, promptProviderCandidate } from "../config-editor/prompts.js";
 import type { FlowEngine, ModelCandidate, ProviderCandidate } from "../../providers/provider-model-selection-flow.js";
 import { readActiveProfile, resolveGlobalStateHome, resolveProfileStateHome } from "../../config/profile-home.js";
 import type { SetupApplyExecutor, SetupApplyMode } from "../setup-apply-plan.js";
@@ -267,7 +266,8 @@ function fakePrompt(
   overrides: Record<string, FakePromptOverrideValue> = {},
   seenOptions: Record<string, readonly string[]> = {},
   seenDescriptions: Record<string, readonly (string | undefined)[]> = {},
-  seenQuestions: { question: string; secret: boolean }[] = []
+  seenQuestions: { question: string; secret: boolean }[] = [],
+  seenSelectInputs: Record<string, SelectPromptInput<unknown>> = {}
 ): Prompt {
   const overrideQueues = new Map<string, (string | boolean)[]>();
   function nextOverride(key: string): string | boolean | undefined {
@@ -293,8 +293,9 @@ function fakePrompt(
     },
     {
       select: async <T>(input: SelectPromptInput<T>): Promise<T> => {
+        seenSelectInputs[input.title] = input as SelectPromptInput<unknown>;
         seenOptions[input.title] = input.options.map((option) => option.label);
-        seenDescriptions[input.title] = input.options.map((option) => option.description);
+        seenDescriptions[input.title] = input.options.map((option) => option.description ?? option.cells?.details);
         const requested = nextOverride(input.title);
         const byLabel = typeof requested === "string"
           ? input.options.find((option) => option.label === requested)
@@ -1252,7 +1253,7 @@ describe("runFirstRunSetup", () => {
     expect(result.reviewManifest.sections["enabled-optional-capabilities"]).toHaveLength(1);
   });
 
-  it("exposes the same provider candidates as the setup editor provider prompt helper", async () => {
+  it("uses the shared structured provider route prompt without Back or Cancel", async () => {
     const providers: ProviderCandidate[] = [
       {
         id: "local" as ProviderId,
@@ -1276,29 +1277,33 @@ describe("runFirstRunSetup", () => {
     ];
     const onboardingOptions: Record<string, readonly string[]> = {};
     const onboardingDescriptions: Record<string, readonly (string | undefined)[]> = {};
-    const editorOptions: Record<string, readonly string[]> = {};
-    const editorDescriptions: Record<string, readonly (string | undefined)[]> = {};
+    const onboardingSelects: Record<string, SelectPromptInput<unknown>> = {};
 
     await runFirstRunSetup({
       homeDir: tempDir,
       workspaceRoot,
-      prompt: fakePrompt({}, onboardingOptions, onboardingDescriptions),
+      prompt: fakePrompt({}, onboardingOptions, onboardingDescriptions, [], onboardingSelects),
       flowEngine: flowEngine({ providerCandidates: providers }),
     });
-    await promptProviderCandidate(fakePrompt({}, editorOptions, editorDescriptions), {
-      candidates: providers,
-    }, "en");
 
-    expect(onboardingOptions["Primary provider"]).toEqual(editorOptions["Primary provider"]);
-    expect(onboardingDescriptions["Primary provider"]).toEqual(editorDescriptions["Primary provider"]);
+    expect(onboardingOptions["Primary provider"]).toEqual(["Local", "OpenAI"]);
+    expect(onboardingDescriptions["Primary provider"]).toEqual([
+      "1 models",
+      "https://api.openai.com/v1 (5 models)",
+    ]);
+    expect(onboardingSelects["Primary provider"]?.surface).toBe("promptCard");
+    expect(onboardingSelects["Primary provider"]?.columns).toEqual([
+      { key: "name", header: "Name" },
+      { key: "details", header: "Details" },
+    ]);
+    expect(onboardingSelects["Primary provider"]?.options.map((option) => option.id)).not.toEqual(expect.arrayContaining(["back", "cancel"]));
   });
 
-  it("exposes the same model candidates for a chosen provider as the setup editor model prompt helper", async () => {
+  it("uses the shared structured model route prompt", async () => {
     const models = modelStatusCandidates("openai" as ProviderId);
     const onboardingOptions: Record<string, readonly string[]> = {};
     const onboardingDescriptions: Record<string, readonly (string | undefined)[]> = {};
-    const editorOptions: Record<string, readonly string[]> = {};
-    const editorDescriptions: Record<string, readonly (string | undefined)[]> = {};
+    const onboardingSelects: Record<string, SelectPromptInput<unknown>> = {};
     const customFlow: FlowEngine = {
       ...flowEngine({ credentialAction: "reuse" }),
       listProviderCandidates: async () => [{
@@ -1316,16 +1321,31 @@ describe("runFirstRunSetup", () => {
     await runFirstRunSetup({
       homeDir: tempDir,
       workspaceRoot,
-      prompt: fakePrompt({ "Primary provider": "OpenAI" }, onboardingOptions, onboardingDescriptions),
+      prompt: fakePrompt({ "Primary provider": "OpenAI" }, onboardingOptions, onboardingDescriptions, [], onboardingSelects),
       flowEngine: customFlow,
     });
-    await promptModelCandidate(fakePrompt({}, editorOptions, editorDescriptions), {
-      providerId: "openai",
-      candidates: models,
-    }, "en");
 
-    expect(onboardingOptions["Primary model"]).toEqual(editorOptions["Primary model"]);
-    expect(onboardingDescriptions["Primary model"]).toEqual(editorDescriptions["Primary model"]);
+    expect(onboardingOptions["Primary model"]).toEqual([
+      "model-alpha",
+      "model-beta",
+      "model-deprecated",
+      "model-unknown",
+      "model-stable",
+      "model-missing",
+    ]);
+    expect(onboardingDescriptions["Primary model"]).toEqual([
+      "alpha",
+      "beta",
+      "deprecated",
+      "",
+      "",
+      "",
+    ]);
+    expect(onboardingSelects["Primary model"]?.surface).toBe("promptCard");
+    expect(onboardingSelects["Primary model"]?.columns).toEqual([
+      { key: "name", header: "Name" },
+      { key: "details", header: "Details" },
+    ]);
   });
 
   it("uses the setup editor provider rejection wording when no provider candidates are available", async () => {

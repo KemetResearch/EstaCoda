@@ -12,6 +12,8 @@ import {
   createProviderModelSelectionFlow,
   type FlowEngine,
 } from "../../providers/provider-model-selection-flow.js";
+import { getProviderMetadata } from "../../providers/provider-metadata.js";
+import { selectProviderModelRoute } from "../provider-model-route-prompt.js";
 import type {
   OnboardingCredentialSummaryStatus,
   OnboardingOptionalCapabilitySummaryStatus,
@@ -59,9 +61,7 @@ import {
   showSetupCard,
 } from "../setup-prompts.js";
 import {
-  promptModelCandidate,
   promptChannelCapability,
-  promptProviderCandidate,
   promptVoiceCapability,
 } from "../config-editor/prompts.js";
 import {
@@ -164,33 +164,25 @@ export async function runFirstRunSetup(
   const workspaceRoot = workspaceSelection.workspaceRoot;
   const workspaceTrusted = workspaceSelection.workspaceTrusted;
 
-
-  const providerCandidates = await flowEngine.listProviderCandidates();
-  if (providerCandidates.length === 0) {
-    throw new Error("No setup-visible provider candidates are available.");
-  }
-  const primaryProviderCandidate = await promptProviderCandidate(localizedOptions.prompt, {
-    candidates: providerCandidates,
+  const routeSelection = await selectProviderModelRoute({
+    prompt: localizedOptions.prompt,
+    flowEngine,
+    locale: language,
     currentProviderId: options.defaultSelections?.primaryProvider,
-  }, language);
-  const primaryProvider = primaryProviderCandidate.id;
-
-
-  const modelCandidates = await flowEngine.listModelCandidates(primaryProvider);
-  if (modelCandidates.length === 0) {
-    throw new Error(`No setup-visible models are available for ${primaryProviderCandidate.displayName}.`);
-  }
-  const primaryModelCandidate = await promptModelCandidate(localizedOptions.prompt, {
-    providerId: primaryProvider,
-    candidates: modelCandidates,
     currentModelId: options.defaultSelections?.primaryModel,
-  }, language);
-  const primaryModel = primaryModelCandidate.id;
-
-  const resolution = await flowEngine.resolveSelection(primaryProvider, primaryModel);
-  if (resolution.kind === "diagnostic") {
-    throw new Error(`Provider/model selection failed: ${resolution.reason}`);
+    allowBack: false,
+    allowCancel: false,
+    mode: "onboarding",
+  });
+  if (routeSelection.kind !== "selected") {
+    throw new Error(routeSelection.kind === "diagnostic"
+      ? routeSelection.output
+      : "Provider/model selection was not completed.");
   }
+
+  const resolution = routeSelection.selection;
+  const primaryProvider = resolution.provider;
+  const primaryModel = resolution.model;
 
   const primaryBaseUrl = resolution.baseUrl;
   const primaryContextWindowTokens = resolution.profile.contextWindowTokens;
@@ -226,7 +218,7 @@ export async function runFirstRunSetup(
         providerId: primaryProvider,
         envVarName,
         question: setupProviderCredentialQuestion(language, {
-          providerName: primaryProviderCandidate.displayName,
+          providerName: getProviderMetadata(primaryProvider).displayName,
           envVarName,
         }),
       });

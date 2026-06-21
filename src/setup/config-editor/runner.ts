@@ -13,6 +13,11 @@ import {
   type FlowEngine,
   type ProviderModelSelectionResult,
 } from "../../providers/provider-model-selection-flow.js";
+import {
+  selectProviderModelRoute,
+  type ProviderModelPromptResult,
+  type ProviderModelRoutePromptMode,
+} from "../provider-model-route-prompt.js";
 import { getProviderMetadata } from "../../providers/provider-metadata.js";
 import type { SkillAutonomy } from "../../skills/skill-learning.js";
 import type {
@@ -56,9 +61,7 @@ import {
   promptChannelCapability,
   promptCredentialReuseChoice,
   promptFallbackRouteAction,
-  promptModelCandidate,
   promptOptionalCapabilityAction,
-  promptProviderCandidate,
   promptSecurityMode,
   promptVoiceCapability,
   promptWorkflowLearning,
@@ -626,9 +629,9 @@ async function handleProviderRouteAction(
   action: ConfigEditorRenderedAction
 ): Promise<ConfigEditorRunnerResult> {
   const editorAction = requireEditorAction(action);
-  const resolved = await selectResolvedProviderRoute(options, initialDecision);
-  if (resolved.kind === "diagnostic") {
-    return diagnosticResult(options, initialDecision, action.id, resolved.output);
+  const resolved = await selectResolvedProviderRoute(options, "primary");
+  if (resolved.kind !== "selected") {
+    return handleProviderRoutePromptExit(options, initialDecision, action.id, resolved);
   }
 
   return reviewAndApplyResolvedRoute(options, initialDecision, session, editorAction, resolved.selection);
@@ -647,12 +650,12 @@ async function handleFallbackRouteAction(
     ? { id: "fallback-add" as const, fallbackOperation: "add" as const }
     : await promptFallbackRouteAction(options.prompt, fallbacks, options.locale);
   const currentFallback = choice.fallbackOperation === "replace" ? choice.fallback : undefined;
-  const resolved = await selectResolvedProviderRoute(options, initialDecision, {
+  const resolved = await selectResolvedProviderRoute(options, "fallback", {
     currentProviderId: currentFallback?.provider,
     currentModelId: currentFallback?.id,
   });
-  if (resolved.kind === "diagnostic") {
-    return diagnosticResult(options, initialDecision, action.id, resolved.output);
+  if (resolved.kind !== "selected") {
+    return handleProviderRoutePromptExit(options, initialDecision, action.id, resolved);
   }
 
   return reviewAndApplyResolvedRoute(options, initialDecision, session, {
@@ -679,9 +682,9 @@ async function handleAuxiliaryRouteAction(
 ): Promise<ConfigEditorRunnerResult> {
   const editorAction = requireEditorAction(action);
   const auxiliaryTask = await promptAuxiliaryModelTask(options.prompt, options.locale);
-  const resolved = await selectResolvedProviderRoute(options, initialDecision);
-  if (resolved.kind === "diagnostic") {
-    return diagnosticResult(options, initialDecision, action.id, resolved.output);
+  const resolved = await selectResolvedProviderRoute(options, "auxiliary");
+  if (resolved.kind !== "selected") {
+    return handleProviderRoutePromptExit(options, initialDecision, action.id, resolved);
   }
 
   return reviewAndApplyResolvedRoute(options, initialDecision, session, {
@@ -1076,43 +1079,23 @@ async function reviewAndApplyResolvedRoute(
 
 async function selectResolvedProviderRoute(
   options: LocalizedConfigEditorRunnerOptions,
-  initialDecision: SetupRouteDecision,
+  mode: ProviderModelRoutePromptMode,
   currentRoute: {
     readonly currentProviderId?: string;
     readonly currentModelId?: string;
   } = {}
-): Promise<
-  | { readonly kind: "selected"; readonly selection: ProviderModelSelectionResult }
-  | { readonly kind: "diagnostic"; readonly output: string }
-> {
+): Promise<ProviderModelPromptResult> {
   const flowEngine = options.flowEngine ?? await createDefaultFlowEngine(options);
-  const providers = await flowEngine.listProviderCandidates();
-  if (providers.length === 0) {
-    return { kind: "diagnostic", output: "No setup-visible provider candidates are available." };
-  }
-
-  const provider = await promptProviderCandidate(options.prompt, {
-    candidates: providers,
-    currentProviderId: currentRoute.currentProviderId ?? initialDecision.state.model?.provider,
-  }, options.locale);
-  const models = await flowEngine.listModelCandidates(provider.id);
-  if (models.length === 0) {
-    return { kind: "diagnostic", output: `No setup-visible models are available for ${provider.displayName}.` };
-  }
-
-  const model = await promptModelCandidate(options.prompt, {
-    providerId: provider.id,
-    candidates: models,
-    currentModelId: currentRoute.currentProviderId === provider.id
-      ? currentRoute.currentModelId
-      : initialDecision.state.model?.provider === provider.id ? initialDecision.state.model.id : undefined,
-  }, options.locale);
-  const resolved = await flowEngine.resolveSelection(provider.id, model.id);
-  if (resolved.kind === "diagnostic") {
-    return { kind: "diagnostic", output: `Provider/model selection failed: ${resolved.reason}` };
-  }
-
-  return { kind: "selected", selection: resolved };
+  return selectProviderModelRoute({
+    prompt: options.prompt,
+    flowEngine,
+    locale: options.locale,
+    currentProviderId: currentRoute.currentProviderId,
+    currentModelId: currentRoute.currentModelId,
+    allowBack: true,
+    allowCancel: true,
+    mode,
+  });
 }
 
 async function resolveActiveProviderRoute(
@@ -1296,6 +1279,27 @@ function diagnosticResult(
   return {
     completed: false,
     exitCode: 1,
+    output,
+    initialDecision,
+    selectedActionId,
+  };
+}
+
+function handleProviderRoutePromptExit(
+  options: LocalizedConfigEditorRunnerOptions,
+  initialDecision: SetupRouteDecision,
+  selectedActionId: string,
+  result: Exclude<ProviderModelPromptResult, { readonly kind: "selected" }>
+): ConfigEditorRunnerResult {
+  if (result.kind === "diagnostic") {
+    return diagnosticResult(options, initialDecision, selectedActionId, result.output);
+  }
+
+  const output = setupCopyText(options.locale, "setupEditor.result.exitWithoutChanges");
+  write(options, `${output}\n`);
+  return {
+    completed: true,
+    exitCode: 0,
     output,
     initialDecision,
     selectedActionId,
