@@ -3,6 +3,8 @@ import type {
   ChannelAuthPolicies,
   ChannelGatewayResult,
   ChannelMessage,
+  ChannelTextAction,
+  ChannelTextOptions,
   ChannelStreamingTextHandle,
   ChannelStreamingTextOptions,
   ChannelStreamingTextResult,
@@ -48,7 +50,13 @@ import {
   type ApprovalActionScope
 } from "./approval-actions.js";
 import {
+  MODEL_PICKER_MODEL_PAGE_SIZE,
   MODEL_PICKER_MAX_CHOICE_ACTIONS,
+  modelPickerBackActionValue,
+  modelPickerCancelActionValue,
+  modelPickerClearActionValue,
+  modelPickerPageActionKey,
+  modelPickerPageActionValue,
   modelPickerProviderActionKey,
   modelPickerSelectActionKey,
   parseModelPickerAction,
@@ -1663,18 +1671,19 @@ export class ChannelGateway {
   async #handleModelCommand(
     message: ChannelMessage,
     adapter: ChannelAdapter,
-    command: GatewayModelCommand
+    command: GatewayModelCommand,
+    deliveryOptions?: ChannelTextOptions
   ): Promise<ChannelGatewayResult> {
     const sessionId = await this.#sessionStore.getOrCreateSessionId(message.sessionKey, { receivedAt: message.receivedAt });
     this.#sessionIdByTurnKey.set(stableSessionKey(message.sessionKey, this.#sessionPolicy), sessionId);
 
     if (command.kind === "show") {
-      return this.#showModelPicker(message, adapter, sessionId);
+      return this.#showModelPicker(message, adapter, sessionId, deliveryOptions);
     }
 
     if (command.kind === "cancel") {
       const text = "Model picker canceled.";
-      await this.#deliverText(adapter, message.sessionKey, text);
+      await this.#deliverText(adapter, message.sessionKey, text, deliveryOptions);
       return { sessionId, replyText: text, artifactCount: 0, progressCount: 0 };
     }
 
@@ -1684,7 +1693,7 @@ export class ChannelGateway {
           "Clearing the global primary model is not supported from /model --global.",
           "Use estacoda model setup from a terminal to choose a new primary model."
         ].join("\n");
-        await this.#deliverText(adapter, message.sessionKey, text);
+        await this.#deliverText(adapter, message.sessionKey, text, deliveryOptions);
         return { sessionId, replyText: text, artifactCount: 0, progressCount: 0 };
       }
 
@@ -1700,7 +1709,7 @@ export class ChannelGateway {
         "Scope: session",
         "Future gateway turns will use the configured primary route."
       ].join("\n");
-      await this.#deliverText(adapter, message.sessionKey, text);
+      await this.#deliverText(adapter, message.sessionKey, text, deliveryOptions);
       return { sessionId, replyText: text, artifactCount: 0, progressCount: 0 };
     }
 
@@ -1708,14 +1717,14 @@ export class ChannelGateway {
       const text = command.scope === "global"
         ? "Usage: /model --global <provider>/<model>\nAlso accepted: /model set --global <provider>/<model>"
         : "Usage: /model <provider>/<model>\nAlso accepted: /model set <provider>/<model>";
-      await this.#deliverText(adapter, message.sessionKey, text);
+      await this.#deliverText(adapter, message.sessionKey, text, deliveryOptions);
       return { sessionId, replyText: text, artifactCount: 0, progressCount: 0 };
     }
 
     const context = await this.#loadModelSwitchContext();
     if (context === undefined) {
       const text = "Gateway model switching is unavailable in this process.";
-      await this.#deliverText(adapter, message.sessionKey, text);
+      await this.#deliverText(adapter, message.sessionKey, text, deliveryOptions);
       return { sessionId, replyText: text, artifactCount: 0, progressCount: 0 };
     }
 
@@ -1723,7 +1732,7 @@ export class ChannelGateway {
       const flow = await this.#createGatewayModelFlow(context);
       const provider = (await flow.listProviderCandidates()).find((candidate) => candidate.id === command.modelInput.trim());
       if (provider !== undefined) {
-        return this.#showModelProviderPicker(message, adapter, sessionId, provider.id);
+        return this.#showModelProviderPicker(message, adapter, sessionId, provider.id, 0, deliveryOptions);
       }
     }
 
@@ -1733,7 +1742,7 @@ export class ChannelGateway {
     }, context);
     if (!resolution.ok) {
       const text = `${resolution.message}\n${resolution.guidance}`;
-      await this.#deliverText(adapter, message.sessionKey, text);
+      await this.#deliverText(adapter, message.sessionKey, text, deliveryOptions);
       return { sessionId, replyText: text, artifactCount: 0, progressCount: 0 };
     }
 
@@ -1744,7 +1753,7 @@ export class ChannelGateway {
           "Global model changes require an authorized channel and a trusted workspace/profile.",
           `Run estacoda model setup ${resolution.route.provider} from a terminal to change the profile primary model.`
         ].join("\n");
-        await this.#deliverText(adapter, message.sessionKey, text);
+        await this.#deliverText(adapter, message.sessionKey, text, deliveryOptions);
         return { sessionId, replyText: text, artifactCount: 0, progressCount: 0 };
       }
 
@@ -1753,7 +1762,7 @@ export class ChannelGateway {
           "Gateway cannot prove the profile config location for a safe global model write.",
           `Run estacoda model setup ${resolution.route.provider} from a terminal to change the profile primary model.`
         ].join("\n");
-        await this.#deliverText(adapter, message.sessionKey, text);
+        await this.#deliverText(adapter, message.sessionKey, text, deliveryOptions);
         return { sessionId, replyText: text, artifactCount: 0, progressCount: 0 };
       }
 
@@ -1772,7 +1781,7 @@ export class ChannelGateway {
         "Scope: global",
         "Fallback routes remain unchanged."
       ].join("\n");
-      await this.#deliverText(adapter, message.sessionKey, text);
+      await this.#deliverText(adapter, message.sessionKey, text, deliveryOptions);
       return { sessionId, replyText: text, artifactCount: 0, progressCount: 0 };
     }
 
@@ -1789,7 +1798,75 @@ export class ChannelGateway {
       "Scope: session",
       "Fallback routes remain unchanged."
     ].join("\n");
-    await this.#deliverText(adapter, message.sessionKey, text);
+    await this.#deliverText(adapter, message.sessionKey, text, deliveryOptions);
+    return { sessionId, replyText: text, artifactCount: 0, progressCount: 0 };
+  }
+
+  async #handleModelPickerSelectCallback(
+    message: ChannelMessage,
+    adapter: ChannelAdapter,
+    sessionId: string,
+    modelInput: string,
+    deliveryOptions?: ChannelTextOptions
+  ): Promise<ChannelGatewayResult> {
+    const context = await this.#loadModelSwitchContext();
+    if (context === undefined) {
+      const text = "Run /model again.";
+      await this.#deliverText(adapter, message.sessionKey, text, modelPickerFinalDeliveryOptions(message, deliveryOptions));
+      return { sessionId, replyText: text, artifactCount: 0, progressCount: 0 };
+    }
+
+    const resolution = await resolveModelSwitchRequest({
+      modelInput,
+      source: "gateway"
+    }, context);
+    if (!resolution.ok) {
+      const text = "Run /model again.";
+      await this.#deliverText(adapter, message.sessionKey, text, modelPickerFinalDeliveryOptions(message, deliveryOptions));
+      return { sessionId, replyText: text, artifactCount: 0, progressCount: 0 };
+    }
+
+    const runtime = await this.#runtimeForSessionCommand(message, sessionId);
+    try {
+      await runtime.sessionDb.setSessionModelOverride(sessionId, resolution.override);
+    } finally {
+      await runtime.dispose();
+    }
+    await this.#refreshCachedRuntimePolicy(sessionId, "Gateway model override set");
+
+    const flow = await this.#createGatewayModelFlow(context);
+    const providers = await flow.listProviderCandidates();
+    const provider = providers.find((candidate) => candidate.id === resolution.route.provider);
+    const text = [
+      "Model Configuration",
+      `Current model: ${resolution.route.id}`,
+      `Provider: ${provider?.displayName ?? resolution.route.provider}`,
+      "Session override updated."
+    ].join("\n");
+    await this.#deliverText(adapter, message.sessionKey, text, modelPickerFinalDeliveryOptions(message, deliveryOptions));
+    return { sessionId, replyText: text, artifactCount: 0, progressCount: 0 };
+  }
+
+  async #handleModelPickerClearCallback(
+    message: ChannelMessage,
+    adapter: ChannelAdapter,
+    sessionId: string,
+    deliveryOptions?: ChannelTextOptions
+  ): Promise<ChannelGatewayResult> {
+    const runtime = await this.#runtimeForSessionCommand(message, sessionId);
+    try {
+      await runtime.sessionDb.clearSessionModelOverride(sessionId);
+    } finally {
+      await runtime.dispose();
+    }
+    await this.#refreshCachedRuntimePolicy(sessionId, "Gateway model override clear");
+
+    const text = [
+      "Model Configuration",
+      "Session model override cleared.",
+      "Future gateway turns will use the configured primary route."
+    ].join("\n");
+    await this.#deliverText(adapter, message.sessionKey, text, modelPickerFinalDeliveryOptions(message, deliveryOptions));
     return { sessionId, replyText: text, artifactCount: 0, progressCount: 0 };
   }
 
@@ -1816,12 +1893,13 @@ export class ChannelGateway {
   async #showModelPicker(
     message: ChannelMessage,
     adapter: ChannelAdapter,
-    sessionId: string
+    sessionId: string,
+    deliveryOptions?: ChannelTextOptions
   ): Promise<ChannelGatewayResult> {
     const context = await this.#loadModelSwitchContext();
     if (context === undefined) {
       const text = "Gateway model switching is unavailable in this process.";
-      await this.#deliverText(adapter, message.sessionKey, text);
+      await this.#deliverText(adapter, message.sessionKey, text, deliveryOptions);
       return { sessionId, replyText: text, artifactCount: 0, progressCount: 0 };
     }
 
@@ -1835,6 +1913,7 @@ export class ChannelGateway {
     const renderedChoices = choices.slice(0, MODEL_PICKER_MAX_CHOICE_ACTIONS);
     const truncated = choices.length > renderedChoices.length;
     const currentModel = await this.#describeCurrentModelSelection(sessionId, message, context);
+    const currentModelLines = renderModelPickerCurrentLines(currentModel, providers);
 
     const text = providers.length === 0
       ? [
@@ -1842,22 +1921,21 @@ export class ChannelGateway {
           "Run estacoda model setup from a terminal to configure credentials."
         ].join("\n")
       : [
-          "Session model picker",
-          `Current: ${currentModel}`,
-          "Choose a provider:",
-          ...providers.slice(0, MODEL_PICKER_MAX_CHOICE_ACTIONS).map((provider) => `model-select ${provider.id}`),
+          "Model Configuration",
+          ...currentModelLines,
+          "Select a provider:",
           truncated
-            ? `Showing ${MODEL_PICKER_MAX_CHOICE_ACTIONS} of ${providers.length} providers. Reply with model-select <provider>/<model> for hidden choices.`
-            : undefined,
-          "",
-          "Clear override: model-clear",
-          "Direct set: model-select <provider>/<model>"
+            ? `Showing ${renderedChoices.length} of ${providers.length} providers.`
+            : undefined
         ].filter((line) => line !== undefined).join("\n");
     await this.#deliverText(
       adapter,
       message.sessionKey,
       text,
-      choices.length === 0 ? undefined : { actions: renderModelPickerActions(renderedChoices) }
+      modelPickerDeliveryOptions(message, choices.length === 0 ? undefined : [
+        ...renderModelPickerActions(renderedChoices, { columns: 2 }),
+        ...modelPickerProviderControlRows()
+      ], deliveryOptions)
     );
     return { sessionId, replyText: text, artifactCount: 0, progressCount: 0 };
   }
@@ -1866,12 +1944,14 @@ export class ChannelGateway {
     message: ChannelMessage,
     adapter: ChannelAdapter,
     sessionId: string,
-    providerId: string
+    providerId: string,
+    page = 0,
+    deliveryOptions?: ChannelTextOptions
   ): Promise<ChannelGatewayResult> {
     const context = await this.#loadModelSwitchContext();
     if (context === undefined) {
       const text = "Gateway model switching is unavailable in this process.";
-      await this.#deliverText(adapter, message.sessionKey, text);
+      await this.#deliverText(adapter, message.sessionKey, text, deliveryOptions);
       return { sessionId, replyText: text, artifactCount: 0, progressCount: 0 };
     }
 
@@ -1883,7 +1963,7 @@ export class ChannelGateway {
         `Model provider is not available: ${providerId}`,
         "Run /model to see configured runnable providers."
       ].join("\n");
-      await this.#deliverText(adapter, message.sessionKey, text);
+      await this.#deliverText(adapter, message.sessionKey, text, deliveryOptions);
       return { sessionId, replyText: text, artifactCount: 0, progressCount: 0 };
     }
 
@@ -1893,8 +1973,11 @@ export class ChannelGateway {
       actionKey: modelPickerSelectActionKey(model.provider, model.id),
       kind: "select" as const
     }));
-    const renderedChoices = choices.slice(0, MODEL_PICKER_MAX_CHOICE_ACTIONS);
-    const truncated = choices.length > renderedChoices.length;
+    const totalPages = Math.max(1, Math.ceil(choices.length / MODEL_PICKER_MODEL_PAGE_SIZE));
+    const safePage = clampModelPickerPage(page, totalPages);
+    const start = safePage * MODEL_PICKER_MODEL_PAGE_SIZE;
+    const renderedChoices = choices.slice(start, start + MODEL_PICKER_MODEL_PAGE_SIZE);
+    const end = start + renderedChoices.length;
 
     const text = choices.length === 0
       ? [
@@ -1902,22 +1985,22 @@ export class ChannelGateway {
           `Run estacoda model setup ${provider.id} from a terminal.`
         ].join("\n")
       : [
-          `Session model picker: ${provider.displayName}`,
-          "Choose a model:",
-          ...models.slice(0, MODEL_PICKER_MAX_CHOICE_ACTIONS).map((model) => `model-select ${model.provider}/${model.id}`),
-          truncated
-            ? `Showing ${MODEL_PICKER_MAX_CHOICE_ACTIONS} of ${models.length} models. Reply with model-select ${provider.id}/<model> for hidden choices.`
-            : undefined,
-          "",
-          "Clear override: model-clear",
-          "Cancel: reply /model to choose another provider."
+          "Model Configuration",
+          `Provider: ${provider.displayName} (${start + 1}-${end} of ${choices.length})`,
+          "Select a model:"
         ].filter((line) => line !== undefined).join("\n");
 
     await this.#deliverText(
       adapter,
       message.sessionKey,
       text,
-      choices.length === 0 ? undefined : { actions: renderModelPickerActions(renderedChoices) }
+      modelPickerDeliveryOptions(message, choices.length === 0 ? undefined : [
+        ...renderModelPickerActions(renderedChoices, {
+          columns: 2,
+          maxChoices: MODEL_PICKER_MODEL_PAGE_SIZE
+        }),
+        ...modelPickerModelNavigationRows(provider.id, safePage, totalPages)
+      ], deliveryOptions)
     );
     return { sessionId, replyText: text, artifactCount: 0, progressCount: 0 };
   }
@@ -1993,6 +2076,25 @@ export class ChannelGateway {
     return matches.length === 1 ? matches[0] : undefined;
   }
 
+  async #resolvePageActionKey(
+    actionKey: string,
+    context: ModelSwitchContext
+  ): Promise<{ providerId: string; page: number } | undefined> {
+    const flow = await this.#createGatewayModelFlow(context);
+    const providers = await flow.listProviderCandidates();
+    const matches: Array<{ providerId: string; page: number }> = [];
+    for (const provider of providers) {
+      const models = await this.#listRunnableModelChoices(flow, provider.id);
+      const totalPages = Math.max(1, Math.ceil(models.length / MODEL_PICKER_MODEL_PAGE_SIZE));
+      for (let page = 0; page < totalPages; page += 1) {
+        if (modelPickerPageActionKey(provider.id, page) === actionKey) {
+          matches.push({ providerId: provider.id, page });
+        }
+      }
+    }
+    return matches.length === 1 ? matches[0] : undefined;
+  }
+
   async #loadModelSwitchContext(): Promise<ModelSwitchContext | undefined> {
     if (this.#modelSwitchContext === undefined) {
       return undefined;
@@ -2028,9 +2130,10 @@ export class ChannelGateway {
     const modelAction = parseModelPickerAction(message.text);
     if (modelAction !== undefined) {
       const sessionId = await this.#sessionStore.getOrCreateSessionId(message.sessionKey, { receivedAt: message.receivedAt });
+      const pickerDeliveryOptions = modelPickerDeliveryOptions(message);
       if (!modelAction.ok) {
-        const text = modelAction.reason;
-        await this.#deliverText(adapter, message.sessionKey, text);
+        const text = "Run /model again.";
+        await this.#deliverText(adapter, message.sessionKey, text, modelPickerFinalDeliveryOptions(message, pickerDeliveryOptions));
         return { sessionId, replyText: text, artifactCount: 0, progressCount: 0 };
       }
 
@@ -2040,31 +2143,50 @@ export class ChannelGateway {
           ? undefined
           : await this.#resolveProviderActionKey(modelAction.action.actionKey, context);
         if (providerId === undefined) {
-          const text = "Model picker action is no longer available. Run /model again.";
-          await this.#deliverText(adapter, message.sessionKey, text);
+          const text = "Run /model again.";
+          await this.#deliverText(adapter, message.sessionKey, text, modelPickerFinalDeliveryOptions(message, pickerDeliveryOptions));
           return { sessionId, replyText: text, artifactCount: 0, progressCount: 0 };
         }
-        return this.#showModelProviderPicker(message, adapter, sessionId, providerId);
+        return this.#showModelProviderPicker(message, adapter, sessionId, providerId, 0, pickerDeliveryOptions);
       }
 
-      let command: GatewayModelCommand;
+      if (modelAction.action.kind === "page") {
+        const context = await this.#loadModelSwitchContext();
+        const pageTarget = context === undefined
+          ? undefined
+          : await this.#resolvePageActionKey(modelAction.action.actionKey, context);
+        if (pageTarget === undefined) {
+          const text = "Run /model again.";
+          await this.#deliverText(adapter, message.sessionKey, text, modelPickerFinalDeliveryOptions(message, pickerDeliveryOptions));
+          return { sessionId, replyText: text, artifactCount: 0, progressCount: 0 };
+        }
+        return this.#showModelProviderPicker(message, adapter, sessionId, pageTarget.providerId, pageTarget.page, pickerDeliveryOptions);
+      }
+
+      if (modelAction.action.kind === "back") {
+        return this.#showModelPicker(message, adapter, sessionId, pickerDeliveryOptions);
+      }
+
       if (modelAction.action.kind === "select") {
         const context = await this.#loadModelSwitchContext();
         const modelInput = context === undefined
           ? undefined
           : await this.#resolveModelActionKey(modelAction.action.actionKey, context);
         if (modelInput === undefined) {
-          const text = "Model picker action is no longer available. Run /model again.";
-          await this.#deliverText(adapter, message.sessionKey, text);
+          const text = "Run /model again.";
+          await this.#deliverText(adapter, message.sessionKey, text, modelPickerFinalDeliveryOptions(message, pickerDeliveryOptions));
           return { sessionId, replyText: text, artifactCount: 0, progressCount: 0 };
         }
-        command = { kind: "set", scope: "session", modelInput };
-      } else {
-        command = modelAction.action.kind === "clear"
-          ? { kind: "clear", scope: "session" }
-          : { kind: "cancel" };
+        return this.#handleModelPickerSelectCallback(message, adapter, sessionId, modelInput, pickerDeliveryOptions);
       }
-      return this.#handleModelCommand(message, adapter, command);
+
+      if (modelAction.action.kind === "clear") {
+        return this.#handleModelPickerClearCallback(message, adapter, sessionId, pickerDeliveryOptions);
+      }
+
+      const text = "Model picker canceled.";
+      await this.#deliverText(adapter, message.sessionKey, text, modelPickerFinalDeliveryOptions(message, pickerDeliveryOptions));
+      return { sessionId, replyText: text, artifactCount: 0, progressCount: 0 };
     }
 
     const modelCommand = parseGatewayModelCommand(message.text);
@@ -3344,6 +3466,133 @@ function yoloSessionKey(stableKey: string, sessionId: string): string {
 function tokenizeCommandArgs(text: string): string[] {
   const matches = text.matchAll(/"([^"]*)"|'([^']*)'|(\S+)/gu);
   return [...matches].map((match) => match[1] ?? match[2] ?? match[3] ?? "");
+}
+
+function renderModelPickerCurrentLines(
+  currentModel: string,
+  providers: Array<{ id: string; displayName: string }>
+): string[] {
+  const route = parseModelPickerRouteDescription(currentModel);
+  if (route === undefined) {
+    return [`Current model: ${currentModel}`];
+  }
+
+  const provider = providers.find((candidate) => candidate.id === route.providerId);
+  return [
+    `Current model: ${route.modelId}`,
+    `Provider: ${provider?.displayName ?? route.providerId}`
+  ];
+}
+
+function parseModelPickerRouteDescription(
+  currentModel: string
+): { providerId: string; modelId: string } | undefined {
+  const routeText = currentModel.replace(/\s+\([^)]+\)$/u, "");
+  const slashIndex = routeText.indexOf("/");
+  if (slashIndex <= 0 || slashIndex === routeText.length - 1) {
+    return undefined;
+  }
+
+  return {
+    providerId: routeText.slice(0, slashIndex),
+    modelId: routeText.slice(slashIndex + 1)
+  };
+}
+
+function modelPickerProviderControlRows(): ChannelTextAction[][] {
+  return [[
+    { label: "Clear", value: modelPickerClearActionValue() },
+    { label: "Cancel", value: modelPickerCancelActionValue() }
+  ]];
+}
+
+function modelPickerDeliveryOptions(
+  message: ChannelMessage,
+  actions?: ChannelTextAction[][],
+  baseOptions?: ChannelTextOptions
+): ChannelTextOptions | undefined {
+  const editMessageId = modelPickerTelegramCallbackMessageId(message);
+  if (actions === undefined && editMessageId === undefined && baseOptions === undefined) {
+    return undefined;
+  }
+
+  return {
+    ...baseOptions,
+    actions: actions ?? baseOptions?.actions,
+    editMessageId: baseOptions?.editMessageId ?? editMessageId
+  };
+}
+
+function modelPickerFinalDeliveryOptions(
+  message: ChannelMessage,
+  baseOptions?: ChannelTextOptions
+): ChannelTextOptions {
+  return modelPickerDeliveryOptions(message, [], baseOptions) ?? { actions: [] };
+}
+
+function modelPickerTelegramCallbackMessageId(message: ChannelMessage): string | undefined {
+  if (message.sessionKey.platform !== "telegram") {
+    return undefined;
+  }
+
+  const telegram = message.metadata?.telegram;
+  if (typeof telegram !== "object" || telegram === null) {
+    return undefined;
+  }
+
+  const callbackQueryId = (telegram as { callbackQueryId?: unknown }).callbackQueryId;
+  if (callbackQueryId === undefined || callbackQueryId === null || String(callbackQueryId).length === 0) {
+    return undefined;
+  }
+
+  const messageId = (telegram as { messageId?: unknown }).messageId;
+  if (typeof messageId === "number" && Number.isFinite(messageId)) {
+    return String(messageId);
+  }
+  if (typeof messageId === "string" && messageId.trim().length > 0) {
+    return messageId;
+  }
+  return undefined;
+}
+
+function modelPickerModelNavigationRows(providerId: string, page: number, totalPages: number): ChannelTextAction[][] {
+  const safeTotalPages = Math.max(1, totalPages);
+  const safePage = clampModelPickerPage(page, safeTotalPages);
+  const rows: ChannelTextAction[][] = [];
+
+  if (safeTotalPages > 1) {
+    const currentPage = {
+      label: `${safePage + 1}/${safeTotalPages}`,
+      value: modelPickerPageActionValue(modelPickerPageActionKey(providerId, safePage))
+    };
+    const previousPage = safePage > 0
+      ? {
+          label: "< Prev",
+          value: modelPickerPageActionValue(modelPickerPageActionKey(providerId, safePage - 1))
+        }
+      : currentPage;
+    const nextPage = safePage < safeTotalPages - 1
+      ? {
+          label: "Next >",
+          value: modelPickerPageActionValue(modelPickerPageActionKey(providerId, safePage + 1))
+        }
+      : currentPage;
+
+    rows.push([previousPage, nextPage]);
+  }
+
+  rows.push([
+    { label: "< Back", value: modelPickerBackActionValue() },
+    { label: "Cancel", value: modelPickerCancelActionValue() }
+  ]);
+  return rows;
+}
+
+function clampModelPickerPage(page: number, totalPages: number): number {
+  if (!Number.isFinite(page)) {
+    return 0;
+  }
+  return Math.min(Math.max(Math.trunc(page), 0), Math.max(totalPages - 1, 0));
 }
 
 type GatewayModelCommand =

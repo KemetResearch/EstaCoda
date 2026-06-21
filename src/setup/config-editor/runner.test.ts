@@ -3376,6 +3376,8 @@ function modelStatusCandidate(
     executable: true,
     catalogOnly: false,
     supportsVision: false,
+    lifecycle: "available",
+    usageClass: "primary-chat",
     profile: {
       id,
       provider,
@@ -3572,6 +3574,8 @@ function modelCandidateForProvider(providerId: ProviderId) {
     executable: true,
     catalogOnly: false,
     supportsVision: true,
+    lifecycle: "available" as const,
+    usageClass: "primary-chat" as const,
     profile: {
       id,
       provider: providerId,

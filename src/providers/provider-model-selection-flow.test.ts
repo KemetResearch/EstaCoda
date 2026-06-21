@@ -11,6 +11,7 @@ import type { EstaCodaConfig } from "../config/runtime-config.js";
 import { mkdtempSync, writeFileSync, rmSync, mkdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import type { ModelCatalogOverrideRegistry } from "../model-catalog/model-catalog-policy.js";
 
 function createMockSnapshot(): Record<string, unknown> {
   return {
@@ -35,6 +36,28 @@ function createMockSnapshot(): Record<string, unknown> {
         reasoning: false,
         tool_call: true,
         structured_output: true,
+        status: "stable"
+      },
+      {
+        id: "gpt-retired",
+        provider_id: "openai",
+        context_window: 128_000,
+        input_modalities: ["text"],
+        output_modalities: ["text"],
+        reasoning: false,
+        tool_call: true,
+        structured_output: true,
+        status: "stable"
+      },
+      {
+        id: "gpt-image-test",
+        provider_id: "openai",
+        context_window: 0,
+        input_modalities: ["text"],
+        output_modalities: ["image"],
+        reasoning: false,
+        tool_call: false,
+        structured_output: false,
         status: "stable"
       },
       {
@@ -110,6 +133,7 @@ function buildOptions(
     config?: EstaCodaConfig;
     registry?: ProviderRegistry;
     mode?: "normal" | "setup" | "catalog-explore";
+    modelCatalogOverrides?: ModelCatalogOverrideRegistry;
   }
 ): ProviderModelSelectionFlowOptions {
   return {
@@ -121,8 +145,22 @@ function buildOptions(
       cachePath,
       allowNetwork: false
     },
+    modelCatalogOverrides: overrides?.modelCatalogOverrides,
     allowNetwork: false,
     mode: overrides?.mode ?? "normal"
+  };
+}
+
+function lifecycleOverrides(): ModelCatalogOverrideRegistry {
+  return {
+    version: 1,
+    models: [{
+      provider: "openai",
+      model: "gpt-retired",
+      lifecycle: "retired",
+      usageClass: "primary-chat",
+      note: "Retired by reviewed test policy."
+    }]
   };
 }
 
@@ -576,9 +614,160 @@ describe("provider-model-selection-flow", () => {
         expect(gpt4o!.supportsVision).toBe(true);
       })
     );
+
+    it(
+      "setup candidates exclude retired models by default",
+      withFixture(async (fixturePath, cachePath) => {
+        const flow = await createProviderModelSelectionFlow(
+          buildOptions(fixturePath, cachePath, {
+            mode: "setup",
+            modelCatalogOverrides: lifecycleOverrides()
+          })
+        );
+
+        const models = await flow.listModelCandidates("openai");
+        expect(models.some((m) => m.id === "gpt-retired")).toBe(false);
+      })
+    );
+
+    it(
+      "setup candidates exclude wrong-usage models by default",
+      withFixture(async (fixturePath, cachePath) => {
+        const flow = await createProviderModelSelectionFlow(
+          buildOptions(fixturePath, cachePath, {
+            mode: "setup",
+            modelCatalogOverrides: lifecycleOverrides()
+          })
+        );
+
+        const models = await flow.listModelCandidates("openai");
+        expect(models.some((m) => m.id === "gpt-image-test")).toBe(false);
+      })
+    );
+
+    it(
+      "propagates lifecycle metadata",
+      withFixture(async (fixturePath, cachePath) => {
+        const flow = await createProviderModelSelectionFlow(
+          buildOptions(fixturePath, cachePath, {
+            mode: "setup",
+            modelCatalogOverrides: lifecycleOverrides()
+          })
+        );
+
+        const models = await flow.listModelCandidates("openai");
+        const gpt4o = models.find((m) => m.id === "gpt-4o");
+        expect(gpt4o).toBeDefined();
+        expect(gpt4o!.lifecycle).toBe("available");
+        expect(gpt4o!.usageClass).toBe("primary-chat");
+        expect(gpt4o!.warnings).toEqual([]);
+      })
+    );
+
+    it(
+      "preserves configured stale candidates with warnings",
+      withFixture(async (fixturePath, cachePath) => {
+        const flow = await createProviderModelSelectionFlow(
+          buildOptions(fixturePath, cachePath, {
+            mode: "setup",
+            modelCatalogOverrides: lifecycleOverrides(),
+            config: {
+              providers: {
+                openai: {
+                  kind: "openai-compatible",
+                  models: ["gpt-retired"]
+                }
+              }
+            }
+          })
+        );
+
+        const models = await flow.listModelCandidates("openai");
+        const retired = models.find((m) => m.id === "gpt-retired");
+        expect(retired).toBeDefined();
+        expect(retired!.configured).toBe(true);
+        expect(retired!.lifecycle).toBe("retired");
+        expect(retired!.warnings).toEqual(["Model is retired."]);
+      })
+    );
+
+    it(
+      "preserves current stale candidates with warnings",
+      withFixture(async (fixturePath, cachePath) => {
+        const flow = await createProviderModelSelectionFlow(
+          buildOptions(fixturePath, cachePath, {
+            mode: "setup",
+            modelCatalogOverrides: lifecycleOverrides(),
+            config: {
+              model: {
+                provider: "openai" as ProviderId,
+                id: "gpt-retired"
+              }
+            }
+          })
+        );
+
+        const models = await flow.listModelCandidates("openai");
+        const retired = models.find((m) => m.id === "gpt-retired");
+        expect(retired).toBeDefined();
+        expect(retired!.lifecycle).toBe("retired");
+        expect(retired!.warnings).toEqual(["Model is retired."]);
+      })
+    );
+
+    it(
+      "normal primary-chat candidates still work",
+      withFixture(async (fixturePath, cachePath) => {
+        const flow = await createProviderModelSelectionFlow(
+          buildOptions(fixturePath, cachePath, {
+            mode: "setup",
+            modelCatalogOverrides: lifecycleOverrides()
+          })
+        );
+
+        const models = await flow.listModelCandidates("openai");
+        expect(models).toEqual(expect.arrayContaining([
+          expect.objectContaining({
+            id: "gpt-4o",
+            lifecycle: "available",
+            usageClass: "primary-chat"
+          })
+        ]));
+      })
+    );
   });
 
   describe("resolveSelection credentialAction", () => {
+    it(
+      "configured current stale models can still resolve",
+      withFixture(async (fixturePath, cachePath) => {
+        delete process.env.OPENAI_API_KEY;
+        const flow = await createProviderModelSelectionFlow(
+          buildOptions(fixturePath, cachePath, {
+            mode: "setup",
+            modelCatalogOverrides: lifecycleOverrides(),
+            config: {
+              model: {
+                provider: "openai" as ProviderId,
+                id: "gpt-retired"
+              },
+              providers: {
+                openai: {
+                  kind: "openai-compatible",
+                  models: ["gpt-retired"]
+                }
+              }
+            }
+          })
+        );
+
+        const result = await flow.resolveSelection("openai", "gpt-retired");
+        expect(result.kind).toBe("selected");
+        if (result.kind !== "selected") return;
+        expect(result.profile.id).toBe("gpt-retired");
+      })
+    );
+
     it(
       "returns none for local provider",
       withFixture(async (fixturePath, cachePath) => {

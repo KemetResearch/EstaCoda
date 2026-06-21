@@ -40,6 +40,8 @@ function makeSelectableModel(overrides?: Partial<SelectableModel>): SelectableMo
     executable: true,
     catalogOnly: false,
     source: "configured",
+    lifecycle: "available",
+    usageClass: "primary-chat",
     credentialReady: true,
     endpointReady: true,
     warnings: [],

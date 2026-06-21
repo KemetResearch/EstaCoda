@@ -7,6 +7,10 @@ import type {
   ResolvedAuxiliaryRoute,
   ResolvedModelRoute
 } from "../contracts/provider.js";
+import type {
+  ModelLifecycle,
+  ModelUsageClass
+} from "../model-catalog/model-catalog-policy.js";
 
 export type ModelRefreshReport = {
   /** Domain from which the remote catalog was fetched. */
@@ -66,6 +70,9 @@ export type ModelCatalogEntryReport = {
   catalogOnly: boolean;
   /** Origin of this entry in the merged catalog. */
   source: "models-dev" | "configured" | "manual" | "fallback-known";
+  lifecycle: ModelLifecycle;
+  usageClass: ModelUsageClass;
+  lifecycleNote?: string;
   credentialReady: boolean;
   endpointReady: boolean;
   warnings: string[];

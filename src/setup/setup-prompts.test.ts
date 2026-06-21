@@ -40,6 +40,7 @@ describe("setup prompt context", () => {
 
     expect(seen?.locale).toBe("ar");
     expect(seen?.direction).toBe("rtl");
+    expect(seen?.options[0]?.id).toBe("yes");
   });
 });
 

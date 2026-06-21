@@ -219,6 +219,19 @@ export class TelegramAdapter implements ChannelAdapter {
       this.#progressByChat.delete(sessionKey.chatId);
       const formatted = formatTelegramReply(text, options);
       const chunks = chunkTelegramText(formatted.text, formatted.format);
+      const editMessageId = parseTelegramEditMessageId(options?.editMessageId);
+
+      if (chunks.length === 1 && editMessageId !== undefined) {
+        try {
+          await this.#editMessageText(sessionKey.chatId, editMessageId, chunks[0] ?? "", {
+            ...options,
+            format: formatted.format
+          });
+          return;
+        } catch {
+          // Stale or deleted callback messages should not break delivery; send a fresh card instead.
+        }
+      }
 
       for (const [index, chunk] of chunks.entries()) {
         await this.#sendMessage(sessionKey.chatId, chunk, {
@@ -251,6 +264,31 @@ export class TelegramAdapter implements ChannelAdapter {
         const delivered = await this.#sendImageArtifact(sessionKey.chatId, artifact);
         if (delivered) {
           return;
+        }
+      }
+      // Telegram Bot API limits:
+      // - Multipart uploads: 50 MB for documents, videos, and other non-photo files
+      // - URL-based sending: 20 MB for other types of content, enforced server-side
+      const TELEGRAM_MAX_MULTIPART_BYTES = 50 * 1024 * 1024;
+      const effectiveLimit = Math.min(this.#maxAttachmentBytes, TELEGRAM_MAX_MULTIPART_BYTES);
+      const filePath = artifact.localPath ?? artifact.path;
+      let exceedsLimit = false;
+      if (filePath && !isHttpUrl(filePath)) {
+        const info = await stat(filePath).catch(() => undefined);
+        exceedsLimit = (info?.size ?? 0) > effectiveLimit;
+      }
+      if (!exceedsLimit) {
+        if (artifact.kind === "video") {
+          const delivered = await this.#sendVideoArtifact(sessionKey.chatId, artifact);
+          if (delivered) {
+            return;
+          }
+        }
+        if (artifact.kind === "document" || artifact.kind === "data" || artifact.kind === "other") {
+          const delivered = await this.#sendDocumentArtifact(sessionKey.chatId, artifact);
+          if (delivered) {
+            return;
+          }
         }
       }
       await this.#sendMessage(sessionKey.chatId, renderArtifactNotice(artifact));
@@ -514,7 +552,7 @@ export class TelegramAdapter implements ChannelAdapter {
     });
   }
 
-  async #sendChatAction(chatId: string, action: "typing" | "upload_document" | "upload_photo" | "upload_voice"): Promise<void> {
+  async #sendChatAction(chatId: string, action: "typing" | "upload_document" | "upload_photo" | "upload_voice" | "upload_video"): Promise<void> {
     await this.#call("sendChatAction", {
       chat_id: chatId,
       action
@@ -533,7 +571,10 @@ export class TelegramAdapter implements ChannelAdapter {
       message_id: messageId,
       text,
       disable_web_page_preview: true,
-      parse_mode: options?.format === "html" ? "HTML" : undefined
+      parse_mode: options?.format === "html" ? "HTML" : undefined,
+      reply_markup: options?.actions === undefined
+        ? undefined
+        : this.#inlineKeyboardPayload(options.actions)
     });
   }
 
@@ -831,6 +872,52 @@ export class TelegramAdapter implements ChannelAdapter {
       }
       await this.#sendChatAction(chatId, "upload_photo");
       await this.#callMultipart<TelegramSentMessage>("sendPhoto", form);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  async #sendDocumentArtifact(chatId: string, artifact: ArtifactRecord): Promise<boolean> {
+    try {
+      const form = new FormData();
+      form.set("chat_id", chatId);
+      if (isHttpUrl(artifact.path)) {
+        form.set("document", artifact.path);
+      } else {
+        const localPath = artifact.localPath ?? artifact.path;
+        const bytes = await readFile(localPath);
+        form.set("document", new Blob([bytes], { type: artifact.mimeType ?? "application/octet-stream" }), basename(localPath));
+      }
+      const caption = renderDocumentArtifactCaption(artifact);
+      if (caption.length > 0) {
+        form.set("caption", caption);
+      }
+      await this.#sendChatAction(chatId, "upload_document");
+      await this.#callMultipart<TelegramSentMessage>("sendDocument", form);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  async #sendVideoArtifact(chatId: string, artifact: ArtifactRecord): Promise<boolean> {
+    try {
+      const form = new FormData();
+      form.set("chat_id", chatId);
+      if (isHttpUrl(artifact.path)) {
+        form.set("video", artifact.path);
+      } else {
+        const localPath = artifact.localPath ?? artifact.path;
+        const bytes = await readFile(localPath);
+        form.set("video", new Blob([bytes], { type: artifact.mimeType ?? "video/mp4" }), basename(localPath));
+      }
+      const caption = renderVideoArtifactCaption(artifact);
+      if (caption.length > 0) {
+        form.set("caption", caption);
+      }
+      await this.#sendChatAction(chatId, "upload_video");
+      await this.#callMultipart<TelegramSentMessage>("sendVideo", form);
       return true;
     } catch {
       return false;
@@ -1948,6 +2035,29 @@ function renderImageArtifactCaption(artifact: ArtifactRecord): string {
     artifact.summary ?? "Generated image",
     `Artifact: ${artifact.id}`
   ].join("\n").slice(0, 1024);
+}
+
+function renderDocumentArtifactCaption(artifact: ArtifactRecord): string {
+  return [
+    artifact.summary ?? `Generated ${artifact.kind}`,
+    `Artifact: ${artifact.id}`
+  ].join("\n").slice(0, 1024);
+}
+
+function renderVideoArtifactCaption(artifact: ArtifactRecord): string {
+  return [
+    artifact.summary ?? `Generated ${artifact.kind}`,
+    `Artifact: ${artifact.id}`
+  ].join("\n").slice(0, 1024);
+}
+
+function parseTelegramEditMessageId(value: string | null | undefined): number | undefined {
+  if (value === undefined || value === null) {
+    return undefined;
+  }
+
+  const parsed = Number(value);
+  return Number.isInteger(parsed) && parsed > 0 ? parsed : undefined;
 }
 
 function chunkTelegramText(

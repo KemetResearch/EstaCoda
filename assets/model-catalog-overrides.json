@@ -1,0 +1,68 @@
+{
+  "version": 1,
+  "models": [
+    {
+      "provider": "openai",
+      "model": "text-embedding-3-large",
+      "lifecycle": "available",
+      "usageClass": "embedding",
+      "note": "Embedding model; hidden from primary chat selection by default."
+    },
+    {
+      "provider": "openai",
+      "model": "text-embedding-3-small",
+      "lifecycle": "available",
+      "usageClass": "embedding",
+      "note": "Embedding model; hidden from primary chat selection by default."
+    },
+    {
+      "provider": "openai",
+      "model": "text-embedding-ada-002",
+      "lifecycle": "available",
+      "usageClass": "embedding",
+      "note": "Embedding model; hidden from primary chat selection by default."
+    },
+    {
+      "provider": "openai",
+      "model": "chatgpt-image-latest",
+      "lifecycle": "available",
+      "usageClass": "image",
+      "note": "Image model; hidden from primary chat selection by default."
+    },
+    {
+      "provider": "openai",
+      "model": "gpt-image-1",
+      "lifecycle": "available",
+      "usageClass": "image",
+      "note": "Image model; hidden from primary chat selection by default."
+    },
+    {
+      "provider": "openai",
+      "model": "gpt-image-1-mini",
+      "lifecycle": "available",
+      "usageClass": "image",
+      "note": "Image model; hidden from primary chat selection by default."
+    },
+    {
+      "provider": "openai",
+      "model": "gpt-image-1.5",
+      "lifecycle": "available",
+      "usageClass": "image",
+      "note": "Image model; hidden from primary chat selection by default."
+    },
+    {
+      "provider": "openai",
+      "model": "o3-deep-research",
+      "lifecycle": "available",
+      "usageClass": "deep-research",
+      "note": "Deep research model; hidden from primary chat selection by default."
+    },
+    {
+      "provider": "openai",
+      "model": "o4-mini-deep-research",
+      "lifecycle": "available",
+      "usageClass": "deep-research",
+      "note": "Deep research model; hidden from primary chat selection by default."
+    }
+  ]
+}

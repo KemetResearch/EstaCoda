@@ -13,6 +13,7 @@ export type SelectPromptInput<T> = {
   instruction?: string;
   selectedLabel?: string;
   options: Array<{
+    id?: string;
     value: T;
     label: string;
     description?: string;
