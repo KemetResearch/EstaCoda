@@ -40,6 +40,7 @@ import { canRunInteractive, createReadlinePrompt, type Prompt } from "./readline
 import { promptUiContextForLocale } from "../contracts/ui.js";
 import { runFirstRunSetup } from "../setup/onboarding-wizard/runner.js";
 import { runConfigEditorSetup } from "../setup/config-editor/runner.js";
+import { selectProviderModelRoute } from "../setup/provider-model-route-prompt.js";
 import { createReviewedSetupApplyExecutor } from "../setup/review/apply-executor.js";
 import { collectSetupEntryState } from "../setup/setup-entry-state.js";
 import { collectSetupRoute } from "../setup/setup-router.js";
@@ -1231,183 +1232,26 @@ async function runBareModelPicker(
   const prompt = options.prompt ?? createReadlinePrompt({
     uiContext: promptUiContextForLocale(localeForConfig(config)),
   });
+  const interactiveOptions: CliOptions = { ...options, prompt };
 
-  // ── Provider selection ──
-  const providerCandidates = await flow.listProviderCandidates();
-  if (providerCandidates.length === 0) {
-    return {
-      handled: true,
-      exitCode: 1,
-      output: "No configurable providers available."
-    };
+  const routeSelection = await selectProviderModelRoute({
+    prompt,
+    flowEngine: flow,
+    locale: localeForConfig(config),
+    currentProviderId: config.primaryModelRoute.provider,
+    currentModelId: config.primaryModelRoute.id,
+    allowBack: true,
+    allowCancel: true,
+    mode: "primary",
+  });
+
+  if (routeSelection.kind === "selected") {
+    return persistModelSelection(interactiveOptions, config, routeSelection.selection);
   }
-
-  const providerOptions = providerCandidates.map((p) => ({
-    value: p.id,
-    label: p.displayName,
-    description: `${p.modelsCount} model(s)`
-  }));
-  providerOptions.push({
-    value: "__cancel__",
-    label: "Cancel",
-    description: "Exit without changing model"
-  });
-
-  const selectedProviderId = await prompt.select!({
-    title: "Primary provider",
-    body: "Choose the provider EstaCoda should use first when it needs to think.",
-    options: providerOptions,
-    fallbackPrompt: "Choose: ",
-    surface: "promptCard"
-  });
-  if (selectedProviderId === "__cancel__") {
-    return { handled: true, exitCode: 0, output: renderModelPickerCancellation() };
+  if (routeSelection.kind === "diagnostic") {
+    return { handled: true, exitCode: 1, output: routeSelection.output };
   }
-
-  // ── Model selection ──
-  const modelCandidates = await flow.listModelCandidates(selectedProviderId);
-  if (modelCandidates.length === 0) {
-    return {
-      handled: true,
-      exitCode: 1,
-      output: `No models available for provider ${selectedProviderId}.`
-    };
-  }
-
-  const modelOptions = modelCandidates.map((m) => {
-    const badges: string[] = [];
-    if (m.supportsVision) badges.push("vision");
-    if (m.profile.supportsTools) badges.push("tools");
-    if (m.profile.supportsReasoning) badges.push("reasoning");
-    return {
-      value: m.id,
-      label: m.id,
-      description: badges.join(", ") || undefined
-    };
-  });
-  modelOptions.push({
-    value: "__back__",
-    label: "Back",
-    description: "Return to provider list"
-  });
-  modelOptions.push({
-    value: "__cancel__",
-    label: "Cancel",
-    description: "Exit without changing model"
-  });
-
-  const selectedModelId = await prompt.select!({
-    title: "Primary model",
-    body: `Choose the primary model for ${selectedProviderId}.`,
-    options: modelOptions,
-    fallbackPrompt: "Choose: ",
-    surface: "promptCard"
-  });
-  if (selectedModelId === "__cancel__") {
-    return { handled: true, exitCode: 0, output: renderModelPickerCancellation() };
-  }
-  if (selectedModelId === "__back__") {
-    // Re-run provider selection. In a real TUI this would loop; for the CLI
-    // we simply recurse back to the provider step by calling the picker again.
-    return runBareModelPicker(options, config);
-  }
-
-  // ── Resolve selection ──
-  const resolution = await flow.resolveSelection(selectedProviderId, selectedModelId);
-  if (resolution.kind === "diagnostic") {
-    return { handled: true, exitCode: 1, output: `Selection failed: ${resolution.reason}` };
-  }
-
-  // ── Credential handling ──
-  let envVarName: string | undefined;
-  let credentialStored = false;
-  let credentialSkipped = false;
-
-  switch (resolution.credentialAction.kind) {
-    case "none": {
-      // Local provider: no credential needed
-      break;
-    }
-    case "reuse": {
-      const ref = resolution.credentialAction.reference;
-      if (!ref.startsWith("env:")) {
-        return {
-          handled: true,
-          exitCode: 1,
-          output: `Invalid credential reference: ${ref}`
-        };
-      }
-      envVarName = ref.slice(4);
-      break;
-    }
-    case "collect": {
-      envVarName = resolution.credentialAction.envVarName;
-      const promptResult = await promptForApiKey({
-        prompt,
-        providerId: resolution.provider,
-        envVarName,
-        homeDir: options.homeDir,
-        profileId: options.profileId,
-        question: `Enter API key for ${resolution.provider} [${envVarName}]: `
-      });
-
-      if (promptResult.kind === "stored") {
-        credentialStored = true;
-      } else {
-        credentialSkipped = true;
-      }
-      break;
-    }
-  }
-
-  // ── Config mutation (pure, in-memory) ──
-  let mutated = applyRegisterProviderConfig(config.config, {
-    provider: resolution.provider,
-    baseUrl: resolution.baseUrl,
-    apiKeyEnv: envVarName
-  });
-
-  mutated = applyRegisterProviderModel(mutated, {
-    provider: resolution.provider,
-    models: [resolution.model]
-  });
-
-  mutated = applySetPreferredModelRoute(mutated, {
-    provider: resolution.provider,
-    model: resolution.model,
-    baseUrl: resolution.baseUrl,
-    apiKeyEnv: envVarName,
-    contextWindowTokens: resolution.profile.contextWindowTokens
-  });
-
-  // ── Persist config ──
-  const profileId = selectedProfileId(options);
-  const targetPath = resolveProfileStateHome({ homeDir: options.homeDir, profileId }).configPath;
-  try {
-    await saveRuntimeConfig(targetPath, mutated);
-  } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
-    return {
-      handled: true,
-      exitCode: 1,
-      output: credentialStored
-        ? `Credential stored, but config save failed: ${message}`
-        : `Config save failed: ${message}`
-    };
-  }
-
-  // ── Render success ──
-  const summary = toPickerSuccessSummary(resolution, targetPath, {
-    credentialStored,
-    credentialSkipped,
-    envVarName
-  });
-
-  return {
-    handled: true,
-    exitCode: 0,
-    output: renderModelPickerSuccess(summary)
-  };
+  return { handled: true, exitCode: 0, output: renderModelPickerCancellation() };
 }
 
 function renderModelOverview(config: Awaited<ReturnType<typeof loadRuntimeConfig>>): string {

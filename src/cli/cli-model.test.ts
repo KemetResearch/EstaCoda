@@ -52,9 +52,21 @@ function createMockPrompt(responses: {
 
   prompt.select = async <T>(input: SelectPromptInput<T>): Promise<T> => {
     responses.onSelect?.(input as SelectPromptInput<unknown>);
-    const value = responses.selects?.[selectIndex] as T;
+    const selected = responses.selects?.[selectIndex];
     selectIndex++;
-    return value;
+    if (selected === undefined) {
+      throw new Error(`Missing mock select response for ${input.title ?? "select prompt"}`);
+    }
+    const option = input.options.find((candidate) => {
+      if (candidate.id === selected || candidate.label === selected) {
+        return true;
+      }
+      return typeof candidate.value === "string" && candidate.value === selected;
+    });
+    if (option === undefined) {
+      throw new Error(`Mock select response "${selected}" did not match any option.`);
+    }
+    return option.value;
   };
 
   return prompt;
@@ -177,14 +189,42 @@ describe("cli model", () => {
         {
           surface: "promptCard",
           title: "Primary provider",
-          body: "Choose the provider EstaCoda should use first when it needs to think."
+          body: "Choose the provider EstaCoda should use first when it needs to think.\n",
+          columns: [
+            { key: "name", header: "Name" },
+            { key: "details", header: "Details" }
+          ]
         },
         {
           surface: "promptCard",
           title: "Primary model",
-          body: "Choose the primary model for openai."
+          body: "Choose the primary model for openai.\n",
+          columns: [
+            { key: "name", header: "Name" },
+            { key: "details", header: "Details" }
+          ]
         }
       ]);
+      expect(selectInputs[0]?.options.map((option) => option.id)).toEqual(
+        expect.arrayContaining(["openai", "back", "cancel"])
+      );
+      expect(selectInputs[1]?.options.map((option) => option.id)).toEqual(
+        expect.arrayContaining(["gpt-4o", "back", "cancel"])
+      );
+      const openAiOption = selectInputs[0]?.options.find((option) => option.id === "openai");
+      const gpt4oOption = selectInputs[1]?.options.find((option) => option.id === "gpt-4o");
+      expect(openAiOption).toMatchObject({
+        label: "OpenAI",
+        cells: { name: "OpenAI", details: expect.stringContaining("models") }
+      });
+      expect(gpt4oOption).toMatchObject({
+        label: "gpt-4o",
+        cells: { name: "gpt-4o" }
+      });
+      expect(openAiOption).not.toHaveProperty("current");
+      expect(gpt4oOption).not.toHaveProperty("current");
+      expect(openAiOption).not.toHaveProperty("badges");
+      expect(gpt4oOption).not.toHaveProperty("badges");
 
       const config = await readUserConfig(tmpDir) as any;
       expect(config.model?.provider).toBe("openai");
@@ -207,7 +247,7 @@ describe("cli model", () => {
       const original = await readUserConfig(tmpDir);
 
       const prompt = createMockPrompt({
-        selects: ["__cancel__"]
+        selects: ["cancel"]
       });
 
       const result = await runCliCommand({
@@ -239,7 +279,71 @@ describe("cli model", () => {
       const original = await readUserConfig(tmpDir);
 
       const prompt = createMockPrompt({
-        selects: ["openai", "__cancel__"]
+        selects: ["openai", "cancel"]
+      });
+
+      const result = await runCliCommand({
+        argv: ["model"],
+        workspaceRoot: tmpDir,
+        homeDir: tmpDir,
+        prompt
+      });
+
+      expect(result.handled).toBe(true);
+      expect(result.exitCode).toBe(0);
+      expect(result.output).toContain("No changes were made.");
+      expect(await readUserConfig(tmpDir)).toEqual(original);
+    });
+
+    it("back at provider step writes nothing", async () => {
+      await writeUserConfig(tmpDir, {
+        providers: {
+          openai: {
+            kind: "openai-compatible",
+            models: ["gpt-4o"]
+          }
+        },
+        model: {
+          provider: "openai",
+          id: "gpt-4o"
+        }
+      });
+      const original = await readUserConfig(tmpDir);
+
+      const prompt = createMockPrompt({
+        selects: ["back"]
+      });
+
+      const result = await runCliCommand({
+        argv: ["model"],
+        workspaceRoot: tmpDir,
+        homeDir: tmpDir,
+        prompt
+      });
+
+      expect(result.handled).toBe(true);
+      expect(result.exitCode).toBe(0);
+      expect(result.output).toContain("No changes were made.");
+      expect(await readUserConfig(tmpDir)).toEqual(original);
+    });
+
+    it("back at model step writes nothing", async () => {
+      await writeUserConfig(tmpDir, {
+        providers: {
+          openai: {
+            kind: "openai-compatible",
+            models: ["gpt-4o"]
+          }
+        },
+        model: {
+          provider: "openai",
+          id: "gpt-4o"
+        }
+      });
+      const original = await readUserConfig(tmpDir);
+
+      const prompt = createMockPrompt({
+        selects: ["openai", "back"]
       });
 
       const result = await runCliCommand({
