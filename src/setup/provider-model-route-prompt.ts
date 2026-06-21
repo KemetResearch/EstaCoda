@@ -56,28 +56,33 @@ export async function selectProviderModelRoute(
     return { kind: "diagnostic", output: "No setup-visible provider candidates are available." };
   }
 
-  const providerAction = await promptProvider(options, providers);
-  if (providerAction.kind === "back" || providerAction.kind === "cancel") {
-    return { kind: providerAction.kind };
-  }
+  while (true) {
+    const providerAction = await promptProvider(options, providers);
+    if (providerAction.kind === "back" || providerAction.kind === "cancel") {
+      return { kind: providerAction.kind };
+    }
 
-  const provider = providerAction.provider;
-  const models = await options.flowEngine.listModelCandidates(provider.id);
-  if (models.length === 0) {
-    return { kind: "diagnostic", output: `No setup-visible models are available for ${provider.displayName}.` };
-  }
+    const provider = providerAction.provider;
+    const models = await options.flowEngine.listModelCandidates(provider.id);
+    if (models.length === 0) {
+      return { kind: "diagnostic", output: `No setup-visible models are available for ${provider.displayName}.` };
+    }
 
-  const modelAction = await promptModel(options, provider, models);
-  if (modelAction.kind === "back" || modelAction.kind === "cancel") {
-    return { kind: modelAction.kind };
-  }
+    const modelAction = await promptModel(options, provider, models);
+    if (modelAction.kind === "back") {
+      continue;
+    }
+    if (modelAction.kind === "cancel") {
+      return { kind: "cancel" };
+    }
 
-  const resolved = await options.flowEngine.resolveSelection(provider.id, modelAction.model.id);
-  if (resolved.kind === "diagnostic") {
-    return { kind: "diagnostic", output: `Provider/model selection failed: ${resolved.reason}` };
-  }
+    const resolved = await options.flowEngine.resolveSelection(provider.id, modelAction.model.id);
+    if (resolved.kind === "diagnostic") {
+      return { kind: "diagnostic", output: `Provider/model selection failed: ${resolved.reason}` };
+    }
 
-  return { kind: "selected", selection: resolved };
+    return { kind: "selected", selection: resolved };
+  }
 }
 
 async function promptProvider(

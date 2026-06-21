@@ -329,7 +329,7 @@ describe("cli model", () => {
       expect(await readUserConfig(tmpDir)).toEqual(original);
     });
 
-    it("back at model step writes nothing", async () => {
+    it("back at model step returns to provider selection before exiting without writes", async () => {
       await writeUserConfig(tmpDir, {
         providers: {
           openai: {
@@ -344,8 +344,10 @@ describe("cli model", () => {
       });
       const original = await readUserConfig(tmpDir);
 
+      const selectTitles: string[] = [];
       const prompt = createMockPrompt({
-        selects: ["openai", "back"]
+        selects: ["openai", "back", "back"],
+        onSelect: (input) => selectTitles.push(input.title)
       });
 
       const result = await runCliCommand({
@@ -358,6 +360,7 @@ describe("cli model", () => {
       expect(result.handled).toBe(true);
       expect(result.exitCode).toBe(0);
       expect(result.output).toContain("No changes were made.");
+      expect(selectTitles).toEqual(["Primary provider", "Primary model", "Primary provider"]);
       expect(await readUserConfig(tmpDir)).toEqual(original);
     });
 

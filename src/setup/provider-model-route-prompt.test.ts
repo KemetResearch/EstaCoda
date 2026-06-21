@@ -143,6 +143,76 @@ describe("selectProviderModelRoute", () => {
     expect(flow.resolved).toHaveLength(0);
   });
 
+  it("returns to the provider card when Back is selected on the model card", async () => {
+    const flow = fakeFlow({
+      providers: [
+        providerCandidate("openai", "OpenAI", 1),
+        providerCandidate("local", "Local", 1),
+      ],
+      models: {
+        openai: [modelCandidate("openai", "openai-model")],
+        local: [modelCandidate("local", "local-model")],
+      },
+    });
+    const prompt = fakePrompt(["openai", "back", "local", "local-model"]);
+
+    const result = await selectProviderModelRoute({
+      prompt,
+      flowEngine: flow.engine,
+      locale: "en",
+      mode: "primary",
+      allowBack: true,
+      allowCancel: true,
+    });
+
+    expect(result).toEqual({
+      kind: "selected",
+      selection: selectionResult("local", "local-model"),
+    });
+    expect(prompt.calls.map((call) => call.title)).toEqual([
+      "Primary provider",
+      "Primary model",
+      "Primary provider",
+      "Primary model",
+    ]);
+    expect(flow.resolved).toEqual([{ providerId: "local", modelId: "local-model" }]);
+  });
+
+  it("omits Back rows from provider and model cards when Back is disabled", async () => {
+    const flow = fakeFlow();
+    const prompt = fakePrompt();
+
+    await selectProviderModelRoute({
+      prompt,
+      flowEngine: flow.engine,
+      locale: "en",
+      mode: "primary",
+      allowBack: false,
+      allowCancel: true,
+    });
+
+    expect(prompt.calls[0]?.options.map((option) => option.id)).not.toContain("back");
+    expect(prompt.calls[1]?.options.map((option) => option.id)).not.toContain("back");
+  });
+
+  it("keeps model-card Cancel as cancel instead of returning to provider selection", async () => {
+    const flow = fakeFlow();
+    const prompt = fakePrompt(["openai", "cancel"]);
+
+    const result = await selectProviderModelRoute({
+      prompt,
+      flowEngine: flow.engine,
+      locale: "en",
+      mode: "primary",
+      allowBack: true,
+      allowCancel: true,
+    });
+
+    expect(result).toEqual({ kind: "cancel" });
+    expect(prompt.calls.map((call) => call.title)).toEqual(["Primary provider", "Primary model"]);
+    expect(flow.resolved).toHaveLength(0);
+  });
+
   it("uses structured prompt-card rows through the prompt contract", async () => {
     const flow = fakeFlow();
     const prompt = fakePrompt();
@@ -181,6 +251,29 @@ describe("selectProviderModelRoute", () => {
     });
     expect(providerPrompt.options.at(-2)?.id).toBe("back");
     expect(providerPrompt.options.at(-1)?.id).toBe("cancel");
+  });
+
+  it("does not mark Back or Cancel rows as current", async () => {
+    const flow = fakeFlow();
+    const prompt = fakePrompt();
+
+    await selectProviderModelRoute({
+      prompt,
+      flowEngine: flow.engine,
+      locale: "en",
+      mode: "primary",
+      allowBack: true,
+      allowCancel: true,
+      currentProviderId: "openai",
+      currentModelId: "alpha-model",
+    });
+
+    for (const call of prompt.calls) {
+      for (const option of call.options.filter((item) => item.id === "back" || item.id === "cancel")) {
+        expect(option.current).toBeUndefined();
+        expect(option.badges).toBeUndefined();
+      }
+    }
   });
 
   it("uses visible current provider as provider default selection and marks it current", async () => {

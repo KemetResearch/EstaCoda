@@ -8,9 +8,10 @@ import { WorkspaceTrustStore } from "../../security/workspace-trust-store.js";
 import type { ProviderId, ProviderApiMode, ProviderAuthMethod } from "../../contracts/provider.js";
 import type { FlowEngine, ModelCandidate } from "../../providers/provider-model-selection-flow.js";
 import { createReviewedSetupApplyExecutor } from "../review/apply-executor.js";
-import { runConfigEditor } from "./runner.js";
+import { __decideConfigEditorLoopForTest, runConfigEditor } from "./runner.js";
 import { promptBrowserCapability, promptedBrowserCapabilityMode, promptModelCandidate, setupEditorReviewSelectedAreaLabel } from "./prompts.js";
 import type { SetupReviewManifest } from "../setup-review-manifest.js";
+import type { SetupRouteDecision } from "../setup-router.js";
 import { resolveProfileStateHome, writeActiveProfile } from "../../config/profile-home.js";
 import { isolateLtr } from "../../ui/bidi.js";
 import {
@@ -769,6 +770,131 @@ describe("runConfigEditor", () => {
     expect(envFile).toContain("PR8_OPENAI_KEY=");
     expect(rawConfig).not.toContain("sk-pr8-provider-route");
     expect(JSON.stringify(result)).not.toContain("sk-pr8-provider-route");
+  });
+
+  it("returns to setup actions when provider-card Back is selected", async () => {
+    await writeUserConfig(tempDir, localReadyConfig());
+    await trustWorkspace(tempDir, workspaceRoot);
+
+    const prompt = fakePrompt({ values: ["Back", "exit"] });
+    const selectTitles: string[] = [];
+    const baseSelect = prompt.select!;
+    prompt.select = async (input) => {
+      selectTitles.push(input.title);
+      return baseSelect(input);
+    };
+
+    const result = await runConfigEditor({
+      homeDir: tempDir,
+      workspaceRoot,
+      prompt,
+      defaultActionId: "edit-primary-model-route",
+      flowEngine: flowEngine({ credentialAction: "collect", envVarName: "PR8_OPENAI_KEY" }),
+    });
+
+    expect(result.completed).toBe(true);
+    expect(result.exitCode).toBe(0);
+    expect(result.selectedActionId).toBe("exit");
+    expect(selectTitles).toEqual(["Primary provider", "Setup editor"]);
+    await expect(readFile(profileConfigPath(tempDir), "utf8")).resolves.toContain("\"provider\": \"local\"");
+  });
+
+  it("keeps repair-again re-entry available after provider-card Back returns to menu", () => {
+    const repairAgainDecision = {
+      kind: "configured-menu",
+      title: "Setup editor",
+      summary: "Ready",
+      state: { kind: "configured-ready" },
+      actions: [],
+      warnings: [],
+      blockers: [],
+      readOnly: true,
+    } as unknown as SetupRouteDecision;
+    const initialLoopState = {
+      repairAgainReentered: false,
+      menuBackReentryCount: 0,
+    };
+    const afterBack = __decideConfigEditorLoopForTest({
+      result: {
+        completed: false,
+        exitCode: 0,
+        output: "",
+        initialDecision: repairAgainDecision,
+        selectedActionId: "edit-primary-model-route",
+        menuBackRequested: true,
+      },
+      ...initialLoopState,
+    });
+
+    expect(afterBack).toEqual({
+      kind: "menu-back",
+      state: {
+        repairAgainReentered: false,
+        menuBackReentryCount: 1,
+      },
+    });
+    if (afterBack.kind !== "menu-back") {
+      throw new Error("Expected provider-card Back to request setup menu re-entry.");
+    }
+    expect(__decideConfigEditorLoopForTest({
+      result: {
+        completed: true,
+        exitCode: 0,
+        output: "",
+        initialDecision: repairAgainDecision,
+        selectedActionId: "edit-security-mode",
+        nextActionId: "repair-again",
+        repairAgainDecision,
+      },
+      repairAgainReentered: afterBack.state.repairAgainReentered,
+      menuBackReentryCount: afterBack.state.menuBackReentryCount,
+    })).toEqual({
+      kind: "repair-again",
+      state: {
+        repairAgainReentered: true,
+        menuBackReentryCount: 1,
+      },
+      initialDecision: repairAgainDecision,
+    });
+  });
+
+  it("returns from model-card Back to provider selection before final setup route selection", async () => {
+    await writeUserConfig(tempDir, localReadyConfig());
+    await trustWorkspace(tempDir, workspaceRoot);
+
+    const prompt = fakePrompt({ values: ["OpenAI", "Back", "OpenAI", "gpt-5.5", true], secret: "sk-pr8-provider-route" });
+    const routePrompts: SelectPromptInput<unknown>[] = [];
+    const baseSelect = prompt.select!;
+    prompt.select = async (input) => {
+      if (input.title === "Primary provider" || input.title === "Primary model") {
+        routePrompts.push(input as SelectPromptInput<unknown>);
+      }
+      return baseSelect(input);
+    };
+
+    const result = await runConfigEditor({
+      homeDir: tempDir,
+      workspaceRoot,
+      prompt,
+      defaultActionId: "edit-primary-model-route",
+      flowEngine: flowEngine({ credentialAction: "collect", envVarName: "PR8_OPENAI_KEY" }),
+      applyExecutor: createReviewedSetupApplyExecutor({
+        homeDir: tempDir,
+        workspaceRoot,
+        collectVerification: () => readyVerification(profileConfigPath(tempDir)),
+      }),
+    });
+
+    expect(result.completed).toBe(true);
+    expect(result.selectedActionId).toBe("edit-primary-model-route");
+    expect(routePrompts.map((input) => input.title)).toEqual([
+      "Primary provider",
+      "Primary model",
+      "Primary provider",
+      "Primary model",
+    ]);
+    const rawConfig = await readFile(profileConfigPath(tempDir), "utf8");
+    expect(rawConfig).toContain("\"provider\": \"openai\"");
   });
 
   it("prompts to reuse a saved profile credential and keeps the existing key without raw key prompt", async () => {

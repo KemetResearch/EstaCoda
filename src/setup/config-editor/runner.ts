@@ -134,7 +134,28 @@ type PendingCredentialWrite = SetupDeferredSecretWrite;
 
 type RunOnceResult = ConfigEditorRunnerResult & {
   readonly repairAgainDecision?: SetupRouteDecision;
+  readonly menuBackRequested?: boolean;
 };
+
+type ConfigEditorLoopState = {
+  readonly repairAgainReentered: boolean;
+  readonly menuBackReentryCount: number;
+};
+
+type ConfigEditorLoopDecision =
+  | {
+      readonly kind: "repair-again";
+      readonly state: ConfigEditorLoopState;
+      readonly initialDecision: SetupRouteDecision;
+    }
+  | {
+      readonly kind: "menu-back";
+      readonly state: ConfigEditorLoopState;
+    }
+  | {
+      readonly kind: "return";
+      readonly result: RunOnceResult;
+    };
 
 type LaunchableApplyEndState = {
   readonly verification: SetupVerificationReport;
@@ -145,16 +166,29 @@ export async function runConfigEditor(
   options: ConfigEditorRunnerOptions
 ): Promise<ConfigEditorRunnerResult> {
   let initialDecision = await collectSetupRoute(options);
-  for (let loopIndex = 0; loopIndex < 2; loopIndex += 1) {
-    const result = await runConfigEditorOnce(options, initialDecision, loopIndex === 0 ? options.defaultActionId : undefined);
-    if (result.nextActionId === "repair-again" && result.repairAgainDecision !== undefined && loopIndex === 0) {
-      initialDecision = result.repairAgainDecision;
+  let isFirstRun = true;
+  let loopState: ConfigEditorLoopState = {
+    repairAgainReentered: false,
+    menuBackReentryCount: 0,
+  };
+  while (loopState.menuBackReentryCount < 4) {
+    const result = await runConfigEditorOnce(options, initialDecision, isFirstRun ? options.defaultActionId : undefined);
+    isFirstRun = false;
+
+    const loopDecision = decideConfigEditorLoop(result, loopState);
+    if (loopDecision.kind === "repair-again") {
+      loopState = loopDecision.state;
+      initialDecision = loopDecision.initialDecision;
       continue;
     }
-    return result;
+    if (loopDecision.kind === "menu-back") {
+      loopState = loopDecision.state;
+      continue;
+    }
+    return loopDecision.result;
   }
 
-  const output = "Repair-again loop stopped after a bounded setup re-entry.";
+  const output = "Setup editor re-entry stopped after a bounded setup loop.";
   write(options, `${output}\n`);
   return {
     completed: false,
@@ -163,6 +197,69 @@ export async function runConfigEditor(
     initialDecision,
     selectedActionId: "repair-again",
   };
+}
+
+function decideConfigEditorLoop(
+  result: RunOnceResult,
+  state: ConfigEditorLoopState
+): ConfigEditorLoopDecision {
+  if (result.nextActionId === "repair-again" && result.repairAgainDecision !== undefined && !state.repairAgainReentered) {
+    return {
+      kind: "repair-again",
+      state: {
+        ...state,
+        repairAgainReentered: true,
+      },
+      initialDecision: result.repairAgainDecision,
+    };
+  }
+  if (result.menuBackRequested === true) {
+    return {
+      kind: "menu-back",
+      state: {
+        ...state,
+        menuBackReentryCount: state.menuBackReentryCount + 1,
+      },
+    };
+  }
+  return {
+    kind: "return",
+    result,
+  };
+}
+
+export function __decideConfigEditorLoopForTest(input: {
+  readonly result: ConfigEditorRunnerResult & {
+    readonly repairAgainDecision?: SetupRouteDecision;
+    readonly menuBackRequested?: boolean;
+  };
+  readonly repairAgainReentered: boolean;
+  readonly menuBackReentryCount: number;
+}):
+  | {
+      readonly kind: "repair-again";
+      readonly state: {
+        readonly repairAgainReentered: boolean;
+        readonly menuBackReentryCount: number;
+      };
+      readonly initialDecision: SetupRouteDecision;
+    }
+  | {
+      readonly kind: "menu-back";
+      readonly state: {
+        readonly repairAgainReentered: boolean;
+        readonly menuBackReentryCount: number;
+      };
+    }
+  | { readonly kind: "return" } {
+  const decision = decideConfigEditorLoop(input.result, {
+    repairAgainReentered: input.repairAgainReentered,
+    menuBackReentryCount: input.menuBackReentryCount,
+  });
+  if (decision.kind === "return") {
+    return { kind: "return" };
+  }
+  return decision;
 }
 
 async function runConfigEditorOnce(
@@ -258,7 +355,7 @@ async function handleAction(
   initialDecision: SetupRouteDecision,
   session: NonNullable<SetupRouteDecision["setupEditorPlanSession"]>,
   action: ConfigEditorRenderedAction
-): Promise<ConfigEditorRunnerResult> {
+): Promise<RunOnceResult> {
   switch (action.id) {
     case "verify-setup": {
       const finalDecision = await collectSetupRoute({ ...options, selection: "verify" });
@@ -627,7 +724,7 @@ async function handleProviderRouteAction(
   initialDecision: SetupRouteDecision,
   session: NonNullable<SetupRouteDecision["setupEditorPlanSession"]>,
   action: ConfigEditorRenderedAction
-): Promise<ConfigEditorRunnerResult> {
+): Promise<RunOnceResult> {
   const editorAction = requireEditorAction(action);
   const loaded = await loadRuntimeConfig(options);
   const resolved = await selectResolvedProviderRoute(options, "primary", {
@@ -646,7 +743,7 @@ async function handleFallbackRouteAction(
   initialDecision: SetupRouteDecision,
   session: NonNullable<SetupRouteDecision["setupEditorPlanSession"]>,
   action: ConfigEditorRenderedAction
-): Promise<ConfigEditorRunnerResult> {
+): Promise<RunOnceResult> {
   const editorAction = requireEditorAction(action);
   const loaded = await loadRuntimeConfig(options);
   const fallbacks = loaded.config.model?.fallbacks ?? [];
@@ -683,7 +780,7 @@ async function handleAuxiliaryRouteAction(
   initialDecision: SetupRouteDecision,
   session: NonNullable<SetupRouteDecision["setupEditorPlanSession"]>,
   action: ConfigEditorRenderedAction
-): Promise<ConfigEditorRunnerResult> {
+): Promise<RunOnceResult> {
   const editorAction = requireEditorAction(action);
   const auxiliaryTask = await promptAuxiliaryModelTask(options.prompt, options.locale);
   const loaded = await loadRuntimeConfig(options);
@@ -1324,9 +1421,19 @@ function handleProviderRoutePromptExit(
   initialDecision: SetupRouteDecision,
   selectedActionId: string,
   result: Exclude<ProviderModelPromptResult, { readonly kind: "selected" }>
-): ConfigEditorRunnerResult {
+): RunOnceResult {
   if (result.kind === "diagnostic") {
     return diagnosticResult(options, initialDecision, selectedActionId, result.output);
+  }
+  if (result.kind === "back") {
+    return {
+      completed: false,
+      exitCode: 0,
+      output: "",
+      initialDecision,
+      selectedActionId,
+      menuBackRequested: true,
+    };
   }
 
   const output = setupCopyText(options.locale, "setupEditor.result.exitWithoutChanges");

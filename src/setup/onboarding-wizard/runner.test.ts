@@ -1346,6 +1346,7 @@ describe("runFirstRunSetup", () => {
       { key: "name", header: "Name" },
       { key: "details", header: "Details" },
     ]);
+    expect(onboardingSelects["Primary model"]?.options.map((option) => option.id)).not.toEqual(expect.arrayContaining(["back", "cancel"]));
   });
 
   it("uses the setup editor provider rejection wording when no provider candidates are available", async () => {
