@@ -1682,7 +1682,7 @@ export class ChannelGateway {
     }
 
     if (command.kind === "cancel") {
-      const text = "Model picker canceled.";
+      const text = "Model selection canceled.";
       await this.#deliverText(adapter, message.sessionKey, text, deliveryOptions);
       return { sessionId, replyText: text, artifactCount: 0, progressCount: 0 };
     }
@@ -1838,7 +1838,7 @@ export class ChannelGateway {
     const providers = await flow.listProviderCandidates();
     const provider = providers.find((candidate) => candidate.id === resolution.route.provider);
     const text = [
-      "Model Configuration",
+      "**Model Configuration**",
       `Current model: ${resolution.route.id}`,
       `Provider: ${provider?.displayName ?? resolution.route.provider}`,
       "Session override updated."
@@ -1862,7 +1862,7 @@ export class ChannelGateway {
     await this.#refreshCachedRuntimePolicy(sessionId, "Gateway model override clear");
 
     const text = [
-      "Model Configuration",
+      "**Model Configuration**",
       "Session model override cleared.",
       "Future gateway turns will use the configured primary route."
     ].join("\n");
@@ -1921,7 +1921,7 @@ export class ChannelGateway {
           "Run estacoda model setup from a terminal to configure credentials."
         ].join("\n")
       : [
-          "Model Configuration",
+          "**Model Configuration**",
           ...currentModelLines,
           "Select a provider:",
           truncated
@@ -1985,7 +1985,7 @@ export class ChannelGateway {
           `Run estacoda model setup ${provider.id} from a terminal.`
         ].join("\n")
       : [
-          "Model Configuration",
+          "**Model Configuration**",
           `Provider: ${provider.displayName} (${start + 1}-${end} of ${choices.length})`,
           "Select a model:"
         ].filter((line) => line !== undefined).join("\n");
@@ -2184,7 +2184,7 @@ export class ChannelGateway {
         return this.#handleModelPickerClearCallback(message, adapter, sessionId, pickerDeliveryOptions);
       }
 
-      const text = "Model picker canceled.";
+      const text = "Model selection canceled.";
       await this.#deliverText(adapter, message.sessionKey, text, modelPickerFinalDeliveryOptions(message, pickerDeliveryOptions));
       return { sessionId, replyText: text, artifactCount: 0, progressCount: 0 };
     }

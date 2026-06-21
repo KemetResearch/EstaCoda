@@ -1587,7 +1587,7 @@ describe("ChannelGateway commands", () => {
 
       const result = await gateway.receive(makeMessage("/model"));
 
-      expect(result.replyText).toContain("Model Configuration");
+      expect(result.replyText).toContain("**Model Configuration**");
       expect(result.replyText).toContain("Current model: qwen2.5:3b");
       expect(result.replyText).toContain("Provider: Local");
       expect(result.replyText).toContain("Select a provider:");
@@ -1608,7 +1608,7 @@ describe("ChannelGateway commands", () => {
       const localAction = actions?.flat().find((action) => action.label === "Local");
       expect(localAction).toBeDefined();
       const providerResult = await gateway.receive(makeTelegramCallbackMessage(localAction?.value ?? "", "81"));
-      expect(providerResult.replyText).toContain("Model Configuration");
+      expect(providerResult.replyText).toContain("**Model Configuration**");
       expect(providerResult.replyText).toMatch(/Provider: Local \(1-\d+ of \d+\)/u);
       expect(providerResult.replyText).toContain("Select a model:");
       expect(providerResult.replyText).not.toContain("model-select local/qwen2.5:3b");
@@ -1916,7 +1916,7 @@ describe("ChannelGateway commands", () => {
       expect(adapter.records.at(-1)?.options?.editMessageId).toBe("82");
       expect(adapter.records.at(-1)?.options?.actions).toEqual([]);
       expect(selected.replyText).toBe([
-        "Model Configuration",
+        "**Model Configuration**",
         "Current model: phi4:latest",
         "Provider: Local",
         "Session override updated."
@@ -1937,14 +1937,14 @@ describe("ChannelGateway commands", () => {
       const canceled = await gateway.receive(makeTelegramCallbackMessage(modelPickerCancelActionValue(), "82", "callback-3"));
       expect(adapter.records.at(-1)?.options?.editMessageId).toBe("82");
       expect(adapter.records.at(-1)?.options?.actions).toEqual([]);
-      expect(canceled.replyText).toBe("Model picker canceled.");
+      expect(canceled.replyText).toBe("Model selection canceled.");
       expect((await db.getSessionModelOverride(picker.sessionId))?.route.id).toBe("phi4:latest");
 
       const cleared = await gateway.receive(makeTelegramCallbackMessage(modelPickerClearActionValue(), "82", "callback-4"));
       expect(adapter.records.at(-1)?.options?.editMessageId).toBe("82");
       expect(adapter.records.at(-1)?.options?.actions).toEqual([]);
       expect(cleared.replyText).toBe([
-        "Model Configuration",
+        "**Model Configuration**",
         "Session model override cleared.",
         "Future gateway turns will use the configured primary route."
       ].join("\n"));
@@ -2026,7 +2026,7 @@ describe("ChannelGateway commands", () => {
 
       const selected = await gateway.receive(makeTelegramCallbackMessage(longAction?.value ?? "", "83", "callback-4"));
       expect(selected.replyText).toBe([
-        "Model Configuration",
+        "**Model Configuration**",
         `Current model: ${longModel}`,
         "Provider: Local",
         "Session override updated."
@@ -2090,10 +2090,10 @@ describe("ChannelGateway commands", () => {
       });
 
       const cancelResult = await gateway.receive(makeMessage(modelPickerCancelActionValue()));
-      expect(cancelResult.replyText).toContain("Model picker canceled");
+      expect(cancelResult.replyText).toContain("Model selection canceled");
 
       const picker = await gateway.receive(makeMessage("/model"));
-      expect(picker.replyText).toContain("Model Configuration");
+      expect(picker.replyText).toContain("**Model Configuration**");
       const localProvider = adapter.records.at(-1)?.options?.actions?.flat()
         .find((action) => action.label === "Local");
       expect(localProvider).toBeDefined();
@@ -2104,7 +2104,7 @@ describe("ChannelGateway commands", () => {
       expect(selectQwen).toBeDefined();
       const selectResult = await gateway.receive(makeMessage(selectQwen?.value ?? ""));
       expect(selectResult.replyText).toBe([
-        "Model Configuration",
+        "**Model Configuration**",
         "Current model: qwen2.5:3b",
         "Provider: Local",
         "Session override updated."
