@@ -20,11 +20,13 @@ import {
   promptIncompleteTelegramCapabilityAction,
   promptOptionalCapabilityAction,
   promptedBrowserCapabilityMode,
+  promptSecurityMode,
   promptSttCapability,
   promptTtsCapability,
   promptVisionCapability,
   promptVoiceCapability,
   promptWebSearchCapability,
+  promptWorkflowLearning,
   promptWorkspaceTrustConfirmation,
   setupEditorReviewSelectedAreaLabel,
 } from "./prompts.js";
@@ -352,6 +354,138 @@ describe("runConfigEditor", () => {
       input.title === "Image generation" &&
       input.options.some((option) => option.id === "gateway-yes")
     )?.columns).toBeUndefined();
+    expect(selectInputs.find((input) => input.title === "Interface language")?.statusLines).toBeUndefined();
+  });
+
+  it("shows current language in the setup editor language selector without adding columns", async () => {
+    const prompt = fakePrompt();
+    const selectInputs = captureSelectInputs(prompt);
+
+    const language = await promptInterfaceLanguageAndStyle(prompt, {
+      initialLocale: "ar",
+      currentLanguage: "ar",
+      currentFlavor: "arabic-light",
+      showCurrentState: true,
+    });
+
+    const input = selectInputs.find((item) => item.title === resolveSetupCopy("ar", "onboarding.interfaceLanguage.title"));
+    expect(language.language).toBe("ar");
+    expect(input?.columns).toBeUndefined();
+    expect(input?.statusLines).toEqual([{ text: "الحالي: العربية", tone: "active", direction: "rtl" }]);
+    expect(input?.showCurrentBadge).toBe(false);
+    expect(input?.defaultIndex).toBe(1);
+    expect(input?.options.find((option) => option.id === "ar")?.current).toBe(true);
+    expect(input?.options.find((option) => option.id === "en")?.current).toBe(false);
+  });
+
+  it("shows current security and Agent Evolution state with current rows", async () => {
+    const prompt = fakePrompt();
+    const selectInputs = captureSelectInputs(prompt);
+
+    const securityMode = await promptSecurityMode(prompt, "strict");
+    const workflowLearning = await promptWorkflowLearning(prompt, "proactive");
+
+    const securityInput = selectInputs.find((input) => input.title === "Security mode");
+    const workflowInput = selectInputs.find((input) => input.title === "Agent Evolution");
+    expect(securityMode).toBe("strict");
+    expect(workflowLearning).toBe("proactive");
+    expect(securityInput?.statusLines).toEqual([{ text: "Current: Strict", tone: "active", direction: "ltr" }]);
+    expect(securityInput?.showCurrentBadge).toBe(false);
+    expect(securityInput?.defaultIndex).toBe(0);
+    expect(securityInput?.options.find((option) => option.id === "strict")?.current).toBe(true);
+    expect(workflowInput?.statusLines).toEqual([{ text: "Current: Proactive", tone: "active", direction: "ltr" }]);
+    expect(workflowInput?.showCurrentBadge).toBe(false);
+    expect(workflowInput?.defaultIndex).toBe(2);
+    expect(workflowInput?.options.find((option) => option.id === "proactive")?.current).toBe(true);
+  });
+
+  it("shows current optional capability state without exposing credential fields", async () => {
+    const prompt = fakePrompt();
+    const selectInputs = captureSelectInputs(prompt);
+
+    await promptWebSearchCapability(prompt, {
+      searchBackend: "brave",
+      braveApiKeyEnv: "SHOULD_NOT_APPEAR",
+      ddgsCapabilityStatus: "ready",
+    });
+    await promptTtsCapability(prompt, {
+      ttsProvider: "openai",
+      ttsModel: "gpt-4o-mini-tts",
+      ttsApiKeyEnv: "SHOULD_NOT_APPEAR",
+    });
+    await promptSttCapability(prompt, {
+      sttProvider: "local",
+      sttModel: "small",
+      sttApiKeyEnv: "SHOULD_NOT_APPEAR",
+    });
+    await promptVisionCapability(prompt, {
+      provider: "byteplus",
+      model: "seedream-4",
+      apiKeyEnv: "SHOULD_NOT_APPEAR",
+      useGateway: true,
+    });
+    await promptBrowserCapability(prompt, {
+      backend: "local-cdp",
+      autoLaunch: true,
+      supervised: true,
+      engine: "cdp",
+    });
+
+    const searchInput = selectInputs.find((input) => input.title === "Search provider");
+    const voiceInputs = selectInputs.filter((input) => input.title === "Voice");
+    const localSttInput = selectInputs.find((input) => input.title === "Configure STT");
+    const visionInput = selectInputs.find((input) => input.title === "Vision and Image Generation");
+    const browserInput = selectInputs.find((input) => input.title === "Browser configuration");
+    const allStatusText = selectInputs.flatMap((input) => input.statusLines ?? []).map((line) => line.text).join("\n");
+
+    expect(searchInput?.statusLines).toEqual([{ text: "Current: Brave Search", tone: "active", direction: "ltr" }]);
+    expect(searchInput?.defaultIndex).toBe(0);
+    expect(searchInput?.options.find((option) => option.id === "web-search-brave")?.current).toBe(true);
+    expect(voiceInputs[0]?.statusLines).toEqual([{ text: "Current: openai/gpt-4o-mini-tts", tone: "active", direction: "ltr" }]);
+    expect(voiceInputs[0]?.options.find((option) => option.id === "tts-openai")?.current).toBe(true);
+    expect(voiceInputs[1]?.statusLines).toEqual([{ text: "Current: local/small", tone: "active", direction: "ltr" }]);
+    expect(voiceInputs[1]?.options.find((option) => option.id === "stt-local")?.current).toBe(true);
+    expect(localSttInput?.statusLines).toEqual([{ text: "Current: Small", tone: "active", direction: "ltr" }]);
+    expect(localSttInput?.defaultIndex).toBe(1);
+    expect(localSttInput?.options.find((option) => option.id === "local-stt-model-small")?.current).toBe(true);
+    expect(visionInput?.statusLines).toEqual([{ text: "Current: byteplus/seedream-4", tone: "active", direction: "ltr" }]);
+    expect(visionInput?.options.find((option) => option.id === "byteplus")?.current).toBe(true);
+    expect(browserInput?.statusLines).toEqual([{ text: "Current: Recommended browser setup", tone: "active", direction: "ltr" }]);
+    expect(browserInput?.options.find((option) => option.id === "browser-recommended")?.current).toBe(true);
+    expect(selectInputs.every((input) => input.showCurrentBadge === undefined || input.showCurrentBadge === false)).toBe(true);
+    expect(allStatusText).not.toContain("SHOULD_NOT_APPEAR");
+  });
+
+  it("does not invent a current web search provider when current state is missing", async () => {
+    const prompt = fakePrompt();
+    const selectInputs = captureSelectInputs(prompt);
+
+    const webSearch = await promptWebSearchCapability(prompt, { ddgsCapabilityStatus: "missing" });
+
+    const searchInput = selectInputs.find((input) => input.title === "Search provider");
+    expect(webSearch).toEqual({ provider: "none" });
+    expect(searchInput?.defaultIndex).toBe(2);
+    expect(searchInput?.statusLines).toBeUndefined();
+    expect(searchInput?.showCurrentBadge).toBeUndefined();
+    expect(searchInput?.options.some((option) => option.current === true)).toBe(false);
+  });
+
+  it("marks DDGS as current when web search state is explicitly DDGS", async () => {
+    const prompt = fakePrompt();
+    const selectInputs = captureSelectInputs(prompt);
+
+    const webSearch = await promptWebSearchCapability(prompt, {
+      searchBackend: "ddgs",
+      ddgsCapabilityStatus: "ready",
+    });
+
+    const searchInput = selectInputs.find((input) => input.title === "Search provider");
+    expect(webSearch).toEqual({ provider: "ddgs", ddgsSetupConfirmed: false });
+    expect(searchInput?.defaultIndex).toBe(1);
+    expect(searchInput?.statusLines).toEqual([{ text: "Current: DuckDuckGo / DDGS", tone: "active", direction: "ltr" }]);
+    expect(searchInput?.showCurrentBadge).toBe(false);
+    expect(searchInput?.options.find((option) => option.id === "web-search-ddgs")?.current).toBe(true);
+    expect(searchInput?.options.find((option) => option.id === "web-search-none")?.current).toBe(false);
   });
 
   it("prepares the read-only verification route without applying changes", async () => {
@@ -3541,6 +3675,16 @@ function fakePrompt(options: { readonly values?: readonly unknown[]; readonly se
   prompt.onboardingCard = () => undefined;
   prompt.close = () => undefined;
   return prompt;
+}
+
+function captureSelectInputs(prompt: Prompt): SelectPromptInput<unknown>[] {
+  const selectInputs: SelectPromptInput<unknown>[] = [];
+  const baseSelect = prompt.select!;
+  prompt.select = async (input) => {
+    selectInputs.push(input as SelectPromptInput<unknown>);
+    return baseSelect(input);
+  };
+  return selectInputs;
 }
 
 function readyDdgsStatus(homeDir: string): Awaited<ReturnType<typeof capabilityManager.checkManagedPythonCapabilityStatus>> {

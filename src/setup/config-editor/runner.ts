@@ -519,6 +519,7 @@ async function handleLanguageAction(
     initialLocale: options.locale,
     currentLanguage: ui?.language ?? "en",
     currentFlavor: ui?.flavor,
+    showCurrentState: true,
   });
 
   return reviewAndApplyAction(options, initialDecision, session, {

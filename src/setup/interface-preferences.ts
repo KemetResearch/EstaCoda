@@ -1,7 +1,7 @@
 import type { Prompt } from "../cli/readline-prompt.js";
 import type { ActivityLabelsLocale, UiFlavor, UiLanguage } from "../config/runtime-config.js";
 import type { SetupCopyKey, SetupCopyLocale } from "./setup-copy.js";
-import { promptSetupChoice, setupPromptContext, setupCopyText, type SetupChoice } from "./setup-prompts.js";
+import { promptSetupChoice, setupPromptContext, setupCopyText, setupCurrentStatusLine, type SetupChoice } from "./setup-prompts.js";
 
 export type InterfaceStyleChoice = SetupChoice<{
   readonly flavor: UiFlavor;
@@ -23,27 +23,36 @@ export async function promptInterfaceLanguageAndStyle(
     readonly initialLocale?: SetupCopyLocale;
     readonly currentLanguage?: UiLanguage;
     readonly currentFlavor?: UiFlavor;
+    readonly showCurrentState?: boolean;
   } = {}
 ): Promise<InterfaceLanguageAndStyleSelection> {
   const initialLocale = input.initialLocale ?? input.currentLanguage ?? "en";
   const defaultLanguage = input.currentLanguage ?? "en";
+  const languageChoices = [
+    {
+      id: "en",
+      label: setupCopyText(initialLocale, "onboarding.interfaceLanguage.options.en.label"),
+      description: setupCopyText(initialLocale, "onboarding.interfaceLanguage.options.en.description"),
+      value: "en" as const,
+      current: input.showCurrentState === true && defaultLanguage === "en",
+    },
+    {
+      id: "ar",
+      label: setupCopyText(initialLocale, "onboarding.interfaceLanguage.options.ar.label"),
+      description: setupCopyText(initialLocale, "onboarding.interfaceLanguage.options.ar.description"),
+      value: "ar" as const,
+      current: input.showCurrentState === true && defaultLanguage === "ar",
+    },
+  ] as const;
+  const currentLanguageLabel = languageChoices.find((choice) => choice.value === defaultLanguage)?.label;
   const language = await promptSetupChoice(setupPromptContext(prompt, initialLocale), {
     title: setupCopyText(initialLocale, "onboarding.interfaceLanguage.title"),
     message: `${setupCopyText(initialLocale, "onboarding.interfaceLanguage")}\n`,
-    choices: [
-      {
-        id: "en",
-        label: setupCopyText(initialLocale, "onboarding.interfaceLanguage.options.en.label"),
-        description: setupCopyText(initialLocale, "onboarding.interfaceLanguage.options.en.description"),
-        value: "en" as const,
-      },
-      {
-        id: "ar",
-        label: setupCopyText(initialLocale, "onboarding.interfaceLanguage.options.ar.label"),
-        description: setupCopyText(initialLocale, "onboarding.interfaceLanguage.options.ar.description"),
-        value: "ar" as const,
-      },
-    ],
+    statusLines: input.showCurrentState === true && currentLanguageLabel !== undefined
+      ? [setupCurrentStatusLine(initialLocale, currentLanguageLabel)]
+      : undefined,
+    showCurrentBadge: input.showCurrentState === true ? false : undefined,
+    choices: languageChoices,
     defaultValue: defaultLanguage,
   });
 

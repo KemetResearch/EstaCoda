@@ -19,6 +19,7 @@ import {
   setupPromptContext,
   setupTechnicalToken,
   setupChoiceColumns,
+  setupCurrentStatusLine,
   showSetupCard,
   setupTelegramAllowedChatIdsQuestion,
   setupTelegramAllowedUserIdsQuestion,
@@ -112,29 +113,36 @@ export async function promptSecurityMode(
   currentValue: SecurityApprovalMode,
   locale: SetupCopyLocale = "en"
 ): Promise<SecurityApprovalMode> {
+  const choices = [
+    {
+      id: "strict",
+      label: setupCopyText(locale, "onboarding.security.options.strict.label"),
+      description: setupCopyText(locale, "onboarding.security.options.strict.description"),
+      value: "strict" as const,
+      current: currentValue === "strict",
+    },
+    {
+      id: "adaptive",
+      label: setupCopyText(locale, "onboarding.security.options.adaptive.label"),
+      description: setupCopyText(locale, "onboarding.security.options.adaptive.description"),
+      value: "adaptive" as const,
+      current: currentValue === "adaptive",
+    },
+    {
+      id: "open",
+      label: setupCopyText(locale, "onboarding.security.options.open.label"),
+      description: setupCopyText(locale, "onboarding.security.options.open.description"),
+      value: "open" as const,
+      current: currentValue === "open",
+    },
+  ] as const;
+  const currentLabel = choices.find((choice) => choice.value === currentValue)?.label ?? currentValue;
   return promptSetupChoice(prompt, {
     title: setupCopyText(locale, "onboarding.security.title"),
     message: `${setupCopyText(locale, "onboarding.security")}\n`,
-    choices: [
-      {
-        id: "strict",
-        label: setupCopyText(locale, "onboarding.security.options.strict.label"),
-        description: setupCopyText(locale, "onboarding.security.options.strict.description"),
-        value: "strict" as const,
-      },
-      {
-        id: "adaptive",
-        label: setupCopyText(locale, "onboarding.security.options.adaptive.label"),
-        description: setupCopyText(locale, "onboarding.security.options.adaptive.description"),
-        value: "adaptive" as const,
-      },
-      {
-        id: "open",
-        label: setupCopyText(locale, "onboarding.security.options.open.label"),
-        description: setupCopyText(locale, "onboarding.security.options.open.description"),
-        value: "open" as const,
-      },
-    ],
+    statusLines: [setupCurrentStatusLine(locale, currentLabel)],
+    showCurrentBadge: false,
+    choices,
     defaultValue: currentValue,
   });
 }
@@ -144,35 +152,43 @@ export async function promptWorkflowLearning(
   currentValue: SkillAutonomy,
   locale: SetupCopyLocale = "en"
 ): Promise<SkillAutonomy> {
+  const choices = [
+    {
+      id: "none",
+      label: setupCopyText(locale, "onboarding.workflowLearning.options.none.label"),
+      description: setupCopyText(locale, "onboarding.workflowLearning.options.none.description"),
+      value: "none" as const,
+      current: currentValue === "none",
+    },
+    {
+      id: "suggest",
+      label: setupCopyText(locale, "onboarding.workflowLearning.options.suggest.label"),
+      description: setupCopyText(locale, "onboarding.workflowLearning.options.suggest.description"),
+      value: "suggest" as const,
+      current: currentValue === "suggest",
+    },
+    {
+      id: "proactive",
+      label: setupCopyText(locale, "onboarding.workflowLearning.options.proactive.label"),
+      description: setupCopyText(locale, "onboarding.workflowLearning.options.proactive.description"),
+      value: "proactive" as const,
+      current: currentValue === "proactive",
+    },
+    {
+      id: "autonomous",
+      label: setupCopyText(locale, "onboarding.workflowLearning.options.autonomous.label"),
+      description: setupCopyText(locale, "onboarding.workflowLearning.options.autonomous.description"),
+      value: "autonomous" as const,
+      current: currentValue === "autonomous",
+    },
+  ] as const;
+  const currentLabel = choices.find((choice) => choice.value === currentValue)?.label ?? currentValue;
   return promptSetupChoice(prompt, {
     title: setupCopyText(locale, "onboarding.workflowLearning.title"),
     message: `${setupCopyText(locale, "onboarding.workflowLearning")}\n`,
-    choices: [
-      {
-        id: "none",
-        label: setupCopyText(locale, "onboarding.workflowLearning.options.none.label"),
-        description: setupCopyText(locale, "onboarding.workflowLearning.options.none.description"),
-        value: "none" as const,
-      },
-      {
-        id: "suggest",
-        label: setupCopyText(locale, "onboarding.workflowLearning.options.suggest.label"),
-        description: setupCopyText(locale, "onboarding.workflowLearning.options.suggest.description"),
-        value: "suggest" as const,
-      },
-      {
-        id: "proactive",
-        label: setupCopyText(locale, "onboarding.workflowLearning.options.proactive.label"),
-        description: setupCopyText(locale, "onboarding.workflowLearning.options.proactive.description"),
-        value: "proactive" as const,
-      },
-      {
-        id: "autonomous",
-        label: setupCopyText(locale, "onboarding.workflowLearning.options.autonomous.label"),
-        description: setupCopyText(locale, "onboarding.workflowLearning.options.autonomous.description"),
-        value: "autonomous" as const,
-      },
-    ],
+    statusLines: [setupCurrentStatusLine(locale, currentLabel)],
+    showCurrentBadge: false,
+    choices,
     defaultValue: currentValue,
   });
 }
@@ -393,30 +409,40 @@ export async function promptWebSearchCapability(
   const defaultProvider: WebSearchProviderChoice = current.searchBackend === "brave" || current.searchBackend === "ddgs"
     ? current.searchBackend
     : "none";
+  const currentProvider = current.searchBackend === "brave" || current.searchBackend === "ddgs"
+    ? current.searchBackend
+    : undefined;
+  const providerChoices = [
+    {
+      id: "web-search-brave",
+      label: setupCopyText(locale, "setupEditor.prompt.webSearch.provider.brave"),
+      description: setupCopyText(locale, "setupEditor.prompt.webSearch.provider.brave.description"),
+      value: "brave" as const,
+      current: currentProvider === "brave",
+    },
+    {
+      id: "web-search-ddgs",
+      label: setupCopyText(locale, "setupEditor.prompt.webSearch.provider.ddgs"),
+      description: setupCopyText(locale, "setupEditor.prompt.webSearch.provider.ddgs.description"),
+      value: "ddgs" as const,
+      current: currentProvider === "ddgs",
+    },
+    {
+      id: "web-search-none",
+      label: setupCopyText(locale, "setupEditor.prompt.webSearch.provider.none"),
+      description: setupCopyText(locale, "setupEditor.prompt.webSearch.provider.none.description"),
+      value: "none" as const,
+      current: false,
+    },
+  ] as const;
+  const currentProviderLabel = providerChoices.find((choice) => choice.value === currentProvider)?.label;
   const provider = await promptSetupChoice<WebSearchProviderChoice>(prompt, {
     title: setupCopyText(locale, "setupEditor.prompt.webSearch.provider.title"),
     message: `${setupCopyText(locale, "setupEditor.prompt.webSearch.provider.body")}\n`,
     columns: setupChoiceColumns(locale),
-    choices: [
-      {
-        id: "web-search-brave",
-        label: setupCopyText(locale, "setupEditor.prompt.webSearch.provider.brave"),
-        description: setupCopyText(locale, "setupEditor.prompt.webSearch.provider.brave.description"),
-        value: "brave" as const,
-      },
-      {
-        id: "web-search-ddgs",
-        label: setupCopyText(locale, "setupEditor.prompt.webSearch.provider.ddgs"),
-        description: setupCopyText(locale, "setupEditor.prompt.webSearch.provider.ddgs.description"),
-        value: "ddgs" as const,
-      },
-      {
-        id: "web-search-none",
-        label: setupCopyText(locale, "setupEditor.prompt.webSearch.provider.none"),
-        description: setupCopyText(locale, "setupEditor.prompt.webSearch.provider.none.description"),
-        value: "none" as const,
-      },
-    ],
+    statusLines: currentProviderLabel === undefined ? undefined : [setupCurrentStatusLine(locale, currentProviderLabel)],
+    showCurrentBadge: currentProviderLabel === undefined ? undefined : false,
+    choices: providerChoices,
     defaultValue: defaultProvider,
   });
 
@@ -932,16 +958,23 @@ export async function promptTtsCapability(
   readonly ttsModel: string;
   readonly ttsApiKeyEnv: string;
 }> {
+  const defaultProvider = current.ttsProvider ?? "openai";
+  const currentTtsRoute = current.ttsProvider === undefined && current.ttsModel === undefined
+    ? undefined
+    : setupRouteStatusText(locale, current.ttsProvider, current.ttsModel);
   const ttsProvider = await promptSetupChoice(prompt, {
     title: setupCopyText(locale, "setupModules.voice.title"),
     message: `${setupCopyText(locale, "setupEditor.prompt.voice.summary")}\n${setupCopyText(locale, "setupEditor.prompt.voice.ttsProvider")}\n`,
     columns: setupChoiceColumns(locale),
+    statusLines: currentTtsRoute === undefined ? undefined : [setupCurrentStatusLine(locale, currentTtsRoute)],
+    showCurrentBadge: currentTtsRoute === undefined ? undefined : false,
     choices: ttsProviders.map((provider) => ({
       id: `tts-${provider}`,
       label: provider,
+      current: current.ttsProvider === provider,
       value: provider,
     })),
-    defaultValue: current.ttsProvider ?? "openai",
+    defaultValue: defaultProvider,
   });
   const ttsModel = await promptSetupStringWithDefault(
     prompt,
@@ -974,16 +1007,23 @@ export async function promptSttCapability(
   readonly sttModel: string;
   readonly sttApiKeyEnv: string;
 }> {
+  const defaultProvider = current.sttProvider ?? "openai";
+  const currentSttRoute = current.sttProvider === undefined && current.sttModel === undefined
+    ? undefined
+    : setupRouteStatusText(locale, current.sttProvider, current.sttModel);
   const sttProvider = await promptSetupChoice(prompt, {
     title: setupCopyText(locale, "setupModules.voice.title"),
     message: `${setupCopyText(locale, "setupEditor.prompt.voice.summary")}\n${setupCopyText(locale, "setupEditor.prompt.voice.sttProvider")}\n`,
     columns: setupChoiceColumns(locale),
+    statusLines: currentSttRoute === undefined ? undefined : [setupCurrentStatusLine(locale, currentSttRoute)],
+    showCurrentBadge: currentSttRoute === undefined ? undefined : false,
     choices: sttProviders.map((provider) => ({
       id: `stt-${provider}`,
       label: provider === "local" ? setupCopyText(locale, "setupEditor.prompt.voice.sttProvider.local") : provider,
+      current: current.sttProvider === provider,
       value: provider,
     })),
-    defaultValue: current.sttProvider ?? "openai",
+    defaultValue: defaultProvider,
   });
 
   let sttModel: string;
@@ -991,11 +1031,19 @@ export async function promptSttCapability(
 
   if (sttProvider === "local") {
     const defaultLocalModel = isSetupLocalSttModel(current.sttModel) ? current.sttModel : "base";
+    const currentLocalModelLabel = isSetupLocalSttModel(current.sttModel)
+      ? localSttModelChoices(locale).find((choice) => choice.value === current.sttModel)?.label
+      : undefined;
     sttModel = await promptSetupChoice(prompt, {
       title: setupCopyText(locale, "setupEditor.prompt.voice.localModel.title"),
       message: `${setupCopyText(locale, "setupEditor.prompt.voice.localModel")}\n`,
       columns: setupChoiceColumns(locale),
-      choices: localSttModelChoices(locale),
+      statusLines: currentLocalModelLabel === undefined ? undefined : [setupCurrentStatusLine(locale, currentLocalModelLabel)],
+      showCurrentBadge: currentLocalModelLabel === undefined ? undefined : false,
+      choices: localSttModelChoices(locale).map((choice) => ({
+        ...choice,
+        current: current.sttModel === choice.value,
+      })),
       defaultValue: defaultLocalModel,
     });
     sttApiKeyEnv = "";
@@ -1071,16 +1119,23 @@ export async function promptVisionCapability(
   readonly apiKeyEnv: string;
   readonly useGateway: boolean;
 }> {
+  const defaultProvider = current.provider ?? "fal";
+  const currentVisionRoute = current.provider === undefined && current.model === undefined
+    ? undefined
+    : setupRouteStatusText(locale, current.provider, current.model);
   const provider = await promptSetupChoice(prompt, {
     title: setupCopyText(locale, "setupModules.vision.title"),
     message: `${setupCopyText(locale, "setupEditor.prompt.vision.summary")}\n${setupCopyText(locale, "setupEditor.prompt.vision.provider")}\n`,
     columns: setupChoiceColumns(locale),
+    statusLines: currentVisionRoute === undefined ? undefined : [setupCurrentStatusLine(locale, currentVisionRoute)],
+    showCurrentBadge: currentVisionRoute === undefined ? undefined : false,
     choices: imageProviders.map((candidate) => ({
       id: candidate,
       label: candidate,
+      current: current.provider === candidate,
       value: candidate,
     })),
-    defaultValue: current.provider ?? "fal",
+    defaultValue: defaultProvider,
   });
   const model = await promptSetupStringWithDefault(
     prompt,
@@ -1143,43 +1198,54 @@ export async function promptBrowserCapability(
   readonly cloudFallback?: boolean;
   readonly cloudSpendApproved?: boolean;
 }> {
+  const defaultMode = isRecommendedBrowserConfig(current) ? "recommended" : browserModeFromCurrent(current);
+  const hasCurrentBrowserState = browserCurrentStateIsKnown(current);
+  const modeChoices = [
+    {
+      id: "browser-recommended",
+      label: setupCopyText(locale, "setupEditor.prompt.browser.mode.recommended"),
+      description: setupCopyText(locale, "setupEditor.prompt.browser.mode.recommended.description"),
+      value: "recommended" as const,
+      current: hasCurrentBrowserState && defaultMode === "recommended",
+    },
+    {
+      id: "browser-local-supervised",
+      label: setupCopyText(locale, "setupEditor.prompt.browser.mode.localSupervised"),
+      description: setupCopyText(locale, "setupEditor.prompt.browser.mode.localSupervised.description"),
+      value: "local-supervised" as const,
+      current: hasCurrentBrowserState && defaultMode === "local-supervised",
+    },
+    {
+      id: "browser-existing-cdp",
+      label: setupCopyText(locale, "setupEditor.prompt.browser.mode.existingCdp"),
+      description: setupCopyText(locale, "setupEditor.prompt.browser.mode.existingCdp.description"),
+      value: "existing-cdp" as const,
+      current: hasCurrentBrowserState && defaultMode === "existing-cdp",
+    },
+    {
+      id: "browser-browserbase",
+      label: setupCopyText(locale, "setupEditor.prompt.browser.mode.browserbase"),
+      description: setupCopyText(locale, "setupEditor.prompt.browser.mode.browserbase.description"),
+      value: "browserbase" as const,
+      current: hasCurrentBrowserState && defaultMode === "browserbase",
+    },
+    {
+      id: "browser-disabled",
+      label: setupCopyText(locale, "setupEditor.prompt.browser.mode.disable"),
+      description: setupCopyText(locale, "setupEditor.prompt.browser.mode.disable.description"),
+      value: "disabled" as const,
+      current: hasCurrentBrowserState && defaultMode === "disabled",
+    },
+  ] as const;
+  const currentModeLabel = modeChoices.find((choice) => choice.value === defaultMode)?.label ?? defaultMode;
   const mode = await promptSetupChoice(prompt, {
     title: setupCopyText(locale, "setupEditor.prompt.browser.mode.title"),
     message: `${setupCopyText(locale, "setupEditor.prompt.browser.mode.body")}\n`,
     columns: setupChoiceColumns(locale),
-    choices: [
-      {
-        id: "browser-recommended",
-        label: setupCopyText(locale, "setupEditor.prompt.browser.mode.recommended"),
-        description: setupCopyText(locale, "setupEditor.prompt.browser.mode.recommended.description"),
-        value: "recommended" as const,
-      },
-      {
-        id: "browser-local-supervised",
-        label: setupCopyText(locale, "setupEditor.prompt.browser.mode.localSupervised"),
-        description: setupCopyText(locale, "setupEditor.prompt.browser.mode.localSupervised.description"),
-        value: "local-supervised" as const,
-      },
-      {
-        id: "browser-existing-cdp",
-        label: setupCopyText(locale, "setupEditor.prompt.browser.mode.existingCdp"),
-        description: setupCopyText(locale, "setupEditor.prompt.browser.mode.existingCdp.description"),
-        value: "existing-cdp" as const,
-      },
-      {
-        id: "browser-browserbase",
-        label: setupCopyText(locale, "setupEditor.prompt.browser.mode.browserbase"),
-        description: setupCopyText(locale, "setupEditor.prompt.browser.mode.browserbase.description"),
-        value: "browserbase" as const,
-      },
-      {
-        id: "browser-disabled",
-        label: setupCopyText(locale, "setupEditor.prompt.browser.mode.disable"),
-        description: setupCopyText(locale, "setupEditor.prompt.browser.mode.disable.description"),
-        value: "disabled" as const,
-      },
-    ],
-    defaultValue: isRecommendedBrowserConfig(current) ? "recommended" : browserModeFromCurrent(current),
+    statusLines: hasCurrentBrowserState ? [setupCurrentStatusLine(locale, currentModeLabel)] : undefined,
+    showCurrentBadge: hasCurrentBrowserState ? false : undefined,
+    choices: modeChoices,
+    defaultValue: defaultMode,
   });
 
   if (mode === "recommended") {
@@ -1347,9 +1413,40 @@ function isRecommendedBrowserConfig(current: {
     (current.engine === undefined || current.engine === "cdp");
 }
 
+function browserCurrentStateIsKnown(current: {
+  readonly backend?: BrowserBackendKind;
+  readonly cloudProvider?: BrowserCloudProviderKind;
+  readonly autoLaunch?: boolean;
+  readonly cdpUrl?: string;
+  readonly launchExecutable?: string;
+  readonly launchArgs?: readonly string[];
+  readonly chromeFlags?: readonly string[];
+  readonly engine?: BrowserEngineKind;
+}): boolean {
+  return current.backend !== undefined ||
+    current.cloudProvider !== undefined ||
+    current.autoLaunch !== undefined ||
+    current.cdpUrl !== undefined ||
+    current.launchExecutable !== undefined ||
+    current.launchArgs !== undefined ||
+    current.chromeFlags !== undefined ||
+    current.engine !== undefined;
+}
+
 function optionalTrimmedString(value: string): string | undefined {
   const trimmed = value.trim();
   return trimmed.length === 0 ? undefined : trimmed;
+}
+
+function setupRouteStatusText(
+  locale: SetupCopyLocale,
+  provider: string | undefined,
+  model: string | undefined
+): string {
+  const route = [provider, model]
+    .filter((value): value is string => value !== undefined && value.trim().length > 0)
+    .join("/");
+  return setupTechnicalToken(locale, route);
 }
 
 function splitCsv(value: string): string[] {
