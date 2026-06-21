@@ -194,15 +194,23 @@ export interface OnboardingPromptColumn {
   readonly header: string;
 }
 
+export interface PromptCardStatusLine {
+  readonly text: string;
+  readonly tone?: "default" | "muted" | "active" | "warning";
+  readonly direction?: "auto" | "ltr" | "rtl";
+}
+
 export interface OnboardingPromptCardViewModel {
   readonly kind: "onboardingPromptCard";
   readonly title: string;
   readonly bodyLines: readonly string[];
   readonly technicalLines?: readonly string[];
+  readonly statusLines?: readonly PromptCardStatusLine[];
   readonly columns?: readonly OnboardingPromptColumn[];
   readonly options: readonly OnboardingPromptOption[];
   readonly selectedOptionIndex: number;
   readonly hint?: string;
+  readonly showCurrentBadge?: boolean;
   readonly locale?: "en" | "ar";
   readonly direction?: "ltr" | "rtl";
 }

@@ -477,6 +477,9 @@ describe("StandardRenderer — dark theme", () => {
     const out = r.renderOnboardingPromptCard(buildOnboardingPromptCardViewModel({
       title: "Choose mode",
       bodyLines: ["Pick a generic mode."],
+      statusLines: [
+        { text: "Current: Alpha", tone: "active", direction: "ltr" },
+      ],
       columns: [
         { key: "name", header: "Name" },
         { key: "description", header: "Description" },
@@ -512,6 +515,7 @@ describe("StandardRenderer — dark theme", () => {
 
     expect(plain).toContain("Name");
     expect(plain).toContain("Description");
+    expect(plain).toContain("Current: Alpha");
     expect(plain).toContain("▸ Alpha");
     expect(plain).toContain("First generic option");
     expect(plain).toContain("Recommended  Current");
@@ -519,6 +523,50 @@ describe("StandardRenderer — dark theme", () => {
     expect(plain).toContain("Back");
     expect(plain).toContain("Cancel");
     expect(plain).toContain("↑↓ navigate   ENTER select");
+  });
+
+  it("uses active status coloring for prompt-card status lines", () => {
+    const tokens = resolveTokens("standard", "dark", "kemetBlue");
+    const r = new StandardRenderer({ tokens, capabilities: fullCaps() });
+    const out = r.renderOnboardingPromptCard(buildOnboardingPromptCardViewModel({
+      title: "Choose mode",
+      bodyLines: [],
+      statusLines: [
+        { text: "Current: Alpha", tone: "active", direction: "ltr" },
+      ],
+      options: [{ id: "alpha", label: "Alpha" }],
+      selectedOptionIndex: 0,
+    }));
+
+    expect(out).toContain(`${ansiFgForHex(tokens.contract.severity.ok)}Current: Alpha`);
+  });
+
+  it("suppresses automatic current badges while preserving explicit badges", () => {
+    const r = renderer("dark", noColorCaps());
+    const plain = stripAnsi(r.renderOnboardingPromptCard(buildOnboardingPromptCardViewModel({
+      title: "Choose mode",
+      bodyLines: [],
+      showCurrentBadge: false,
+      columns: [
+        { key: "name", header: "Name" },
+        { key: "description", header: "Description" },
+      ],
+      options: [
+        {
+          id: "alpha",
+          label: "Alpha",
+          cells: { name: "Alpha", description: "First generic option" },
+          badges: ["Recommended"],
+          current: true,
+        },
+      ],
+      selectedOptionIndex: 0,
+    })));
+
+    const selectedLine = plain.split("\n").find((line) => line.includes("▸ Alpha"));
+    expect(selectedLine).toBeDefined();
+    expect(selectedLine).toContain("Recommended");
+    expect(selectedLine).not.toContain("Current");
   });
 
   it("renders structured columns from label and description without cells", () => {
@@ -702,8 +750,24 @@ describe("StandardRenderer — dark theme", () => {
 
     const selectedLine = plain.split("\n").find((line) => line.includes("ألفا"));
     expect(selectedLine).toBeDefined();
-    expect(selectedLine!.indexOf("▸")).toBeGreaterThan(selectedLine!.indexOf("ألفا"));
+    expect(selectedLine!.trimStart().startsWith("▸ ")).toBe(true);
+    expect(selectedLine!.indexOf("▸")).toBeLessThan(selectedLine!.indexOf("ألفا"));
     expect(plain).toContain(isolateLtr("CLI"));
+  });
+
+  it("renders Arabic prompt-card hints as LTR technical text", () => {
+    const r = new StandardRenderer({ tokens: resolveTokens("standard", "dark", "kemetBlue"), capabilities: fullCaps(), locale: "ar" });
+    const plain = stripAnsi(r.renderOnboardingPromptCard(buildOnboardingPromptCardViewModel({
+      title: "اختر الوضع",
+      bodyLines: ["اختر وضعًا عامًا."],
+      options: [{ id: "alpha", label: "ألفا" }],
+      selectedOptionIndex: 0,
+      hint: "↑↓ navigate   ENTER select",
+      locale: "ar",
+      direction: "rtl",
+    })));
+
+    expect(plain).toContain(isolateLtr("↑↓ navigate   ENTER select"));
   });
 
   it("renders Arabic onboarding selected marker after the label without Unicode", () => {

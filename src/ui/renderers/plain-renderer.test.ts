@@ -154,6 +154,9 @@ describe("PlainRenderer — renderOnboardingPromptCard", () => {
     const out = renderOnboardingPromptCard(buildOnboardingPromptCardViewModel({
       title: "Choose mode",
       bodyLines: ["Pick a generic mode."],
+      statusLines: [
+        { text: "Current: Alpha", tone: "active", direction: "ltr" },
+      ],
       columns: [
         { key: "name", header: "Name" },
         { key: "description", header: "Description" },
@@ -188,6 +191,7 @@ describe("PlainRenderer — renderOnboardingPromptCard", () => {
 
     expect(out).toContain("  Name");
     expect(out).toContain("Description");
+    expect(out).toContain("Current: Alpha");
     expect(out).toContain("> Alpha");
     expect(out).toContain("First generic option");
     expect(out).toContain("Recommended  Current");
@@ -195,6 +199,67 @@ describe("PlainRenderer — renderOnboardingPromptCard", () => {
     expect(out).toContain("Back");
     expect(out).toContain("Cancel");
     expect(out).toContain("Type a number to choose.");
+    assertNoAnsi(out);
+  });
+
+  it("renders prompt-card status lines readably without color", () => {
+    const out = renderOnboardingPromptCard(buildOnboardingPromptCardViewModel({
+      title: "Choose mode",
+      bodyLines: [],
+      statusLines: [
+        { text: "Current: Alpha", tone: "active", direction: "ltr" },
+      ],
+      options: [{ id: "alpha", label: "Alpha" }],
+      selectedOptionIndex: 0,
+    }));
+
+    expect(out).toContain("Current: Alpha");
+    assertNoAnsi(out);
+  });
+
+  it("resolves prompt-card status auto direction from card direction instead of locale", () => {
+    const out = renderOnboardingPromptCard(buildOnboardingPromptCardViewModel({
+      title: "Choose mode",
+      bodyLines: [],
+      statusLines: [
+        { text: "Current: Alpha", direction: "auto" },
+      ],
+      options: [{ id: "alpha", label: "Alpha" }],
+      selectedOptionIndex: 0,
+      locale: "ar",
+      direction: "ltr",
+    }), "ar");
+
+    expect(out).toContain(isolateLtr("Current: Alpha"));
+    expect(out).not.toContain(isolateRtl("Current: Alpha"));
+    assertNoAnsi(out);
+  });
+
+  it("suppresses automatic current badges while preserving explicit badges", () => {
+    const out = renderOnboardingPromptCard(buildOnboardingPromptCardViewModel({
+      title: "Choose mode",
+      bodyLines: [],
+      showCurrentBadge: false,
+      columns: [
+        { key: "name", header: "Name" },
+        { key: "description", header: "Description" },
+      ],
+      options: [
+        {
+          id: "alpha",
+          label: "Alpha",
+          cells: { name: "Alpha", description: "First generic option" },
+          badges: ["Recommended"],
+          current: true,
+        },
+      ],
+      selectedOptionIndex: 0,
+    }));
+
+    const selectedLine = out.split("\n").find((line) => line.includes("> Alpha"));
+    expect(selectedLine).toBeDefined();
+    expect(selectedLine).toContain("Recommended");
+    expect(selectedLine).not.toContain("Current");
     assertNoAnsi(out);
   });
 
@@ -356,8 +421,23 @@ describe("PlainRenderer — renderOnboardingPromptCard", () => {
 
     const selectedLine = out.split("\n").find((line) => line.includes(isolateLtr("CLI")));
     expect(selectedLine).toBeDefined();
-    expect(selectedLine!.endsWith(">")).toBe(true);
+    expect(selectedLine!.startsWith("> ")).toBe(true);
     expect(out).toContain(isolateLtr("CLI"));
+  });
+
+  it("renders Arabic prompt-card hints as LTR technical text", () => {
+    const out = renderOnboardingPromptCard(buildOnboardingPromptCardViewModel({
+      title: "اختر الوضع",
+      bodyLines: ["اختر وضعًا عامًا."],
+      options: [{ id: "alpha", label: "ألفا" }],
+      selectedOptionIndex: 0,
+      hint: "↑↓ navigate   ENTER select",
+      locale: "ar",
+      direction: "rtl",
+    }), "ar");
+
+    expect(out).toContain(isolateLtr("↑↓ navigate   ENTER select"));
+    assertNoAnsi(out);
   });
 });
 

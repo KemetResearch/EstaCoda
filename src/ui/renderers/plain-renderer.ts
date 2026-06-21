@@ -19,6 +19,7 @@ import type {
   OnboardingPromptOption,
   PlainFallbackViewModel,
   PickerViewModel,
+  PromptCardStatusLine,
   ProgressContextRailViewModel,
   StartupViewModel,
   StartupDashboardViewModel,
@@ -512,6 +513,7 @@ export function renderOnboardingPromptCard(
   locale: UiLocale = "en"
 ): string {
   const effectiveLocale = vm.locale ?? locale;
+  const effectiveDirection = vm.direction ?? (effectiveLocale === "ar" ? "rtl" : "ltr");
   const lines: string[] = [vm.title];
 
   for (const bodyLine of vm.bodyLines) {
@@ -522,7 +524,13 @@ export function renderOnboardingPromptCard(
     lines.push(effectiveLocale === "ar" ? isolateLtr(technicalLine) : technicalLine);
   }
 
-  const hasPreOptionContent = vm.bodyLines.length > 0 || (vm.technicalLines?.length ?? 0) > 0;
+  for (const statusLine of vm.statusLines ?? []) {
+    lines.push(renderPlainPromptStatusLine(statusLine, effectiveLocale, effectiveDirection));
+  }
+
+  const hasPreOptionContent = vm.bodyLines.length > 0
+    || (vm.technicalLines?.length ?? 0) > 0
+    || (vm.statusLines?.length ?? 0) > 0;
   if (hasPreOptionContent && vm.options.length > 0) {
     lines.push("");
   }
@@ -546,10 +554,23 @@ export function renderOnboardingPromptCard(
   }
 
   if (vm.hint !== undefined && vm.hint.length > 0) {
-    lines.push(vm.hint);
+    lines.push(effectiveLocale === "ar" ? isolateLtr(vm.hint) : vm.hint);
   }
 
   return lines.join("\n");
+}
+
+function renderPlainPromptStatusLine(
+  line: PromptCardStatusLine,
+  locale: UiLocale,
+  cardDirection: "ltr" | "rtl"
+): string {
+  const direction = line.direction ?? "auto";
+  const textDirection = direction === "auto" ? cardDirection : direction;
+  if (textDirection === "ltr") {
+    return locale === "ar" ? isolateLtr(line.text) : line.text;
+  }
+  return isolateRtl(closeOpenBidiIsolates(line.text));
 }
 
 function hasStructuredPromptRows(vm: OnboardingPromptCardViewModel): boolean {
@@ -569,11 +590,11 @@ function renderPlainStructuredOnboardingOptions(vm: OnboardingPromptCardViewMode
     const row = plainStructuredRow(
       columns,
       plainStructuredOptionCells(option, columns),
-      plainOptionBadges(option),
+      plainOptionBadges(option, vm.showCurrentBadge),
       widths,
       locale
     );
-    lines.push(locale === "ar" ? `${row} ${marker}` : `${marker} ${row}`);
+    lines.push(`${marker} ${row}`);
   }
 
   return lines;
@@ -668,9 +689,9 @@ function plainStructuredArabicCell(value: string): string {
     : isolateRtl(closeOpenBidiIsolates(value));
 }
 
-function plainOptionBadges(option: OnboardingPromptOption): readonly string[] {
+function plainOptionBadges(option: OnboardingPromptOption, showCurrentBadge = true): readonly string[] {
   const badges = [...(option.badges ?? [])];
-  if (option.current === true && !badges.includes("Current")) {
+  if (showCurrentBadge && option.current === true && !badges.includes("Current")) {
     badges.push("Current");
   }
   return badges;

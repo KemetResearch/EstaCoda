@@ -16,6 +16,7 @@ import type {
   OnboardingPromptOption,
   PlainFallbackViewModel,
   PickerViewModel,
+  PromptCardStatusLine,
   ProgressContextRailViewModel,
   StartupViewModel,
   StartupDashboardViewModel,
@@ -624,6 +625,7 @@ export class StandardRenderer {
     const rawContentLines: string[] = [
       ...vm.bodyLines,
       ...(vm.technicalLines ?? []),
+      ...(vm.statusLines ?? []).map((line) => line.text),
       ...this.#onboardingPromptCardRawOptionLines(vm, optionMarkerSlotWidth),
       vm.hint ?? "",
     ].filter((line) => line.length > 0);
@@ -660,7 +662,13 @@ export class StandardRenderer {
       lines.push(`  ${direction === "rtl" ? padVisibleStart(text, contentWidth) : text}`);
     }
 
-    const hasPreOptionContent = vm.bodyLines.length > 0 || (vm.technicalLines?.length ?? 0) > 0;
+    for (const statusLine of vm.statusLines ?? []) {
+      lines.push(`  ${this.#renderOnboardingPromptCardStatusLine(statusLine, locale, direction, contentWidth)}`);
+    }
+
+    const hasPreOptionContent = vm.bodyLines.length > 0
+      || (vm.technicalLines?.length ?? 0) > 0
+      || (vm.statusLines?.length ?? 0) > 0;
     if (hasPreOptionContent && vm.options.length > 0) {
       lines.push("  ");
     }
@@ -671,7 +679,6 @@ export class StandardRenderer {
         selectedMarker,
         optionMarkerGap,
         optionMarkerSlotWidth,
-        direction,
         locale,
         contentWidth
       ));
@@ -698,8 +705,8 @@ export class StandardRenderer {
     }
 
     if (vm.hint !== undefined && vm.hint.length > 0) {
-      const hint = this.#muted(this.#localizedNatural(vm.hint, direction, contentWidth));
-      lines.push(`  ${direction === "rtl" ? padVisibleStart(hint, contentWidth) : hint}`);
+      const hint = this.#muted(this.#localizedTechnical(vm.hint, locale, contentWidth));
+      lines.push(`  ${hint}`);
     }
 
     lines.push(bottom);
@@ -708,6 +715,37 @@ export class StandardRenderer {
 
   #hasStructuredOnboardingPromptRows(vm: OnboardingPromptCardViewModel): boolean {
     return (vm.columns?.length ?? 0) > 0;
+  }
+
+  #renderOnboardingPromptCardStatusLine(
+    line: PromptCardStatusLine,
+    locale: UiLocale,
+    cardDirection: TextDirection,
+    contentWidth: number
+  ): string {
+    const direction = line.direction ?? "auto";
+    const textDirection = direction === "auto" ? cardDirection : direction;
+    const rendered = textDirection === "ltr"
+      ? this.#localizedTechnical(line.text, locale, contentWidth)
+      : this.#localizedNatural(line.text, "rtl", contentWidth);
+    const styled = this.#stylePromptCardStatusLine(rendered, line.tone ?? "default");
+    return textDirection === "rtl" ? padVisibleStart(styled, contentWidth) : styled;
+  }
+
+  #stylePromptCardStatusLine(
+    text: string,
+    tone: NonNullable<PromptCardStatusLine["tone"]>
+  ): string {
+    switch (tone) {
+      case "active":
+        return this.#severity(text, "ok");
+      case "warning":
+        return this.#severity(text, "warn");
+      case "muted":
+        return this.#muted(text);
+      case "default":
+        return this.#primary(text);
+    }
   }
 
   #onboardingPromptCardRawOptionLines(vm: OnboardingPromptCardViewModel, optionMarkerSlotWidth: number): string[] {
@@ -720,7 +758,7 @@ export class StandardRenderer {
       columns.map((column) => column.header).join("  "),
       ...vm.options.map((option) => [
         ...columns.map((column) => option.cells?.[column.key] ?? (column.key === "name" ? option.label : "")),
-        ...this.#onboardingOptionBadges(option),
+        ...this.#onboardingOptionBadges(option, vm.showCurrentBadge),
       ].filter((part) => part.length > 0).join("  ")),
     ];
   }
@@ -730,7 +768,6 @@ export class StandardRenderer {
     selectedMarker: string,
     optionMarkerGap: string,
     optionMarkerSlotWidth: number,
-    direction: TextDirection,
     locale: UiLocale,
     contentWidth: number
   ): string[] {
@@ -747,12 +784,10 @@ export class StandardRenderer {
       [],
       layout,
       locale,
-      direction,
+      "ltr",
       "header"
     );
-    lines.push(direction === "rtl"
-      ? `  ${padVisibleStart(header, contentWidth)}`
-      : `  ${" ".repeat(optionMarkerSlotWidth)}${header}`);
+    lines.push(`  ${" ".repeat(optionMarkerSlotWidth)}${header}`);
 
     for (let i = 0; i < vm.options.length; i++) {
       const option = vm.options[i];
@@ -761,18 +796,13 @@ export class StandardRenderer {
       const row = this.#structuredPromptRow(
         columns,
         this.#structuredPromptOptionCells(option, columns),
-        this.#onboardingOptionBadges(option),
+        this.#onboardingOptionBadges(option, vm.showCurrentBadge),
         layout,
         locale,
-        direction,
+        "ltr",
         "option"
       );
-      if (direction === "rtl") {
-        const optionRow = isolateRtl(closeOpenBidiIsolates(`${row}${optionMarkerGap}${marker}`));
-        lines.push(`  ${padVisibleStart(optionRow, contentWidth)}`);
-      } else {
-        lines.push(`  ${marker}${optionMarkerGap}${row}`);
-      }
+      lines.push(`  ${marker}${optionMarkerGap}${row}`);
     }
 
     return lines;
@@ -842,7 +872,7 @@ export class StandardRenderer {
         return this.#structuredPromptCellWithBadges(rawValue, badges, width, locale, direction, index === 0);
       }
       const text = kind === "header"
-        ? this.#secondary(truncateVisible(rawValue, width))
+        ? this.#secondary(this.#localizedPromptCell(rawValue, locale, direction, width))
         : index === 0
           ? this.#primary(this.#localizedPromptCell(rawValue, locale, direction, width))
           : this.#muted(this.#localizedPromptCell(rawValue, locale, direction, width));
@@ -889,9 +919,9 @@ export class StandardRenderer {
     return direction === "rtl" ? isolateRtl(closeOpenBidiIsolates(truncated)) : truncated;
   }
 
-  #onboardingOptionBadges(option: OnboardingPromptOption): readonly string[] {
+  #onboardingOptionBadges(option: OnboardingPromptOption, showCurrentBadge = true): readonly string[] {
     const badges = [...(option.badges ?? [])];
-    if (option.current === true && !badges.includes("Current")) {
+    if (showCurrentBadge && option.current === true && !badges.includes("Current")) {
       badges.push("Current");
     }
     return badges;

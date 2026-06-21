@@ -2,7 +2,7 @@ import { emitKeypressEvents } from "node:readline";
 import { createInterface as createPromptInterface } from "node:readline/promises";
 import type { Readable, Writable } from "node:stream";
 import { buildOnboardingPromptCardViewModel, buildPickerViewModel } from "../ui/view-models/builders.js";
-import type { OnboardingPromptOption, PickerOption, ViewModel } from "../contracts/view-model.js";
+import type { OnboardingPromptOption, PickerOption, PromptCardStatusLine, ViewModel } from "../contracts/view-model.js";
 import type { Locale, TextDirection } from "../contracts/ui.js";
 import { createSessionRenderer } from "./session-renderer.js";
 import { isolateLtr, isolateRtl } from "../ui/bidi.js";
@@ -33,6 +33,8 @@ export type SelectPromptInput<T> = {
   locale?: Locale;
   direction?: TextDirection;
   technicalLines?: readonly string[];
+  statusLines?: readonly PromptCardStatusLine[];
+  showCurrentBadge?: boolean;
 };
 
 export async function selectOption<T>(input: Readable, output: Writable, selection: SelectPromptInput<T>): Promise<T> {
@@ -148,10 +150,12 @@ function buildSelectionViewModel<T>(selection: SelectPromptInput<T>, selectedInd
       title: selection.title,
       bodyLines: splitBodyLines(selection.body),
       technicalLines: selection.technicalLines,
+      statusLines: selection.statusLines,
       columns: selection.columns,
       options,
       selectedOptionIndex: selectedIndex,
       hint: selection.hint ?? selection.instruction,
+      showCurrentBadge: selection.showCurrentBadge,
       locale: selection.locale,
       direction: selection.direction,
     });

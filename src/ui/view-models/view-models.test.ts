@@ -269,6 +269,9 @@ describe("ViewModel builders", () => {
       title: "Workspace trust",
       bodyLines: ["Trust this workspace?"],
       technicalLines: ["/workspace"],
+      statusLines: [
+        { text: "Current: alpha", tone: "active", direction: "ltr" },
+      ],
       columns: [
         { key: "name", header: "Name" },
         { key: "description", header: "Description" },
@@ -285,6 +288,7 @@ describe("ViewModel builders", () => {
       ],
       selectedOptionIndex: 0,
       hint: "Use arrow keys to choose.",
+      showCurrentBadge: false,
       locale: "en",
       direction: "ltr",
     });
@@ -293,6 +297,9 @@ describe("ViewModel builders", () => {
     expect(vm.title).toBe("Workspace trust");
     expect(vm.bodyLines).toEqual(["Trust this workspace?"]);
     expect(vm.technicalLines).toEqual(["/workspace"]);
+    expect(vm.statusLines).toEqual([
+      { text: "Current: alpha", tone: "active", direction: "ltr" },
+    ]);
     expect(vm.columns).toEqual([
       { key: "name", header: "Name" },
       { key: "description", header: "Description" },
@@ -312,6 +319,7 @@ describe("ViewModel builders", () => {
     });
     expect(vm.selectedOptionIndex).toBe(0);
     expect(vm.hint).toBe("Use arrow keys to choose.");
+    expect(vm.showCurrentBadge).toBe(false);
     expect(vm.locale).toBe("en");
     expect(vm.direction).toBe("ltr");
     expect(Object.getPrototypeOf(vm)).toBe(Object.prototype);
