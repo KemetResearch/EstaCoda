@@ -472,6 +472,157 @@ describe("StandardRenderer — dark theme", () => {
     expect(out).toContain("▸ Not now");
   });
 
+  it("renders generic structured prompt-card rows with columns, badges, current, and hint", () => {
+    const r = renderer("dark", noColorCaps());
+    const out = r.renderOnboardingPromptCard(buildOnboardingPromptCardViewModel({
+      title: "Choose mode",
+      bodyLines: ["Pick a generic mode."],
+      columns: [
+        { key: "name", header: "Name" },
+        { key: "description", header: "Description" },
+      ],
+      options: [
+        {
+          id: "alpha",
+          label: "Alpha",
+          cells: { name: "Alpha", description: "First generic option" },
+          badges: ["Recommended"],
+          current: true,
+        },
+        {
+          id: "beta",
+          label: "Beta",
+          cells: { name: "Beta", description: "Second generic option" },
+        },
+        {
+          id: "back",
+          label: "Back",
+          cells: { name: "Back", description: "Return to previous card" },
+        },
+        {
+          id: "cancel",
+          label: "Cancel",
+          cells: { name: "Cancel", description: "Exit without changes" },
+        },
+      ],
+      selectedOptionIndex: 0,
+      hint: "↑↓ navigate   ENTER select",
+    }));
+    const plain = stripAnsi(out);
+
+    expect(plain).toContain("Name");
+    expect(plain).toContain("Description");
+    expect(plain).toContain("▸ Alpha");
+    expect(plain).toContain("First generic option");
+    expect(plain).toContain("Recommended  Current");
+    expect(plain).toContain("  Beta");
+    expect(plain).toContain("Back");
+    expect(plain).toContain("Cancel");
+    expect(plain).toContain("↑↓ navigate   ENTER select");
+  });
+
+  it("renders structured columns from label and description without cells", () => {
+    const r = renderer("dark", noColorCaps());
+    const plain = stripAnsi(r.renderOnboardingPromptCard(buildOnboardingPromptCardViewModel({
+      title: "Choose mode",
+      bodyLines: [],
+      columns: [
+        { key: "name", header: "Name" },
+        { key: "description", header: "Description" },
+      ],
+      options: [
+        { id: "alpha", label: "Alpha", description: "First generic option" },
+        { id: "beta", label: "Beta", description: "Second generic option" },
+      ],
+      selectedOptionIndex: 0,
+    })));
+
+    const selectedLine = plain.split("\n").find((line) => line.includes("▸ Alpha"));
+    expect(selectedLine).toBeDefined();
+    expect(selectedLine).toContain("First generic option");
+    expect(plain).toContain("Description");
+  });
+
+  it("keeps structured prompt-card rows inside narrow terminal width", () => {
+    const r = renderer("dark", narrowCaps());
+    const plain = stripAnsi(r.renderOnboardingPromptCard(buildOnboardingPromptCardViewModel({
+      title: "Choose mode",
+      bodyLines: ["Pick a generic mode."],
+      columns: [
+        { key: "name", header: "Name" },
+        { key: "description", header: "Description" },
+      ],
+      options: [
+        {
+          id: "alpha-long",
+          label: "Alpha with a long name",
+          cells: {
+            name: "Alpha with a long name",
+            description: "A very long generic description that should truncate cleanly in a narrow terminal.",
+          },
+          current: true,
+        },
+      ],
+      selectedOptionIndex: 0,
+    })));
+
+    expect(plain).toContain("...");
+    expect(plain).toContain("Current");
+    for (const line of plain.split("\n")) {
+      expect(measureVisibleWidth(line)).toBeLessThanOrEqual(narrowCaps().terminalWidth);
+    }
+  });
+
+  it("keeps current visible when structured descriptions are long", () => {
+    const r = renderer("dark", { ...noColorCaps(), terminalWidth: 60 });
+    const plain = stripAnsi(r.renderOnboardingPromptCard(buildOnboardingPromptCardViewModel({
+      title: "Choose mode",
+      bodyLines: [],
+      columns: [
+        { key: "name", header: "Name" },
+        { key: "description", header: "Description" },
+      ],
+      options: [
+        {
+          id: "alpha",
+          label: "Alpha",
+          cells: {
+            name: "Alpha",
+            description: "A very long generic option description that would previously hide the current badge.",
+          },
+          current: true,
+        },
+      ],
+      selectedOptionIndex: 0,
+    })));
+
+    const selectedLine = plain.split("\n").find((line) => line.includes("▸ Alpha"));
+    expect(selectedLine).toBeDefined();
+    expect(selectedLine).toContain("...");
+    expect(selectedLine).toContain("Current");
+  });
+
+  it("renders structured prompt-card rows with no Unicode fallback", () => {
+    const r = renderer("dark", noUnicodeCaps());
+    const plain = stripAnsi(r.renderOnboardingPromptCard(buildOnboardingPromptCardViewModel({
+      title: "Choose mode",
+      bodyLines: [],
+      columns: [
+        { key: "name", header: "Name" },
+        { key: "description", header: "Description" },
+      ],
+      options: [
+        { id: "alpha", label: "Alpha", cells: { name: "Alpha", description: "First option" }, current: true },
+        { id: "beta", label: "Beta", cells: { name: "Beta", description: "Second option" } },
+      ],
+      selectedOptionIndex: 0,
+    })));
+
+    expect(plain).toContain("> Alpha");
+    expect(plain).toContain("Current");
+    expect(plain).not.toContain("▸");
+  });
+
   it("truncates long technical paths safely inside onboarding cards", () => {
     const r = renderer("dark", narrowCaps());
     const longPath = "/Users/example/projects/this/is/a/very/long/workspace/path/that/keeps/going";
@@ -520,6 +671,39 @@ describe("StandardRenderer — dark theme", () => {
     expect(out).toContain(isolateLtr("KIMI_API_KEY"));
     expect(out).toContain(isolateLtr("kimi-k2"));
     expect(out).toContain(isolateLtr("openrouter"));
+  });
+
+  it("keeps Arabic structured prompt-card marker placement stable", () => {
+    const r = new StandardRenderer({ tokens: resolveTokens("standard", "dark", "kemetBlue"), capabilities: fullCaps(), locale: "ar" });
+    const plain = stripAnsi(r.renderOnboardingPromptCard(buildOnboardingPromptCardViewModel({
+      title: "اختر الوضع",
+      bodyLines: ["اختر وضعًا عامًا."],
+      columns: [
+        { key: "name", header: "الاسم" },
+        { key: "description", header: "الوصف" },
+      ],
+      options: [
+        {
+          id: "alpha",
+          label: "ألفا",
+          cells: { name: "ألفا", description: `خيار عام مع ${isolateLtr("CLI")} مستقر.` },
+          current: true,
+        },
+        {
+          id: "beta",
+          label: "بيتا",
+          cells: { name: "بيتا", description: "خيار عام آخر." },
+        },
+      ],
+      selectedOptionIndex: 0,
+      locale: "ar",
+      direction: "rtl",
+    })));
+
+    const selectedLine = plain.split("\n").find((line) => line.includes("ألفا"));
+    expect(selectedLine).toBeDefined();
+    expect(selectedLine!.indexOf("▸")).toBeGreaterThan(selectedLine!.indexOf("ألفا"));
+    expect(plain).toContain(isolateLtr("CLI"));
   });
 
   it("renders Arabic onboarding selected marker after the label without Unicode", () => {

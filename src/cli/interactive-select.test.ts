@@ -112,6 +112,53 @@ describe("interactive-select prompt card surface", () => {
     ].join("\n"));
   });
 
+  it("passes structured prompt-card table fields through plain fallback rendering", async () => {
+    const input = Readable.from(["1\n"]);
+    const output = makeOutput(false);
+
+    const selected = await selectOption(input, output, {
+      surface: "promptCard",
+      title: "Choose mode",
+      body: "Pick a generic mode.",
+      columns: [
+        { key: "name", header: "Name" },
+        { key: "description", header: "Description" },
+      ],
+      options: [
+        {
+          value: "alpha",
+          label: "Alpha",
+          cells: { name: "Alpha", description: "First generic option" },
+          badges: ["Recommended"],
+          current: true,
+        },
+        {
+          value: "back",
+          label: "Back",
+          cells: { name: "Back", description: "Return to previous card" },
+        },
+        {
+          value: "cancel",
+          label: "Cancel",
+          cells: { name: "Cancel", description: "Exit without changes" },
+        },
+      ],
+      hint: "Type a number to choose.",
+      fallbackPrompt: "Choose: ",
+    });
+
+    const rendered = output.getText();
+    expect(selected).toBe("alpha");
+    expect(rendered).toContain("Name");
+    expect(rendered).toContain("Description");
+    expect(rendered).toContain("> Alpha");
+    expect(rendered).toContain("First generic option");
+    expect(rendered).toContain("Recommended  Current");
+    expect(rendered).toContain("Back");
+    expect(rendered).toContain("Cancel");
+    expect(rendered).toContain("Type a number to choose.");
+  });
+
   it("localizes and bolds Arabic selected output", async () => {
     clearCiEnv();
     process.env.FORCE_COLOR = "1";

@@ -269,9 +269,19 @@ describe("ViewModel builders", () => {
       title: "Workspace trust",
       bodyLines: ["Trust this workspace?"],
       technicalLines: ["/workspace"],
+      columns: [
+        { key: "name", header: "Name" },
+        { key: "description", header: "Description" },
+      ],
       options: [
-        { id: "trust", label: "Trust workspace" },
-        { id: "skip", label: "Not now" },
+        {
+          id: "alpha",
+          label: "Alpha",
+          cells: { name: "Alpha", description: "First generic option" },
+          badges: ["Current"],
+          current: true,
+        },
+        { id: "skip", label: "Not now", description: "Return later" },
       ],
       selectedOptionIndex: 0,
       hint: "Use arrow keys to choose.",
@@ -283,7 +293,23 @@ describe("ViewModel builders", () => {
     expect(vm.title).toBe("Workspace trust");
     expect(vm.bodyLines).toEqual(["Trust this workspace?"]);
     expect(vm.technicalLines).toEqual(["/workspace"]);
+    expect(vm.columns).toEqual([
+      { key: "name", header: "Name" },
+      { key: "description", header: "Description" },
+    ]);
     expect(vm.options).toHaveLength(2);
+    expect(vm.options[0]).toEqual({
+      id: "alpha",
+      label: "Alpha",
+      cells: { name: "Alpha", description: "First generic option" },
+      badges: ["Current"],
+      current: true,
+    });
+    expect(vm.options[1]).toEqual({
+      id: "skip",
+      label: "Not now",
+      description: "Return later",
+    });
     expect(vm.selectedOptionIndex).toBe(0);
     expect(vm.hint).toBe("Use arrow keys to choose.");
     expect(vm.locale).toBe("en");

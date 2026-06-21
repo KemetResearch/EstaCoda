@@ -14,7 +14,9 @@ import type {
   ConversationMessageViewModel,
   KeyValueBlockViewModel,
   ListViewModel,
+  OnboardingPromptColumn,
   OnboardingPromptCardViewModel,
+  OnboardingPromptOption,
   PlainFallbackViewModel,
   PickerViewModel,
   ProgressContextRailViewModel,
@@ -525,17 +527,21 @@ export function renderOnboardingPromptCard(
     lines.push("");
   }
 
-  for (let i = 0; i < vm.options.length; i++) {
-    const option = vm.options[i];
-    const marker = i === vm.selectedOptionIndex ? ">" : " ";
-    const label = option.technical === true && effectiveLocale === "ar"
-      ? isolateLtr(option.label)
-      : effectiveLocale === "ar"
-        ? isolateRtl(option.label)
-      : option.label;
-    lines.push(effectiveLocale === "ar" ? `${label} ${marker}` : `${marker} ${label}`);
-    if (option.description !== undefined) {
-      lines.push(...renderPlainOnboardingOptionDescription(option.description, effectiveLocale));
+  if (hasStructuredPromptRows(vm)) {
+    lines.push(...renderPlainStructuredOnboardingOptions(vm, effectiveLocale));
+  } else {
+    for (let i = 0; i < vm.options.length; i++) {
+      const option = vm.options[i];
+      const marker = i === vm.selectedOptionIndex ? ">" : " ";
+      const label = option.technical === true && effectiveLocale === "ar"
+        ? isolateLtr(option.label)
+        : effectiveLocale === "ar"
+          ? isolateRtl(option.label)
+        : option.label;
+      lines.push(effectiveLocale === "ar" ? `${label} ${marker}` : `${marker} ${label}`);
+      if (option.description !== undefined) {
+        lines.push(...renderPlainOnboardingOptionDescription(option.description, effectiveLocale));
+      }
     }
   }
 
@@ -544,6 +550,130 @@ export function renderOnboardingPromptCard(
   }
 
   return lines.join("\n");
+}
+
+function hasStructuredPromptRows(vm: OnboardingPromptCardViewModel): boolean {
+  return (vm.columns?.length ?? 0) > 0;
+}
+
+function renderPlainStructuredOnboardingOptions(vm: OnboardingPromptCardViewModel, locale: UiLocale): string[] {
+  const columns = vm.columns ?? [];
+  const widths = plainStructuredColumnWidths(columns, vm.options);
+  const lines: string[] = [
+    `  ${plainStructuredRow(columns, Object.fromEntries(columns.map((column) => [column.key, column.header])), [], widths, locale)}`
+  ];
+
+  for (let i = 0; i < vm.options.length; i++) {
+    const option = vm.options[i];
+    const marker = i === vm.selectedOptionIndex ? ">" : " ";
+    const row = plainStructuredRow(
+      columns,
+      plainStructuredOptionCells(option, columns),
+      plainOptionBadges(option),
+      widths,
+      locale
+    );
+    lines.push(locale === "ar" ? `${row} ${marker}` : `${marker} ${row}`);
+  }
+
+  return lines;
+}
+
+function plainStructuredColumnWidths(
+  columns: readonly OnboardingPromptColumn[],
+  options: readonly OnboardingPromptOption[]
+): number[] {
+  if (columns.length === 0) return [];
+  if (columns.length === 1) return [PLAIN_ONBOARDING_DESCRIPTION_WIDTH];
+
+  const first = columns[0]!;
+  const firstWidth = Math.min(24, Math.max(
+    measureVisibleWidth(first.header),
+    ...options.map((option) => measureVisibleWidth(option.cells?.[first.key] ?? option.label))
+  ));
+  const remaining = Math.max(16, PLAIN_ONBOARDING_DESCRIPTION_WIDTH - firstWidth - (2 * (columns.length - 1)));
+  const widths = [firstWidth];
+  for (let i = 1; i < columns.length; i++) {
+    widths.push(i === columns.length - 1
+      ? remaining
+      : Math.max(8, Math.floor(remaining / (columns.length - 1))));
+  }
+  return widths;
+}
+
+function plainStructuredOptionCells(
+  option: OnboardingPromptOption,
+  columns: readonly OnboardingPromptColumn[]
+): Record<string, string> {
+  const cells: Record<string, string> = { ...(option.cells ?? {}) };
+  const firstColumn = columns[0];
+  if (firstColumn !== undefined && cells[firstColumn.key] === undefined) {
+    cells[firstColumn.key] = option.label;
+  }
+  if (columns.length > 1 && option.description !== undefined) {
+    const descriptionColumn = columns.find((column) => column.key === "description") ?? columns[columns.length - 1];
+    if (descriptionColumn !== undefined && cells[descriptionColumn.key] === undefined) {
+      cells[descriptionColumn.key] = option.description;
+    }
+  }
+  return cells;
+}
+
+function plainStructuredRow(
+  columns: readonly OnboardingPromptColumn[],
+  cells: Readonly<Record<string, string>>,
+  badges: readonly string[],
+  widths: readonly number[],
+  locale: UiLocale
+): string {
+  return columns.map((column, index) => {
+    const width = widths[index] ?? 1;
+    const value = cells[column.key] ?? "";
+    if (index === columns.length - 1 && badges.length > 0) {
+      return plainStructuredCellWithBadges(value, badges, width, locale);
+    }
+    const localized = locale === "ar" ? plainStructuredArabicCell(value) : value;
+    return padVisibleEnd(truncateVisible(localized, width), width);
+  }).join("  ");
+}
+
+function plainStructuredCellWithBadges(
+  value: string,
+  badges: readonly string[],
+  width: number,
+  locale: UiLocale
+): string {
+  const badgeText = badges.join("  ");
+  const badgeWidth = measureVisibleWidth(badgeText);
+  const localizedBadges = locale === "ar" ? plainStructuredArabicCell(badgeText) : badgeText;
+  if (badgeWidth >= width) {
+    return padVisibleEnd(truncateVisible(localizedBadges, width), width);
+  }
+
+  const gap = "  ";
+  const gapWidth = measureVisibleWidth(gap);
+  const valueWidth = Math.max(0, width - badgeWidth - gapWidth);
+  if (valueWidth === 0) {
+    return padVisibleEnd(localizedBadges, width);
+  }
+
+  const localizedValue = locale === "ar" ? plainStructuredArabicCell(value) : value;
+  return `${padVisibleEnd(truncateVisible(localizedValue, valueWidth), valueWidth)}${gap}${localizedBadges}`;
+}
+
+function plainStructuredArabicCell(value: string): string {
+  if (value.length === 0) return value;
+  return /[A-Za-z0-9]/u.test(value)
+    ? isolateLtr(value)
+    : isolateRtl(closeOpenBidiIsolates(value));
+}
+
+function plainOptionBadges(option: OnboardingPromptOption): readonly string[] {
+  const badges = [...(option.badges ?? [])];
+  if (option.current === true && !badges.includes("Current")) {
+    badges.push("Current");
+  }
+  return badges;
 }
 
 function renderPlainOnboardingOptionDescription(description: string, locale: UiLocale): string[] {

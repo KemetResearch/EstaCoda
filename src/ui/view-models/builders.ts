@@ -257,6 +257,7 @@ export interface BuildOnboardingPromptCardInput {
   readonly title: string;
   readonly bodyLines: readonly string[];
   readonly technicalLines?: readonly string[];
+  readonly columns?: OnboardingPromptCardViewModel["columns"];
   readonly options: readonly OnboardingPromptOption[];
   readonly selectedOptionIndex: number;
   readonly hint?: string;
@@ -272,6 +273,7 @@ export function buildOnboardingPromptCardViewModel(
     title: input.title,
     bodyLines: input.bodyLines,
     technicalLines: input.technicalLines,
+    columns: input.columns,
     options: input.options,
     selectedOptionIndex: input.selectedOptionIndex,
     hint: input.hint,

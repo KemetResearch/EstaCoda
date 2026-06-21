@@ -11,13 +11,21 @@ export type SelectPromptInput<T> = {
   title: string;
   body?: string;
   instruction?: string;
+  hint?: string;
   selectedLabel?: string;
+  columns?: readonly {
+    key: string;
+    header: string;
+  }[];
   options: Array<{
     id?: string;
     value: T;
     label: string;
     description?: string;
     technical?: boolean;
+    cells?: Readonly<Record<string, string>>;
+    badges?: readonly string[];
+    current?: boolean;
   }>;
   defaultIndex?: number;
   fallbackPrompt: string;
@@ -132,14 +140,18 @@ function buildSelectionViewModel<T>(selection: SelectPromptInput<T>, selectedInd
       label: opt.label,
       description: opt.description,
       technical: opt.technical ?? false,
+      cells: opt.cells,
+      badges: opt.badges,
+      current: opt.current,
     }));
     return buildOnboardingPromptCardViewModel({
       title: selection.title,
       bodyLines: splitBodyLines(selection.body),
       technicalLines: selection.technicalLines,
+      columns: selection.columns,
       options,
       selectedOptionIndex: selectedIndex,
-      hint: selection.instruction,
+      hint: selection.hint ?? selection.instruction,
       locale: selection.locale,
       direction: selection.direction,
     });

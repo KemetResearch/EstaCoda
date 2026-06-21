@@ -150,6 +150,134 @@ describe("PlainRenderer — renderOnboardingPromptCard", () => {
     expect(out).toContain("> Not now");
   });
 
+  it("renders structured generic prompt-card rows with badges, current, ordinary Back/Cancel, and hint", () => {
+    const out = renderOnboardingPromptCard(buildOnboardingPromptCardViewModel({
+      title: "Choose mode",
+      bodyLines: ["Pick a generic mode."],
+      columns: [
+        { key: "name", header: "Name" },
+        { key: "description", header: "Description" },
+      ],
+      options: [
+        {
+          id: "alpha",
+          label: "Alpha",
+          cells: { name: "Alpha", description: "First generic option" },
+          badges: ["Recommended"],
+          current: true,
+        },
+        {
+          id: "beta",
+          label: "Beta",
+          cells: { name: "Beta", description: "Second generic option" },
+        },
+        {
+          id: "back",
+          label: "Back",
+          cells: { name: "Back", description: "Return to previous card" },
+        },
+        {
+          id: "cancel",
+          label: "Cancel",
+          cells: { name: "Cancel", description: "Exit without changes" },
+        },
+      ],
+      selectedOptionIndex: 0,
+      hint: "Type a number to choose.",
+    }));
+
+    expect(out).toContain("  Name");
+    expect(out).toContain("Description");
+    expect(out).toContain("> Alpha");
+    expect(out).toContain("First generic option");
+    expect(out).toContain("Recommended  Current");
+    expect(out).toContain("  Beta");
+    expect(out).toContain("Back");
+    expect(out).toContain("Cancel");
+    expect(out).toContain("Type a number to choose.");
+    assertNoAnsi(out);
+  });
+
+  it("renders structured columns from label and description without cells", () => {
+    const out = renderOnboardingPromptCard(buildOnboardingPromptCardViewModel({
+      title: "Choose mode",
+      bodyLines: [],
+      columns: [
+        { key: "name", header: "Name" },
+        { key: "description", header: "Description" },
+      ],
+      options: [
+        { id: "alpha", label: "Alpha", description: "First generic option" },
+        { id: "beta", label: "Beta", description: "Second generic option" },
+      ],
+      selectedOptionIndex: 0,
+    }));
+
+    const selectedLine = out.split("\n").find((line) => line.includes("> Alpha"));
+    expect(selectedLine).toBeDefined();
+    expect(selectedLine).toContain("First generic option");
+    expect(out).toContain("Description");
+    assertNoAnsi(out);
+  });
+
+  it("truncates long structured plain rows readably", () => {
+    const out = renderOnboardingPromptCard(buildOnboardingPromptCardViewModel({
+      title: "Choose mode",
+      bodyLines: [],
+      columns: [
+        { key: "name", header: "Name" },
+        { key: "description", header: "Description" },
+      ],
+      options: [
+        {
+          id: "alpha",
+          label: "Alpha option with a long name",
+          cells: {
+            name: "Alpha option with a long name",
+            description: "A very long generic option description that should truncate in deterministic plain rendering.",
+          },
+          current: true,
+        },
+      ],
+      selectedOptionIndex: 0,
+    }));
+
+    expect(out).toContain("...");
+    expect(out).toContain("Current");
+    for (const line of out.split("\n")) {
+      expect(measureVisibleWidth(line)).toBeLessThanOrEqual(94);
+    }
+  });
+
+  it("keeps current visible when structured plain descriptions are long", () => {
+    const out = renderOnboardingPromptCard(buildOnboardingPromptCardViewModel({
+      title: "Choose mode",
+      bodyLines: [],
+      columns: [
+        { key: "name", header: "Name" },
+        { key: "description", header: "Description" },
+      ],
+      options: [
+        {
+          id: "alpha",
+          label: "Alpha",
+          cells: {
+            name: "Alpha",
+            description: "A very long generic option description that would previously hide the current badge.",
+          },
+          current: true,
+        },
+      ],
+      selectedOptionIndex: 0,
+    }));
+
+    const selectedLine = out.split("\n").find((line) => line.includes("> Alpha"));
+    expect(selectedLine).toBeDefined();
+    expect(selectedLine).toContain("...");
+    expect(selectedLine).toContain("Current");
+    assertNoAnsi(out);
+  });
+
   it("isolates Arabic technical lines and keeps selected marker after the label", () => {
     const out = renderOnboardingPromptCard(buildOnboardingPromptCardViewModel({
       title: "الثقة بمساحة العمل",
@@ -198,6 +326,38 @@ describe("PlainRenderer — renderOnboardingPromptCard", () => {
       expect(line).toMatch(/^  /u);
       expect(measureVisibleWidth(line)).toBeLessThanOrEqual(90);
     }
+  });
+
+  it("keeps Arabic structured row marker placement stable", () => {
+    const out = renderOnboardingPromptCard(buildOnboardingPromptCardViewModel({
+      title: "اختر الوضع",
+      bodyLines: ["اختر وضعًا عامًا."],
+      columns: [
+        { key: "name", header: "الاسم" },
+        { key: "description", header: "الوصف" },
+      ],
+      options: [
+        {
+          id: "alpha",
+          label: "ألفا",
+          cells: { name: "ألفا", description: `خيار عام مع ${isolateLtr("CLI")}.` },
+          current: true,
+        },
+        {
+          id: "beta",
+          label: "بيتا",
+          cells: { name: "بيتا", description: "خيار عام آخر." },
+        },
+      ],
+      selectedOptionIndex: 0,
+      locale: "ar",
+      direction: "rtl",
+    }), "ar");
+
+    const selectedLine = out.split("\n").find((line) => line.includes(isolateLtr("CLI")));
+    expect(selectedLine).toBeDefined();
+    expect(selectedLine!.endsWith(">")).toBe(true);
+    expect(out).toContain(isolateLtr("CLI"));
   });
 });
 

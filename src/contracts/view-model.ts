@@ -184,6 +184,14 @@ export interface OnboardingPromptOption {
   readonly label: string;
   readonly description?: string;
   readonly technical?: boolean;
+  readonly cells?: Readonly<Record<string, string>>;
+  readonly badges?: readonly string[];
+  readonly current?: boolean;
+}
+
+export interface OnboardingPromptColumn {
+  readonly key: string;
+  readonly header: string;
 }
 
 export interface OnboardingPromptCardViewModel {
@@ -191,6 +199,7 @@ export interface OnboardingPromptCardViewModel {
   readonly title: string;
   readonly bodyLines: readonly string[];
   readonly technicalLines?: readonly string[];
+  readonly columns?: readonly OnboardingPromptColumn[];
   readonly options: readonly OnboardingPromptOption[];
   readonly selectedOptionIndex: number;
   readonly hint?: string;
