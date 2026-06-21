@@ -490,7 +490,7 @@ function valueOrDefault<T>(selection: SelectPromptInput<T>, value: unknown): T {
 }
 
 function valueWithIdOrDefault<T>(selection: SelectPromptInput<T>, id: string): T {
-  return selection.options.find((option) => optionValueId(option.value) === id)?.value
+  return selection.options.find((option) => option.id === id || optionValueId(option.value) === id)?.value
     ?? selection.options[selection.defaultIndex ?? 0]?.value
     ?? selection.options[0]!.value;
 }

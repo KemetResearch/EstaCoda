@@ -6,10 +6,10 @@ import type { Prompt } from "../../cli/readline-prompt.js";
 import type { SelectPromptInput } from "../../cli/interactive-select.js";
 import { WorkspaceTrustStore } from "../../security/workspace-trust-store.js";
 import type { ProviderId, ProviderApiMode, ProviderAuthMethod } from "../../contracts/provider.js";
-import type { FlowEngine, ModelCandidate } from "../../providers/provider-model-selection-flow.js";
+import type { FlowEngine } from "../../providers/provider-model-selection-flow.js";
 import { createReviewedSetupApplyExecutor } from "../review/apply-executor.js";
 import { __decideConfigEditorLoopForTest, runConfigEditor } from "./runner.js";
-import { promptBrowserCapability, promptedBrowserCapabilityMode, promptModelCandidate, setupEditorReviewSelectedAreaLabel } from "./prompts.js";
+import { promptBrowserCapability, promptedBrowserCapabilityMode, setupEditorReviewSelectedAreaLabel } from "./prompts.js";
 import type { SetupReviewManifest } from "../setup-review-manifest.js";
 import type { SetupRouteDecision } from "../setup-router.js";
 import { resolveProfileStateHome, writeActiveProfile } from "../../config/profile-home.js";
@@ -162,29 +162,6 @@ describe("runConfigEditor", () => {
     expect(prompts[0]?.body).toBe("اختار اللي تحب تضبطه.");
     expect(prompts[0]?.labels).toContain("اخرج بدون تغييرات");
     expect(prompts[0]?.descriptions).toContain("اخرج من الإعداد من غير تعديل أي شيء.");
-  });
-
-  it("renders only actionable model status tags in config-editor model choices", async () => {
-    const descriptions: Array<string | undefined> = [];
-    const prompt = fakePrompt();
-    prompt.select = async (input) => {
-      descriptions.push(...input.options.map((option) => option.description));
-      return input.options[0]!.value;
-    };
-
-    await promptModelCandidate(prompt, {
-      providerId: "openai",
-      candidates: modelStatusCandidates("openai" as ProviderId),
-    });
-
-    expect(descriptions).toEqual([
-      "alpha",
-      "beta",
-      "deprecated",
-      "",
-      "",
-      "",
-    ]);
   });
 
   it("prepares the read-only verification route without applying changes", async () => {
@@ -3509,44 +3486,6 @@ function gatewayServiceActions(input: {
     start: vi.fn<GatewayActivationServiceActions["start"]>().mockResolvedValue({
       ok: true,
     }),
-  };
-}
-
-function modelStatusCandidates(provider: ProviderId): ModelCandidate[] {
-  return [
-    modelStatusCandidate(provider, "model-alpha", "alpha"),
-    modelStatusCandidate(provider, "model-beta", "beta"),
-    modelStatusCandidate(provider, "model-deprecated", "deprecated"),
-    modelStatusCandidate(provider, "model-unknown", "unknown"),
-    modelStatusCandidate(provider, "model-stable", "stable"),
-    modelStatusCandidate(provider, "model-missing"),
-  ];
-}
-
-function modelStatusCandidate(
-  provider: ProviderId,
-  id: string,
-  status?: ModelCandidate["profile"]["status"]
-): ModelCandidate {
-  return {
-    id,
-    provider,
-    configured: true,
-    executable: true,
-    catalogOnly: false,
-    supportsVision: false,
-    lifecycle: "available",
-    usageClass: "primary-chat",
-    profile: {
-      id,
-      provider,
-      contextWindowTokens: 128000,
-      supportsTools: false,
-      supportsVision: false,
-      supportsReasoning: false,
-      supportsStructuredOutput: true,
-      ...(status !== undefined ? { status } : {}),
-    },
   };
 }
 

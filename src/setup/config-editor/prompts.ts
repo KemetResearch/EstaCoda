@@ -1,11 +1,10 @@
 import type { Prompt } from "../../cli/readline-prompt.js";
 import { promptForApiKeyInput } from "../../cli/secret-prompt.js";
 import type { BrowserBackendKind, BrowserCloudProviderKind } from "../../contracts/browser.js";
-import type { AuxiliaryModelTask, ModelProfile } from "../../contracts/provider.js";
+import type { AuxiliaryModelTask } from "../../contracts/provider.js";
 import type { SecurityApprovalMode } from "../../contracts/security.js";
 import type { BrowserEngineKind, ImageGenerationProvider, SttProvider, TtsProvider } from "../../config/runtime-config.js";
 import type { ModelFallbackConfig } from "../../config/runtime-config.js";
-import type { ModelCandidate, ProviderCandidate } from "../../providers/provider-model-selection-flow.js";
 import type { SkillAutonomy } from "../../skills/skill-learning.js";
 import type { SetupReviewManifest } from "../setup-review-manifest.js";
 import {
@@ -208,60 +207,6 @@ export async function promptWorkspaceTrustConfirmation(
     ],
     defaultValue: false,
   });
-}
-
-export async function promptProviderCandidate(
-  prompt: Prompt,
-  input: {
-    readonly candidates: readonly ProviderCandidate[];
-    readonly currentProviderId?: string;
-  },
-  locale: SetupCopyLocale = "en"
-): Promise<ProviderCandidate> {
-  return promptSetupChoice(prompt, {
-    title: setupCopyText(locale, "onboarding.providers.primary.title"),
-    message: `${setupCopyText(locale, "onboarding.providers.primary")}\n`,
-    choices: input.candidates.map((candidate) => ({
-      id: candidate.id,
-      label: candidate.displayName,
-      description: candidate.baseUrl
-        ? `${candidate.baseUrl} (${candidate.modelsCount} models)`
-        : `${candidate.modelsCount} models`,
-      value: candidate,
-    })),
-    defaultValue: input.candidates.find((candidate) => candidate.id === input.currentProviderId) ?? input.candidates[0],
-  });
-}
-
-export async function promptModelCandidate(
-  prompt: Prompt,
-  input: {
-    readonly providerId: string;
-    readonly candidates: readonly ModelCandidate[];
-    readonly currentModelId?: string;
-  },
-  locale: SetupCopyLocale = "en"
-): Promise<ModelCandidate> {
-  return promptSetupChoice(prompt, {
-    title: setupCopyText(locale, "onboarding.providers.primaryModel.title"),
-    message: `${setupCopyText(locale, "onboarding.providers.primaryModel").replace("{providerId}", input.providerId)}\n`,
-    choices: input.candidates.map((candidate) => ({
-      id: candidate.id,
-      label: candidate.id,
-      description: [
-        candidate.profile.supportsTools ? setupCopyText(locale, "onboarding.catalog.model.features.tools") : undefined,
-        candidate.profile.supportsVision ? setupCopyText(locale, "onboarding.catalog.model.features.vision") : undefined,
-        candidate.profile.supportsReasoning ? setupCopyText(locale, "onboarding.catalog.model.features.reasoning") : undefined,
-        renderableModelStatus(candidate.profile.status),
-      ].filter((part): part is string => part !== undefined).join(", "),
-      value: candidate,
-    })),
-    defaultValue: input.candidates.find((candidate) => candidate.id === input.currentModelId) ?? input.candidates[0],
-  });
-}
-
-function renderableModelStatus(status: ModelProfile["status"]): ModelProfile["status"] | undefined {
-  return status === "alpha" || status === "beta" || status === "deprecated" ? status : undefined;
 }
 
 export async function promptConfigEditorReviewApproval(
