@@ -5,7 +5,7 @@ import {
   promptSetupChoice,
   setupPromptContext,
   setupCopyText,
-  setupCurrentStatusLine,
+  setupCurrentStatusLines,
   setupNavigationChoice,
   type SetupChoice,
 } from "./setup-prompts.js";
@@ -78,9 +78,10 @@ export async function promptInterfaceLanguageAndStyle(
   const language = await promptSetupChoice(setupPromptContext(prompt, initialLocale), {
     title: setupCopyText(initialLocale, "onboarding.interfaceLanguage.title"),
     message: `${setupCopyText(initialLocale, "onboarding.interfaceLanguage")}\n`,
-    statusLines: input.showCurrentState === true && currentLanguageLabel !== undefined
-      ? [setupCurrentStatusLine(initialLocale, currentLanguageLabel)]
-      : undefined,
+    statusLines: setupCurrentStatusLines(
+      initialLocale,
+      input.showCurrentState === true ? currentLanguageLabel : undefined
+    ),
     showCurrentBadge: input.showCurrentState === true ? false : undefined,
     choices: languageChoices,
     defaultValue: defaultLanguage,

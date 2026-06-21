@@ -11,6 +11,7 @@ import {
   setupCopyText,
   setupCsvPromptLabel,
   setupCurrentStatusLine,
+  setupCurrentStatusLines,
   setupNavigationChoice,
   setupPromptLabel,
   setupPromptWithDefault,
@@ -157,6 +158,12 @@ describe("setup prompt context", () => {
       tone: "active",
       direction: "rtl",
     });
+    expect(setupCurrentStatusLines("ar", "English")).toEqual([{
+      text: "الحالي: English",
+      tone: "active",
+      direction: "rtl",
+    }]);
+    expect(setupCurrentStatusLines("ar", undefined)).toBeUndefined();
   });
 });
 

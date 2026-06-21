@@ -141,6 +141,13 @@ export function setupCurrentStatusLine(
   };
 }
 
+export function setupCurrentStatusLines(
+  locale: SetupCopyLocale,
+  text: string | undefined
+): readonly PromptCardStatusLine[] | undefined {
+  return text === undefined ? undefined : [setupCurrentStatusLine(locale, text)];
+}
+
 export function setupNavigationChoice<T>(choice: Omit<SetupChoice<T>, "group">): SetupChoice<T> {
   return {
     ...choice,
