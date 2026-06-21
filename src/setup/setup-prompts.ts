@@ -1,6 +1,6 @@
 import type { SelectPromptInput } from "../cli/interactive-select.js";
 import type { Prompt } from "../cli/readline-prompt.js";
-import type { PromptCardStatusLine } from "../contracts/view-model.js";
+import type { PromptCardBodyLineStyle, PromptCardStatusLine } from "../contracts/view-model.js";
 import { isolateLtr, isolateRtl } from "../ui/bidi.js";
 import {
   promptUiContextForLocale,
@@ -76,6 +76,7 @@ type SetupPromptTarget = Prompt | SetupPromptContext;
 export async function promptSetupChoice<T>(target: SetupPromptTarget, input: {
   readonly title: string;
   readonly message: string;
+  readonly bodyLineStyles?: readonly PromptCardBodyLineStyle[];
   readonly choices: readonly SetupChoice<T>[];
   readonly defaultValue?: T;
   readonly columns?: readonly SetupChoiceColumn[];
@@ -94,6 +95,7 @@ export async function promptSetupChoice<T>(target: SetupPromptTarget, input: {
     return prompt.select({
       title: input.title,
       body: input.message.trim(),
+      bodyLineStyles: input.bodyLineStyles,
       options: input.choices.map((choice) => ({
         id: choice.id,
         label: choice.label,

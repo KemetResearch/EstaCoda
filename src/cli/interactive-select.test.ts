@@ -120,6 +120,7 @@ describe("interactive-select prompt card surface", () => {
       surface: "promptCard",
       title: "Choose mode",
       body: "Pick a generic mode.",
+      bodyLineStyles: [{ emphasis: "strong" }],
       statusLines: [
         { text: "Current: Alpha", tone: "active", direction: "ltr" },
       ],
@@ -155,6 +156,7 @@ describe("interactive-select prompt card surface", () => {
 
     const rendered = output.getText();
     expect(selected).toBe("alpha");
+    expect(rendered).toContain("Pick a generic mode.");
     expect(rendered).toContain("Name");
     expect(rendered).toContain("Description");
     expect(rendered).toContain("Current: Alpha");

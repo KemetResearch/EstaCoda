@@ -201,10 +201,15 @@ export interface PromptCardStatusLine {
   readonly direction?: "auto" | "ltr" | "rtl";
 }
 
+export interface PromptCardBodyLineStyle {
+  readonly emphasis?: "strong";
+}
+
 export interface OnboardingPromptCardViewModel {
   readonly kind: "onboardingPromptCard";
   readonly title: string;
   readonly bodyLines: readonly string[];
+  readonly bodyLineStyles?: readonly PromptCardBodyLineStyle[];
   readonly technicalLines?: readonly string[];
   readonly statusLines?: readonly PromptCardStatusLine[];
   readonly columns?: readonly OnboardingPromptColumn[];

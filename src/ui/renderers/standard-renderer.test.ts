@@ -533,6 +533,22 @@ describe("StandardRenderer — dark theme", () => {
     expect(cancelIndex).toBe(backIndex + 1);
   });
 
+  it("styles strong prompt-card body lines without embedding style in copy", () => {
+    const r = renderer("dark", fullCaps());
+    const out = r.renderOnboardingPromptCard(buildOnboardingPromptCardViewModel({
+      title: "Setup editor",
+      bodyLines: ["Choose what to configure:"],
+      bodyLineStyles: [{ emphasis: "strong" }],
+      options: [
+        { id: "primary", label: "Primary model", description: "Default model used by the agent." },
+      ],
+      selectedOptionIndex: 0,
+    }));
+
+    expect(out).toMatch(/\x1b\[1mChoose what to configure:/u);
+    expect(stripAnsi(out)).toContain("Choose what to configure:");
+  });
+
   it("hides structured prompt-card headers when explicitly disabled", () => {
     const r = renderer("dark", noColorCaps());
     const plain = stripAnsi(r.renderOnboardingPromptCard(buildOnboardingPromptCardViewModel({

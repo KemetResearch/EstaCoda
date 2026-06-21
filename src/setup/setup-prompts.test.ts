@@ -68,6 +68,7 @@ describe("setup prompt context", () => {
     const selected = await promptSetupChoice(setupPromptContext(prompt, "en"), {
       title: "Choose mode",
       message: "Pick a mode.\n",
+      bodyLineStyles: [{ emphasis: "strong" }],
       columns: setupChoiceColumns("en"),
       statusLines: [statusLine],
       hint: "Use arrows.",
@@ -95,6 +96,7 @@ describe("setup prompt context", () => {
     });
 
     expect(selected).toBe("alpha");
+    expect(seen?.bodyLineStyles).toEqual([{ emphasis: "strong" }]);
     expect(seen?.columns).toEqual([
       { key: "name", header: "Name" },
       { key: "description", header: "Details" },

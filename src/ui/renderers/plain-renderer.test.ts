@@ -210,6 +210,21 @@ describe("PlainRenderer — renderOnboardingPromptCard", () => {
     assertNoAnsi(out);
   });
 
+  it("renders strong prompt-card body line metadata as readable plain text", () => {
+    const out = renderOnboardingPromptCard(buildOnboardingPromptCardViewModel({
+      title: "Setup editor",
+      bodyLines: ["Choose what to configure:"],
+      bodyLineStyles: [{ emphasis: "strong" }],
+      options: [
+        { id: "primary", label: "Primary model", description: "Default model used by the agent." },
+      ],
+      selectedOptionIndex: 0,
+    }));
+
+    expect(out).toContain("Choose what to configure:");
+    assertNoAnsi(out);
+  });
+
   it("hides structured prompt-card headers when explicitly disabled", () => {
     const out = renderOnboardingPromptCard(buildOnboardingPromptCardViewModel({
       title: "Choose mode",

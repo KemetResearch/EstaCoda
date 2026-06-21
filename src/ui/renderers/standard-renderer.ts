@@ -648,11 +648,12 @@ export class StandardRenderer {
     const lines: string[] = [top];
 
     if (direction === "rtl") {
-      lines.push(...this.#renderRtlOnboardingBodyLines(vm.bodyLines, contentWidth));
+      lines.push(...this.#renderRtlOnboardingBodyLines(vm.bodyLines, contentWidth, vm.bodyLineStyles));
     } else {
       for (let i = 0; i < vm.bodyLines.length; i++) {
         const text = this.#localizedNatural(vm.bodyLines[i], direction, contentWidth);
-        const styled = i === 0 ? this.#primary(text) : this.#secondary(text);
+        const styledText = vm.bodyLineStyles?.[i]?.emphasis === "strong" ? this.#bold(text) : text;
+        const styled = i === 0 ? this.#primary(styledText) : this.#secondary(styledText);
         lines.push(`  ${styled}`);
       }
     }
@@ -1000,13 +1001,21 @@ export class StandardRenderer {
     return direction === "rtl" ? isolateRtl(truncated) : truncated;
   }
 
-  #renderRtlOnboardingBodyLines(bodyLines: readonly string[], contentWidth: number): string[] {
+  #renderRtlOnboardingBodyLines(
+    bodyLines: readonly string[],
+    contentWidth: number,
+    bodyLineStyles?: OnboardingPromptCardViewModel["bodyLineStyles"]
+  ): string[] {
     if (bodyLines.length === 0) return [];
 
     const blockWidth = computeRtlOnboardingBodyBlockWidth(bodyLines, contentWidth);
     const rendered: string[] = [];
     for (let i = 0; i < bodyLines.length; i++) {
-      const style = i === 0 ? this.#primary.bind(this) : this.#secondary.bind(this);
+      const baseStyle = i === 0 ? this.#primary.bind(this) : this.#secondary.bind(this);
+      const style = (value: string): string => {
+        const styled = bodyLineStyles?.[i]?.emphasis === "strong" ? this.#bold(value) : value;
+        return baseStyle(styled);
+      };
       const numbered = splitNumberedRtlLine(bodyLines[i]);
       if (numbered !== undefined) {
         rendered.push(...this.#renderRtlNumberedBodyLine(numbered, blockWidth, contentWidth, style));

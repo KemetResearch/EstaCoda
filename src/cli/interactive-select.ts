@@ -2,7 +2,7 @@ import { emitKeypressEvents } from "node:readline";
 import { createInterface as createPromptInterface } from "node:readline/promises";
 import type { Readable, Writable } from "node:stream";
 import { buildOnboardingPromptCardViewModel, buildPickerViewModel } from "../ui/view-models/builders.js";
-import type { OnboardingPromptOption, PickerOption, PromptCardStatusLine, ViewModel } from "../contracts/view-model.js";
+import type { OnboardingPromptOption, PickerOption, PromptCardBodyLineStyle, PromptCardStatusLine, ViewModel } from "../contracts/view-model.js";
 import type { Locale, TextDirection } from "../contracts/ui.js";
 import { createSessionRenderer } from "./session-renderer.js";
 import { isolateLtr, isolateRtl } from "../ui/bidi.js";
@@ -10,6 +10,7 @@ import { isolateLtr, isolateRtl } from "../ui/bidi.js";
 export type SelectPromptInput<T> = {
   title: string;
   body?: string;
+  bodyLineStyles?: readonly PromptCardBodyLineStyle[];
   instruction?: string;
   hint?: string;
   selectedLabel?: string;
@@ -152,6 +153,7 @@ function buildSelectionViewModel<T>(selection: SelectPromptInput<T>, selectedInd
     return buildOnboardingPromptCardViewModel({
       title: selection.title,
       bodyLines: splitBodyLines(selection.body),
+      bodyLineStyles: selection.bodyLineStyles,
       technicalLines: selection.technicalLines,
       statusLines: selection.statusLines,
       columns: selection.columns,

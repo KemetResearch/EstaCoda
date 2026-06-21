@@ -98,6 +98,7 @@ export async function promptConfigEditorAction(
   return promptSetupChoice(prompt, {
     title: setupCopyText(locale, "setupEditor.prompt.action.title"),
     message: `${setupCopyText(locale, "setupEditor.prompt.action.body")}\n`,
+    bodyLineStyles: [{ emphasis: "strong" }],
     columns: setupChoiceColumns(locale),
     showColumnHeaders: false,
     choices: actions.map((action) => ({

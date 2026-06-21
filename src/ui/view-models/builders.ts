@@ -256,6 +256,7 @@ export function buildPickerViewModel(input: BuildPickerInput): PickerViewModel {
 export interface BuildOnboardingPromptCardInput {
   readonly title: string;
   readonly bodyLines: readonly string[];
+  readonly bodyLineStyles?: OnboardingPromptCardViewModel["bodyLineStyles"];
   readonly technicalLines?: readonly string[];
   readonly statusLines?: OnboardingPromptCardViewModel["statusLines"];
   readonly columns?: OnboardingPromptCardViewModel["columns"];
@@ -275,6 +276,7 @@ export function buildOnboardingPromptCardViewModel(
     kind: "onboardingPromptCard",
     title: input.title,
     bodyLines: input.bodyLines,
+    bodyLineStyles: input.bodyLineStyles,
     technicalLines: input.technicalLines,
     statusLines: input.statusLines,
     columns: input.columns,

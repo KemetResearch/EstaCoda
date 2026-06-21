@@ -268,6 +268,7 @@ describe("ViewModel builders", () => {
     const vm = buildOnboardingPromptCardViewModel({
       title: "Workspace trust",
       bodyLines: ["Trust this workspace?"],
+      bodyLineStyles: [{ emphasis: "strong" }],
       technicalLines: ["/workspace"],
       statusLines: [
         { text: "Current: alpha", tone: "active", direction: "ltr" },
@@ -297,6 +298,7 @@ describe("ViewModel builders", () => {
     expect(vm.kind).toBe("onboardingPromptCard");
     expect(vm.title).toBe("Workspace trust");
     expect(vm.bodyLines).toEqual(["Trust this workspace?"]);
+    expect(vm.bodyLineStyles).toEqual([{ emphasis: "strong" }]);
     expect(vm.technicalLines).toEqual(["/workspace"]);
     expect(vm.statusLines).toEqual([
       { text: "Current: alpha", tone: "active", direction: "ltr" },

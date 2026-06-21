@@ -114,20 +114,20 @@ describe("runConfigEditor", () => {
     expect(output.join("")).toContain("Setup Editor");
     expect(output.join("")).toContain("Available actions:");
     expect(output.join("")).toContain("edit-fallback-model-route");
-    expect(output.join("")).toContain("Configure backup providers and models used when the primary model fails.");
+    expect(output.join("")).toContain("Backup model used if the primary model fails.");
     expect(output.join("")).toContain("edit-auxiliary-model-route");
-    expect(output.join("")).toContain("Configure specialist models for assessment, compression, recall, and memory.");
+    expect(output.join("")).toContain("Models used for assessment, compression, recall, and memory.");
     expect(output.join("")).toContain("edit-security-mode");
     expect(output.join("")).toContain("edit-workflow-learning");
-    expect(output.join("")).toContain("edit-language - Choose language");
+    expect(output.join("")).toContain("edit-language - Language");
     expect(output.join("")).toContain("configure-channels");
     expect(output.join("")).toContain("configure-voice");
     expect(output.join("")).toContain("configure-image-generation");
     expect(output.join("")).toContain("configure-browser");
     expect(output.join("")).not.toContain("edit-primary-credential-reference");
     expect(output.join("")).not.toContain("review-optional-capabilities");
-    expect(output.join("")).toContain("verify-setup - Run setup verification");
-    expect(output.join("")).toContain("show-diagnostics - Show diagnostics");
+    expect(output.join("")).toContain("verify-setup - Setup verification");
+    expect(output.join("")).toContain("show-diagnostics - Diagnostics");
     expect(output.join("")).toContain("exit - Exit without changes");
     await expect(readFile(profileConfigPath(tempDir), "utf8")).resolves.toBe(before);
   });
@@ -149,6 +149,11 @@ describe("runConfigEditor", () => {
       labels: string[];
       descriptions: Array<string | undefined>;
       groups: Array<string | undefined>;
+      bodyLineStyles: SelectPromptInput<unknown>["bodyLineStyles"];
+      columns: SelectPromptInput<unknown>["columns"];
+      showColumnHeaders: SelectPromptInput<unknown>["showColumnHeaders"];
+      hint: string | undefined;
+      values: unknown[];
     }> = [];
     const prompt = fakePrompt();
     prompt.select = async (input) => {
@@ -158,6 +163,11 @@ describe("runConfigEditor", () => {
         labels: input.options.map((option) => option.label),
         descriptions: input.options.map((option) => option.description),
         groups: input.options.map((option) => option.group),
+        bodyLineStyles: input.bodyLineStyles,
+        columns: input.columns,
+        showColumnHeaders: input.showColumnHeaders,
+        hint: input.hint,
+        values: input.options.map((option) => option.value),
       });
       const exit = input.options.find((option) =>
         typeof option.value === "object" &&
@@ -182,16 +192,50 @@ describe("runConfigEditor", () => {
     expect(result.completed).toBe(true);
     expect(result.selectedActionId).toBe("exit");
     expect(output.join("")).toContain("محرّر الإعدادات");
-    expect(output.join("")).toContain("عدّل النموذج الأساسي");
-    expect(output.join("")).toContain("حدّد المزوّد والنموذج اللي يستخدمه الوكيل.");
-    expect(output.join("")).toContain("فعّل قنوات التحكم عن بُعد مثل");
+    expect(output.join("")).toContain("النموذج الأساسي");
+    expect(output.join("")).toContain("النموذج الافتراضي الذي يستخدمه الوكيل.");
+    expect(output.join("")).toContain("قنوات تحكم عن بُعد مثل");
     expect(output.join("")).toContain(isolateLtr("Telegram"));
     expect(prompts[0]?.title).toBe("محرّر الإعدادات");
-    expect(prompts[0]?.body).toBe("اختار اللي تحب تضبطه.");
-    expect(prompts[0]?.labels).toContain("اخرج بدون تغييرات");
-    expect(prompts[0]?.descriptions).toContain("اخرج من الإعداد من غير تعديل أي شيء.");
-    const exitActionIndex = prompts[0]?.labels.indexOf("اخرج بدون تغييرات") ?? -1;
+    expect(prompts[0]?.body).toBe("اختار اللي تحب تضبطه:");
+    expect(prompts[0]?.body).not.toContain("\x1b[");
+    expect(prompts[0]?.bodyLineStyles).toEqual([{ emphasis: "strong" }]);
+    expect(prompts[0]?.columns).toEqual([
+      { key: "name", header: "الاسم" },
+      { key: "description", header: "التفاصيل" },
+    ]);
+    expect(prompts[0]?.showColumnHeaders).toBe(false);
+    expect(prompts[0]?.hint).toBe("↑↓ navigate   ENTER select   CTRL+C exit");
+    expect(prompts[0]?.labels).toContain("النموذج الأساسي");
+    expect(prompts[0]?.descriptions).toContain("النموذج الافتراضي الذي يستخدمه الوكيل.");
+    expect(prompts[0]?.labels).toContain("القنوات");
+    expect(prompts[0]?.descriptions).toContain(resolveSetupCopy("ar", "setupEditor.actions.configureChannels.description"));
+    expect(prompts[0]?.labels).toContain("التحقق من الإعداد");
+    expect(prompts[0]?.labels).toContain("التشخيصات");
+    expect(prompts[0]?.labels).toContain("الخروج دون تغييرات");
+    expect(prompts[0]?.descriptions).toContain("غادر الإعداد دون تعديل التكوين.");
+    expect(prompts[0]?.values.map((value) =>
+      typeof value === "object" && value !== null && "id" in value ? value.id : undefined
+    )).toEqual([
+      "edit-primary-model-route",
+      "edit-fallback-model-route",
+      "edit-auxiliary-model-route",
+      "configure-channels",
+      "configure-voice",
+      "configure-image-generation",
+      "configure-web-search",
+      "configure-browser",
+      "edit-security-mode",
+      "edit-workflow-learning",
+      "edit-language",
+      "verify-setup",
+      "show-diagnostics",
+      "exit",
+    ]);
+    const exitActionIndex = prompts[0]?.labels.indexOf("الخروج دون تغييرات") ?? -1;
     expect(prompts[0]?.groups[exitActionIndex]).toBe("navigation");
+    expect(prompts[0]?.groups[prompts[0]?.labels.indexOf("التحقق من الإعداد") ?? -1]).toBeUndefined();
+    expect(prompts[0]?.groups[prompts[0]?.labels.indexOf("التشخيصات") ?? -1]).toBeUndefined();
   });
 
   it("opts comparative setup editor selectors into columns without changing selected values", async () => {
@@ -284,6 +328,9 @@ describe("runConfigEditor", () => {
       "Voice",
       "WhatsApp beta",
       "Telegram",
+    ]);
+    expect(selectInputs.find((input) => input.title === "Setup editor")?.bodyLineStyles).toEqual([
+      { emphasis: "strong" },
     ]);
     for (const input of selectInputs.filter((item) => item.columns !== undefined)) {
       expect(input.columns).toEqual([
@@ -3745,8 +3792,8 @@ describe("runConfigEditor", () => {
     expect(result.output).toContain("Error:");
     expect(result.output).toContain("Normal config edits are blocked until the config file can be parsed.");
     expect(result.output).toContain("Only diagnostics, verification, and exit are available");
-    expect(output.join("")).toContain("verify-setup - Run setup verification");
-    expect(output.join("")).toContain("show-diagnostics - Show diagnostics");
+    expect(output.join("")).toContain("verify-setup - Setup verification");
+    expect(output.join("")).toContain("show-diagnostics - Diagnostics");
     expect(output.join("")).toContain("exit - Exit without changes");
     expect(output.join("")).not.toContain("edit-primary-model-route");
     expect(output.join("")).not.toContain("edit-security-mode");
