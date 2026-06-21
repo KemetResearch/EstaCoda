@@ -290,6 +290,7 @@ describe("runConfigEditor", () => {
         { key: "name", header: "Name" },
         { key: "description", header: "Details" },
       ]);
+      expect(input.showColumnHeaders).toBe(false);
       expect(input.options.every((option) => option.cells === undefined)).toBe(true);
     }
     const webSearchInput = selectInputs.find((input) =>
@@ -381,12 +382,16 @@ describe("runConfigEditor", () => {
 
     const languageInput = selectInputs.find((input) => input.title === "Setup language");
     expect(languageInput?.columns).toBeUndefined();
+    expect(languageInput?.hint).toBe("↑↓ navigate   ENTER select   CTRL+C exit");
     expect(languageInput?.options.map((option) => option.label)).toEqual([
       "English",
       "العربية",
     ]);
     expect(languageInput?.options.some((option) => option.group === "navigation")).toBe(false);
     expect(selectInputs.find((input) => input.title === "Workspace trust")?.columns).toBeUndefined();
+    expect(selectInputs.find((input) => input.title === "Workspace trust")?.hint).toBe(
+      "↑↓ navigate   ENTER select   CTRL+C exit"
+    );
     expect(selectInputs.find((input) => input.title === "Finalize configuration")?.columns).toBeUndefined();
     expect(selectInputs.find((input) => input.title === "Setup next action")?.columns).toBeUndefined();
     expect(selectInputs.find((input) => input.title === "DDGS setup")?.columns).toBeUndefined();

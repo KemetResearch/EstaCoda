@@ -82,6 +82,7 @@ export async function promptSetupChoice<T>(target: SetupPromptTarget, input: {
   readonly statusLines?: readonly PromptCardStatusLine[];
   readonly hint?: string;
   readonly showCurrentBadge?: boolean;
+  readonly showColumnHeaders?: boolean;
 }): Promise<T> {
   if (input.choices.length === 0) {
     throw new Error(`${input.title} has no choices.`);
@@ -109,8 +110,9 @@ export async function promptSetupChoice<T>(target: SetupPromptTarget, input: {
       surface: "promptCard",
       columns: input.columns,
       statusLines: input.statusLines,
-      hint: input.hint,
+      hint: input.hint ?? setupNavigationHint(uiContext.locale),
       showCurrentBadge: input.showCurrentBadge,
+      showColumnHeaders: input.showColumnHeaders,
       locale: uiContext.locale,
       direction: uiContext.direction,
     } satisfies SelectPromptInput<T>);
@@ -127,6 +129,10 @@ export function setupChoiceColumns(locale: SetupCopyLocale): readonly SetupChoic
     { key: "name", header: locale === "ar" ? "الاسم" : "Name" },
     { key: "description", header: locale === "ar" ? "التفاصيل" : "Details" },
   ];
+}
+
+export function setupNavigationHint(_locale: SetupCopyLocale): string {
+  return "↑↓ navigate   ENTER select   CTRL+C exit";
 }
 
 export function setupCurrentStatusLine(

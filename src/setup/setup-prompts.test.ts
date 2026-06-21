@@ -12,6 +12,7 @@ import {
   setupCsvPromptLabel,
   setupCurrentStatusLine,
   setupCurrentStatusLines,
+  setupNavigationHint,
   setupNavigationChoice,
   setupPromptLabel,
   setupPromptWithDefault,
@@ -46,6 +47,7 @@ describe("setup prompt context", () => {
     expect(seen?.locale).toBe("ar");
     expect(seen?.direction).toBe("rtl");
     expect(seen?.columns).toBeUndefined();
+    expect(seen?.hint).toBe("↑↓ navigate   ENTER select   CTRL+C exit");
     expect(seen?.options[0]?.id).toBe("yes");
   });
 
@@ -70,6 +72,7 @@ describe("setup prompt context", () => {
       statusLines: [statusLine],
       hint: "Use arrows.",
       showCurrentBadge: false,
+      showColumnHeaders: false,
       choices: [
         {
           id: "alpha",
@@ -99,6 +102,7 @@ describe("setup prompt context", () => {
     expect(seen?.statusLines).toEqual([statusLine]);
     expect(seen?.hint).toBe("Use arrows.");
     expect(seen?.showCurrentBadge).toBe(false);
+    expect(seen?.showColumnHeaders).toBe(false);
     expect(seen?.options[0]).toMatchObject({
       id: "alpha",
       label: "Alpha",
@@ -140,7 +144,7 @@ describe("setup prompt context", () => {
     expect(selected).toBe(false);
     expect(seen?.columns).toBeUndefined();
     expect(seen?.statusLines).toBeUndefined();
-    expect(seen?.hint).toBeUndefined();
+    expect(seen?.hint).toBe(setupNavigationHint("en"));
     expect(seen?.showCurrentBadge).toBeUndefined();
     expect(seen?.options).toEqual([
       { id: "yes", label: "Yes", description: "Continue setup.", value: true },
@@ -164,6 +168,7 @@ describe("setup prompt context", () => {
       direction: "rtl",
     }]);
     expect(setupCurrentStatusLines("ar", undefined)).toBeUndefined();
+    expect(setupNavigationHint("ar")).toBe("↑↓ navigate   ENTER select   CTRL+C exit");
   });
 });
 
