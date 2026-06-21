@@ -36,6 +36,7 @@ export type SelectPromptInput<T> = {
   technicalLines?: readonly string[];
   statusLines?: readonly PromptCardStatusLine[];
   showCurrentBadge?: boolean;
+  showColumnHeaders?: boolean;
 };
 
 export async function selectOption<T>(input: Readable, output: Writable, selection: SelectPromptInput<T>): Promise<T> {
@@ -158,6 +159,7 @@ function buildSelectionViewModel<T>(selection: SelectPromptInput<T>, selectedInd
       selectedOptionIndex: selectedIndex,
       hint: selection.hint ?? selection.instruction,
       showCurrentBadge: selection.showCurrentBadge,
+      showColumnHeaders: selection.showColumnHeaders,
       locale: selection.locale,
       direction: selection.direction,
     });

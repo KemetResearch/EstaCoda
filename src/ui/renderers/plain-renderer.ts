@@ -585,9 +585,9 @@ function hasStructuredPromptRows(vm: OnboardingPromptCardViewModel): boolean {
 function renderPlainStructuredOnboardingOptions(vm: OnboardingPromptCardViewModel, locale: UiLocale): string[] {
   const columns = vm.columns ?? [];
   const widths = plainStructuredColumnWidths(columns, vm.options);
-  const lines: string[] = [
-    `  ${plainStructuredRow(columns, Object.fromEntries(columns.map((column) => [column.key, column.header])), [], widths, locale)}`
-  ];
+  const lines: string[] = vm.showColumnHeaders === false
+    ? []
+    : [`  ${plainStructuredRow(columns, Object.fromEntries(columns.map((column) => [column.key, column.header])), [], widths, locale)}`];
 
   let renderedNavigationSeparator = false;
   for (let i = 0; i < vm.options.length; i++) {

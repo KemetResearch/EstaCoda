@@ -760,7 +760,7 @@ export class StandardRenderer {
 
     const columns = vm.columns ?? [];
     return [
-      columns.map((column) => column.header).join("  "),
+      ...(vm.showColumnHeaders === false ? [] : [columns.map((column) => column.header).join("  ")]),
       ...vm.options.map((option) => [
         ...columns.map((column) => option.cells?.[column.key] ?? (column.key === "name" ? option.label : "")),
         ...this.#onboardingOptionBadges(option, vm.showCurrentBadge),
@@ -783,16 +783,18 @@ export class StandardRenderer {
     const layout = this.#structuredPromptColumnLayout(columns, vm.options, dataWidth);
     const lines: string[] = [];
 
-    const header = this.#structuredPromptRow(
-      columns,
-      Object.fromEntries(columns.map((column) => [column.key, column.header])),
-      [],
-      layout,
-      locale,
-      "ltr",
-      "header"
-    );
-    lines.push(`  ${" ".repeat(optionMarkerSlotWidth)}${header}`);
+    if (vm.showColumnHeaders !== false) {
+      const header = this.#structuredPromptRow(
+        columns,
+        Object.fromEntries(columns.map((column) => [column.key, column.header])),
+        [],
+        layout,
+        locale,
+        "ltr",
+        "header"
+      );
+      lines.push(`  ${" ".repeat(optionMarkerSlotWidth)}${header}`);
+    }
 
     let renderedNavigationSeparator = false;
     for (let i = 0; i < vm.options.length; i++) {

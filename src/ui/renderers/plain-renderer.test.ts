@@ -210,6 +210,33 @@ describe("PlainRenderer — renderOnboardingPromptCard", () => {
     assertNoAnsi(out);
   });
 
+  it("hides structured prompt-card headers when explicitly disabled", () => {
+    const out = renderOnboardingPromptCard(buildOnboardingPromptCardViewModel({
+      title: "Choose mode",
+      bodyLines: [],
+      showColumnHeaders: false,
+      columns: [
+        { key: "name", header: "Name" },
+        { key: "description", header: "Description" },
+      ],
+      options: [
+        { id: "alpha", label: "Alpha", description: "First generic option" },
+        { id: "beta", label: "Beta", description: "Second generic option" },
+      ],
+      selectedOptionIndex: 0,
+    }));
+
+    expect(out).not.toContain("  Name");
+    expect(out).not.toContain("Description");
+    const selectedLine = out.split("\n").find((line) => line.includes("> Alpha"));
+    const betaLine = out.split("\n").find((line) => line.includes("  Beta"));
+    expect(selectedLine).toBeDefined();
+    expect(selectedLine).toContain("First generic option");
+    expect(betaLine).toBeDefined();
+    expect(betaLine).toContain("Second generic option");
+    assertNoAnsi(out);
+  });
+
   it("inserts one generic separator before non-structured navigation prompt-card rows", () => {
     const out = renderOnboardingPromptCard(buildOnboardingPromptCardViewModel({
       title: "Choose mode",
@@ -460,12 +487,12 @@ describe("PlainRenderer — renderOnboardingPromptCard", () => {
       bodyLines: ["اختر وضعًا عامًا."],
       options: [{ id: "alpha", label: "ألفا" }],
       selectedOptionIndex: 0,
-      hint: "↑↓ navigate   ENTER select",
+      hint: "↑↓ navigate   ENTER select   CTRL+C exit",
       locale: "ar",
       direction: "rtl",
     }), "ar");
 
-    expect(out).toContain(isolateLtr("↑↓ navigate   ENTER select"));
+    expect(out).toContain(isolateLtr("↑↓ navigate   ENTER select   CTRL+C exit"));
     assertNoAnsi(out);
   });
 });

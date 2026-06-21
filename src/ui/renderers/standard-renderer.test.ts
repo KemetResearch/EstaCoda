@@ -533,6 +533,33 @@ describe("StandardRenderer — dark theme", () => {
     expect(cancelIndex).toBe(backIndex + 1);
   });
 
+  it("hides structured prompt-card headers when explicitly disabled", () => {
+    const r = renderer("dark", noColorCaps());
+    const plain = stripAnsi(r.renderOnboardingPromptCard(buildOnboardingPromptCardViewModel({
+      title: "Choose mode",
+      bodyLines: [],
+      showColumnHeaders: false,
+      columns: [
+        { key: "name", header: "Name" },
+        { key: "description", header: "Description" },
+      ],
+      options: [
+        { id: "alpha", label: "Alpha", description: "First generic option" },
+        { id: "beta", label: "Beta", description: "Second generic option" },
+      ],
+      selectedOptionIndex: 0,
+    })));
+
+    expect(plain).not.toContain("Name");
+    expect(plain).not.toContain("Description");
+    const selectedLine = plain.split("\n").find((line) => line.includes("▸ Alpha"));
+    const betaLine = plain.split("\n").find((line) => line.includes("  Beta"));
+    expect(selectedLine).toBeDefined();
+    expect(selectedLine).toContain("First generic option");
+    expect(betaLine).toBeDefined();
+    expect(betaLine).toContain("Second generic option");
+  });
+
   it("inserts one generic separator before non-structured navigation prompt-card rows", () => {
     const r = renderer("dark", noColorCaps());
     const plain = stripAnsi(r.renderOnboardingPromptCard(buildOnboardingPromptCardViewModel({
@@ -790,15 +817,16 @@ describe("StandardRenderer — dark theme", () => {
       bodyLines: ["اختر وضعًا عامًا."],
       options: [{ id: "alpha", label: "ألفا" }],
       selectedOptionIndex: 0,
-      hint: "↑↓ navigate   ENTER select",
+      hint: "↑↓ navigate   ENTER select   CTRL+C exit",
       locale: "ar",
       direction: "rtl",
     })));
 
-    const hintLine = plain.split("\n").find((line) => line.includes(isolateLtr("↑↓ navigate   ENTER select")));
+    const hint = isolateLtr("↑↓ navigate   ENTER select   CTRL+C exit");
+    const hintLine = plain.split("\n").find((line) => line.includes(hint));
     expect(hintLine).toBeDefined();
-    expect(hintLine!.trim()).toBe(isolateLtr("↑↓ navigate   ENTER select"));
-    expect(hintLine).toMatch(/^ {4,}/u);
+    expect(hintLine!.trim()).toBe(hint);
+    expect(hintLine).toMatch(/^  /u);
   });
 
   it("renders Arabic onboarding selected marker after the label without Unicode", () => {

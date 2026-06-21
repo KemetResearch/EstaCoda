@@ -172,6 +172,43 @@ describe("interactive-select prompt card surface", () => {
     expect(cancelIndex).toBe(backIndex + 1);
   });
 
+  it("passes prompt-card showColumnHeaders through plain fallback rendering", async () => {
+    const input = Readable.from(["1\n"]);
+    const output = makeOutput(false);
+
+    await selectOption(input, output, {
+      surface: "promptCard",
+      title: "Choose mode",
+      body: "Pick a generic mode.",
+      showColumnHeaders: false,
+      columns: [
+        { key: "name", header: "Name" },
+        { key: "description", header: "Description" },
+      ],
+      options: [
+        {
+          value: "alpha",
+          label: "Alpha",
+          description: "First generic option",
+        },
+        {
+          value: "beta",
+          label: "Beta",
+          description: "Second generic option",
+        },
+      ],
+      hint: "↑↓ navigate   ENTER select   CTRL+C exit",
+      fallbackPrompt: "Choose: ",
+    });
+
+    const rendered = output.getText();
+    expect(rendered).not.toContain("  Name");
+    expect(rendered).not.toContain("Description");
+    expect(rendered).toContain("> Alpha");
+    expect(rendered).toContain("First generic option");
+    expect(rendered).toContain("↑↓ navigate   ENTER select   CTRL+C exit");
+  });
+
   it("localizes and bolds Arabic selected output", async () => {
     clearCiEnv();
     process.env.FORCE_COLOR = "1";

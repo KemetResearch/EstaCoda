@@ -289,6 +289,7 @@ describe("ViewModel builders", () => {
       selectedOptionIndex: 0,
       hint: "Use arrow keys to choose.",
       showCurrentBadge: false,
+      showColumnHeaders: false,
       locale: "en",
       direction: "ltr",
     });
@@ -321,6 +322,7 @@ describe("ViewModel builders", () => {
     expect(vm.selectedOptionIndex).toBe(0);
     expect(vm.hint).toBe("Use arrow keys to choose.");
     expect(vm.showCurrentBadge).toBe(false);
+    expect(vm.showColumnHeaders).toBe(false);
     expect(vm.locale).toBe("en");
     expect(vm.direction).toBe("ltr");
     expect(Object.getPrototypeOf(vm)).toBe(Object.prototype);

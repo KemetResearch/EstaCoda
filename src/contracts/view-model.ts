@@ -212,6 +212,7 @@ export interface OnboardingPromptCardViewModel {
   readonly selectedOptionIndex: number;
   readonly hint?: string;
   readonly showCurrentBadge?: boolean;
+  readonly showColumnHeaders?: boolean;
   readonly locale?: "en" | "ar";
   readonly direction?: "ltr" | "rtl";
 }

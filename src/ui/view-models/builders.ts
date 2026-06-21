@@ -263,6 +263,7 @@ export interface BuildOnboardingPromptCardInput {
   readonly selectedOptionIndex: number;
   readonly hint?: string;
   readonly showCurrentBadge?: boolean;
+  readonly showColumnHeaders?: boolean;
   readonly locale?: "en" | "ar";
   readonly direction?: "ltr" | "rtl";
 }
@@ -281,6 +282,7 @@ export function buildOnboardingPromptCardViewModel(
     selectedOptionIndex: input.selectedOptionIndex,
     hint: input.hint,
     showCurrentBadge: input.showCurrentBadge,
+    showColumnHeaders: input.showColumnHeaders,
     locale: input.locale,
     direction: input.direction,
   };
