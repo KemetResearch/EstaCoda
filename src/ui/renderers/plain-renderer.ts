@@ -538,8 +538,13 @@ export function renderOnboardingPromptCard(
   if (hasStructuredPromptRows(vm)) {
     lines.push(...renderPlainStructuredOnboardingOptions(vm, effectiveLocale));
   } else {
+    let renderedNavigationSeparator = false;
     for (let i = 0; i < vm.options.length; i++) {
       const option = vm.options[i];
+      if (option.group === "navigation" && !renderedNavigationSeparator && i > 0) {
+        lines.push("");
+        renderedNavigationSeparator = true;
+      }
       const marker = i === vm.selectedOptionIndex ? ">" : " ";
       const label = option.technical === true && effectiveLocale === "ar"
         ? isolateLtr(option.label)
@@ -584,8 +589,13 @@ function renderPlainStructuredOnboardingOptions(vm: OnboardingPromptCardViewMode
     `  ${plainStructuredRow(columns, Object.fromEntries(columns.map((column) => [column.key, column.header])), [], widths, locale)}`
   ];
 
+  let renderedNavigationSeparator = false;
   for (let i = 0; i < vm.options.length; i++) {
     const option = vm.options[i];
+    if (option.group === "navigation" && !renderedNavigationSeparator && i > 0) {
+      lines.push("");
+      renderedNavigationSeparator = true;
+    }
     const marker = i === vm.selectedOptionIndex ? ">" : " ";
     const row = plainStructuredRow(
       columns,

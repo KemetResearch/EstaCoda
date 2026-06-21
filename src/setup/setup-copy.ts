@@ -196,6 +196,7 @@ export const SETUP_COPY_ENTRIES = [
   copy("onboarding.providers.current", "Current", "الحالي", [], "provider-selection"),
   copy("onboarding.providers.currentRoute", "Current: {route}", "الحالي: {route}", ["{route}"], "provider-selection"),
   copy("onboarding.providers.currentModelNotShown", "Current model not shown: {route}", "النموذج الحالي غير معروض: {route}", ["{route}"], "provider-selection"),
+  copy("onboarding.providers.navigation.back.description", "Return to the previous step.", "ارجع إلى الخطوة السابقة.", [], "provider-selection"),
   copy("onboarding.providers.description.openai", "Hosted OpenAI models.", "نماذج OpenAI المستضافة.", [], "provider-selection"),
   copy("onboarding.providers.description.google", "Hosted Google Gemini models.", "نماذج Google Gemini المستضافة.", [], "provider-selection"),
   copy("onboarding.providers.description.deepseek", "Hosted DeepSeek models.", "نماذج DeepSeek المستضافة.", [], "provider-selection"),

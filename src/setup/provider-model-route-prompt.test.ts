@@ -251,8 +251,30 @@ describe("selectProviderModelRoute", () => {
     });
     expect(providerPrompt.showCurrentBadge).toBe(false);
     expect(modelPrompt.showCurrentBadge).toBe(false);
-    expect(providerPrompt.options.at(-2)?.id).toBe("back");
-    expect(providerPrompt.options.at(-1)?.id).toBe("cancel");
+    expect(providerPrompt.options.at(-2)).toMatchObject({
+      id: "back",
+      group: "navigation",
+      cells: {
+        details: "Return to the previous step.",
+      },
+    });
+    expect(providerPrompt.options.at(-1)).toMatchObject({
+      id: "cancel",
+      group: "navigation",
+    });
+    expect(modelPrompt.options.at(-2)).toMatchObject({
+      id: "back",
+      group: "navigation",
+      cells: {
+        details: "Return to the previous step.",
+      },
+    });
+    expect(modelPrompt.options.at(-1)).toMatchObject({
+      id: "cancel",
+      group: "navigation",
+    });
+    expect(providerPrompt.options[0]?.group).toBeUndefined();
+    expect(modelPrompt.options[0]?.group).toBeUndefined();
   });
 
   it("does not mark Back or Cancel rows as current", async () => {
@@ -274,6 +296,7 @@ describe("selectProviderModelRoute", () => {
       for (const option of call.options.filter((item) => item.id === "back" || item.id === "cancel")) {
         expect(option.current).toBeUndefined();
         expect(option.badges).toBeUndefined();
+        expect(option.group).toBe("navigation");
       }
     }
   });
@@ -331,6 +354,26 @@ describe("selectProviderModelRoute", () => {
     expect(prompt.calls[0]?.statusLines).toEqual([
       { text: "الحالي: \u2066local/local-model\u2069", tone: "active", direction: "rtl" },
     ]);
+  });
+
+  it("uses localized previous-step copy for Arabic Back rows", async () => {
+    const flow = fakeFlow();
+    const prompt = fakePrompt();
+
+    await selectProviderModelRoute({
+      prompt,
+      flowEngine: flow.engine,
+      locale: "ar",
+      mode: "primary",
+      allowBack: true,
+    });
+
+    expect(prompt.calls[0]?.options.find((option) => option.id === "back")).toMatchObject({
+      group: "navigation",
+      cells: {
+        details: "ارجع إلى الخطوة السابقة.",
+      },
+    });
   });
 
   it("uses visible current model as model default selection and marks it current", async () => {

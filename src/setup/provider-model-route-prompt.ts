@@ -187,6 +187,7 @@ function navigationOptions<T extends { readonly kind: string }>(
       id: "back",
       label: backLabel(options.locale),
       value: { kind: "back" } as T,
+      group: "navigation",
       cells: {
         name: backLabel(options.locale),
         details: backDetails(options.locale),
@@ -198,6 +199,7 @@ function navigationOptions<T extends { readonly kind: string }>(
       id: "cancel",
       label: setupCopyText(options.locale, "onboarding.review.cancelAction"),
       value: { kind: "cancel" } as T,
+      group: "navigation",
       cells: {
         name: setupCopyText(options.locale, "onboarding.review.cancelAction"),
         details: cancelDetails(options.locale),
@@ -391,7 +393,7 @@ function backLabel(locale: SetupCopyLocale): string {
 }
 
 function backDetails(locale: SetupCopyLocale): string {
-  return locale === "ar" ? "ارجع إلى البطاقة السابقة." : "Return to the previous card.";
+  return setupCopyText(locale, "onboarding.providers.navigation.back.description");
 }
 
 function cancelDetails(locale: SetupCopyLocale): string {

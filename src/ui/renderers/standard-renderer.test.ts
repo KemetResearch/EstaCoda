@@ -500,11 +500,13 @@ describe("StandardRenderer — dark theme", () => {
         {
           id: "back",
           label: "Back",
-          cells: { name: "Back", description: "Return to previous card" },
+          group: "navigation",
+          cells: { name: "Back", description: "Return to previous step" },
         },
         {
           id: "cancel",
           label: "Cancel",
+          group: "navigation",
           cells: { name: "Cancel", description: "Exit without changes" },
         },
       ],
@@ -523,6 +525,32 @@ describe("StandardRenderer — dark theme", () => {
     expect(plain).toContain("Back");
     expect(plain).toContain("Cancel");
     expect(plain).toContain("↑↓ navigate   ENTER select");
+    const lines = plain.split("\n");
+    const backIndex = lines.findIndex((line) => line.includes("Back"));
+    const cancelIndex = lines.findIndex((line) => line.includes("Cancel"));
+    expect(backIndex).toBeGreaterThan(0);
+    expect(lines[backIndex - 1]?.trim()).toBe("");
+    expect(cancelIndex).toBe(backIndex + 1);
+  });
+
+  it("inserts one generic separator before non-structured navigation prompt-card rows", () => {
+    const r = renderer("dark", noColorCaps());
+    const plain = stripAnsi(r.renderOnboardingPromptCard(buildOnboardingPromptCardViewModel({
+      title: "Choose mode",
+      bodyLines: [],
+      options: [
+        { id: "alpha", label: "Alpha" },
+        { id: "beta", label: "Beta" },
+        { id: "back", label: "Back", group: "navigation" },
+        { id: "cancel", label: "Cancel", group: "navigation" },
+      ],
+      selectedOptionIndex: 0,
+    })));
+    const lines = plain.split("\n");
+    const backIndex = lines.findIndex((line) => line.includes("Back"));
+    const cancelIndex = lines.findIndex((line) => line.includes("Cancel"));
+    expect(lines[backIndex - 1]?.trim()).toBe("");
+    expect(cancelIndex).toBe(backIndex + 1);
   });
 
   it("uses active status coloring for prompt-card status lines", () => {
@@ -767,7 +795,10 @@ describe("StandardRenderer — dark theme", () => {
       direction: "rtl",
     })));
 
-    expect(plain).toContain(isolateLtr("↑↓ navigate   ENTER select"));
+    const hintLine = plain.split("\n").find((line) => line.includes(isolateLtr("↑↓ navigate   ENTER select")));
+    expect(hintLine).toBeDefined();
+    expect(hintLine!.trim()).toBe(isolateLtr("↑↓ navigate   ENTER select"));
+    expect(hintLine).toMatch(/^ {4,}/u);
   });
 
   it("renders Arabic onboarding selected marker after the label without Unicode", () => {

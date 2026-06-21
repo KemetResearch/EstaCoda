@@ -177,11 +177,13 @@ describe("PlainRenderer — renderOnboardingPromptCard", () => {
         {
           id: "back",
           label: "Back",
-          cells: { name: "Back", description: "Return to previous card" },
+          group: "navigation",
+          cells: { name: "Back", description: "Return to previous step" },
         },
         {
           id: "cancel",
           label: "Cancel",
+          group: "navigation",
           cells: { name: "Cancel", description: "Exit without changes" },
         },
       ],
@@ -199,6 +201,33 @@ describe("PlainRenderer — renderOnboardingPromptCard", () => {
     expect(out).toContain("Back");
     expect(out).toContain("Cancel");
     expect(out).toContain("Type a number to choose.");
+    const lines = out.split("\n");
+    const backIndex = lines.findIndex((line) => line.includes("Back"));
+    const cancelIndex = lines.findIndex((line) => line.includes("Cancel"));
+    expect(backIndex).toBeGreaterThan(0);
+    expect(lines[backIndex - 1]).toBe("");
+    expect(cancelIndex).toBe(backIndex + 1);
+    assertNoAnsi(out);
+  });
+
+  it("inserts one generic separator before non-structured navigation prompt-card rows", () => {
+    const out = renderOnboardingPromptCard(buildOnboardingPromptCardViewModel({
+      title: "Choose mode",
+      bodyLines: [],
+      options: [
+        { id: "alpha", label: "Alpha" },
+        { id: "beta", label: "Beta" },
+        { id: "back", label: "Back", group: "navigation" },
+        { id: "cancel", label: "Cancel", group: "navigation" },
+      ],
+      selectedOptionIndex: 0,
+    }));
+
+    const lines = out.split("\n");
+    const backIndex = lines.findIndex((line) => line.includes("Back"));
+    const cancelIndex = lines.findIndex((line) => line.includes("Cancel"));
+    expect(lines[backIndex - 1]).toBe("");
+    expect(cancelIndex).toBe(backIndex + 1);
     assertNoAnsi(out);
   });
 

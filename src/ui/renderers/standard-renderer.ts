@@ -683,8 +683,13 @@ export class StandardRenderer {
         contentWidth
       ));
     } else {
+      let renderedNavigationSeparator = false;
       for (let i = 0; i < vm.options.length; i++) {
         const option = vm.options[i];
+        if (option.group === "navigation" && !renderedNavigationSeparator && i > 0) {
+          lines.push("  ");
+          renderedNavigationSeparator = true;
+        }
         const isSelected = i === vm.selectedOptionIndex;
         const marker = isSelected ? this.#action(selectedMarker) : " ";
         const optionLabelWidth = Math.max(1, contentWidth - optionMarkerSlotWidth);
@@ -706,7 +711,7 @@ export class StandardRenderer {
 
     if (vm.hint !== undefined && vm.hint.length > 0) {
       const hint = this.#muted(this.#localizedTechnical(vm.hint, locale, contentWidth));
-      lines.push(`  ${hint}`);
+      lines.push(`  ${direction === "rtl" ? padVisibleStart(hint, contentWidth) : hint}`);
     }
 
     lines.push(bottom);
@@ -789,8 +794,13 @@ export class StandardRenderer {
     );
     lines.push(`  ${" ".repeat(optionMarkerSlotWidth)}${header}`);
 
+    let renderedNavigationSeparator = false;
     for (let i = 0; i < vm.options.length; i++) {
       const option = vm.options[i];
+      if (option.group === "navigation" && !renderedNavigationSeparator && i > 0) {
+        lines.push("  ");
+        renderedNavigationSeparator = true;
+      }
       const isSelected = i === vm.selectedOptionIndex;
       const marker = isSelected ? this.#action(selectedMarker) : " ";
       const row = this.#structuredPromptRow(

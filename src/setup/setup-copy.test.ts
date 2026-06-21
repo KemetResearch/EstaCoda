@@ -39,6 +39,7 @@ const FIRST_RUN_KEYS = [
   "onboarding.providers.current",
   "onboarding.providers.currentRoute",
   "onboarding.providers.currentModelNotShown",
+  "onboarding.providers.navigation.back.description",
   "onboarding.providers.description.openai",
   "onboarding.providers.description.google",
   "onboarding.providers.description.deepseek",
@@ -726,6 +727,11 @@ describe("setup copy", () => {
     expect(modelDescriptionOverride("ar", "openai", "gpt-5-mini")).toBe("خيار منخفض التكلفة للمهام المساعدة.");
     expect(modelDescriptionOverride("en", "google", "gpt-5-mini")).toBeUndefined();
     expect(modelDescriptionOverride("en", "openai", "unknown-model")).toBeUndefined();
+  });
+
+  it("uses provider navigation back copy for the previous step", () => {
+    expect(resolveSetupCopy("en", "onboarding.providers.navigation.back.description")).toBe("Return to the previous step.");
+    expect(resolveSetupCopy("ar", "onboarding.providers.navigation.back.description")).toBe("ارجع إلى الخطوة السابقة.");
   });
 
   it("resolves onboarding local STT skipped warning copy", () => {

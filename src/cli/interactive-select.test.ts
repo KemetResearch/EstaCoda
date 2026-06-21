@@ -139,11 +139,13 @@ describe("interactive-select prompt card surface", () => {
         {
           value: "back",
           label: "Back",
-          cells: { name: "Back", description: "Return to previous card" },
+          group: "navigation",
+          cells: { name: "Back", description: "Return to previous step" },
         },
         {
           value: "cancel",
           label: "Cancel",
+          group: "navigation",
           cells: { name: "Cancel", description: "Exit without changes" },
         },
       ],
@@ -163,6 +165,11 @@ describe("interactive-select prompt card surface", () => {
     expect(rendered).toContain("Back");
     expect(rendered).toContain("Cancel");
     expect(rendered).toContain("Type a number to choose.");
+    const lines = rendered.split("\n");
+    const backIndex = lines.findIndex((line) => line.includes("Back"));
+    const cancelIndex = lines.findIndex((line) => line.includes("Cancel"));
+    expect(lines[backIndex - 1]).toBe("");
+    expect(cancelIndex).toBe(backIndex + 1);
   });
 
   it("localizes and bolds Arabic selected output", async () => {

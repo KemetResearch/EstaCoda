@@ -284,7 +284,7 @@ describe("ViewModel builders", () => {
           badges: ["Current"],
           current: true,
         },
-        { id: "skip", label: "Not now", description: "Return later" },
+        { id: "skip", label: "Not now", description: "Return later", group: "navigation" },
       ],
       selectedOptionIndex: 0,
       hint: "Use arrow keys to choose.",
@@ -316,6 +316,7 @@ describe("ViewModel builders", () => {
       id: "skip",
       label: "Not now",
       description: "Return later",
+      group: "navigation",
     });
     expect(vm.selectedOptionIndex).toBe(0);
     expect(vm.hint).toBe("Use arrow keys to choose.");

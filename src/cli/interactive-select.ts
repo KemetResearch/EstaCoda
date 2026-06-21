@@ -23,6 +23,7 @@ export type SelectPromptInput<T> = {
     label: string;
     description?: string;
     technical?: boolean;
+    group?: "main" | "navigation";
     cells?: Readonly<Record<string, string>>;
     badges?: readonly string[];
     current?: boolean;
@@ -142,6 +143,7 @@ function buildSelectionViewModel<T>(selection: SelectPromptInput<T>, selectedInd
       label: opt.label,
       description: opt.description,
       technical: opt.technical ?? false,
+      group: opt.group,
       cells: opt.cells,
       badges: opt.badges,
       current: opt.current,

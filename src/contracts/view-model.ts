@@ -184,6 +184,7 @@ export interface OnboardingPromptOption {
   readonly label: string;
   readonly description?: string;
   readonly technical?: boolean;
+  readonly group?: "main" | "navigation";
   readonly cells?: Readonly<Record<string, string>>;
   readonly badges?: readonly string[];
   readonly current?: boolean;
