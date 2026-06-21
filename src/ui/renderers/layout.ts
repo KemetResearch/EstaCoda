@@ -193,6 +193,15 @@ export function padVisibleAlign(
   return padVisibleEnd(text, width, fill);
 }
 
+export function centerVisibleBlock(text: string, width: number): string {
+  const lines = text.split("\n");
+  const blockWidth = Math.max(0, ...lines.map((line) => measureVisibleWidth(line)));
+  if (blockWidth >= width) return text;
+
+  const padding = " ".repeat(Math.floor((width - blockWidth) / 2));
+  return lines.map((line) => (line === "" ? line : padding + line)).join("\n");
+}
+
 export function indentLines(
   lines: readonly string[],
   indent: number | string = 2
