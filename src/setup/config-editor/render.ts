@@ -7,6 +7,7 @@ export type ConfigEditorRenderedAction = {
   readonly id: SetupRouteActionId | SetupEditorActionId;
   readonly label: string;
   readonly description: string;
+  readonly group?: "main" | "navigation";
   readonly readOnly: boolean;
   readonly source: "route" | "editor" | "synthetic";
   readonly editorAction?: SetupEditorActionDraft;
@@ -181,6 +182,7 @@ function renderRouteAction(
     id: action.id,
     label: localized?.label ?? action.label,
     description: localized?.description ?? action.description,
+    group: action.id === "exit" ? "navigation" : undefined,
     readOnly: !action.mutatesConfig,
     source: "route",
   };
@@ -195,6 +197,7 @@ function renderEditorAction(
     id: action.id,
     label: formatSetupCopy(locale, action.copyKey, copyValues),
     description: editorActionDescription(action, locale),
+    group: action.effect === "exit" ? "navigation" : undefined,
     readOnly: action.readOnly,
     source: "editor",
     editorAction: action,
@@ -225,6 +228,7 @@ function syntheticAction(id: SetupRouteActionId, locale: SetupCopyLocale): Confi
         id,
         label: localized.label,
         description: localized.description,
+        group: "navigation",
         readOnly: true,
         source: "synthetic",
       };

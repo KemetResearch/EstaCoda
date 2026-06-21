@@ -143,7 +143,13 @@ describe("runConfigEditor", () => {
     });
     await trustWorkspace(tempDir, workspaceRoot);
     const output: string[] = [];
-    const prompts: Array<{ title: string; body: string; labels: string[]; descriptions: Array<string | undefined> }> = [];
+    const prompts: Array<{
+      title: string;
+      body: string;
+      labels: string[];
+      descriptions: Array<string | undefined>;
+      groups: Array<string | undefined>;
+    }> = [];
     const prompt = fakePrompt();
     prompt.select = async (input) => {
       prompts.push({
@@ -151,6 +157,7 @@ describe("runConfigEditor", () => {
         body: input.body ?? "",
         labels: input.options.map((option) => option.label),
         descriptions: input.options.map((option) => option.description),
+        groups: input.options.map((option) => option.group),
       });
       const exit = input.options.find((option) =>
         typeof option.value === "object" &&
@@ -183,6 +190,8 @@ describe("runConfigEditor", () => {
     expect(prompts[0]?.body).toBe("اختار اللي تحب تضبطه.");
     expect(prompts[0]?.labels).toContain("اخرج بدون تغييرات");
     expect(prompts[0]?.descriptions).toContain("اخرج من الإعداد من غير تعديل أي شيء.");
+    const exitActionIndex = prompts[0]?.labels.indexOf("اخرج بدون تغييرات") ?? -1;
+    expect(prompts[0]?.groups[exitActionIndex]).toBe("navigation");
   });
 
   it("opts comparative setup editor selectors into columns without changing selected values", async () => {
@@ -283,10 +292,36 @@ describe("runConfigEditor", () => {
       ]);
       expect(input.options.every((option) => option.cells === undefined)).toBe(true);
     }
+    const webSearchInput = selectInputs.find((input) =>
+      input.options.some((option) => option.id === "web-search-none")
+    );
+    const browserModeInput = selectInputs.find((input) =>
+      input.options.some((option) => option.id === "browser-disabled")
+    );
+    const optionalActionInput = selectInputs.find((input) =>
+      input.options.some((option) => option.id === "voice-enable")
+    );
+    const incompleteChannelInput = selectInputs.find((input) =>
+      input.options.some((option) => option.id === "channel-incomplete-retry")
+    );
+    const incompleteTelegramInput = selectInputs.find((input) =>
+      input.options.some((option) => option.id === "telegram-incomplete-retry")
+    );
+    expect(webSearchInput?.options.find((option) => option.id === "web-search-none")?.group).toBeUndefined();
+    expect(browserModeInput?.options.find((option) => option.id === "browser-disabled")?.group).toBeUndefined();
+    expect(optionalActionInput?.options.find((option) => option.id === "voice-enable")?.group).toBeUndefined();
+    expect(optionalActionInput?.options.find((option) => option.id === "voice-unchanged")?.group).toBe("navigation");
+    expect(optionalActionInput?.options.find((option) => option.id === "voice-skip")?.group).toBe("navigation");
+    expect(incompleteChannelInput?.options.every((option) => option.group === "navigation")).toBe(true);
+    expect(incompleteTelegramInput?.options.every((option) => option.group === "navigation")).toBe(true);
     expect(selectInputs.find((input) =>
       input.title === "Image generation" &&
       input.options.some((option) => option.id === "gateway-no")
     )?.columns).toBeUndefined();
+    expect(selectInputs.find((input) =>
+      input.title === "Image generation" &&
+      input.options.some((option) => option.id === "gateway-no")
+    )?.options.find((option) => option.id === "gateway-no")?.group).toBeUndefined();
   });
 
   it("keeps language and confirmation setup prompts stacked", async () => {
@@ -354,13 +389,29 @@ describe("runConfigEditor", () => {
     expect(selectInputs.find((input) => input.title === "Workspace trust")?.columns).toBeUndefined();
     expect(selectInputs.find((input) => input.title === "Finalize configuration")?.columns).toBeUndefined();
     expect(selectInputs.find((input) => input.title === "Setup next action")?.columns).toBeUndefined();
-    expect(selectInputs.find((input) => input.title === "Install DDGS Search support")?.columns).toBeUndefined();
+    expect(selectInputs.find((input) => input.title === "DDGS setup")?.columns).toBeUndefined();
     expect(selectInputs.find((input) => input.title === "Local supervised browser")?.columns).toBeUndefined();
     expect(selectInputs.find((input) =>
       input.title === "Image generation" &&
       input.options.some((option) => option.id === "gateway-yes")
     )?.columns).toBeUndefined();
     expect(languageInput?.statusLines).toBeUndefined();
+    const trustInput = selectInputs.find((input) => input.title === "Workspace trust");
+    const reviewInput = selectInputs.find((input) => input.title === "Finalize configuration");
+    const postApplyInput = selectInputs.find((input) => input.title === "Setup next action");
+    const autoLaunchInput = selectInputs.find((input) => input.title === "Local supervised browser");
+    const gatewayInput = selectInputs.find((input) =>
+      input.title === "Image generation" &&
+      input.options.some((option) => option.id === "gateway-yes")
+    );
+    expect(trustInput?.options.find((option) => option.id === "trust")?.group).toBeUndefined();
+    expect(trustInput?.options.find((option) => option.id === "cancel")?.group).toBe("navigation");
+    expect(reviewInput?.options.find((option) => option.id === "approve")?.group).toBeUndefined();
+    expect(reviewInput?.options.find((option) => option.id === "cancel")?.group).toBe("navigation");
+    expect(postApplyInput?.options.find((option) => option.id === "exit")?.group).toBe("navigation");
+    expect(autoLaunchInput?.options.find((option) => option.id === "browser-auto-launch-no")?.group).toBeUndefined();
+    expect(gatewayInput?.options.find((option) => option.id === "gateway-no")?.group).toBeUndefined();
+    expect(gatewayInput?.options.find((option) => option.id === "gateway-yes")?.group).toBeUndefined();
   });
 
   it("shows current language and Back in the setup editor language selector without adding columns", async () => {
@@ -488,6 +539,51 @@ describe("runConfigEditor", () => {
     expect(searchInput?.statusLines).toBeUndefined();
     expect(searchInput?.showCurrentBadge).toBeUndefined();
     expect(searchInput?.options.some((option) => option.current === true)).toBe(false);
+  });
+
+  it("groups DDGS install skip as navigation without grouping web search provider choices", async () => {
+    const prompt = fakePrompt({ values: ["ddgs", false] });
+    const selectInputs = captureSelectInputs(prompt);
+
+    const webSearch = await promptWebSearchCapability(prompt, { ddgsCapabilityStatus: "missing" });
+
+    const searchInput = selectInputs.find((input) => input.title === "Search provider");
+    const installInput = selectInputs.find((input) => input.title === "DDGS setup");
+    expect(webSearch).toEqual({ provider: "ddgs", ddgsSetupConfirmed: false });
+    expect(searchInput?.options.find((option) => option.id === "web-search-brave")?.group).toBeUndefined();
+    expect(searchInput?.options.find((option) => option.id === "web-search-ddgs")?.group).toBeUndefined();
+    expect(searchInput?.options.find((option) => option.id === "web-search-none")?.group).toBeUndefined();
+    expect(installInput?.options.find((option) => option.id === "web-search-ddgs-install-confirm")?.group)
+      .toBeUndefined();
+    expect(installInput?.options.find((option) => option.id === "web-search-ddgs-install-skip")?.group)
+      .toBe("navigation");
+  });
+
+  it("groups every post-apply action as navigation without changing selected action ids", async () => {
+    const prompt = fakePrompt({ values: ["repair-again"] });
+    const selectInputs = captureSelectInputs(prompt);
+
+    const action = await promptConfigEditorPostApplyAction(prompt, {
+      state: "degraded",
+      launchEligible: true,
+      limitedModeEligible: true,
+    });
+
+    const postApplyInput = selectInputs.find((input) => input.title === "Setup next action");
+    expect(action).toBe("repair-again");
+    expect(postApplyInput?.options.map((option) => option.id)).toEqual([
+      "launch",
+      "accept-limited-mode",
+      "repair-again",
+      "exit",
+    ]);
+    expect(postApplyInput?.options.map((option) => option.value)).toEqual([
+      "launch",
+      "accept-limited-mode",
+      "repair-again",
+      "exit",
+    ]);
+    expect(postApplyInput?.options.every((option) => option.group === "navigation")).toBe(true);
   });
 
   it("marks DDGS as current when web search state is explicitly DDGS", async () => {
@@ -2184,21 +2280,28 @@ describe("runConfigEditor", () => {
     await writeUserConfig(tempDir, localReadyConfig());
     await trustWorkspace(tempDir, workspaceRoot);
     const actions = gatewayServiceActions();
+    const selectInputs: Record<string, SelectPromptInput<unknown>> = {};
+    const prompt = fakePrompt({
+      values: [
+        "telegram",
+        "enable",
+        "42",
+        "-100",
+        true,
+        "Not now",
+      ],
+      secret: "123456:stored-telegram-token",
+    });
+    const baseSelect = prompt.select!;
+    prompt.select = async (input) => {
+      selectInputs[input.title] = input as SelectPromptInput<unknown>;
+      return baseSelect(input);
+    };
 
     const result = await runConfigEditor({
       homeDir: tempDir,
       workspaceRoot,
-      prompt: fakePrompt({
-        values: [
-          "telegram",
-          "enable",
-          "42",
-          "-100",
-          true,
-          "Not now",
-        ],
-        secret: "123456:stored-telegram-token",
-      }),
+      prompt,
       defaultActionId: "configure-channels",
       applyExecutor: createReviewedSetupApplyExecutor({
         homeDir: tempDir,
@@ -2214,6 +2317,10 @@ describe("runConfigEditor", () => {
     expect(actions.install).not.toHaveBeenCalled();
     expect(actions.start).not.toHaveBeenCalled();
     expect(result.output).toContain(gatewayServiceActivationNotNowGuidance);
+    expect(selectInputs[gatewayServiceActivationPromptTitle]?.options.find((option) => option.id === "yes")?.group)
+      .toBeUndefined();
+    expect(selectInputs[gatewayServiceActivationPromptTitle]?.options.find((option) => option.id === "not-now")?.group)
+      .toBe("navigation");
   });
 
   it("does not offer gateway activation when a ready channel already existed before setup editor apply", async () => {
@@ -3604,12 +3711,18 @@ describe("runConfigEditor", () => {
     await mkdir(dirname(profileConfigPath(tempDir)), { recursive: true });
     await writeFile(profileConfigPath(tempDir), "{not-json", "utf8");
     const output: string[] = [];
+    const selectInputs: SelectPromptInput<unknown>[] = [];
+    const prompt = fakePrompt({ values: ["show-diagnostics"] });
+    const baseSelect = prompt.select!;
+    prompt.select = async (input) => {
+      selectInputs.push(input as SelectPromptInput<unknown>);
+      return baseSelect(input);
+    };
 
     const result = await runConfigEditor({
       homeDir: tempDir,
       workspaceRoot,
-      prompt: fakePrompt(),
-      defaultActionId: "show-diagnostics",
+      prompt,
       output: { write: (value) => output.push(value) },
     });
 
@@ -3633,6 +3746,13 @@ describe("runConfigEditor", () => {
     expect(output.join("")).not.toContain("edit-primary-model-route");
     expect(output.join("")).not.toContain("edit-security-mode");
     expect(output.join("")).not.toContain("repair-state-directory");
+    const menuInput = selectInputs[0];
+    expect(menuInput?.options.map((option) =>
+      typeof option.value === "object" && option.value !== null && "id" in option.value ? option.value.id : option.id
+    )).toEqual(["verify-setup", "show-diagnostics", "exit"]);
+    expect(menuInput?.options.find((option) => option.id === "verify-setup")?.group).toBeUndefined();
+    expect(menuInput?.options.find((option) => option.id === "show-diagnostics")?.group).toBeUndefined();
+    expect(menuInput?.options.find((option) => option.id === "exit")?.group).toBe("navigation");
   });
 
   it("renders state-not-writable as a repair-first diagnostic surface", async () => {

@@ -8,7 +8,7 @@ import {
   startService,
   type ServiceManagerState,
 } from "../gateway/service-manager.js";
-import { promptSetupChoice, setupPromptContext } from "./setup-prompts.js";
+import { promptSetupChoice, setupNavigationChoice, setupPromptContext } from "./setup-prompts.js";
 import type { SetupCopyLocale } from "./setup-copy.js";
 import type { SetupReviewManifest } from "./setup-review-manifest.js";
 
@@ -123,12 +123,12 @@ export async function maybeOfferGatewayStartAfterChannelSetup(
         label: "Yes",
         value: true,
       },
-      {
+      setupNavigationChoice({
         id: "not-now",
         label: "Not now",
         description: gatewayServiceActivationNotNowGuidance,
         value: false,
-      },
+      }),
     ],
     defaultValue: false,
   });

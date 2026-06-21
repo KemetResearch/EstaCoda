@@ -20,6 +20,7 @@ import {
   setupTechnicalToken,
   setupChoiceColumns,
   setupCurrentStatusLine,
+  setupNavigationChoice,
   showSetupCard,
   setupTelegramAllowedChatIdsQuestion,
   setupTelegramAllowedUserIdsQuestion,
@@ -102,6 +103,7 @@ export async function promptConfigEditorAction(
       id: action.id,
       label: action.label,
       description: action.description,
+      group: action.group,
       value: action,
     })),
     defaultValue: defaultAction,
@@ -216,12 +218,12 @@ export async function promptWorkspaceTrustConfirmation(
         description: setupCopyText(locale, "onboarding.workspace.trustAction.description"),
         value: true,
       },
-      {
+      setupNavigationChoice({
         id: "cancel",
         label: setupCopyText(locale, "onboarding.review.cancelAction"),
         description: setupCopyText(locale, "setupApply.review.cancelled"),
         value: false,
-      },
+      }),
     ],
     defaultValue: false,
   });
@@ -250,12 +252,12 @@ export async function promptConfigEditorReviewApproval(
         description: setupCopyText(locale, "setupEditor.review.confirm.description"),
         value: true,
       },
-      {
+      setupNavigationChoice({
         id: "cancel",
         label: setupCopyText(locale, "setupEditor.review.cancel"),
         description: setupCopyText(locale, "setupEditor.review.cancel.description"),
         value: false,
-      },
+      }),
     ],
     defaultValue: true,
   });
@@ -481,12 +483,12 @@ export async function promptWebSearchCapability(
         description: setupCopyText(locale, "setupEditor.prompt.webSearch.provider.ddgs.description"),
         value: true,
       },
-      {
+      setupNavigationChoice({
         id: "web-search-ddgs-install-skip",
         label: setupCopyText(locale, "setupEditor.prompt.webSearch.ddgs.install.skip"),
         description: setupCopyText(locale, "setupEditor.prompt.webSearch.ddgs.notInstalled"),
         value: false,
-      },
+      }),
     ],
     defaultValue: false,
   });
@@ -588,29 +590,29 @@ export async function promptConfigEditorPostApplyAction(
   locale: SetupCopyLocale = "en"
 ): Promise<ConfigEditorPostApplyActionId> {
   const launchChoices = input.launchEligible
-    ? [{
+    ? [setupNavigationChoice({
         id: "launch",
         label: setupCopyText(locale, "setupEditor.prompt.postApply.launch"),
         description: setupCopyText(locale, "setupEditor.prompt.postApply.launch.description"),
         value: "launch" as const,
-      }]
+      })]
     : [];
   const limitedChoices = input.limitedModeEligible
-    ? [{
+    ? [setupNavigationChoice({
         id: "accept-limited-mode",
         label: setupCopyText(locale, "setupEditor.prompt.postApply.acceptLimitedMode"),
         description: setupCopyText(locale, "setupEditor.prompt.postApply.acceptLimitedMode.description"),
         value: "accept-limited-mode" as const,
-      }]
+      })]
     : [];
   const repairChoices = input.state === "ready"
     ? []
-    : [{
+    : [setupNavigationChoice({
         id: "repair-again",
         label: setupCopyText(locale, "setupEditor.prompt.postApply.repairAgain"),
         description: setupCopyText(locale, "setupEditor.prompt.postApply.repairAgain.description"),
         value: "repair-again" as const,
-      }];
+      })];
 
   return promptSetupChoice(prompt, {
     title: setupCopyText(locale, "setupEditor.prompt.postApply.title"),
@@ -619,12 +621,12 @@ export async function promptConfigEditorPostApplyAction(
       ...launchChoices,
       ...limitedChoices,
       ...repairChoices,
-      {
+      setupNavigationChoice({
         id: "exit",
         label: setupCopyText(locale, "setupEditor.prompt.postApply.exit"),
         description: setupCopyText(locale, "setupEditor.prompt.postApply.exit.description"),
         value: "exit" as const,
-      },
+      }),
     ],
     defaultValue: "exit" as const,
   });
@@ -641,12 +643,12 @@ export async function promptOptionalCapabilityAction(
 ): Promise<OptionalCapabilityPromptAction> {
   const skipChoice = input.configured
     ? []
-    : [{
+    : [setupNavigationChoice({
         id: `${input.id}-skip`,
         label: setupCopyText(locale, "setupEditor.prompt.optionalCapabilityAction.skip"),
         description: setupCopyText(locale, "setupEditor.prompt.optionalCapabilityAction.skip.description"),
         value: "skip" as const,
-      }];
+      })];
 
   return promptSetupChoice(prompt, {
     title: input.title,
@@ -659,12 +661,12 @@ export async function promptOptionalCapabilityAction(
         description: setupCopyText(locale, "setupEditor.prompt.optionalCapabilityAction.enableConfigure.description"),
         value: "enable" as const,
       },
-      {
+      setupNavigationChoice({
         id: `${input.id}-unchanged`,
         label: setupCopyText(locale, "setupEditor.prompt.optionalCapabilityAction.leaveUnchanged"),
         description: setupCopyText(locale, "setupEditor.prompt.optionalCapabilityAction.leaveUnchanged.description"),
         value: "unchanged" as const,
-      },
+      }),
       ...skipChoice,
     ],
     defaultValue: "enable" as const,
@@ -860,24 +862,24 @@ export async function promptIncompleteChannelCapabilityAction(
     ].join("\n"),
     columns: setupChoiceColumns(locale),
     choices: [
-      {
+      setupNavigationChoice({
         id: "channel-incomplete-retry",
         label: setupCopyText(locale, "setupEditor.prompt.telegram.incomplete.retry"),
         description: setupCopyText(locale, "setupEditor.prompt.telegram.incomplete.retry.description"),
         value: "retry" as const,
-      },
-      {
+      }),
+      setupNavigationChoice({
         id: "channel-incomplete-skip",
         label: setupCopyText(locale, "setupEditor.prompt.optionalCapabilityAction.skip"),
         description: setupCopyText(locale, "setupEditor.prompt.optionalCapabilityAction.skip.description"),
         value: "skip" as const,
-      },
-      {
+      }),
+      setupNavigationChoice({
         id: "channel-incomplete-unchanged",
         label: setupCopyText(locale, "setupEditor.prompt.optionalCapabilityAction.leaveUnchanged"),
         description: setupCopyText(locale, "setupEditor.prompt.optionalCapabilityAction.leaveUnchanged.description"),
         value: "unchanged" as const,
-      },
+      }),
     ],
     defaultValue: "skip" as const,
   });
@@ -896,24 +898,24 @@ export async function promptIncompleteTelegramCapabilityAction(
     ].join("\n"),
     columns: setupChoiceColumns(locale),
     choices: [
-      {
+      setupNavigationChoice({
         id: "telegram-incomplete-retry",
         label: setupCopyText(locale, "setupEditor.prompt.telegram.incomplete.retry"),
         description: setupCopyText(locale, "setupEditor.prompt.telegram.incomplete.retry.description"),
         value: "retry" as const,
-      },
-      {
+      }),
+      setupNavigationChoice({
         id: "telegram-incomplete-skip",
         label: setupCopyText(locale, "setupEditor.prompt.optionalCapabilityAction.skip"),
         description: setupCopyText(locale, "setupEditor.prompt.optionalCapabilityAction.skip.description"),
         value: "skip" as const,
-      },
-      {
+      }),
+      setupNavigationChoice({
         id: "telegram-incomplete-unchanged",
         label: setupCopyText(locale, "setupEditor.prompt.optionalCapabilityAction.leaveUnchanged"),
         description: setupCopyText(locale, "setupEditor.prompt.optionalCapabilityAction.leaveUnchanged.description"),
         value: "unchanged" as const,
-      },
+      }),
     ],
     defaultValue: "skip" as const,
   });

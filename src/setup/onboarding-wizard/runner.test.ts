@@ -2262,6 +2262,7 @@ describe("runFirstRunSetup", () => {
 
   it("does not install or start when the onboarding gateway prompt is declined", async () => {
     const actions = gatewayServiceActions();
+    const seenSelectInputs: Record<string, SelectPromptInput<unknown>> = {};
 
     const result = await runFirstRunSetup({
       homeDir: tempDir,
@@ -2273,7 +2274,7 @@ describe("runFirstRunSetup", () => {
         [resolveSetupCopy("en", "onboarding.launch.startNow")]: "No",
         __prompt: ["", "42", ""],
         __secret: "123456:telegram-token",
-      }),
+      }, {}, {}, [], seenSelectInputs),
       flowEngine: flowEngine(),
       applyExecutor: reviewedExecutor(tempDir, workspaceRoot),
       gatewayServiceActivation: { serviceActions: actions },
@@ -2286,6 +2287,10 @@ describe("runFirstRunSetup", () => {
     expect(actions.install).not.toHaveBeenCalled();
     expect(actions.start).not.toHaveBeenCalled();
     expect(result.output).toContain(gatewayServiceActivationNotNowGuidance);
+    expect(seenSelectInputs[gatewayServiceActivationPromptTitle]?.options.find((option) => option.id === "yes")?.group)
+      .toBeUndefined();
+    expect(seenSelectInputs[gatewayServiceActivationPromptTitle]?.options.find((option) => option.id === "not-now")?.group)
+      .toBe("navigation");
   });
 
   it("does not offer the onboarding gateway prompt when no channel was configured", async () => {
