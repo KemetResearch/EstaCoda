@@ -35,6 +35,30 @@ const FIRST_RUN_KEYS = [
   "onboarding.providers.primaryCredential",
   "onboarding.providers.primaryCredential.validation.reference",
   "onboarding.providers.primaryCredential.localProviderSkip",
+  "onboarding.providers.current",
+  "onboarding.providers.currentRoute",
+  "onboarding.providers.currentModelNotShown",
+  "onboarding.providers.description.openai",
+  "onboarding.providers.description.google",
+  "onboarding.providers.description.deepseek",
+  "onboarding.providers.description.kimi",
+  "onboarding.providers.description.openrouter",
+  "onboarding.providers.description.zai",
+  "onboarding.providers.description.local",
+  "onboarding.providers.description.codex",
+  "onboarding.providers.description.custom",
+  "onboarding.providers.description.customBaseUrl",
+  "onboarding.catalog.model.features.tools",
+  "onboarding.catalog.model.features.vision",
+  "onboarding.catalog.model.features.reasoning",
+  "onboarding.catalog.model.features.structuredOutput",
+  "onboarding.catalog.model.context",
+  "onboarding.catalog.model.status.alpha",
+  "onboarding.catalog.model.status.beta",
+  "onboarding.catalog.model.status.deprecated",
+  "onboarding.catalog.model.status.retired",
+  "onboarding.catalog.model.description.local",
+  "onboarding.catalog.model.description.custom",
   "onboarding.security",
   "onboarding.security.validation.selected",
   "onboarding.workflowLearning",
@@ -594,6 +618,9 @@ describe("setup copy", () => {
     expect(resolveSetupCopy("ar", "setupModules.provider.review")).toContain(isolateLtr("{modelId}"));
     expect(resolveSetupCopy("ar", "setupApply.operations.configPatch")).toContain(isolateLtr("{scope}"));
     expect(resolveSetupCopy("ar", "setupApply.operations.configPatch")).toContain(isolateLtr("{configPath}"));
+    expect(resolveSetupCopy("ar", "onboarding.providers.currentRoute")).toContain(isolateLtr("{route}"));
+    expect(resolveSetupCopy("ar", "onboarding.providers.currentModelNotShown")).toContain(isolateLtr("{route}"));
+    expect(resolveSetupCopy("ar", "onboarding.providers.description.customBaseUrl")).toContain(isolateLtr("{baseUrl}"));
     expect(resolveSetupCopy("ar", "setupModules.telegram.title")).toBe(isolateLtr("Telegram"));
     expect(resolveSetupCopy("ar", "onboarding.providers.primaryCredential.localProviderSkip")).toContain(isolateLtr("API"));
     expect(resolveSetupCopy("ar", "setupRouter.configured.title")).toContain(isolateLtr("EstaCoda"));

@@ -215,16 +215,18 @@ describe("cli model", () => {
       const gpt4oOption = selectInputs[1]?.options.find((option) => option.id === "gpt-4o");
       expect(openAiOption).toMatchObject({
         label: "OpenAI",
-        cells: { name: "OpenAI", details: expect.stringContaining("models") }
+        cells: { name: "OpenAI", details: "Hosted OpenAI models." },
+        badges: ["Current"],
+        current: true
       });
       expect(gpt4oOption).toMatchObject({
         label: "gpt-4o",
-        cells: { name: "gpt-4o" }
+        cells: { name: "gpt-4o", details: expect.stringContaining("context") },
+        badges: ["Current"],
+        current: true
       });
-      expect(openAiOption).not.toHaveProperty("current");
-      expect(gpt4oOption).not.toHaveProperty("current");
-      expect(openAiOption).not.toHaveProperty("badges");
-      expect(gpt4oOption).not.toHaveProperty("badges");
+      expect(selectInputs[0]?.defaultIndex).toBe(selectInputs[0]?.options.findIndex((option) => option.id === "openai"));
+      expect(selectInputs[1]?.defaultIndex).toBe(selectInputs[1]?.options.findIndex((option) => option.id === "gpt-4o"));
 
       const config = await readUserConfig(tmpDir) as any;
       expect(config.model?.provider).toBe("openai");

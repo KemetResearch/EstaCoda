@@ -1288,8 +1288,8 @@ describe("runFirstRunSetup", () => {
 
     expect(onboardingOptions["Primary provider"]).toEqual(["Local", "OpenAI"]);
     expect(onboardingDescriptions["Primary provider"]).toEqual([
-      "1 models",
-      "https://api.openai.com/v1 (5 models)",
+      "Local OpenAI-compatible models.",
+      "Hosted OpenAI models.",
     ]);
     expect(onboardingSelects["Primary provider"]?.surface).toBe("promptCard");
     expect(onboardingSelects["Primary provider"]?.columns).toEqual([
@@ -1334,12 +1334,12 @@ describe("runFirstRunSetup", () => {
       "model-missing",
     ]);
     expect(onboardingDescriptions["Primary model"]).toEqual([
-      "alpha",
-      "beta",
-      "deprecated",
-      "",
-      "",
-      "",
+      "Structured output. 128K context. Alpha",
+      "Structured output. 128K context. Beta",
+      "Structured output. 128K context. Deprecated",
+      "Structured output. 128K context",
+      "Structured output. 128K context",
+      "Structured output. 128K context",
     ]);
     expect(onboardingSelects["Primary model"]?.surface).toBe("promptCard");
     expect(onboardingSelects["Primary model"]?.columns).toEqual([
@@ -1401,12 +1401,12 @@ describe("runFirstRunSetup", () => {
     });
 
     expect(seenDescriptions["Primary model"]).toEqual([
-      "alpha",
-      "beta",
-      "deprecated",
-      "",
-      "",
-      "",
+      "Structured output. 128K context. Alpha",
+      "Structured output. 128K context. Beta",
+      "Structured output. 128K context. Deprecated",
+      "Structured output. 128K context",
+      "Structured output. 128K context",
+      "Structured output. 128K context",
     ]);
   });
 

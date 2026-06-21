@@ -2,7 +2,7 @@ import { resolveStateHome } from "../../config/state-home.js";
 import { hasSavedEnvSecret } from "../../config/env-secret-store.js";
 import { defaultProfileId, readActiveProfile, resolveProfileStateHome } from "../../config/profile-home.js";
 import { loadRuntimeConfig } from "../../config/runtime-config.js";
-import type { ProviderId } from "../../contracts/provider.js";
+import type { AuxiliaryModelSlotInput, ProviderId } from "../../contracts/provider.js";
 import type { SecurityApprovalMode } from "../../contracts/security.js";
 import type { Prompt } from "../../cli/readline-prompt.js";
 import { withPromptUiContext } from "../../cli/readline-prompt.js";
@@ -629,7 +629,11 @@ async function handleProviderRouteAction(
   action: ConfigEditorRenderedAction
 ): Promise<ConfigEditorRunnerResult> {
   const editorAction = requireEditorAction(action);
-  const resolved = await selectResolvedProviderRoute(options, "primary");
+  const loaded = await loadRuntimeConfig(options);
+  const resolved = await selectResolvedProviderRoute(options, "primary", {
+    currentProviderId: loaded.primaryModelRoute.provider,
+    currentModelId: loaded.primaryModelRoute.id,
+  });
   if (resolved.kind !== "selected") {
     return handleProviderRoutePromptExit(options, initialDecision, action.id, resolved);
   }
@@ -682,7 +686,12 @@ async function handleAuxiliaryRouteAction(
 ): Promise<ConfigEditorRunnerResult> {
   const editorAction = requireEditorAction(action);
   const auxiliaryTask = await promptAuxiliaryModelTask(options.prompt, options.locale);
-  const resolved = await selectResolvedProviderRoute(options, "auxiliary");
+  const loaded = await loadRuntimeConfig(options);
+  const currentAuxiliaryRoute = auxiliaryRouteFromSlot(loaded.config.auxiliaryModels?.[auxiliaryTask]);
+  const resolved = await selectResolvedProviderRoute(options, "auxiliary", {
+    currentProviderId: currentAuxiliaryRoute?.provider,
+    currentModelId: currentAuxiliaryRoute?.id,
+  });
   if (resolved.kind !== "selected") {
     return handleProviderRoutePromptExit(options, initialDecision, action.id, resolved);
   }
@@ -694,6 +703,31 @@ async function handleAuxiliaryRouteAction(
       auxiliaryTask,
     },
   }, resolved.selection);
+}
+
+function auxiliaryRouteFromSlot(
+  slot: AuxiliaryModelSlotInput | undefined
+): { readonly provider: string; readonly id: string } | undefined {
+  if (slot === undefined) {
+    return undefined;
+  }
+  if (typeof slot === "string") {
+    const separator = slot.indexOf("/");
+    if (separator <= 0 || separator === slot.length - 1) {
+      return undefined;
+    }
+    return {
+      provider: slot.slice(0, separator),
+      id: slot.slice(separator + 1),
+    };
+  }
+  if (slot.provider === undefined || slot.provider === "auto" || slot.provider === "main" || slot.id === undefined) {
+    return undefined;
+  }
+  return {
+    provider: slot.provider,
+    id: slot.id,
+  };
 }
 
 async function handleCredentialAction(

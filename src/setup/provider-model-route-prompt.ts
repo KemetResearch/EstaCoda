@@ -8,9 +8,10 @@ import type {
 } from "../providers/provider-model-selection-flow.js";
 import type { ProviderId, ModelProfile } from "../contracts/provider.js";
 import {
+  formatSetupCopy,
   setupCopyText,
 } from "./setup-prompts.js";
-import type { SetupCopyLocale } from "./setup-copy.js";
+import type { SetupCopyKey, SetupCopyLocale } from "./setup-copy.js";
 
 export type ProviderModelRoutePromptMode =
   | "primary"
@@ -83,6 +84,7 @@ async function promptProvider(
   options: SelectProviderModelRouteOptions,
   candidates: readonly ProviderCandidate[]
 ): Promise<ProviderPromptAction> {
+  const currentProviderIndex = candidates.findIndex((candidate) => candidate.id === options.currentProviderId);
   const promptOptions: Array<SelectPromptInput<ProviderPromptAction>["options"][number]> = [
     ...candidates.map((candidate) => ({
       id: candidate.id,
@@ -90,8 +92,10 @@ async function promptProvider(
       value: { kind: "provider" as const, provider: candidate },
       cells: {
         name: candidate.displayName,
-        details: providerDetails(candidate),
+        details: providerCandidateDescription(options.locale, candidate),
       },
+      badges: candidate.id === options.currentProviderId ? [currentBadge(options.locale)] : undefined,
+      current: candidate.id === options.currentProviderId,
     })),
     ...navigationOptions<ProviderPromptAction>(options),
   ];
@@ -99,9 +103,10 @@ async function promptProvider(
   return selectStructuredOption(options.prompt, {
     title: providerTitle(options.locale, options.mode),
     body: `${providerBody(options.locale, options.mode)}\n`,
+    technicalLines: currentRouteLines(options.locale, options.currentProviderId, options.currentModelId),
     columns: promptColumns(options.locale),
     options: promptOptions,
-    defaultIndex: 0,
+    defaultIndex: currentProviderIndex >= 0 ? currentProviderIndex : 0,
     fallbackPrompt: "Choose: ",
     surface: "promptCard",
     hint: PROMPT_HINT,
@@ -115,6 +120,13 @@ async function promptModel(
   provider: ProviderCandidate,
   candidates: readonly ModelCandidate[]
 ): Promise<ModelPromptAction> {
+  const currentModelVisible =
+    provider.id === options.currentProviderId &&
+    options.currentModelId !== undefined &&
+    candidates.some((candidate) => candidate.id === options.currentModelId);
+  const currentModelIndex = currentModelVisible
+    ? candidates.findIndex((candidate) => candidate.id === options.currentModelId)
+    : -1;
   const promptOptions: Array<SelectPromptInput<ModelPromptAction>["options"][number]> = [
     ...candidates.map((candidate) => ({
       id: candidate.id,
@@ -122,8 +134,12 @@ async function promptModel(
       value: { kind: "model" as const, model: candidate },
       cells: {
         name: candidate.id,
-        details: modelDetails(options.locale, candidate),
+        details: modelCandidateDescription(options.locale, candidate),
       },
+      badges: provider.id === options.currentProviderId && candidate.id === options.currentModelId
+        ? [currentBadge(options.locale)]
+        : undefined,
+      current: provider.id === options.currentProviderId && candidate.id === options.currentModelId,
     })),
     ...navigationOptions<ModelPromptAction>(options),
   ];
@@ -131,9 +147,10 @@ async function promptModel(
   return selectStructuredOption(options.prompt, {
     title: modelTitle(options.locale, options.mode),
     body: `${modelBody(options.locale, options.mode).replace("{providerId}", provider.id)}\n`,
+    technicalLines: currentModelLines(options.locale, provider.id, options.currentProviderId, options.currentModelId, currentModelVisible),
     columns: promptColumns(options.locale),
     options: promptOptions,
-    defaultIndex: 0,
+    defaultIndex: currentModelIndex >= 0 ? currentModelIndex : 0,
     fallbackPrompt: "Choose: ",
     surface: "promptCard",
     hint: PROMPT_HINT,
@@ -192,27 +209,158 @@ function promptColumns(locale: SetupCopyLocale): SelectPromptInput<unknown>["col
   ];
 }
 
-function providerDetails(candidate: ProviderCandidate): string {
-  return candidate.baseUrl
-    ? `${candidate.baseUrl} (${candidate.modelsCount} ${modelCountLabel(candidate.modelsCount)})`
-    : `${candidate.modelsCount} ${modelCountLabel(candidate.modelsCount)}`;
+export function providerCandidateDescription(locale: SetupCopyLocale, candidate: ProviderCandidate): string {
+  const key = PROVIDER_DESCRIPTION_KEYS[candidate.id];
+  if (key !== undefined) {
+    return setupCopyText(locale, key);
+  }
+  if (candidate.baseUrl !== undefined && candidate.baseUrl.length > 0) {
+    return formatSetupCopy(locale, "onboarding.providers.description.customBaseUrl", {
+      baseUrl: candidate.baseUrl,
+    });
+  }
+  return setupCopyText(locale, "onboarding.providers.description.custom");
 }
 
-function modelDetails(locale: SetupCopyLocale, candidate: ModelCandidate): string {
-  return [
+export function modelCandidateDescription(locale: SetupCopyLocale, candidate: ModelCandidate): string {
+  const descriptionParts: string[] = [];
+  if (candidate.provider === "local") {
+    descriptionParts.push(setupCopyText(locale, "onboarding.catalog.model.description.local"));
+  } else if (candidate.provider === "openai-compatible") {
+    descriptionParts.push(setupCopyText(locale, "onboarding.catalog.model.description.custom"));
+  }
+
+  const capabilityParts = [
     candidate.profile.supportsTools ? setupCopyText(locale, "onboarding.catalog.model.features.tools") : undefined,
     candidate.profile.supportsVision ? setupCopyText(locale, "onboarding.catalog.model.features.vision") : undefined,
     candidate.profile.supportsReasoning ? setupCopyText(locale, "onboarding.catalog.model.features.reasoning") : undefined,
-    renderableModelStatus(candidate.profile.status),
-  ].filter((part): part is string => part !== undefined).join(", ");
+    candidate.profile.supportsStructuredOutput ? setupCopyText(locale, "onboarding.catalog.model.features.structuredOutput") : undefined,
+  ].filter((part): part is string => part !== undefined);
+  if (capabilityParts.length > 0) {
+    descriptionParts.push(capitalizeForLocale(locale, joinDescriptionList(locale, capabilityParts)));
+  }
+
+  if (candidate.profile.contextWindowTokens > 0) {
+    descriptionParts.push(formatSetupCopy(locale, "onboarding.catalog.model.context", {
+      contextWindow: formatContextWindow(candidate.profile.contextWindowTokens),
+    }));
+  }
+
+  const status = renderableModelStatus(locale, candidate.profile.status);
+  if (status !== undefined) {
+    descriptionParts.push(status);
+  }
+  const lifecycle = renderableLifecycle(locale, candidate.lifecycle);
+  if (lifecycle !== undefined && lifecycle !== status) {
+    descriptionParts.push(lifecycle);
+  }
+  if (candidate.lifecycleNote !== undefined && candidate.lifecycleNote.trim().length > 0) {
+    descriptionParts.push(trimSentencePunctuation(candidate.lifecycleNote));
+  }
+  for (const warning of candidate.warnings ?? []) {
+    if (warning.trim().length > 0) {
+      descriptionParts.push(trimSentencePunctuation(warning));
+    }
+  }
+
+  return descriptionParts.join(". ");
 }
 
-function renderableModelStatus(status: ModelProfile["status"]): ModelProfile["status"] | undefined {
-  return status === "alpha" || status === "beta" || status === "deprecated" ? status : undefined;
+const PROVIDER_DESCRIPTION_KEYS: Partial<Record<string, SetupCopyKey>> = {
+  openai: "onboarding.providers.description.openai",
+  google: "onboarding.providers.description.google",
+  deepseek: "onboarding.providers.description.deepseek",
+  kimi: "onboarding.providers.description.kimi",
+  openrouter: "onboarding.providers.description.openrouter",
+  zai: "onboarding.providers.description.zai",
+  local: "onboarding.providers.description.local",
+  codex: "onboarding.providers.description.codex",
+  "openai-compatible": "onboarding.providers.description.custom",
+};
+
+function renderableModelStatus(locale: SetupCopyLocale, status: ModelProfile["status"]): string | undefined {
+  if (status === "alpha") return setupCopyText(locale, "onboarding.catalog.model.status.alpha");
+  if (status === "beta") return setupCopyText(locale, "onboarding.catalog.model.status.beta");
+  if (status === "deprecated") return setupCopyText(locale, "onboarding.catalog.model.status.deprecated");
+  return undefined;
 }
 
-function modelCountLabel(count: number): string {
-  return "models";
+function renderableLifecycle(locale: SetupCopyLocale, lifecycle: ModelCandidate["lifecycle"]): string | undefined {
+  if (lifecycle === "deprecated") return setupCopyText(locale, "onboarding.catalog.model.status.deprecated");
+  return lifecycle === "retired" ? setupCopyText(locale, "onboarding.catalog.model.status.retired") : undefined;
+}
+
+function formatContextWindow(tokens: number): string {
+  if (tokens >= 1_000_000 && tokens % 1_000_000 === 0) {
+    return `${tokens / 1_000_000}M`;
+  }
+  if (tokens >= 1_000_000) {
+    return `${Number((tokens / 1_000_000).toFixed(1))}M`;
+  }
+  if (tokens >= 1_000 && tokens % 1_000 === 0) {
+    return `${tokens / 1_000}K`;
+  }
+  if (tokens >= 1_000) {
+    return `${Number((tokens / 1_000).toFixed(1))}K`;
+  }
+  return String(tokens);
+}
+
+function capitalizeForLocale(locale: SetupCopyLocale, value: string): string {
+  if (locale === "ar" || value.length === 0) {
+    return value;
+  }
+  return `${value[0]!.toLocaleUpperCase("en-US")}${value.slice(1)}`;
+}
+
+function joinDescriptionList(locale: SetupCopyLocale, parts: readonly string[]): string {
+  return parts.join(locale === "ar" ? "، " : ", ");
+}
+
+function trimSentencePunctuation(value: string): string {
+  return value.trim().replace(/[.。]+$/u, "");
+}
+
+function currentBadge(locale: SetupCopyLocale): string {
+  return setupCopyText(locale, "onboarding.providers.current");
+}
+
+function currentRouteLines(
+  locale: SetupCopyLocale,
+  currentProviderId: string | undefined,
+  currentModelId: string | undefined
+): readonly string[] | undefined {
+  if (currentProviderId === undefined || currentModelId === undefined) {
+    return undefined;
+  }
+  return [formatSetupCopy(locale, "onboarding.providers.currentRoute", {
+    route: formatRoute(currentProviderId, currentModelId),
+  })];
+}
+
+function currentModelLines(
+  locale: SetupCopyLocale,
+  providerId: string,
+  currentProviderId: string | undefined,
+  currentModelId: string | undefined,
+  currentModelVisible: boolean
+): readonly string[] | undefined {
+  if (currentProviderId === undefined || currentModelId === undefined) {
+    return undefined;
+  }
+  const lines = [formatSetupCopy(locale, "onboarding.providers.currentRoute", {
+    route: formatRoute(currentProviderId, currentModelId),
+  })];
+  if (providerId === currentProviderId && !currentModelVisible) {
+    lines.push(formatSetupCopy(locale, "onboarding.providers.currentModelNotShown", {
+      route: formatRoute(currentProviderId, currentModelId),
+    }));
+  }
+  return lines;
+}
+
+function formatRoute(providerId: string, modelId: string): string {
+  return modelId.startsWith(`${providerId}/`) ? modelId : `${providerId}/${modelId}`;
 }
 
 function providerTitle(locale: SetupCopyLocale, mode: ProviderModelRoutePromptMode): string {

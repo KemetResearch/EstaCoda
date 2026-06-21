@@ -8,7 +8,11 @@ import type {
   ProviderCandidate,
   ProviderModelSelectionResult,
 } from "../providers/provider-model-selection-flow.js";
-import { selectProviderModelRoute } from "./provider-model-route-prompt.js";
+import {
+  modelCandidateDescription,
+  providerCandidateDescription,
+  selectProviderModelRoute,
+} from "./provider-model-route-prompt.js";
 
 describe("selectProviderModelRoute", () => {
   it("returns selected route for a normal provider and model selection", async () => {
@@ -164,7 +168,7 @@ describe("selectProviderModelRoute", () => {
       label: "OpenAI",
       cells: {
         name: "OpenAI",
-        details: "2 models",
+        details: "Hosted OpenAI models.",
       },
     });
     expect(modelPrompt.options[0]).toMatchObject({
@@ -172,14 +176,14 @@ describe("selectProviderModelRoute", () => {
       label: "alpha-model",
       cells: {
         name: "alpha-model",
-        details: "tools, vision",
+        details: "Tools, vision, structured output. 128K context",
       },
     });
     expect(providerPrompt.options.at(-2)?.id).toBe("back");
     expect(providerPrompt.options.at(-1)?.id).toBe("cancel");
   });
 
-  it("does not use current provider as provider default selection yet", async () => {
+  it("uses visible current provider as provider default selection and marks it current", async () => {
     const flow = fakeFlow({
       providers: [
         providerCandidate("openai", "OpenAI", 1),
@@ -194,13 +198,20 @@ describe("selectProviderModelRoute", () => {
       locale: "en",
       mode: "primary",
       currentProviderId: "local",
+      currentModelId: "local-model",
     });
 
-    expect(prompt.calls[0]?.defaultIndex).toBe(0);
-    expect(flow.resolved).toEqual([{ providerId: "openai", modelId: "alpha-model" }]);
+    expect(prompt.calls[0]?.defaultIndex).toBe(1);
+    expect(prompt.calls[0]?.technicalLines).toEqual(["Current: local/local-model"]);
+    expect(prompt.calls[0]?.options[1]).toMatchObject({
+      id: "local",
+      badges: ["Current"],
+      current: true,
+    });
+    expect(flow.resolved).toEqual([{ providerId: "local", modelId: "alpha-model" }]);
   });
 
-  it("does not use current model as model default selection yet", async () => {
+  it("uses visible current model as model default selection and marks it current", async () => {
     const flow = fakeFlow({
       models: {
         openai: [
@@ -220,12 +231,22 @@ describe("selectProviderModelRoute", () => {
       currentModelId: "beta-model",
     });
 
-    expect(prompt.calls[1]?.defaultIndex).toBe(0);
-    expect(flow.resolved).toEqual([{ providerId: "openai", modelId: "alpha-model" }]);
+    expect(prompt.calls[1]?.defaultIndex).toBe(1);
+    expect(prompt.calls[1]?.options[1]).toMatchObject({
+      id: "beta-model",
+      badges: ["Current"],
+      current: true,
+    });
+    expect(flow.resolved).toEqual([{ providerId: "openai", modelId: "beta-model" }]);
   });
 
-  it("does not invent provider or model descriptions in this foundation commit", async () => {
-    const flow = fakeFlow();
+  it("does not mark current model when browsing a different provider", async () => {
+    const flow = fakeFlow({
+      providers: [
+        providerCandidate("openai", "OpenAI", 1),
+        providerCandidate("local", "Local", 1),
+      ],
+    });
     const prompt = fakePrompt();
 
     await selectProviderModelRoute({
@@ -233,15 +254,122 @@ describe("selectProviderModelRoute", () => {
       flowEngine: flow.engine,
       locale: "en",
       mode: "primary",
-      allowCancel: true,
+      currentProviderId: "local",
+      currentModelId: "local-model",
     });
 
-    const descriptions = prompt.calls.flatMap((call) => call.options.map((option) => option.description));
-    const serialized = JSON.stringify(prompt.calls);
-    expect(descriptions.every((description) => description === undefined)).toBe(true);
-    expect(serialized).not.toContain("Direct OpenAI");
-    expect(serialized).not.toContain("Gemini models");
-    expect(serialized).not.toContain("Multi-provider catalog");
+    expect(prompt.calls[1]?.options.some((option) => option.current === true)).toBe(false);
+    expect(prompt.calls[1]?.options.some((option) => option.badges?.includes("Current") === true)).toBe(false);
+  });
+
+  it("shows a current-model-not-visible note for the current provider", async () => {
+    const flow = fakeFlow({
+      models: {
+        openai: [modelCandidate("openai", "alpha-model")],
+      },
+    });
+    const prompt = fakePrompt();
+
+    await selectProviderModelRoute({
+      prompt,
+      flowEngine: flow.engine,
+      locale: "en",
+      mode: "primary",
+      currentProviderId: "openai",
+      currentModelId: "missing-model",
+    });
+
+    expect(prompt.calls[1]?.technicalLines).toEqual([
+      "Current: openai/missing-model",
+      "Current model not shown: openai/missing-model",
+    ]);
+  });
+
+  it("uses provider descriptions with custom fallback behavior", () => {
+    expect(providerCandidateDescription("en", providerCandidate("google", "Google", 1))).toBe("Hosted Google Gemini models.");
+    expect(providerCandidateDescription("en", {
+      ...providerCandidate("custom-provider" as ProviderId, "Custom", 1),
+      baseUrl: "https://models.example/v1",
+    })).toBe("Custom OpenAI-compatible provider at https://models.example/v1.");
+    expect(providerCandidateDescription("en", providerCandidate("custom-provider" as ProviderId, "Custom", 1))).toBe("Custom OpenAI-compatible provider.");
+  });
+
+  it("generates conservative model descriptions from model metadata", () => {
+    expect(modelCandidateDescription("en", modelCandidate("openai", "alpha-model"))).toBe(
+      "Tools, vision, structured output. 128K context"
+    );
+    expect(modelCandidateDescription("en", {
+      ...modelCandidate("openai", "beta-model"),
+      profile: {
+        ...modelCandidate("openai", "beta-model").profile,
+        contextWindowTokens: 1_000_000,
+        supportsTools: false,
+        supportsVision: false,
+        supportsStructuredOutput: false,
+        supportsReasoning: true,
+        status: "beta",
+      },
+      supportsVision: false,
+      lifecycleNote: "Use with care.",
+      warnings: ["Limited availability."],
+    })).toBe("Reasoning. 1M context. Beta. Use with care. Limited availability");
+  });
+
+  it("does not invent model capabilities when metadata fields are absent", () => {
+    expect(modelCandidateDescription("en", {
+      ...modelCandidate("openai", "plain-model"),
+      profile: {
+        ...modelCandidate("openai", "plain-model").profile,
+        contextWindowTokens: 0,
+        supportsTools: false,
+        supportsVision: false,
+        supportsStructuredOutput: false,
+        supportsReasoning: false,
+      },
+      supportsVision: false,
+    })).toBe("");
+  });
+
+  it("includes deprecated lifecycle when profile status is stable or absent", () => {
+    expect(modelCandidateDescription("en", {
+      ...modelCandidate("openai", "stable-deprecated-model"),
+      lifecycle: "deprecated",
+      profile: {
+        ...modelCandidate("openai", "stable-deprecated-model").profile,
+        status: "stable",
+      },
+    })).toContain("Deprecated");
+
+    const withoutStatus = modelCandidate("openai", "statusless-deprecated-model");
+    const { status: _status, ...profileWithoutStatus } = withoutStatus.profile;
+    expect(modelCandidateDescription("en", {
+      ...withoutStatus,
+      lifecycle: "deprecated",
+      profile: profileWithoutStatus,
+    })).toContain("Deprecated");
+  });
+
+  it("does not duplicate deprecated when lifecycle and profile status both carry it", () => {
+    const description = modelCandidateDescription("en", {
+      ...modelCandidate("openai", "deprecated-model"),
+      lifecycle: "deprecated",
+      profile: {
+        ...modelCandidate("openai", "deprecated-model").profile,
+        status: "deprecated",
+      },
+    });
+
+    expect(description.match(/Deprecated/gu)).toHaveLength(1);
+  });
+
+  it("generates Arabic-safe provider and model descriptions", () => {
+    const providerDescription = providerCandidateDescription("ar", {
+      ...providerCandidate("custom-provider" as ProviderId, "Custom", 1),
+      baseUrl: "https://models.example/v1",
+    });
+    expect(providerDescription).toContain("https://models.example/v1");
+    expect(providerDescription).toContain("\u2066https://models.example/v1\u2069");
+    expect(modelCandidateDescription("ar", modelCandidate("local", "llama3"))).toContain("سياق \u2066128K\u2069");
   });
 
   it("does not resolve or persist anything when navigation exits early", async () => {
