@@ -274,7 +274,7 @@ describe("ViewModel builders", () => {
         { text: "Current: alpha", tone: "active", direction: "ltr" },
       ],
       columns: [
-        { key: "name", header: "Name" },
+        { key: "name", header: "Name", align: "right" },
         { key: "description", header: "Description" },
       ],
       options: [
@@ -291,6 +291,7 @@ describe("ViewModel builders", () => {
       hint: "Use arrow keys to choose.",
       showCurrentBadge: false,
       showColumnHeaders: false,
+      tableDirection: "rtl",
       locale: "en",
       direction: "ltr",
     });
@@ -304,7 +305,7 @@ describe("ViewModel builders", () => {
       { text: "Current: alpha", tone: "active", direction: "ltr" },
     ]);
     expect(vm.columns).toEqual([
-      { key: "name", header: "Name" },
+      { key: "name", header: "Name", align: "right" },
       { key: "description", header: "Description" },
     ]);
     expect(vm.options).toHaveLength(2);
@@ -325,6 +326,7 @@ describe("ViewModel builders", () => {
     expect(vm.hint).toBe("Use arrow keys to choose.");
     expect(vm.showCurrentBadge).toBe(false);
     expect(vm.showColumnHeaders).toBe(false);
+    expect(vm.tableDirection).toBe("rtl");
     expect(vm.locale).toBe("en");
     expect(vm.direction).toBe("ltr");
     expect(Object.getPrototypeOf(vm)).toBe(Object.prototype);

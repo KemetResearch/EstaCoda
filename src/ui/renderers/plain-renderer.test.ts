@@ -496,6 +496,83 @@ describe("PlainRenderer — renderOnboardingPromptCard", () => {
     expect(out).toContain(isolateLtr("CLI"));
   });
 
+  it("renders explicit RTL structured prompt-card rows in declared physical column order", () => {
+    const out = renderOnboardingPromptCard(buildOnboardingPromptCardViewModel({
+      title: "اختر الوضع",
+      bodyLines: ["اختر وضعًا عامًا."],
+      showColumnHeaders: false,
+      tableDirection: "rtl",
+      columns: [
+        { key: "description", header: "التفاصيل", align: "right" },
+        { key: "name", header: "الاسم", align: "right" },
+      ],
+      options: [
+        {
+          id: "alpha",
+          label: "ألفا",
+          cells: { description: `خيار عام مع ${isolateLtr("CLI")}.`, name: "ألفا" },
+        },
+        {
+          id: "back",
+          label: "رجوع",
+          group: "navigation",
+          cells: { description: "ارجع إلى الخطوة السابقة.", name: "رجوع" },
+        },
+      ],
+      selectedOptionIndex: 0,
+      locale: "ar",
+      direction: "rtl",
+    }), "ar");
+
+    expect(out).not.toContain("التفاصيل");
+    expect(out).not.toContain("الاسم");
+    const selectedLine = out.split("\n").find((line) => line.includes("ألفا"));
+    expect(selectedLine).toBeDefined();
+    expect(selectedLine!.indexOf("خيار عام")).toBeLessThan(selectedLine!.indexOf("ألفا"));
+    expect(selectedLine!.indexOf("ألفا")).toBeLessThan(selectedLine!.indexOf(">"));
+    expect(selectedLine!.trimEnd().endsWith(">")).toBe(true);
+    expect(out).toContain(isolateLtr("CLI"));
+    const lines = out.split("\n");
+    const backIndex = lines.findIndex((line) => line.includes("رجوع"));
+    expect(backIndex).toBeGreaterThan(0);
+    expect(lines[backIndex - 1]).toBe("");
+  });
+
+  it("uses label and description fallback in explicit RTL prompt-card tables", () => {
+    const out = renderOnboardingPromptCard(buildOnboardingPromptCardViewModel({
+      title: "اختر الوضع",
+      bodyLines: [],
+      showColumnHeaders: false,
+      tableDirection: "rtl",
+      columns: [
+        { key: "description", header: "التفاصيل", align: "right" },
+        { key: "name", header: "الاسم", align: "right" },
+      ],
+      options: [
+        {
+          id: "alpha",
+          label: "ألفا",
+          description: "وصف عربي طويل يثبت أن التفاصيل تأخذ المساحة الأكبر.",
+        },
+      ],
+      selectedOptionIndex: 0,
+      locale: "ar",
+      direction: "rtl",
+    }), "ar");
+
+    const selectedLine = out.split("\n").find((line) => line.includes("ألفا"));
+    expect(selectedLine).toBeDefined();
+    const descriptionIndex = selectedLine!.indexOf("وصف عربي");
+    const labelIndex = selectedLine!.indexOf("ألفا");
+    expect(descriptionIndex).toBeGreaterThanOrEqual(0);
+    expect(labelIndex).toBeGreaterThan(descriptionIndex);
+    expect(labelIndex - descriptionIndex).toBeGreaterThan(20);
+    const markerIndex = selectedLine!.indexOf(">");
+    expect(markerIndex).toBeGreaterThan(labelIndex);
+    expect(markerIndex - labelIndex).toBeLessThan(12);
+    expect(selectedLine!.trimEnd().endsWith(">")).toBe(true);
+  });
+
   it("renders Arabic prompt-card hints as LTR technical text", () => {
     const out = renderOnboardingPromptCard(buildOnboardingPromptCardViewModel({
       title: "اختر الوضع",

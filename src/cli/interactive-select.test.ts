@@ -211,6 +211,38 @@ describe("interactive-select prompt card surface", () => {
     expect(rendered).toContain("↑↓ navigate   ENTER select   CTRL+C exit");
   });
 
+  it("passes prompt-card table direction and column alignment through plain fallback rendering", async () => {
+    const input = Readable.from(["1\n"]);
+    const output = makeOutput(false);
+
+    await selectOption(input, output, {
+      surface: "promptCard",
+      title: "اختر الوضع",
+      body: "اختر وضعًا عامًا.",
+      columns: [
+        { key: "description", header: "التفاصيل", align: "right" },
+        { key: "name", header: "الاسم", align: "right" },
+      ],
+      tableDirection: "rtl",
+      locale: "ar",
+      direction: "rtl",
+      options: [
+        {
+          value: "alpha",
+          label: "ألفا",
+          cells: { description: "خيار عام", name: "ألفا" },
+        },
+      ],
+      fallbackPrompt: "Choose: ",
+    });
+
+    const rendered = output.getText();
+    const selectedLine = rendered.split("\n").find((line) => line.includes("ألفا"));
+    expect(selectedLine).toBeDefined();
+    expect(selectedLine).toContain("خيار عام");
+    expect(selectedLine!.trimEnd().endsWith(">")).toBe(true);
+  });
+
   it("localizes and bolds Arabic selected output", async () => {
     clearCiEnv();
     process.env.FORCE_COLOR = "1";

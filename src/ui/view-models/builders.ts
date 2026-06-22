@@ -265,6 +265,7 @@ export interface BuildOnboardingPromptCardInput {
   readonly hint?: string;
   readonly showCurrentBadge?: boolean;
   readonly showColumnHeaders?: boolean;
+  readonly tableDirection?: OnboardingPromptCardViewModel["tableDirection"];
   readonly locale?: "en" | "ar";
   readonly direction?: "ltr" | "rtl";
 }
@@ -285,6 +286,7 @@ export function buildOnboardingPromptCardViewModel(
     hint: input.hint,
     showCurrentBadge: input.showCurrentBadge,
     showColumnHeaders: input.showColumnHeaders,
+    tableDirection: input.tableDirection,
     locale: input.locale,
     direction: input.direction,
   };

@@ -190,9 +190,12 @@ export interface OnboardingPromptOption {
   readonly current?: boolean;
 }
 
+export type PromptCardTableDirection = "ltr" | "rtl";
+
 export interface OnboardingPromptColumn {
   readonly key: string;
   readonly header: string;
+  readonly align?: "left" | "right";
 }
 
 export interface PromptCardStatusLine {
@@ -218,6 +221,7 @@ export interface OnboardingPromptCardViewModel {
   readonly hint?: string;
   readonly showCurrentBadge?: boolean;
   readonly showColumnHeaders?: boolean;
+  readonly tableDirection?: PromptCardTableDirection;
   readonly locale?: "en" | "ar";
   readonly direction?: "ltr" | "rtl";
 }

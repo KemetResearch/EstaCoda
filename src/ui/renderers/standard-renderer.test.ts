@@ -742,6 +742,121 @@ describe("StandardRenderer — dark theme", () => {
     expect(plain).not.toContain("▸");
   });
 
+  it("renders explicit RTL structured prompt-card rows in declared physical column order", () => {
+    const r = renderer("dark", noColorCaps());
+    const plain = stripAnsi(r.renderOnboardingPromptCard(buildOnboardingPromptCardViewModel({
+      title: "اختر الوضع",
+      bodyLines: ["اختر وضعًا عامًا."],
+      showColumnHeaders: false,
+      tableDirection: "rtl",
+      columns: [
+        { key: "description", header: "التفاصيل", align: "right" },
+        { key: "name", header: "الاسم", align: "right" },
+      ],
+      options: [
+        {
+          id: "alpha",
+          label: "ألفا",
+          cells: { description: `خيار عام مع ${isolateLtr("CLI")} مستقر.`, name: "ألفا" },
+        },
+        {
+          id: "back",
+          label: "رجوع",
+          group: "navigation",
+          cells: { description: "ارجع إلى الخطوة السابقة.", name: "رجوع" },
+        },
+      ],
+      selectedOptionIndex: 0,
+      hint: "↑↓ navigate   ENTER select   CTRL+C exit",
+      locale: "ar",
+      direction: "rtl",
+    })));
+
+    expect(plain).not.toContain("التفاصيل");
+    expect(plain).not.toContain("الاسم");
+    const selectedLine = plain.split("\n").find((line) => line.includes("ألفا"));
+    expect(selectedLine).toBeDefined();
+    expect(selectedLine!.indexOf("خيار عام")).toBeLessThan(selectedLine!.indexOf("ألفا"));
+    expect(selectedLine!.indexOf("ألفا")).toBeLessThan(selectedLine!.indexOf("▸"));
+    expect(selectedLine!.trimEnd().endsWith("▸")).toBe(true);
+    expect(plain).toContain(isolateLtr("CLI"));
+    expect(plain).toContain(isolateLtr("↑↓ navigate   ENTER select   CTRL+C exit"));
+    const lines = plain.split("\n");
+    const backIndex = lines.findIndex((line) => line.includes("رجوع"));
+    expect(backIndex).toBeGreaterThan(0);
+    expect(lines[backIndex - 1]?.trim()).toBe("");
+  });
+
+  it("uses label and description fallback in explicit RTL prompt-card tables", () => {
+    const r = renderer("dark", noColorCaps());
+    const plain = stripAnsi(r.renderOnboardingPromptCard(buildOnboardingPromptCardViewModel({
+      title: "اختر الوضع",
+      bodyLines: [],
+      showColumnHeaders: false,
+      tableDirection: "rtl",
+      columns: [
+        { key: "description", header: "التفاصيل", align: "right" },
+        { key: "name", header: "الاسم", align: "right" },
+      ],
+      options: [
+        {
+          id: "alpha",
+          label: "ألفا",
+          description: "وصف عربي طويل يثبت أن التفاصيل تأخذ المساحة الأكبر.",
+        },
+      ],
+      selectedOptionIndex: 0,
+      locale: "ar",
+      direction: "rtl",
+    })));
+
+    const selectedLine = plain.split("\n").find((line) => line.includes("ألفا"));
+    expect(selectedLine).toBeDefined();
+    const descriptionIndex = selectedLine!.indexOf("وصف عربي");
+    const labelIndex = selectedLine!.indexOf("ألفا");
+    expect(descriptionIndex).toBeGreaterThanOrEqual(0);
+    expect(labelIndex).toBeGreaterThan(descriptionIndex);
+    expect(labelIndex - descriptionIndex).toBeGreaterThan(20);
+    const markerIndex = selectedLine!.indexOf("▸");
+    expect(markerIndex).toBeGreaterThan(labelIndex);
+    expect(markerIndex - labelIndex).toBeLessThan(12);
+    expect(selectedLine!.trimEnd().endsWith("▸")).toBe(true);
+  });
+
+  it("keeps explicit RTL structured prompt-card rows bounded with no Unicode fallback", () => {
+    const r = renderer("dark", { ...narrowCaps(), supportsUnicode: false });
+    const plain = stripAnsi(r.renderOnboardingPromptCard(buildOnboardingPromptCardViewModel({
+      title: "اختر الوضع",
+      bodyLines: ["اختر وضعًا عامًا."],
+      tableDirection: "rtl",
+      columns: [
+        { key: "description", header: "التفاصيل", align: "right" },
+        { key: "name", header: "الاسم", align: "right" },
+      ],
+      options: [
+        {
+          id: "alpha",
+          label: "ألفا طويلة",
+          cells: {
+            description: "وصف عربي طويل يجب أن يظل داخل عرض الطرفية الضيق دون إفساد الصف.",
+            name: "ألفا طويلة",
+          },
+        },
+      ],
+      selectedOptionIndex: 0,
+      locale: "ar",
+      direction: "rtl",
+    })));
+
+    const selectedLine = plain.split("\n").find((line) => line.includes("ألفا"));
+    expect(selectedLine).toBeDefined();
+    expect(selectedLine!.trimEnd().endsWith(">")).toBe(true);
+    expect(plain).not.toContain("▸");
+    for (const line of plain.split("\n")) {
+      expect(measureVisibleWidth(line)).toBeLessThanOrEqual(narrowCaps().terminalWidth);
+    }
+  });
+
   it("truncates long technical paths safely inside onboarding cards", () => {
     const r = renderer("dark", narrowCaps());
     const longPath = "/Users/example/projects/this/is/a/very/long/workspace/path/that/keeps/going";

@@ -780,6 +780,7 @@ export class StandardRenderer {
     const columns = vm.columns ?? [];
     if (columns.length === 0) return [];
 
+    const tableDirection = vm.tableDirection ?? "ltr";
     const dataWidth = Math.max(8, contentWidth - optionMarkerSlotWidth);
     const layout = this.#structuredPromptColumnLayout(columns, vm.options, dataWidth);
     const lines: string[] = [];
@@ -794,7 +795,9 @@ export class StandardRenderer {
         "ltr",
         "header"
       );
-      lines.push(`  ${" ".repeat(optionMarkerSlotWidth)}${header}`);
+      lines.push(tableDirection === "rtl"
+        ? `  ${header}${" ".repeat(optionMarkerSlotWidth)}`
+        : `  ${" ".repeat(optionMarkerSlotWidth)}${header}`);
     }
 
     let renderedNavigationSeparator = false;
@@ -815,7 +818,9 @@ export class StandardRenderer {
         "ltr",
         "option"
       );
-      lines.push(`  ${marker}${optionMarkerGap}${row}`);
+      lines.push(tableDirection === "rtl"
+        ? `  ${row}${optionMarkerGap}${marker}`
+        : `  ${marker}${optionMarkerGap}${row}`);
     }
 
     return lines;
@@ -830,20 +835,29 @@ export class StandardRenderer {
 
     const gapWidth = 2 * (columns.length - 1);
     const available = Math.max(columns.length, dataWidth - gapWidth);
-    const firstColumn = columns[0]!;
-    const firstNaturalWidth = Math.max(
-      measureVisibleWidth(firstColumn.header),
-      ...options.map((option) => measureVisibleWidth(option.cells?.[firstColumn.key] ?? option.label))
+    const primaryIndex = this.#structuredPromptPrimaryColumnIndex(columns);
+    const primaryColumn = columns[primaryIndex]!;
+    const primaryNaturalWidth = Math.max(
+      measureVisibleWidth(primaryColumn.header),
+      ...options.map((option) => measureVisibleWidth(option.cells?.[primaryColumn.key] ?? option.label))
     );
-    const firstWidth = Math.min(Math.max(8, firstNaturalWidth), Math.max(8, Math.min(24, available - 8)));
-    const remainingColumns = columns.length - 1;
-    const remainingWidth = Math.max(1, available - firstWidth);
-    const baseRemainingWidth = Math.max(1, Math.floor(remainingWidth / remainingColumns));
-    const widths = [firstWidth];
-    for (let i = 1; i < columns.length; i++) {
-      widths.push(i === columns.length - 1
-        ? Math.max(1, available - widths.reduce((sum, width) => sum + width, 0))
-        : baseRemainingWidth);
+    const nonPrimaryIndices = columns
+      .map((_, index) => index)
+      .filter((index) => index !== primaryIndex);
+    const maxPrimaryWidth = Math.max(1, Math.min(24, available - nonPrimaryIndices.length));
+    const primaryWidth = Math.max(1, Math.min(Math.max(8, primaryNaturalWidth), maxPrimaryWidth));
+    const widths = Array.from({ length: columns.length }, () => 1);
+    widths[primaryIndex] = primaryWidth;
+    const remainingWidth = Math.max(nonPrimaryIndices.length, available - primaryWidth);
+    const baseRemainingWidth = Math.max(1, Math.floor(remainingWidth / nonPrimaryIndices.length));
+    let assigned = primaryWidth;
+    for (let i = 0; i < nonPrimaryIndices.length; i++) {
+      const index = nonPrimaryIndices[i]!;
+      const width = i === nonPrimaryIndices.length - 1
+        ? Math.max(1, available - assigned)
+        : baseRemainingWidth;
+      widths[index] = width;
+      assigned += width;
     }
     return widths;
   }
@@ -853,20 +867,36 @@ export class StandardRenderer {
     columns: readonly OnboardingPromptColumn[]
   ): Record<string, string> {
     const cells: Record<string, string> = { ...(option.cells ?? {}) };
-    const firstColumn = columns[0];
-    if (firstColumn !== undefined && cells[firstColumn.key] === undefined) {
-      cells[firstColumn.key] = option.label;
+    const primaryColumn = this.#structuredPromptPrimaryColumn(columns);
+    if (primaryColumn !== undefined && cells[primaryColumn.key] === undefined) {
+      cells[primaryColumn.key] = option.label;
     }
-    if (columns.length === 1 && option.description !== undefined && cells[firstColumn?.key ?? ""] === option.label) {
-      cells[firstColumn!.key] = `${option.label} ${option.description}`;
+    if (columns.length === 1 && option.description !== undefined && cells[primaryColumn?.key ?? ""] === option.label) {
+      cells[primaryColumn!.key] = `${option.label} ${option.description}`;
     }
     if (columns.length > 1 && option.description !== undefined) {
-      const descriptionColumn = columns.find((column) => column.key === "description") ?? columns[columns.length - 1];
+      const descriptionColumn = this.#structuredPromptDescriptionColumn(columns);
       if (descriptionColumn !== undefined && cells[descriptionColumn.key] === undefined) {
         cells[descriptionColumn.key] = option.description;
       }
     }
     return cells;
+  }
+
+  #structuredPromptPrimaryColumnIndex(columns: readonly OnboardingPromptColumn[]): number {
+    const nameIndex = columns.findIndex((column) => column.key === "name");
+    return nameIndex >= 0 ? nameIndex : 0;
+  }
+
+  #structuredPromptPrimaryColumn(columns: readonly OnboardingPromptColumn[]): OnboardingPromptColumn | undefined {
+    return columns[this.#structuredPromptPrimaryColumnIndex(columns)];
+  }
+
+  #structuredPromptDescriptionColumn(columns: readonly OnboardingPromptColumn[]): OnboardingPromptColumn | undefined {
+    const descriptionColumn = columns.find((column) => column.key === "description");
+    if (descriptionColumn !== undefined) return descriptionColumn;
+    const primaryIndex = this.#structuredPromptPrimaryColumnIndex(columns);
+    return columns.find((_, index) => index !== primaryIndex) ?? columns[columns.length - 1];
   }
 
   #structuredPromptRow(
@@ -882,14 +912,15 @@ export class StandardRenderer {
       const rawValue = cells[column.key] ?? "";
       const width = widths[index] ?? 1;
       if (kind === "option" && index === columns.length - 1 && badges.length > 0) {
-        return this.#structuredPromptCellWithBadges(rawValue, badges, width, locale, direction, index === 0);
+        const primaryValue = column.key === "name" || (index === 0 && columns.every((candidate) => candidate.key !== "name"));
+        return this.#structuredPromptCellWithBadges(rawValue, badges, width, locale, direction, primaryValue);
       }
       const text = kind === "header"
         ? this.#secondary(this.#localizedPromptCell(rawValue, locale, direction, width))
-        : index === 0
+        : column.key === "name" || (index === 0 && columns.every((candidate) => candidate.key !== "name"))
           ? this.#primary(this.#localizedPromptCell(rawValue, locale, direction, width))
           : this.#muted(this.#localizedPromptCell(rawValue, locale, direction, width));
-      return padVisibleEnd(text, width);
+      return this.#padStructuredPromptCell(text, width, column.align);
     });
     return renderedCells.join("  ");
   }
@@ -920,6 +951,10 @@ export class StandardRenderer {
       return padVisibleEnd(styledBadges, width);
     }
     return `${padVisibleEnd(styledValue, valueWidth)}${gap}${styledBadges}`;
+  }
+
+  #padStructuredPromptCell(text: string, width: number, align?: OnboardingPromptColumn["align"]): string {
+    return align === "right" ? padVisibleStart(text, width) : padVisibleEnd(text, width);
   }
 
   #localizedPromptCell(value: string, locale: UiLocale, direction: TextDirection, maxWidth: number): string {

@@ -2,7 +2,7 @@
 // Deterministic, ASCII-safe plain-text output for all ViewModel types.
 // No ANSI, no emoji, no color, no animation, no terminal-width detection.
 
-import { measureTextWidth, measureVisibleWidth, padVisibleAlign, padVisibleEnd, truncateVisible, wrapText } from "./layout.js";
+import { measureTextWidth, measureVisibleWidth, padVisibleAlign, padVisibleEnd, padVisibleStart, truncateVisible, wrapText } from "./layout.js";
 import type { UiLocale } from "../../ui/cli-ui-copy.js";
 import { chromeCopy } from "../../ui/cli-ui-copy.js";
 import { closeOpenBidiIsolates, isolateLtr, isolateRtl } from "../../ui/bidi.js";
@@ -584,10 +584,13 @@ function hasStructuredPromptRows(vm: OnboardingPromptCardViewModel): boolean {
 
 function renderPlainStructuredOnboardingOptions(vm: OnboardingPromptCardViewModel, locale: UiLocale): string[] {
   const columns = vm.columns ?? [];
+  const tableDirection = vm.tableDirection ?? "ltr";
   const widths = plainStructuredColumnWidths(columns, vm.options);
   const lines: string[] = vm.showColumnHeaders === false
     ? []
-    : [`  ${plainStructuredRow(columns, Object.fromEntries(columns.map((column) => [column.key, column.header])), [], widths, locale)}`];
+    : [tableDirection === "rtl"
+      ? `  ${plainStructuredRow(columns, Object.fromEntries(columns.map((column) => [column.key, column.header])), [], widths, locale)}  `
+      : `  ${plainStructuredRow(columns, Object.fromEntries(columns.map((column) => [column.key, column.header])), [], widths, locale)}`];
 
   let renderedNavigationSeparator = false;
   for (let i = 0; i < vm.options.length; i++) {
@@ -604,7 +607,7 @@ function renderPlainStructuredOnboardingOptions(vm: OnboardingPromptCardViewMode
       widths,
       locale
     );
-    lines.push(`${marker} ${row}`);
+    lines.push(tableDirection === "rtl" ? `${row} ${marker}` : `${marker} ${row}`);
   }
 
   return lines;
@@ -617,17 +620,22 @@ function plainStructuredColumnWidths(
   if (columns.length === 0) return [];
   if (columns.length === 1) return [PLAIN_ONBOARDING_DESCRIPTION_WIDTH];
 
-  const first = columns[0]!;
-  const firstWidth = Math.min(24, Math.max(
-    measureVisibleWidth(first.header),
-    ...options.map((option) => measureVisibleWidth(option.cells?.[first.key] ?? option.label))
+  const primaryIndex = plainStructuredPrimaryColumnIndex(columns);
+  const primary = columns[primaryIndex]!;
+  const primaryWidth = Math.min(24, Math.max(
+    measureVisibleWidth(primary.header),
+    ...options.map((option) => measureVisibleWidth(option.cells?.[primary.key] ?? option.label))
   ));
-  const remaining = Math.max(16, PLAIN_ONBOARDING_DESCRIPTION_WIDTH - firstWidth - (2 * (columns.length - 1)));
-  const widths = [firstWidth];
-  for (let i = 1; i < columns.length; i++) {
-    widths.push(i === columns.length - 1
+  const nonPrimaryIndices = columns
+    .map((_, index) => index)
+    .filter((index) => index !== primaryIndex);
+  const remaining = Math.max(16, PLAIN_ONBOARDING_DESCRIPTION_WIDTH - primaryWidth - (2 * (columns.length - 1)));
+  const widths = Array.from({ length: columns.length }, () => 1);
+  widths[primaryIndex] = primaryWidth;
+  for (let i = 0; i < nonPrimaryIndices.length; i++) {
+    widths[nonPrimaryIndices[i]!] = i === nonPrimaryIndices.length - 1
       ? remaining
-      : Math.max(8, Math.floor(remaining / (columns.length - 1))));
+      : Math.max(8, Math.floor(remaining / nonPrimaryIndices.length));
   }
   return widths;
 }
@@ -637,17 +645,33 @@ function plainStructuredOptionCells(
   columns: readonly OnboardingPromptColumn[]
 ): Record<string, string> {
   const cells: Record<string, string> = { ...(option.cells ?? {}) };
-  const firstColumn = columns[0];
-  if (firstColumn !== undefined && cells[firstColumn.key] === undefined) {
-    cells[firstColumn.key] = option.label;
+  const primaryColumn = plainStructuredPrimaryColumn(columns);
+  if (primaryColumn !== undefined && cells[primaryColumn.key] === undefined) {
+    cells[primaryColumn.key] = option.label;
   }
   if (columns.length > 1 && option.description !== undefined) {
-    const descriptionColumn = columns.find((column) => column.key === "description") ?? columns[columns.length - 1];
+    const descriptionColumn = plainStructuredDescriptionColumn(columns);
     if (descriptionColumn !== undefined && cells[descriptionColumn.key] === undefined) {
       cells[descriptionColumn.key] = option.description;
     }
   }
   return cells;
+}
+
+function plainStructuredPrimaryColumnIndex(columns: readonly OnboardingPromptColumn[]): number {
+  const nameIndex = columns.findIndex((column) => column.key === "name");
+  return nameIndex >= 0 ? nameIndex : 0;
+}
+
+function plainStructuredPrimaryColumn(columns: readonly OnboardingPromptColumn[]): OnboardingPromptColumn | undefined {
+  return columns[plainStructuredPrimaryColumnIndex(columns)];
+}
+
+function plainStructuredDescriptionColumn(columns: readonly OnboardingPromptColumn[]): OnboardingPromptColumn | undefined {
+  const descriptionColumn = columns.find((column) => column.key === "description");
+  if (descriptionColumn !== undefined) return descriptionColumn;
+  const primaryIndex = plainStructuredPrimaryColumnIndex(columns);
+  return columns.find((_, index) => index !== primaryIndex) ?? columns[columns.length - 1];
 }
 
 function plainStructuredRow(
@@ -664,8 +688,12 @@ function plainStructuredRow(
       return plainStructuredCellWithBadges(value, badges, width, locale);
     }
     const localized = locale === "ar" ? plainStructuredArabicCell(value) : value;
-    return padVisibleEnd(truncateVisible(localized, width), width);
+    return plainStructuredPadCell(truncateVisible(localized, width), width, column.align);
   }).join("  ");
+}
+
+function plainStructuredPadCell(text: string, width: number, align?: OnboardingPromptColumn["align"]): string {
+  return align === "right" ? padVisibleStart(text, width) : padVisibleEnd(text, width);
 }
 
 function plainStructuredCellWithBadges(
