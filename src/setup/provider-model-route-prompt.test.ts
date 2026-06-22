@@ -235,6 +235,12 @@ describe("selectProviderModelRoute", () => {
     ]);
     expect(providerPrompt.tableDirection).toBeUndefined();
     expect(modelPrompt.tableDirection).toBeUndefined();
+    expect(providerPrompt.tableWidth).toBeUndefined();
+    expect(modelPrompt.tableWidth).toBeUndefined();
+    expect(providerPrompt.tableMaxWidth).toBeUndefined();
+    expect(modelPrompt.tableMaxWidth).toBeUndefined();
+    expect(providerPrompt.tableAlign).toBeUndefined();
+    expect(modelPrompt.tableAlign).toBeUndefined();
     expect(providerPrompt.showColumnHeaders).toBeUndefined();
     expect(providerPrompt.options[0]).toMatchObject({
       id: "openai",

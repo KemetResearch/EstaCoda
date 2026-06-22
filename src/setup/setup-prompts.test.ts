@@ -9,7 +9,10 @@ import {
   promptSetupYesNo,
   renderSetupApplyEndState,
   setupChoiceColumns,
+  setupChoiceTableAlign,
   setupChoiceTableDirection,
+  setupChoiceTableMaxWidth,
+  setupChoiceTableWidth,
   setupCopyText,
   setupCsvPromptLabel,
   setupCurrentStatusLine,
@@ -138,6 +141,9 @@ describe("setup prompt context", () => {
       showCurrentBadge: false,
       showColumnHeaders: false,
       tableDirection: setupChoiceTableDirection("en"),
+      tableWidth: setupChoiceTableWidth("en"),
+      tableMaxWidth: setupChoiceTableMaxWidth("en"),
+      tableAlign: setupChoiceTableAlign("en"),
       choices: [
         {
           id: "alpha",
@@ -170,6 +176,9 @@ describe("setup prompt context", () => {
     expect(seen?.showCurrentBadge).toBe(false);
     expect(seen?.showColumnHeaders).toBe(false);
     expect(seen?.tableDirection).toBe("ltr");
+    expect(seen?.tableWidth).toBe("full");
+    expect(seen?.tableMaxWidth).toBeUndefined();
+    expect(seen?.tableAlign).toBeUndefined();
     expect(seen?.options[0]).toMatchObject({
       id: "alpha",
       label: "Alpha",
@@ -211,6 +220,9 @@ describe("setup prompt context", () => {
     expect(selected).toBe(false);
     expect(seen?.columns).toBeUndefined();
     expect(seen?.tableDirection).toBeUndefined();
+    expect(seen?.tableWidth).toBeUndefined();
+    expect(seen?.tableMaxWidth).toBeUndefined();
+    expect(seen?.tableAlign).toBeUndefined();
     expect(seen?.statusLines).toBeUndefined();
     expect(seen?.hint).toBe(setupNavigationHint("en"));
     expect(seen?.showCurrentBadge).toBeUndefined();
@@ -231,6 +243,12 @@ describe("setup prompt context", () => {
     ]);
     expect(setupChoiceTableDirection("ar")).toBe("rtl");
     expect(setupChoiceTableDirection("en")).toBe("ltr");
+    expect(setupChoiceTableWidth("ar")).toBe("content");
+    expect(setupChoiceTableWidth("en")).toBe("full");
+    expect(setupChoiceTableMaxWidth("ar")).toBe(88);
+    expect(setupChoiceTableMaxWidth("en")).toBeUndefined();
+    expect(setupChoiceTableAlign("ar")).toBe("right");
+    expect(setupChoiceTableAlign("en")).toBeUndefined();
     expect(setupCurrentStatusLine("ar", "English")).toEqual({
       text: "الحالي: English",
       tone: "active",

@@ -1,6 +1,11 @@
 import type { SelectPromptInput } from "../cli/interactive-select.js";
 import type { Prompt } from "../cli/readline-prompt.js";
-import type { PromptCardBodyLineStyle, PromptCardStatusLine } from "../contracts/view-model.js";
+import type {
+  PromptCardBodyLineStyle,
+  PromptCardStatusLine,
+  PromptCardTableAlign,
+  PromptCardTableWidth,
+} from "../contracts/view-model.js";
 import { isolateLtr, isolateRtl } from "../ui/bidi.js";
 import {
   promptUiContextForLocale,
@@ -90,6 +95,9 @@ export type PromptSetupChoiceInput<T> = {
   readonly showCurrentBadge?: boolean;
   readonly showColumnHeaders?: boolean;
   readonly tableDirection?: "ltr" | "rtl";
+  readonly tableWidth?: PromptCardTableWidth;
+  readonly tableMaxWidth?: number;
+  readonly tableAlign?: PromptCardTableAlign;
 };
 
 const SETUP_BACK_CHOICE_VALUE = Symbol("setup-back-choice");
@@ -129,6 +137,9 @@ export async function promptSetupChoice<T>(
       showCurrentBadge: input.showCurrentBadge,
       showColumnHeaders: input.showColumnHeaders,
       tableDirection: input.tableDirection,
+      tableWidth: input.tableWidth,
+      tableMaxWidth: input.tableMaxWidth,
+      tableAlign: input.tableAlign,
       locale: uiContext.locale,
       direction: uiContext.direction,
     } satisfies SelectPromptInput<T>);
@@ -186,6 +197,18 @@ export function setupChoiceColumns(locale: SetupCopyLocale): readonly SetupChoic
 
 export function setupChoiceTableDirection(locale: SetupCopyLocale): "ltr" | "rtl" {
   return locale === "ar" ? "rtl" : "ltr";
+}
+
+export function setupChoiceTableWidth(locale: SetupCopyLocale): PromptCardTableWidth {
+  return locale === "ar" ? "content" : "full";
+}
+
+export function setupChoiceTableMaxWidth(locale: SetupCopyLocale): number | undefined {
+  return locale === "ar" ? 88 : undefined;
+}
+
+export function setupChoiceTableAlign(locale: SetupCopyLocale): PromptCardTableAlign | undefined {
+  return locale === "ar" ? "right" : undefined;
 }
 
 export function setupNavigationHint(_locale: SetupCopyLocale): string {

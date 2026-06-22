@@ -152,6 +152,9 @@ describe("runConfigEditor", () => {
       bodyLineStyles: SelectPromptInput<unknown>["bodyLineStyles"];
       columns: SelectPromptInput<unknown>["columns"];
       tableDirection: SelectPromptInput<unknown>["tableDirection"];
+      tableWidth: SelectPromptInput<unknown>["tableWidth"];
+      tableMaxWidth: SelectPromptInput<unknown>["tableMaxWidth"];
+      tableAlign: SelectPromptInput<unknown>["tableAlign"];
       showColumnHeaders: SelectPromptInput<unknown>["showColumnHeaders"];
       hint: string | undefined;
       values: unknown[];
@@ -167,6 +170,9 @@ describe("runConfigEditor", () => {
         bodyLineStyles: input.bodyLineStyles,
         columns: input.columns,
         tableDirection: input.tableDirection,
+        tableWidth: input.tableWidth,
+        tableMaxWidth: input.tableMaxWidth,
+        tableAlign: input.tableAlign,
         showColumnHeaders: input.showColumnHeaders,
         hint: input.hint,
         values: input.options.map((option) => option.value),
@@ -207,6 +213,9 @@ describe("runConfigEditor", () => {
       { key: "name", header: "الاسم", align: "right" },
     ]);
     expect(prompts[0]?.tableDirection).toBe("rtl");
+    expect(prompts[0]?.tableWidth).toBe("content");
+    expect(prompts[0]?.tableMaxWidth).toBe(88);
+    expect(prompts[0]?.tableAlign).toBe("right");
     expect(prompts[0]?.showColumnHeaders).toBe(false);
     expect(prompts[0]?.hint).toBe("↑↓ navigate   ENTER select   CTRL+C exit");
     expect(prompts[0]?.labels).toContain("النموذج الأساسي");
@@ -341,6 +350,9 @@ describe("runConfigEditor", () => {
         { key: "description", header: "Details", align: "left" },
       ]);
       expect(input.tableDirection).toBe("ltr");
+      expect(input.tableWidth).toBe("full");
+      expect(input.tableMaxWidth).toBeUndefined();
+      expect(input.tableAlign).toBeUndefined();
       expect(input.showColumnHeaders).toBe(false);
       expect(input.options.every((option) => option.cells === undefined)).toBe(true);
     }
@@ -606,6 +618,29 @@ describe("runConfigEditor", () => {
     expect(searchInput?.statusLines).toBeUndefined();
     expect(searchInput?.showCurrentBadge).toBeUndefined();
     expect(searchInput?.options.some((option) => option.current === true)).toBe(false);
+  });
+
+  it("uses compact right-aligned Arabic setup table layout for web search provider choices", async () => {
+    const prompt = fakePrompt();
+    const selectInputs = captureSelectInputs(prompt);
+
+    const webSearch = await promptWebSearchCapability(prompt, { ddgsCapabilityStatus: "missing" }, "ar");
+
+    const searchInput = selectInputs.find((input) =>
+      input.options.some((option) => option.id === "web-search-none")
+    );
+    expect(webSearch).toEqual({ provider: "none" });
+    expect(searchInput?.columns).toEqual([
+      { key: "description", header: "التفاصيل", align: "right" },
+      { key: "name", header: "الاسم", align: "right" },
+    ]);
+    expect(searchInput?.tableDirection).toBe("rtl");
+    expect(searchInput?.tableWidth).toBe("content");
+    expect(searchInput?.tableMaxWidth).toBe(88);
+    expect(searchInput?.tableAlign).toBe("right");
+    expect(searchInput?.showColumnHeaders).toBe(false);
+    expect(searchInput?.hint).toBe("↑↓ navigate   ENTER select   CTRL+C exit");
+    expect(searchInput?.options.find((option) => option.id === "web-search-none")?.group).toBeUndefined();
   });
 
   it("groups DDGS install skip as navigation without grouping web search provider choices", async () => {
