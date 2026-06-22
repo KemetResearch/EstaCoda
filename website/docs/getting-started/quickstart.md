@@ -79,6 +79,8 @@ The Onboarding Wizard walks through the setup in this order:
 
 Setup is reviewed before apply. The wizard shows a summary before committing configuration changes, and raw secrets are not displayed in review output.
 
+The wizard includes `Back` on choice prompts where it helps correct a prior setup choice. Text and secret entry prompts keep their normal behavior.
+
 First-run onboarding can configure Channels, Voice, Search, and Browser. Image generation, fallback models, and deeper provider configuration are available after the base setup through the Setup Editor and dedicated CLI commands.
 
 ## 3. Configure one working model

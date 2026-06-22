@@ -447,6 +447,7 @@ HOME=/tmp/estacoda-qa-first-run pnpm run dev -- setup --interactive
 - The Onboarding Wizard starts because no usable config exists.
 - The visible sequence is setup detection, profile bootstrap, welcome, language/style, workspace, workspace trust, model route, safety, Agent Evolution, optional capabilities, summary, apply, launch.
 - Primary provider/model setup uses the shared provider/model picker.
+- `Back` appears selectively on structured choice prompts where it prevents dead ends: workspace trust, provider/model, credential handling, security mode, Agent Evolution, optional capabilities, nested optional capability choices, and the final summary. Verify that `Back` returns to the previous meaningful step, preserves already entered values as current/default selections, and does not add `/back` handling to raw text or secret prompts.
 - Hosted provider credential input is masked.
 - Credential summary shows only `Not set`, `Existing credential detected`, or `New credential pending`.
 - Cancelling before apply leaves no config, trust, state, or `.env` mutation from the cancelled plan.

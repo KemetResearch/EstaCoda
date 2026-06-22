@@ -719,6 +719,23 @@ describe("runFirstRunSetup", () => {
     expect(result.selections.workspaceTrusted).toBe(true);
   });
 
+  it("does not apply partial workspace trust after Workspace trust Back", async () => {
+    const result = await runFirstRunSetup({
+      homeDir: tempDir,
+      workspaceRoot,
+      prompt: fakePrompt({
+        "Workspace trust": ["Back", "Decide Later"],
+      }),
+      flowEngine: flowEngine(),
+      applyExecutor: reviewedExecutor(tempDir, workspaceRoot),
+    });
+
+    expect(result.completed).toBe(true);
+    expect(result.selections.workspaceTrusted).toBe(false);
+    expect(result.reviewManifest.sections["workspace-trust-grants"]).toHaveLength(0);
+    await expect(readFile(join(tempDir, ".estacoda", "trust.json"), "utf8")).rejects.toThrow();
+  });
+
   it("lets Decide Later save config without ready or complete wording", async () => {
     const result = await runFirstRunSetup({
       homeDir: tempDir,
@@ -1615,6 +1632,31 @@ describe("runFirstRunSetup", () => {
     await expect(readFile(profileEnvPath(tempDir), "utf8")).resolves.toBe("");
     await expect(readFile(profileConfigPath(tempDir), "utf8")).resolves.toContain("\"provider\": \"unconfigured\"");
     await expect(readFile(join(tempDir, ".estacoda", "trust.json"), "utf8")).rejects.toThrow();
+  });
+
+  it("does not write optional capability config or secrets when summary Cancel is selected", async () => {
+    const result = await runFirstRunSetup({
+      homeDir: tempDir,
+      workspaceRoot,
+      prompt: fakePrompt(browserPromptOverrides(
+        resolveSetupCopy("en", "setupEditor.prompt.browser.mode.browserbase"),
+        {
+          "Configuration summary": "Cancel",
+          __secret: ["bb-cancelled-api-key", "bb-cancelled-project-id"],
+        }
+      )),
+      flowEngine: flowEngine(),
+      applyExecutor: reviewedExecutor(tempDir, workspaceRoot),
+    });
+    const config = await readProfileConfig(tempDir) as { browser?: unknown };
+
+    expect(result.completed).toBe(false);
+    expect(result.applyPlanningResult.kind).toBe("cancelled");
+    expect(config.browser).toBeUndefined();
+    await expect(readFile(profileEnvPath(tempDir), "utf8")).resolves.toBe("");
+    await expect(readFile(join(tempDir, ".estacoda", "trust.json"), "utf8")).rejects.toThrow();
+    expect(JSON.stringify(result)).not.toContain("bb-cancelled-api-key");
+    expect(JSON.stringify(result)).not.toContain("bb-cancelled-project-id");
   });
 
   it("does not write a collected API key when reviewed apply is blocked before deferred secrets", async () => {
