@@ -3310,20 +3310,41 @@ describe("runConfigEditor", () => {
       },
     });
     await trustWorkspace(tempDir, workspaceRoot);
+    const selectCalls: Array<{
+      title: string;
+      body: string;
+      columns?: unknown;
+      labels: string[];
+      descriptions: Array<string | undefined>;
+      values: unknown[];
+    }> = [];
+    const prompt = fakePrompt({
+      values: [
+        "tts",
+        "enable",
+        "openai",
+        "gpt-4o-mini-tts",
+        "VOICE_TTS_KEY",
+        true,
+      ],
+    });
+    const baseSelect = prompt.select!;
+    prompt.select = async (input) => {
+      selectCalls.push({
+        title: input.title,
+        body: input.body ?? "",
+        columns: input.columns,
+        labels: input.options.map((option) => option.label),
+        descriptions: input.options.map((option) => option.description),
+        values: input.options.map((option) => option.value),
+      });
+      return baseSelect(input);
+    };
 
     const result = await runConfigEditor({
       homeDir: tempDir,
       workspaceRoot,
-      prompt: fakePrompt({
-        values: [
-          "tts",
-          "enable",
-          "openai",
-          "gpt-4o-mini-tts",
-          "VOICE_TTS_KEY",
-          true,
-        ],
-      }),
+      prompt,
       defaultActionId: "configure-voice",
       applyExecutor: createReviewedSetupApplyExecutor({
         homeDir: tempDir,
@@ -3338,6 +3359,7 @@ describe("runConfigEditor", () => {
       imageGen?: unknown;
       browser?: unknown;
     };
+    const ttsProviderPrompt = selectCalls.find((call) => call.body.includes("Choose your TTS provider:"));
 
     expect(result.completed).toBe(true);
     expect(result.selectedActionId).toBe("configure-voice");
@@ -3363,6 +3385,46 @@ describe("runConfigEditor", () => {
     expect(config.channels).toBeUndefined();
     expect(config.imageGen).toBeUndefined();
     expect(config.browser).toBeUndefined();
+    expect(ttsProviderPrompt?.body).toBe("Choose your TTS provider:");
+    expect(ttsProviderPrompt?.columns).toEqual([
+      { key: "name", header: "Name", align: "left" },
+      { key: "description", header: "Details", align: "left" },
+    ]);
+    expect(ttsProviderPrompt?.labels).toEqual([
+      "Edge",
+      "ElevenLabs",
+      "OpenAI",
+      "Minimax",
+      "Mistral",
+      "Gemini",
+      "Xai",
+      "Neutts",
+      "Kittentts",
+      "Back",
+    ]);
+    expect(ttsProviderPrompt?.descriptions).toEqual([
+      "via Microsoft. No API key required. Recommended.",
+      "ElevenLabs voice synthesis. Requires API key.",
+      "OpenAI speech models. Requires API key.",
+      "Minimax speech synthesis. Requires API key.",
+      "Mistral Voxtral TTS. Not enabled yet.",
+      "Gemini speech synthesis. Requires API key.",
+      "xAI speech synthesis. Requires API key.",
+      "Local NeuTTS. No API key required. Not enabled yet.",
+      "Local KittenTTS. No API key required. Not enabled yet.",
+      "Return to the previous step.",
+    ]);
+    expect(ttsProviderPrompt?.values.slice(0, 9)).toEqual([
+      "edge",
+      "elevenlabs",
+      "openai",
+      "minimax",
+      "mistral",
+      "gemini",
+      "xai",
+      "neutts",
+      "kittentts",
+    ]);
     expect(rawConfig).not.toContain("sk-");
     expect(JSON.stringify(result)).not.toContain("sk-");
   });
@@ -3419,6 +3481,7 @@ describe("runConfigEditor", () => {
     const selectCalls: Array<{
       title: string;
       body: string;
+      columns?: unknown;
       labels: string[];
       descriptions: Array<string | undefined>;
       values: unknown[];
@@ -3437,6 +3500,7 @@ describe("runConfigEditor", () => {
       selectCalls.push({
         title: input.title,
         body: input.body ?? "",
+        columns: input.columns,
         labels: input.options.map((option) => option.label),
         descriptions: input.options.map((option) => option.description),
         values: input.options.map((option) => option.value),
@@ -3470,7 +3534,7 @@ describe("runConfigEditor", () => {
         };
       };
     };
-    const sttProviderPrompt = selectCalls.find((call) => call.body.includes("STT provider"));
+    const sttProviderPrompt = selectCalls.find((call) => call.body.includes("Choose your STT provider:"));
     const localModelPrompt = selectCalls.find((call) => call.body.includes("Pick the faster-whisper STT model"));
 
     expect(result.completed).toBe(true);
@@ -3496,6 +3560,18 @@ describe("runConfigEditor", () => {
     });
     expect(sttProviderPrompt?.labels).toContain("Local (via faster-whisper)");
     expect(sttProviderPrompt?.values).toContain("local");
+    expect(sttProviderPrompt?.body).toBe("Choose your STT provider:");
+    expect(sttProviderPrompt?.columns).toEqual([
+      { key: "name", header: "Name", align: "left" },
+      { key: "description", header: "Details", align: "left" },
+    ]);
+    expect(sttProviderPrompt?.descriptions).toEqual([
+      "Managed via faster-whisper in EstaCoda's Python environment. No API key required. Recommended.",
+      "Groq-hosted Whisper transcription. Requires API key.",
+      "OpenAI transcription models. Requires API key.",
+      "Mistral Voxtral transcription. Requires API key.",
+      "Return to the previous step.",
+    ]);
     expect(localModelPrompt?.title).toBe("Configure STT");
     expect(localModelPrompt?.labels).toEqual([
       "Base (recommended for everyday use)",

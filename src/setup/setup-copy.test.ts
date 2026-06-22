@@ -320,9 +320,24 @@ const SETUP_EDITOR_KEYS = [
   "setupEditor.prompt.voice.mode.tts.description",
   "setupEditor.prompt.voice.summary",
   "setupEditor.prompt.voice.ttsProvider",
+  "setupEditor.prompt.voice.ttsProvider.body",
+  "setupEditor.prompt.voice.ttsProvider.edge.description",
+  "setupEditor.prompt.voice.ttsProvider.elevenlabs.description",
+  "setupEditor.prompt.voice.ttsProvider.openai.description",
+  "setupEditor.prompt.voice.ttsProvider.minimax.description",
+  "setupEditor.prompt.voice.ttsProvider.mistral.description",
+  "setupEditor.prompt.voice.ttsProvider.gemini.description",
+  "setupEditor.prompt.voice.ttsProvider.xai.description",
+  "setupEditor.prompt.voice.ttsProvider.neutts.description",
+  "setupEditor.prompt.voice.ttsProvider.kittentts.description",
   "setupEditor.prompt.voice.ttsModel",
   "setupEditor.prompt.voice.ttsApiKeyEnv",
   "setupEditor.prompt.voice.sttProvider",
+  "setupEditor.prompt.voice.sttProvider.body",
+  "setupEditor.prompt.voice.sttProvider.local.description",
+  "setupEditor.prompt.voice.sttProvider.groq.description",
+  "setupEditor.prompt.voice.sttProvider.openai.description",
+  "setupEditor.prompt.voice.sttProvider.mistral.description",
   "setupEditor.prompt.voice.sttModel",
   "setupEditor.prompt.voice.sttApiKeyEnv",
   "setupEditor.prompt.vision.summary",
@@ -691,6 +706,11 @@ describe("setup copy", () => {
     expect(resolveSetupCopy("ar", "setupEditor.prompt.voice.mode.stt")).toBe(`Speech to Text (${isolateLtr("STT")})`);
     expect(resolveSetupCopy("ar", "setupEditor.prompt.voice.mode.tts")).toBe(`Text to Speech (${isolateLtr("TTS")})`);
     expect(resolveSetupCopy("ar", "setupEditor.prompt.voice.ttsProvider")).toContain(isolateLtr("TTS"));
+    expect(resolveSetupCopy("ar", "setupEditor.prompt.voice.ttsProvider.body")).toBe(`اختر مزوّد ${isolateLtr("TTS")}:`);
+    expect(resolveSetupCopy("ar", "setupEditor.prompt.voice.ttsProvider.edge.description")).toContain(isolateLtr("Microsoft"));
+    expect(resolveSetupCopy("ar", "setupEditor.prompt.voice.ttsProvider.edge.description")).toContain(isolateLtr("API"));
+    expect(resolveSetupCopy("ar", "setupEditor.prompt.voice.ttsProvider.mistral.description")).toContain(isolateLtr("TTS"));
+    expect(resolveSetupCopy("ar", "setupEditor.prompt.voice.sttProvider.body")).toBe(`اختر مزوّد ${isolateLtr("STT")}:`);
     expect(resolveSetupCopy("ar", "setupEditor.prompt.voice.summary")).toContain(isolateLtr("faster-whisper"));
     expect(resolveSetupCopy("ar", "setupEditor.prompt.voice.summary")).toContain(isolateLtr("pythonBinary"));
     expect(resolveSetupCopy("ar", "setupEditor.prompt.voice.summary")).toContain(isolateLtr("~/.estacoda/python-env"));

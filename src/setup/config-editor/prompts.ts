@@ -1226,7 +1226,7 @@ export async function promptTtsCapability(
     : setupRouteStatusText(locale, current.ttsProvider, current.ttsModel);
   const ttsProviderResult = await promptSetupChoiceMaybeBack<TtsProvider>(prompt, {
     title: setupCopyText(locale, "setupModules.voice.title"),
-    message: `${setupCopyText(locale, "setupEditor.prompt.voice.summary")}\n${setupCopyText(locale, "setupEditor.prompt.voice.ttsProvider")}\n`,
+    message: `${setupCopyText(locale, "setupEditor.prompt.voice.ttsProvider.body")}\n`,
     columns: setupChoiceColumns(locale),
     tableDirection: setupChoiceTableDirection(locale),
     tableWidth: setupChoiceTableWidth(locale),
@@ -1237,7 +1237,8 @@ export async function promptTtsCapability(
     showCurrentBadge: currentTtsRoute === undefined ? undefined : false,
     choices: ttsProviders.map((provider) => ({
       id: `tts-${provider}`,
-      label: provider,
+      label: ttsProviderLabel(provider),
+      description: ttsProviderDescription(locale, provider),
       current: current.ttsProvider === provider,
       value: provider,
     })),
@@ -1302,7 +1303,7 @@ export async function promptSttCapability(
   while (true) {
     const sttProviderResult = await promptSetupChoiceMaybeBack<SttProvider>(prompt, {
       title: setupCopyText(locale, "setupModules.voice.title"),
-      message: `${setupCopyText(locale, "setupEditor.prompt.voice.summary")}\n${setupCopyText(locale, "setupEditor.prompt.voice.sttProvider")}\n`,
+      message: `${setupCopyText(locale, "setupEditor.prompt.voice.sttProvider.body")}\n`,
       columns: setupChoiceColumns(locale),
       tableDirection: setupChoiceTableDirection(locale),
       tableWidth: setupChoiceTableWidth(locale),
@@ -1314,6 +1315,7 @@ export async function promptSttCapability(
       choices: sttProviders.map((provider) => ({
         id: `stt-${provider}`,
         label: provider === "local" ? setupCopyText(locale, "setupEditor.prompt.voice.sttProvider.local") : provider,
+        description: sttProviderDescription(locale, provider),
         current: current.sttProvider === provider,
         value: provider,
       })),
@@ -1754,8 +1756,70 @@ function browserCapabilityWithMode<T extends object>(values: T, mode: BrowserSet
 }
 
 const ttsProviders: readonly TtsProvider[] = ["edge", "elevenlabs", "openai", "minimax", "mistral", "gemini", "xai", "neutts", "kittentts"];
-const sttProviders: readonly SttProvider[] = ["local", "groq", "openai", "mistral"];
+type SetupEditorSttProvider = "local" | "groq" | "openai" | "mistral";
+
+const sttProviders: readonly SetupEditorSttProvider[] = ["local", "groq", "openai", "mistral"];
 const imageProviders: readonly ImageGenerationProvider[] = ["fal", "byteplus"];
+
+function ttsProviderLabel(provider: TtsProvider): string {
+  switch (provider) {
+    case "edge":
+      return "Edge";
+    case "elevenlabs":
+      return "ElevenLabs";
+    case "openai":
+      return "OpenAI";
+    case "minimax":
+      return "Minimax";
+    case "mistral":
+      return "Mistral";
+    case "gemini":
+      return "Gemini";
+    case "xai":
+      return "Xai";
+    case "neutts":
+      return "Neutts";
+    case "kittentts":
+      return "Kittentts";
+  }
+}
+
+function ttsProviderDescription(locale: SetupCopyLocale, provider: TtsProvider): string {
+  switch (provider) {
+    case "edge":
+      return setupCopyText(locale, "setupEditor.prompt.voice.ttsProvider.edge.description");
+    case "elevenlabs":
+      return setupCopyText(locale, "setupEditor.prompt.voice.ttsProvider.elevenlabs.description");
+    case "openai":
+      return setupCopyText(locale, "setupEditor.prompt.voice.ttsProvider.openai.description");
+    case "minimax":
+      return setupCopyText(locale, "setupEditor.prompt.voice.ttsProvider.minimax.description");
+    case "mistral":
+      return setupCopyText(locale, "setupEditor.prompt.voice.ttsProvider.mistral.description");
+    case "gemini":
+      return setupCopyText(locale, "setupEditor.prompt.voice.ttsProvider.gemini.description");
+    case "xai":
+      return setupCopyText(locale, "setupEditor.prompt.voice.ttsProvider.xai.description");
+    case "neutts":
+      return setupCopyText(locale, "setupEditor.prompt.voice.ttsProvider.neutts.description");
+    case "kittentts":
+      return setupCopyText(locale, "setupEditor.prompt.voice.ttsProvider.kittentts.description");
+  }
+}
+
+function sttProviderDescription(locale: SetupCopyLocale, provider: SetupEditorSttProvider): string {
+  switch (provider) {
+    case "local":
+      return setupCopyText(locale, "setupEditor.prompt.voice.sttProvider.local.description");
+    case "groq":
+      return setupCopyText(locale, "setupEditor.prompt.voice.sttProvider.groq.description");
+    case "openai":
+      return setupCopyText(locale, "setupEditor.prompt.voice.sttProvider.openai.description");
+    case "mistral":
+      return setupCopyText(locale, "setupEditor.prompt.voice.sttProvider.mistral.description");
+  }
+}
+
 function browserModeFromCurrent(current: {
   readonly backend?: BrowserBackendKind;
   readonly cloudProvider?: BrowserCloudProviderKind;
