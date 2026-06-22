@@ -12,7 +12,22 @@ export type NativeHistoryBuilderOptions = {
   targetProviderFamily?: ProviderReplayEcho["providerFamily"];
   targetApiMode?: ProviderReplayEcho["apiMode"];
   mergeAdjacentUsers?: boolean;
+  replayEchoContext?: ProviderReplayEchoContext;
 };
+
+export type ProviderReplayEchoContext =
+  | {
+      kind: "historical";
+      requiresReasoningEcho: boolean;
+    }
+  | {
+      kind: "active-continuation";
+      activeToolCallIds: ReadonlySet<string>;
+      requiresReasoningEcho: boolean;
+    }
+  | {
+      kind: "strip";
+    };
 
 export type NativeHistoryBuilderStats = {
   nativeToolTurns: number;
@@ -23,6 +38,8 @@ export type NativeHistoryBuilderStats = {
   droppedToolMessages: number;
   skippedUnsafeTurns: number;
   skippedMalformedTurns: number;
+  preservedProviderReplayEcho: number;
+  placeholderProviderReplayEcho: number;
   strippedProviderReplayEcho: number;
   mergedUserMessages: number;
 };
@@ -47,6 +64,8 @@ export function buildNativeHistoryMessages(
     droppedToolMessages: 0,
     skippedUnsafeTurns: 0,
     skippedMalformedTurns: 0,
+    preservedProviderReplayEcho: 0,
+    placeholderProviderReplayEcho: 0,
     strippedProviderReplayEcho: 0,
     mergedUserMessages: 0
   };
@@ -117,14 +136,7 @@ function buildToolCallTurnMessages(
     content: sessionMessages[index]?.content ?? "",
     toolCalls
   };
-  const echo = providerReplayEcho(metadata.providerReplayEcho);
-  if (echo !== undefined) {
-    if (echoMatchesTarget(echo, options)) {
-      assistant.providerReplayEcho = echo;
-    } else {
-      stats.strippedProviderReplayEcho += 1;
-    }
-  }
+  applyProviderReplayEcho(assistant, metadata, toolCalls, missingIds, options, stats);
 
   const providerMessages: ProviderMessage[] = [assistant];
   for (const toolCall of toolCalls) {
@@ -355,6 +367,75 @@ function providerReplayEchoProvenance(value: unknown): ProviderReplayEcho["prove
     return undefined;
   }
   return value === "provider" || value === "protocol-placeholder" ? value : false;
+}
+
+function applyProviderReplayEcho(
+  assistant: ProviderMessage,
+  metadata: ProviderToolCallTurnMetadata,
+  toolCalls: ProviderStructuredToolCall[],
+  missingIds: string[],
+  options: NativeHistoryBuilderOptions,
+  stats: NativeHistoryBuilderStats
+): void {
+  const rawEchoExists = metadata.providerReplayEcho !== undefined;
+  const echo = providerReplayEcho(metadata.providerReplayEcho);
+  const context = options.replayEchoContext ?? { kind: "strip" as const };
+
+  if (
+    context.kind === "active-continuation" &&
+    echo !== undefined &&
+    isProviderOriginatedEcho(echo) &&
+    echoMatchesTarget(echo, options) &&
+    missingIds.length === 0 &&
+    toolCallIdsExactlyMatch(toolCalls, context.activeToolCallIds)
+  ) {
+    assistant.providerReplayEcho = echo;
+    stats.preservedProviderReplayEcho += 1;
+    return;
+  }
+
+  if (rawEchoExists) {
+    stats.strippedProviderReplayEcho += 1;
+  }
+
+  if (context.kind !== "strip" && context.requiresReasoningEcho === true) {
+    const placeholder = providerReplayEchoPlaceholder(options);
+    if (placeholder !== undefined) {
+      assistant.providerReplayEcho = placeholder;
+      stats.placeholderProviderReplayEcho += 1;
+    }
+  }
+}
+
+function isProviderOriginatedEcho(echo: ProviderReplayEcho): boolean {
+  return echo.provenance === undefined || echo.provenance === "provider";
+}
+
+function providerReplayEchoPlaceholder(options: NativeHistoryBuilderOptions): ProviderReplayEcho | undefined {
+  if (
+    options.targetProviderFamily === undefined ||
+    options.targetApiMode !== "openai_chat_completions"
+  ) {
+    return undefined;
+  }
+  return {
+    field: "reasoning_content",
+    value: " ",
+    providerFamily: options.targetProviderFamily,
+    apiMode: "openai_chat_completions",
+    chars: 1,
+    provenance: "protocol-placeholder"
+  };
+}
+
+function toolCallIdsExactlyMatch(
+  toolCalls: ProviderStructuredToolCall[],
+  activeToolCallIds: ReadonlySet<string>
+): boolean {
+  if (toolCalls.length !== activeToolCallIds.size) {
+    return false;
+  }
+  return toolCalls.every((toolCall) => activeToolCallIds.has(toolCall.id));
 }
 
 function echoMatchesTarget(echo: ProviderReplayEcho, options: NativeHistoryBuilderOptions): boolean {
