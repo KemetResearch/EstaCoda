@@ -42,8 +42,16 @@ type ModelDescriptionOverride = {
 
 const MODEL_DESCRIPTION_OVERRIDES: Readonly<Record<string, ModelDescriptionOverride>> = {
   "openai:gpt-5-mini": {
-    en: "Cost-conscious choice for auxiliary tasks.",
-    ar: "خيار منخفض التكلفة للمهام المساعدة.",
+    en: "Recommended auxiliary model.",
+    ar: "نموذج مساعد موصى به.",
+  },
+  "deepseek:deepseek-v4-flash": {
+    en: "Recommended auxiliary model.",
+    ar: "نموذج مساعد موصى به.",
+  },
+  "google:gemini-3-flash-preview": {
+    en: "Recommended auxiliary model.",
+    ar: "نموذج مساعد موصى به.",
   },
 };
 

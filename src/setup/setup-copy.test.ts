@@ -731,8 +731,12 @@ describe("setup copy", () => {
   });
 
   it("resolves sparse model description overrides by provider and model id", () => {
-    expect(modelDescriptionOverride("en", "openai", "gpt-5-mini")).toBe("Cost-conscious choice for auxiliary tasks.");
-    expect(modelDescriptionOverride("ar", "openai", "gpt-5-mini")).toBe("خيار منخفض التكلفة للمهام المساعدة.");
+    expect(modelDescriptionOverride("en", "openai", "gpt-5-mini")).toBe("Recommended auxiliary model.");
+    expect(modelDescriptionOverride("ar", "openai", "gpt-5-mini")).toBe("نموذج مساعد موصى به.");
+    expect(modelDescriptionOverride("en", "deepseek", "deepseek-v4-flash")).toBe("Recommended auxiliary model.");
+    expect(modelDescriptionOverride("ar", "deepseek", "deepseek-v4-flash")).toBe("نموذج مساعد موصى به.");
+    expect(modelDescriptionOverride("en", "google", "gemini-3-flash-preview")).toBe("Recommended auxiliary model.");
+    expect(modelDescriptionOverride("ar", "google", "gemini-3-flash-preview")).toBe("نموذج مساعد موصى به.");
     expect(modelDescriptionOverride("en", "google", "gpt-5-mini")).toBeUndefined();
     expect(modelDescriptionOverride("en", "openai", "unknown-model")).toBeUndefined();
   });
