@@ -17,7 +17,6 @@ import { isolateLtr } from "../../ui/bidi.js";
 import { createReviewedSetupApplyExecutor } from "../review/apply-executor.js";
 import { runFirstRunSetup } from "./runner.js";
 import { renderOnboardingWizardSummary } from "./summary.js";
-import { promptModelCandidate, promptProviderCandidate } from "../config-editor/prompts.js";
 import type { FlowEngine, ModelCandidate, ProviderCandidate } from "../../providers/provider-model-selection-flow.js";
 import { readActiveProfile, resolveGlobalStateHome, resolveProfileStateHome } from "../../config/profile-home.js";
 import type { SetupApplyExecutor, SetupApplyMode } from "../setup-apply-plan.js";
@@ -57,7 +56,7 @@ async function readProfileConfig(homeDir: string): Promise<Record<string, unknow
 function browserPromptOverrides(modeLabel: string, extra: Record<string, FakePromptOverrideValue> = {}): Record<string, FakePromptOverrideValue> {
   return {
     [resolveSetupCopy("en", "onboarding.optionalCapabilities.title")]: true,
-    [resolveSetupCopy("en", "onboarding.optionalCapabilities.menu.title")]: "Configure browser",
+    [resolveSetupCopy("en", "onboarding.optionalCapabilities.menu.title")]: "Browser",
     [resolveSetupCopy("en", "setupEditor.prompt.browser.mode.title")]: modeLabel,
     [resolveSetupCopy("en", "onboarding.optionalCapabilities.more.title")]: false,
     ...extra,
@@ -267,7 +266,8 @@ function fakePrompt(
   overrides: Record<string, FakePromptOverrideValue> = {},
   seenOptions: Record<string, readonly string[]> = {},
   seenDescriptions: Record<string, readonly (string | undefined)[]> = {},
-  seenQuestions: { question: string; secret: boolean }[] = []
+  seenQuestions: { question: string; secret: boolean }[] = [],
+  seenSelectInputs: Record<string, SelectPromptInput<unknown>> = {}
 ): Prompt {
   const overrideQueues = new Map<string, (string | boolean)[]>();
   function nextOverride(key: string): string | boolean | undefined {
@@ -293,8 +293,9 @@ function fakePrompt(
     },
     {
       select: async <T>(input: SelectPromptInput<T>): Promise<T> => {
+        seenSelectInputs[input.title] = input as SelectPromptInput<unknown>;
         seenOptions[input.title] = input.options.map((option) => option.label);
-        seenDescriptions[input.title] = input.options.map((option) => option.description);
+        seenDescriptions[input.title] = input.options.map((option) => option.description ?? option.cells?.details);
         const requested = nextOverride(input.title);
         const byLabel = typeof requested === "string"
           ? input.options.find((option) => option.label === requested)
@@ -571,6 +572,39 @@ describe("runFirstRunSetup", () => {
     await expect(readFile(profileConfigPath(tempDir), "utf8")).resolves.toContain("\"provider\": \"unconfigured\"");
     await expect(readFile(profileEnvPath(tempDir), "utf8")).resolves.toBe("");
     await expect(readFile(join(tempDir, ".estacoda", "trust.json"), "utf8")).rejects.toThrow();
+  });
+
+  it("presents onboarding Agent Evolution choices in the configured order", async () => {
+    const seenSelectInputs: Record<string, SelectPromptInput<unknown>> = {};
+
+    const result = await runFirstRunSetup({
+      homeDir: tempDir,
+      workspaceRoot,
+      prompt: fakePrompt({}, {}, {}, [], seenSelectInputs),
+      flowEngine: flowEngine(),
+    });
+
+    const workflowInput = seenSelectInputs[resolveSetupCopy("en", "onboarding.workflowLearning.title")];
+    expect(workflowInput?.options.map((option) => option.label)).toEqual([
+      "Suggest",
+      "Proactive",
+      "Autonomous",
+      "Off",
+    ]);
+    expect(workflowInput?.options.map((option) => option.id)).toEqual([
+      "suggest",
+      "proactive",
+      "autonomous",
+      "none",
+    ]);
+    expect(workflowInput?.options.map((option) => option.value)).toEqual([
+      "suggest",
+      "proactive",
+      "autonomous",
+      "none",
+    ]);
+    expect(workflowInput?.defaultIndex).toBe(0);
+    expect(result.selections.workflowLearning).toBe("suggest");
   });
 
   it("blocks a missing workspace path before the trust prompt", async () => {
@@ -1199,7 +1233,7 @@ describe("runFirstRunSetup", () => {
       prompt: fakePrompt({
         "Primary provider": "OpenAI",
         "Optional capabilities": "Yes",
-        "Configure optional capability": "Configure voice",
+        "Configure optional capability": "Voice",
         "Configure other capabilities now": "Skip",
       }, seenOptions),
       flowEngine: flowEngine({
@@ -1230,13 +1264,13 @@ describe("runFirstRunSetup", () => {
       "Vision and Image Generation",
     ]));
     expect(seenOptions["Configure optional capability"]).toEqual([
-      "Configure channels",
-      "Configure voice",
-      "Configure browser",
+      "Channels",
+      "Voice",
+      "Browser",
       "Search",
       "Skip",
     ]);
-    expect(seenOptions["Configure optional capability"]).not.toContain("Configure image generation");
+    expect(seenOptions["Configure optional capability"]).not.toContain("Image generation");
     expect(result.selections.primaryProvider).toBe("openai");
     expect(result.selections.primaryModel).toBe("gpt-5.5");
     expect(result.selections.optionalCapabilities).toEqual(["voice"]);
@@ -1252,7 +1286,7 @@ describe("runFirstRunSetup", () => {
     expect(result.reviewManifest.sections["enabled-optional-capabilities"]).toHaveLength(1);
   });
 
-  it("exposes the same provider candidates as the setup editor provider prompt helper", async () => {
+  it("uses the shared structured provider route prompt without Back or Cancel", async () => {
     const providers: ProviderCandidate[] = [
       {
         id: "local" as ProviderId,
@@ -1276,29 +1310,33 @@ describe("runFirstRunSetup", () => {
     ];
     const onboardingOptions: Record<string, readonly string[]> = {};
     const onboardingDescriptions: Record<string, readonly (string | undefined)[]> = {};
-    const editorOptions: Record<string, readonly string[]> = {};
-    const editorDescriptions: Record<string, readonly (string | undefined)[]> = {};
+    const onboardingSelects: Record<string, SelectPromptInput<unknown>> = {};
 
     await runFirstRunSetup({
       homeDir: tempDir,
       workspaceRoot,
-      prompt: fakePrompt({}, onboardingOptions, onboardingDescriptions),
+      prompt: fakePrompt({}, onboardingOptions, onboardingDescriptions, [], onboardingSelects),
       flowEngine: flowEngine({ providerCandidates: providers }),
     });
-    await promptProviderCandidate(fakePrompt({}, editorOptions, editorDescriptions), {
-      candidates: providers,
-    }, "en");
 
-    expect(onboardingOptions["Primary provider"]).toEqual(editorOptions["Primary provider"]);
-    expect(onboardingDescriptions["Primary provider"]).toEqual(editorDescriptions["Primary provider"]);
+    expect(onboardingOptions["Primary provider"]).toEqual(["Local", "OpenAI"]);
+    expect(onboardingDescriptions["Primary provider"]).toEqual([
+      "Local OpenAI-compatible models running on your machine.",
+      "Frontier models for high-quality primary reasoning. Direct API.",
+    ]);
+    expect(onboardingSelects["Primary provider"]?.surface).toBe("promptCard");
+    expect(onboardingSelects["Primary provider"]?.columns).toEqual([
+      { key: "name", header: "Name" },
+      { key: "details", header: "Details" },
+    ]);
+    expect(onboardingSelects["Primary provider"]?.options.map((option) => option.id)).not.toEqual(expect.arrayContaining(["back", "cancel"]));
   });
 
-  it("exposes the same model candidates for a chosen provider as the setup editor model prompt helper", async () => {
+  it("uses the shared structured model route prompt", async () => {
     const models = modelStatusCandidates("openai" as ProviderId);
     const onboardingOptions: Record<string, readonly string[]> = {};
     const onboardingDescriptions: Record<string, readonly (string | undefined)[]> = {};
-    const editorOptions: Record<string, readonly string[]> = {};
-    const editorDescriptions: Record<string, readonly (string | undefined)[]> = {};
+    const onboardingSelects: Record<string, SelectPromptInput<unknown>> = {};
     const customFlow: FlowEngine = {
       ...flowEngine({ credentialAction: "reuse" }),
       listProviderCandidates: async () => [{
@@ -1316,16 +1354,32 @@ describe("runFirstRunSetup", () => {
     await runFirstRunSetup({
       homeDir: tempDir,
       workspaceRoot,
-      prompt: fakePrompt({ "Primary provider": "OpenAI" }, onboardingOptions, onboardingDescriptions),
+      prompt: fakePrompt({ "Primary provider": "OpenAI" }, onboardingOptions, onboardingDescriptions, [], onboardingSelects),
       flowEngine: customFlow,
     });
-    await promptModelCandidate(fakePrompt({}, editorOptions, editorDescriptions), {
-      providerId: "openai",
-      candidates: models,
-    }, "en");
 
-    expect(onboardingOptions["Primary model"]).toEqual(editorOptions["Primary model"]);
-    expect(onboardingDescriptions["Primary model"]).toEqual(editorDescriptions["Primary model"]);
+    expect(onboardingOptions["Primary model"]).toEqual([
+      "model-alpha",
+      "model-beta",
+      "model-deprecated",
+      "model-unknown",
+      "model-stable",
+      "model-missing",
+    ]);
+    expect(onboardingDescriptions["Primary model"]).toEqual([
+      "128K context | Alpha",
+      "128K context | Beta",
+      "128K context | Deprecated",
+      "128K context",
+      "128K context",
+      "128K context",
+    ]);
+    expect(onboardingSelects["Primary model"]?.surface).toBe("promptCard");
+    expect(onboardingSelects["Primary model"]?.columns).toEqual([
+      { key: "name", header: "Name" },
+      { key: "details", header: "Details" },
+    ]);
+    expect(onboardingSelects["Primary model"]?.options.map((option) => option.id)).not.toEqual(expect.arrayContaining(["back", "cancel"]));
   });
 
   it("uses the setup editor provider rejection wording when no provider candidates are available", async () => {
@@ -1381,12 +1435,12 @@ describe("runFirstRunSetup", () => {
     });
 
     expect(seenDescriptions["Primary model"]).toEqual([
-      "alpha",
-      "beta",
-      "deprecated",
-      "",
-      "",
-      "",
+      "128K context | Alpha",
+      "128K context | Beta",
+      "128K context | Deprecated",
+      "128K context",
+      "128K context",
+      "128K context",
     ]);
   });
 
@@ -1495,7 +1549,7 @@ describe("runFirstRunSetup", () => {
       workspaceRoot,
       prompt: fakePrompt({
         "Optional capabilities": "Yes",
-        "Configure optional capability": ["Configure channels", "Configure browser"],
+        "Configure optional capability": ["Channels", "Browser"],
         "Configure other capabilities now": ["Yes", "Skip"],
         [resolveSetupCopy("en", "setupEditor.prompt.browser.mode.title")]: resolveSetupCopy("en", "setupEditor.prompt.browser.mode.localSupervised"),
         [resolveSetupCopy("en", "setupEditor.prompt.browser.local.title")]: resolveSetupCopy("en", "setupEditor.prompt.browser.autoLaunch.yes"),
@@ -1521,7 +1575,7 @@ describe("runFirstRunSetup", () => {
       workspaceRoot,
       prompt: fakePrompt({
         "Optional capabilities": "Yes",
-        "Configure optional capability": ["Configure browser", "Skip"],
+        "Configure optional capability": ["Browser", "Skip"],
         "Configure other capabilities now": "Yes",
         [resolveSetupCopy("en", "setupEditor.prompt.browser.mode.title")]: resolveSetupCopy("en", "setupEditor.prompt.browser.mode.localSupervised"),
         [resolveSetupCopy("en", "setupEditor.prompt.browser.local.title")]: resolveSetupCopy("en", "setupEditor.prompt.browser.autoLaunch.yes"),
@@ -1532,8 +1586,8 @@ describe("runFirstRunSetup", () => {
 
     expect(result.selections.optionalCapabilities).toEqual(["browser"]);
     expect(seenOptions["Configure optional capability"]).toEqual([
-      "Configure channels",
-      "Configure voice",
+      "Channels",
+      "Voice",
       "Search",
       "Skip",
     ]);
@@ -1980,7 +2034,7 @@ describe("runFirstRunSetup", () => {
       workspaceRoot,
       prompt: fakePrompt({
         "Optional capabilities": "Yes",
-        "Configure optional capability": "Configure voice",
+        "Configure optional capability": "Voice",
         "Configure other capabilities now": "Skip",
         __prompt: ["", ""],
       }),
@@ -2006,8 +2060,8 @@ describe("runFirstRunSetup", () => {
       workspaceRoot,
       prompt: fakePrompt({
         "Optional capabilities": "Yes",
-        "Configure optional capability": "Configure voice",
-        "Configure voice": "Set Text to Speech (TTS) Provider",
+        "Configure optional capability": "Voice",
+        "Configure voice": "Text to Speech (TTS)",
         "Configure other capabilities now": "Skip",
         __prompt: ["", ""],
       }),
@@ -2038,8 +2092,8 @@ describe("runFirstRunSetup", () => {
       workspaceRoot,
       prompt: fakePrompt({
         "Optional capabilities": "Yes",
-        "Configure optional capability": "Configure voice",
-        "Configure voice": "Set Speech to Text (STT) Provider",
+        "Configure optional capability": "Voice",
+        "Configure voice": "Speech to Text (STT)",
         "Voice": "Local (via faster-whisper)",
         "Configure STT": "base",
         "Configure other capabilities now": "Skip",
@@ -2073,8 +2127,8 @@ describe("runFirstRunSetup", () => {
       workspaceRoot,
       prompt: fakePrompt({
         "Optional capabilities": "Yes",
-        "Configure optional capability": ["Configure voice", "Configure voice"],
-        "Configure voice": ["Set Speech to Text (STT) Provider", "Set Text to Speech (TTS) Provider"],
+        "Configure optional capability": ["Voice", "Voice"],
+        "Configure voice": ["Speech to Text (STT)", "Text to Speech (TTS)"],
         "Voice": ["Local (via faster-whisper)", "openai"],
         "Configure STT": "base",
         "Configure other capabilities now": ["Yes", "Skip"],
@@ -2159,6 +2213,7 @@ describe("runFirstRunSetup", () => {
     expect(result.selections.language).toBe("ar");
     expect(result.selections.interfaceFlavor).toBe("arabic-light");
     expect(result.selections.activityLabels).toBe("ar");
+    expect(seenOptions["Setup language"]).toEqual(["English", "العربية"]);
     expect(seenOptions[resolveSetupCopy("ar", "onboarding.interfaceStyle.title")]).toBeUndefined();
     const selectedWorkspaceRoot = result.selections.workspaceRoot;
     expect(selectedWorkspaceRoot).toBeDefined();
@@ -2201,7 +2256,7 @@ describe("runFirstRunSetup", () => {
     const promptOrder: string[] = [];
     const prompt = fakePrompt({
       "Optional capabilities": "Yes",
-      "Configure optional capability": "Configure channels",
+      "Configure optional capability": "Channels",
       [gatewayServiceActivationPromptTitle]: "Yes",
       [resolveSetupCopy("en", "onboarding.launch.startNow")]: "No",
       __prompt: ["", "42", ""],
@@ -2241,18 +2296,19 @@ describe("runFirstRunSetup", () => {
 
   it("does not install or start when the onboarding gateway prompt is declined", async () => {
     const actions = gatewayServiceActions();
+    const seenSelectInputs: Record<string, SelectPromptInput<unknown>> = {};
 
     const result = await runFirstRunSetup({
       homeDir: tempDir,
       workspaceRoot,
       prompt: fakePrompt({
         "Optional capabilities": "Yes",
-        "Configure optional capability": "Configure channels",
+        "Configure optional capability": "Channels",
         [gatewayServiceActivationPromptTitle]: "Not now",
         [resolveSetupCopy("en", "onboarding.launch.startNow")]: "No",
         __prompt: ["", "42", ""],
         __secret: "123456:telegram-token",
-      }),
+      }, {}, {}, [], seenSelectInputs),
       flowEngine: flowEngine(),
       applyExecutor: reviewedExecutor(tempDir, workspaceRoot),
       gatewayServiceActivation: { serviceActions: actions },
@@ -2265,6 +2321,10 @@ describe("runFirstRunSetup", () => {
     expect(actions.install).not.toHaveBeenCalled();
     expect(actions.start).not.toHaveBeenCalled();
     expect(result.output).toContain(gatewayServiceActivationNotNowGuidance);
+    expect(seenSelectInputs[gatewayServiceActivationPromptTitle]?.options.find((option) => option.id === "yes")?.group)
+      .toBeUndefined();
+    expect(seenSelectInputs[gatewayServiceActivationPromptTitle]?.options.find((option) => option.id === "not-now")?.group)
+      .toBe("navigation");
   });
 
   it("does not offer the onboarding gateway prompt when no channel was configured", async () => {
@@ -2344,7 +2404,7 @@ describe("runFirstRunSetup", () => {
     const promptTitles: string[] = [];
     const prompt = fakePrompt({
       "Optional capabilities": "Yes",
-      "Configure optional capability": "Configure channels",
+      "Configure optional capability": "Channels",
       [resolveSetupCopy("en", "onboarding.launch.startNow")]: "No",
       __prompt: ["", "", ""],
       __secret: "123456:telegram-token",
@@ -2375,7 +2435,7 @@ describe("runFirstRunSetup", () => {
     const promptTitles: string[] = [];
     const prompt = fakePrompt({
       "Optional capabilities": "Yes",
-      "Configure optional capability": "Configure channels",
+      "Configure optional capability": "Channels",
       __prompt: ["", "42", ""],
       __secret: "123456:telegram-token",
     });

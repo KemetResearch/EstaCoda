@@ -92,7 +92,7 @@ const BUILT_IN_METADATA: Record<string, ProviderMetadata> = {
   },
   kimi: {
     id: "kimi",
-    displayName: "Kimi For Coding",
+    displayName: "Kimi",
     catalogKnown: true,
     configurable: true,
     runnable: true,

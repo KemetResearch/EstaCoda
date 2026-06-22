@@ -3,14 +3,37 @@ import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises
 import { dirname, join } from "node:path";
 import { tmpdir } from "node:os";
 import type { Prompt } from "../../cli/readline-prompt.js";
+import type { SelectPromptInput } from "../../cli/interactive-select.js";
 import { WorkspaceTrustStore } from "../../security/workspace-trust-store.js";
 import type { ProviderId, ProviderApiMode, ProviderAuthMethod } from "../../contracts/provider.js";
-import type { FlowEngine, ModelCandidate } from "../../providers/provider-model-selection-flow.js";
+import type { FlowEngine } from "../../providers/provider-model-selection-flow.js";
 import { createReviewedSetupApplyExecutor } from "../review/apply-executor.js";
-import { runConfigEditor } from "./runner.js";
-import { promptBrowserCapability, promptedBrowserCapabilityMode, promptModelCandidate, setupEditorReviewSelectedAreaLabel } from "./prompts.js";
+import { __decideConfigEditorLoopForTest, runConfigEditor } from "./runner.js";
+import {
+  promptAuxiliaryModelTask,
+  promptBrowserCapability,
+  promptChannelCapability,
+  promptConfigEditorAction,
+  promptConfigEditorPostApplyAction,
+  promptConfigEditorReviewApproval,
+  promptIncompleteChannelCapabilityAction,
+  promptIncompleteTelegramCapabilityAction,
+  promptOptionalCapabilityAction,
+  promptedBrowserCapabilityMode,
+  promptSecurityMode,
+  promptSttCapability,
+  promptTtsCapability,
+  promptVisionCapability,
+  promptVoiceCapability,
+  promptWebSearchCapability,
+  promptWorkflowLearning,
+  promptWorkspaceTrustConfirmation,
+  setupEditorReviewSelectedAreaLabel,
+} from "./prompts.js";
 import type { SetupReviewManifest } from "../setup-review-manifest.js";
+import type { SetupRouteDecision } from "../setup-router.js";
 import { resolveProfileStateHome, writeActiveProfile } from "../../config/profile-home.js";
+import { promptInterfaceLanguageAndStyle } from "../interface-preferences.js";
 import { isolateLtr } from "../../ui/bidi.js";
 import {
   gatewayServiceActivationNotNowGuidance,
@@ -91,20 +114,20 @@ describe("runConfigEditor", () => {
     expect(output.join("")).toContain("Setup Editor");
     expect(output.join("")).toContain("Available actions:");
     expect(output.join("")).toContain("edit-fallback-model-route");
-    expect(output.join("")).toContain("Configure backup providers and models used when the primary model fails.");
+    expect(output.join("")).toContain("Backup model used if the primary model fails.");
     expect(output.join("")).toContain("edit-auxiliary-model-route");
-    expect(output.join("")).toContain("Configure specialist models for assessment, compression, recall, and memory.");
+    expect(output.join("")).toContain("Models used for assessment, compression, recall, and memory.");
     expect(output.join("")).toContain("edit-security-mode");
     expect(output.join("")).toContain("edit-workflow-learning");
-    expect(output.join("")).toContain("edit-language - Choose language");
+    expect(output.join("")).toContain("edit-language - Language");
     expect(output.join("")).toContain("configure-channels");
     expect(output.join("")).toContain("configure-voice");
     expect(output.join("")).toContain("configure-image-generation");
     expect(output.join("")).toContain("configure-browser");
     expect(output.join("")).not.toContain("edit-primary-credential-reference");
     expect(output.join("")).not.toContain("review-optional-capabilities");
-    expect(output.join("")).toContain("verify-setup - Run setup verification");
-    expect(output.join("")).toContain("show-diagnostics - Show diagnostics");
+    expect(output.join("")).toContain("verify-setup - Setup verification");
+    expect(output.join("")).toContain("show-diagnostics - Diagnostics");
     expect(output.join("")).toContain("exit - Exit without changes");
     await expect(readFile(profileConfigPath(tempDir), "utf8")).resolves.toBe(before);
   });
@@ -120,7 +143,22 @@ describe("runConfigEditor", () => {
     });
     await trustWorkspace(tempDir, workspaceRoot);
     const output: string[] = [];
-    const prompts: Array<{ title: string; body: string; labels: string[]; descriptions: Array<string | undefined> }> = [];
+    const prompts: Array<{
+      title: string;
+      body: string;
+      labels: string[];
+      descriptions: Array<string | undefined>;
+      groups: Array<string | undefined>;
+      bodyLineStyles: SelectPromptInput<unknown>["bodyLineStyles"];
+      columns: SelectPromptInput<unknown>["columns"];
+      tableDirection: SelectPromptInput<unknown>["tableDirection"];
+      tableWidth: SelectPromptInput<unknown>["tableWidth"];
+      tableMaxWidth: SelectPromptInput<unknown>["tableMaxWidth"];
+      tableAlign: SelectPromptInput<unknown>["tableAlign"];
+      showColumnHeaders: SelectPromptInput<unknown>["showColumnHeaders"];
+      hint: string | undefined;
+      values: unknown[];
+    }> = [];
     const prompt = fakePrompt();
     prompt.select = async (input) => {
       prompts.push({
@@ -128,6 +166,16 @@ describe("runConfigEditor", () => {
         body: input.body ?? "",
         labels: input.options.map((option) => option.label),
         descriptions: input.options.map((option) => option.description),
+        groups: input.options.map((option) => option.group),
+        bodyLineStyles: input.bodyLineStyles,
+        columns: input.columns,
+        tableDirection: input.tableDirection,
+        tableWidth: input.tableWidth,
+        tableMaxWidth: input.tableMaxWidth,
+        tableAlign: input.tableAlign,
+        showColumnHeaders: input.showColumnHeaders,
+        hint: input.hint,
+        values: input.options.map((option) => option.value),
       });
       const exit = input.options.find((option) =>
         typeof option.value === "object" &&
@@ -152,37 +200,510 @@ describe("runConfigEditor", () => {
     expect(result.completed).toBe(true);
     expect(result.selectedActionId).toBe("exit");
     expect(output.join("")).toContain("محرّر الإعدادات");
-    expect(output.join("")).toContain("عدّل النموذج الأساسي");
-    expect(output.join("")).toContain("حدّد المزوّد والنموذج اللي يستخدمه الوكيل.");
-    expect(output.join("")).toContain("فعّل قنوات التحكم عن بُعد مثل");
+    expect(output.join("")).toContain("النموذج الأساسي");
+    expect(output.join("")).toContain("النموذج الافتراضي الذي يستخدمه الوكيل.");
+    expect(output.join("")).toContain("قنوات تحكم عن بُعد مثل");
     expect(output.join("")).toContain(isolateLtr("Telegram"));
     expect(prompts[0]?.title).toBe("محرّر الإعدادات");
-    expect(prompts[0]?.body).toBe("اختار اللي تحب تضبطه.");
-    expect(prompts[0]?.labels).toContain("اخرج بدون تغييرات");
-    expect(prompts[0]?.descriptions).toContain("اخرج من الإعداد من غير تعديل أي شيء.");
+    expect(prompts[0]?.body).toBe("اختار اللي تحب تضبطه:");
+    expect(prompts[0]?.body).not.toContain("\x1b[");
+    expect(prompts[0]?.bodyLineStyles).toEqual([{ emphasis: "strong" }]);
+    expect(prompts[0]?.columns).toEqual([
+      { key: "description", header: "التفاصيل", align: "right" },
+      { key: "name", header: "الاسم", align: "right" },
+    ]);
+    expect(prompts[0]?.tableDirection).toBe("rtl");
+    expect(prompts[0]?.tableWidth).toBe("content");
+    expect(prompts[0]?.tableMaxWidth).toBe(88);
+    expect(prompts[0]?.tableAlign).toBe("right");
+    expect(prompts[0]?.showColumnHeaders).toBe(false);
+    expect(prompts[0]?.hint).toBe("↑↓ navigate   ENTER select   CTRL+C exit");
+    expect(prompts[0]?.labels).toContain("النموذج الأساسي");
+    expect(prompts[0]?.descriptions).toContain("النموذج الافتراضي الذي يستخدمه الوكيل.");
+    expect(prompts[0]?.labels).toContain("القنوات");
+    expect(prompts[0]?.descriptions).toContain(resolveSetupCopy("ar", "setupEditor.actions.configureChannels.description"));
+    expect(prompts[0]?.labels).toContain("التحقق من الإعداد");
+    expect(prompts[0]?.labels).toContain("التشخيصات");
+    expect(prompts[0]?.labels).toContain("الخروج دون تغييرات");
+    expect(prompts[0]?.descriptions).toContain("غادر الإعداد دون تعديل التكوين.");
+    expect(prompts[0]?.values.map((value) =>
+      typeof value === "object" && value !== null && "id" in value ? value.id : undefined
+    )).toEqual([
+      "edit-primary-model-route",
+      "edit-fallback-model-route",
+      "edit-auxiliary-model-route",
+      "configure-channels",
+      "configure-voice",
+      "configure-image-generation",
+      "configure-web-search",
+      "configure-browser",
+      "edit-security-mode",
+      "edit-workflow-learning",
+      "edit-language",
+      "verify-setup",
+      "show-diagnostics",
+      "exit",
+    ]);
+    const exitActionIndex = prompts[0]?.labels.indexOf("الخروج دون تغييرات") ?? -1;
+    expect(prompts[0]?.groups[exitActionIndex]).toBe("navigation");
+    expect(prompts[0]?.groups[prompts[0]?.labels.indexOf("التحقق من الإعداد") ?? -1]).toBeUndefined();
+    expect(prompts[0]?.groups[prompts[0]?.labels.indexOf("التشخيصات") ?? -1]).toBeUndefined();
   });
 
-  it("renders only actionable model status tags in config-editor model choices", async () => {
-    const descriptions: Array<string | undefined> = [];
-    const prompt = fakePrompt();
+  it("opts comparative setup editor selectors into columns without changing selected values", async () => {
+    const prompt = fakePrompt({
+      values: [
+        "configure-channels",
+        "whatsapp",
+        "brave",
+        "compression",
+        "tts",
+        "openai",
+        "",
+        "",
+        "local",
+        "small",
+        "fal",
+        "",
+        "",
+        false,
+        "disabled",
+        "unchanged",
+        "skip",
+        "unchanged",
+      ],
+    });
+    const selectInputs: SelectPromptInput<unknown>[] = [];
+    const baseSelect = prompt.select!;
     prompt.select = async (input) => {
-      descriptions.push(...input.options.map((option) => option.description));
-      return input.options[0]!.value;
+      selectInputs.push(input as SelectPromptInput<unknown>);
+      return baseSelect(input);
     };
 
-    await promptModelCandidate(prompt, {
-      providerId: "openai",
-      candidates: modelStatusCandidates("openai" as ProviderId),
+    const selectedAction = await promptConfigEditorAction(prompt, [
+      {
+        id: "configure-channels",
+        label: "Configure channels",
+        description: "Configure remote-control channels.",
+        readOnly: false,
+        source: "editor",
+      },
+    ]);
+    const channel = await promptChannelCapability(prompt);
+    const webSearch = await promptWebSearchCapability(prompt, { ddgsCapabilityStatus: "ready" });
+    const auxiliaryTask = await promptAuxiliaryModelTask(prompt);
+    const voiceMode = await promptVoiceCapability(prompt);
+    const tts = await promptTtsCapability(prompt, {});
+    const stt = await promptSttCapability(prompt, {});
+    const vision = await promptVisionCapability(prompt, {});
+    const browser = await promptBrowserCapability(prompt, {});
+    const optionalAction = await promptOptionalCapabilityAction(prompt, {
+      id: "voice",
+      title: "Voice",
+      configured: false,
+    });
+    const incompleteChannelAction = await promptIncompleteChannelCapabilityAction(prompt, {
+      title: "WhatsApp beta",
+      bodyKey: "setupEditor.prompt.whatsapp.incomplete.body",
+    });
+    const incompleteTelegramAction = await promptIncompleteTelegramCapabilityAction(prompt);
+
+    expect(selectedAction?.id).toBe("configure-channels");
+    expect(channel).toBe("whatsapp");
+    expect(webSearch).toEqual({ provider: "brave", braveApiKeyEnv: "BRAVE_SEARCH_API_KEY" });
+    expect(auxiliaryTask).toBe("compression");
+    expect(voiceMode).toBe("tts");
+    expect(tts.ttsProvider).toBe("openai");
+    expect(stt.sttProvider).toBe("local");
+    expect(stt.sttModel).toBe("small");
+    expect(vision.provider).toBe("fal");
+    expect(vision.useGateway).toBe(false);
+    expect(browser.backend).toBe("unconfigured");
+    expect(optionalAction).toBe("unchanged");
+    expect(incompleteChannelAction).toBe("skip");
+    expect(incompleteTelegramAction).toBe("unchanged");
+
+    const columnTitles = selectInputs
+      .filter((input) => input.columns !== undefined)
+      .map((input) => input.title);
+    expect(columnTitles).toEqual([
+      "Setup editor",
+      "Choose channel",
+      "Search provider",
+      "Choose auxiliary model.",
+      "Configure voice",
+      "Voice",
+      "Voice",
+      "Configure STT",
+      "Vision and Image Generation",
+      "Browser configuration",
+      "Voice",
+      "WhatsApp beta",
+      "Telegram",
+    ]);
+    expect(selectInputs.find((input) => input.title === "Setup editor")?.bodyLineStyles).toEqual([
+      { emphasis: "strong" },
+    ]);
+    for (const input of selectInputs.filter((item) => item.columns !== undefined)) {
+      expect(input.columns).toEqual([
+        { key: "name", header: "Name", align: "left" },
+        { key: "description", header: "Details", align: "left" },
+      ]);
+      expect(input.tableDirection).toBe("ltr");
+      expect(input.tableWidth).toBe("full");
+      expect(input.tableMaxWidth).toBeUndefined();
+      expect(input.tableAlign).toBeUndefined();
+      expect(input.showColumnHeaders).toBe(false);
+      expect(input.options.every((option) => option.cells === undefined)).toBe(true);
+    }
+    const webSearchInput = selectInputs.find((input) =>
+      input.options.some((option) => option.id === "web-search-none")
+    );
+    const browserModeInput = selectInputs.find((input) =>
+      input.options.some((option) => option.id === "browser-disabled")
+    );
+    const optionalActionInput = selectInputs.find((input) =>
+      input.options.some((option) => option.id === "voice-enable")
+    );
+    const incompleteChannelInput = selectInputs.find((input) =>
+      input.options.some((option) => option.id === "channel-incomplete-retry")
+    );
+    const incompleteTelegramInput = selectInputs.find((input) =>
+      input.options.some((option) => option.id === "telegram-incomplete-retry")
+    );
+    expect(webSearchInput?.options.find((option) => option.id === "web-search-none")?.group).toBeUndefined();
+    expect(browserModeInput?.options.find((option) => option.id === "browser-disabled")?.group).toBeUndefined();
+    expect(optionalActionInput?.options.find((option) => option.id === "voice-enable")?.group).toBeUndefined();
+    expect(optionalActionInput?.options.find((option) => option.id === "voice-unchanged")?.group).toBe("navigation");
+    expect(optionalActionInput?.options.find((option) => option.id === "voice-skip")?.group).toBe("navigation");
+    expect(incompleteChannelInput?.options.every((option) => option.group === "navigation")).toBe(true);
+    expect(incompleteTelegramInput?.options.every((option) => option.group === "navigation")).toBe(true);
+    expect(selectInputs.find((input) =>
+      input.title === "Image generation" &&
+      input.options.some((option) => option.id === "gateway-no")
+    )?.columns).toBeUndefined();
+    expect(selectInputs.find((input) =>
+      input.title === "Image generation" &&
+      input.options.some((option) => option.id === "gateway-no")
+    )?.options.find((option) => option.id === "gateway-no")?.group).toBeUndefined();
+  });
+
+  it("keeps language and confirmation setup prompts stacked", async () => {
+    const prompt = fakePrompt({
+      values: [
+        "ar",
+        false,
+        false,
+        "exit",
+        "ddgs",
+        false,
+        "local-supervised",
+        false,
+        "",
+        "",
+        "",
+        "",
+        "fal",
+        "",
+        "",
+        true,
+      ],
+    });
+    const selectInputs: SelectPromptInput<unknown>[] = [];
+    const baseSelect = prompt.select!;
+    prompt.select = async (input) => {
+      selectInputs.push(input as SelectPromptInput<unknown>);
+      return baseSelect(input);
+    };
+
+    const language = await promptInterfaceLanguageAndStyle(prompt);
+    const trust = await promptWorkspaceTrustConfirmation(prompt, {
+      workspaceRoot,
+      trustStorePath: join(tempDir, ".estacoda", "trust.json"),
+    });
+    const review = await promptConfigEditorReviewApproval(prompt, {
+      selectedActionId: "edit-security-mode",
+      reviewManifest: minimalManifest(),
+    });
+    const postApply = await promptConfigEditorPostApplyAction(prompt, {
+      state: "ready",
+      launchEligible: false,
+      limitedModeEligible: false,
+    });
+    const ddgs = await promptWebSearchCapability(prompt, { ddgsCapabilityStatus: "missing" });
+    const browser = await promptBrowserCapability(prompt, {});
+    const vision = await promptVisionCapability(prompt, {});
+
+    expect(language.language).toBe("ar");
+    expect(trust).toBe(false);
+    expect(review).toBe(false);
+    expect(postApply).toBe("exit");
+    expect(ddgs).toEqual({ provider: "ddgs", ddgsSetupConfirmed: false });
+    expect(browser.backend).toBe("local-cdp");
+    expect(browser.autoLaunch).toBe(false);
+    expect(vision.useGateway).toBe(true);
+
+    const languageInput = selectInputs.find((input) => input.title === "Setup language");
+    expect(languageInput?.columns).toBeUndefined();
+    expect(languageInput?.hint).toBe("↑↓ navigate   ENTER select   CTRL+C exit");
+    expect(languageInput?.options.map((option) => option.label)).toEqual([
+      "English",
+      "العربية",
+    ]);
+    expect(languageInput?.options.map((option) => option.description)).toEqual([
+      undefined,
+      undefined,
+    ]);
+    expect(languageInput?.options.some((option) => option.group === "navigation")).toBe(false);
+    expect(selectInputs.find((input) => input.title === "Workspace trust")?.columns).toBeUndefined();
+    expect(selectInputs.find((input) => input.title === "Workspace trust")?.hint).toBe(
+      "↑↓ navigate   ENTER select   CTRL+C exit"
+    );
+    expect(selectInputs.find((input) => input.title === "Finalize configuration")?.columns).toBeUndefined();
+    expect(selectInputs.find((input) => input.title === "Setup next action")?.columns).toBeUndefined();
+    expect(selectInputs.find((input) => input.title === "DDGS setup")?.columns).toBeUndefined();
+    expect(selectInputs.find((input) => input.title === "Local supervised browser")?.columns).toBeUndefined();
+    expect(selectInputs.find((input) =>
+      input.title === "Image generation" &&
+      input.options.some((option) => option.id === "gateway-yes")
+    )?.columns).toBeUndefined();
+    expect(languageInput?.statusLines).toBeUndefined();
+    const trustInput = selectInputs.find((input) => input.title === "Workspace trust");
+    const reviewInput = selectInputs.find((input) => input.title === "Finalize configuration");
+    const postApplyInput = selectInputs.find((input) => input.title === "Setup next action");
+    const autoLaunchInput = selectInputs.find((input) => input.title === "Local supervised browser");
+    const gatewayInput = selectInputs.find((input) =>
+      input.title === "Image generation" &&
+      input.options.some((option) => option.id === "gateway-yes")
+    );
+    expect(trustInput?.options.find((option) => option.id === "trust")?.group).toBeUndefined();
+    expect(trustInput?.options.find((option) => option.id === "cancel")?.group).toBe("navigation");
+    expect(reviewInput?.options.find((option) => option.id === "approve")?.group).toBeUndefined();
+    expect(reviewInput?.options.find((option) => option.id === "cancel")?.group).toBe("navigation");
+    expect(postApplyInput?.options.find((option) => option.id === "exit")?.group).toBe("navigation");
+    expect(autoLaunchInput?.options.find((option) => option.id === "browser-auto-launch-no")?.group).toBeUndefined();
+    expect(gatewayInput?.options.find((option) => option.id === "gateway-no")?.group).toBeUndefined();
+    expect(gatewayInput?.options.find((option) => option.id === "gateway-yes")?.group).toBeUndefined();
+  });
+
+  it("shows current language and Back in the setup editor language selector without adding columns", async () => {
+    const prompt = fakePrompt();
+    const selectInputs = captureSelectInputs(prompt);
+
+    const result = await promptInterfaceLanguageAndStyle(prompt, {
+      initialLocale: "ar",
+      currentLanguage: "ar",
+      currentFlavor: "arabic-light",
+      showCurrentState: true,
+      allowBack: true,
     });
 
-    expect(descriptions).toEqual([
-      "alpha",
-      "beta",
-      "deprecated",
-      "",
-      "",
-      "",
+    const input = selectInputs.find((item) => item.title === resolveSetupCopy("ar", "onboarding.interfaceLanguage.title"));
+    expect(result).toEqual({
+      kind: "selected",
+      selection: {
+        language: "ar",
+        flavor: "arabic-light",
+        activityLabels: "ar",
+      },
+    });
+    expect(input?.columns).toBeUndefined();
+    expect(input?.statusLines).toEqual([{ text: "الحالي: العربية", tone: "active", direction: "rtl" }]);
+    expect(input?.showCurrentBadge).toBe(false);
+    expect(input?.defaultIndex).toBe(1);
+    expect(input?.options.find((option) => option.id === "ar")?.current).toBe(true);
+    expect(input?.options.find((option) => option.id === "en")?.current).toBe(false);
+    expect(input?.options.find((option) => option.id === "back")).toEqual(expect.objectContaining({
+      label: "رجوع",
+      description: "ارجع إلى الخطوة السابقة.",
+      group: "navigation",
+    }));
+    expect(input?.options.find((option) => option.id === "back")?.current).toBeUndefined();
+    expect(input?.options.find((option) => option.id === "back")?.badges).toBeUndefined();
+  });
+
+  it("shows current security and Agent Evolution state with current rows", async () => {
+    const prompt = fakePrompt();
+    const selectInputs = captureSelectInputs(prompt);
+
+    const securityMode = await promptSecurityMode(prompt, "strict");
+    const workflowLearning = await promptWorkflowLearning(prompt, "proactive");
+
+    const securityInput = selectInputs.find((input) => input.title === "Security mode");
+    const workflowInput = selectInputs.find((input) => input.title === "Agent Evolution");
+    expect(securityMode).toBe("strict");
+    expect(workflowLearning).toBe("proactive");
+    expect(securityInput?.statusLines).toEqual([{ text: "Current: Strict", tone: "active", direction: "ltr" }]);
+    expect(securityInput?.showCurrentBadge).toBe(false);
+    expect(securityInput?.defaultIndex).toBe(0);
+    expect(securityInput?.options.find((option) => option.id === "strict")?.current).toBe(true);
+    expect(workflowInput?.statusLines).toEqual([{ text: "Current: Proactive", tone: "active", direction: "ltr" }]);
+    expect(workflowInput?.showCurrentBadge).toBe(false);
+    expect(workflowInput?.options.map((option) => option.id)).toEqual([
+      "suggest",
+      "proactive",
+      "autonomous",
+      "none",
     ]);
+    expect(workflowInput?.defaultIndex).toBe(1);
+    expect(workflowInput?.options.find((option) => option.id === "proactive")?.current).toBe(true);
+  });
+
+  it("shows current optional capability state without exposing credential fields", async () => {
+    const prompt = fakePrompt();
+    const selectInputs = captureSelectInputs(prompt);
+
+    await promptWebSearchCapability(prompt, {
+      searchBackend: "brave",
+      braveApiKeyEnv: "SHOULD_NOT_APPEAR",
+      ddgsCapabilityStatus: "ready",
+    });
+    await promptTtsCapability(prompt, {
+      ttsProvider: "openai",
+      ttsModel: "gpt-4o-mini-tts",
+      ttsApiKeyEnv: "SHOULD_NOT_APPEAR",
+    });
+    await promptSttCapability(prompt, {
+      sttProvider: "local",
+      sttModel: "small",
+      sttApiKeyEnv: "SHOULD_NOT_APPEAR",
+    });
+    await promptVisionCapability(prompt, {
+      provider: "byteplus",
+      model: "seedream-4",
+      apiKeyEnv: "SHOULD_NOT_APPEAR",
+      useGateway: true,
+    });
+    await promptBrowserCapability(prompt, {
+      backend: "local-cdp",
+      autoLaunch: true,
+      supervised: true,
+      engine: "cdp",
+    });
+
+    const searchInput = selectInputs.find((input) => input.title === "Search provider");
+    const voiceInputs = selectInputs.filter((input) => input.title === "Voice");
+    const localSttInput = selectInputs.find((input) => input.title === "Configure STT");
+    const visionInput = selectInputs.find((input) => input.title === "Vision and Image Generation");
+    const browserInput = selectInputs.find((input) => input.title === "Browser configuration");
+    const allStatusText = selectInputs.flatMap((input) => input.statusLines ?? []).map((line) => line.text).join("\n");
+
+    expect(searchInput?.statusLines).toEqual([{ text: "Current: Brave Search", tone: "active", direction: "ltr" }]);
+    expect(searchInput?.defaultIndex).toBe(0);
+    expect(searchInput?.options.find((option) => option.id === "web-search-brave")?.current).toBe(true);
+    expect(voiceInputs[0]?.statusLines).toEqual([{ text: "Current: openai/gpt-4o-mini-tts", tone: "active", direction: "ltr" }]);
+    expect(voiceInputs[0]?.options.find((option) => option.id === "tts-openai")?.current).toBe(true);
+    expect(voiceInputs[1]?.statusLines).toEqual([{ text: "Current: local/small", tone: "active", direction: "ltr" }]);
+    expect(voiceInputs[1]?.options.find((option) => option.id === "stt-local")?.current).toBe(true);
+    expect(localSttInput?.statusLines).toEqual([{ text: "Current: Small", tone: "active", direction: "ltr" }]);
+    expect(localSttInput?.defaultIndex).toBe(1);
+    expect(localSttInput?.options.find((option) => option.id === "local-stt-model-small")?.current).toBe(true);
+    expect(visionInput?.statusLines).toEqual([{ text: "Current: byteplus/seedream-4", tone: "active", direction: "ltr" }]);
+    expect(visionInput?.options.find((option) => option.id === "byteplus")?.current).toBe(true);
+    expect(browserInput?.statusLines).toEqual([{ text: "Current: Recommended browser setup", tone: "active", direction: "ltr" }]);
+    expect(browserInput?.options.find((option) => option.id === "browser-recommended")?.current).toBe(true);
+    expect(selectInputs.every((input) => input.showCurrentBadge === undefined || input.showCurrentBadge === false)).toBe(true);
+    expect(allStatusText).not.toContain("SHOULD_NOT_APPEAR");
+  });
+
+  it("does not invent a current web search provider when current state is missing", async () => {
+    const prompt = fakePrompt();
+    const selectInputs = captureSelectInputs(prompt);
+
+    const webSearch = await promptWebSearchCapability(prompt, { ddgsCapabilityStatus: "missing" });
+
+    const searchInput = selectInputs.find((input) => input.title === "Search provider");
+    expect(webSearch).toEqual({ provider: "none" });
+    expect(searchInput?.defaultIndex).toBe(2);
+    expect(searchInput?.statusLines).toBeUndefined();
+    expect(searchInput?.showCurrentBadge).toBeUndefined();
+    expect(searchInput?.options.some((option) => option.current === true)).toBe(false);
+  });
+
+  it("uses compact right-aligned Arabic setup table layout for web search provider choices", async () => {
+    const prompt = fakePrompt();
+    const selectInputs = captureSelectInputs(prompt);
+
+    const webSearch = await promptWebSearchCapability(prompt, { ddgsCapabilityStatus: "missing" }, "ar");
+
+    const searchInput = selectInputs.find((input) =>
+      input.options.some((option) => option.id === "web-search-none")
+    );
+    expect(webSearch).toEqual({ provider: "none" });
+    expect(searchInput?.columns).toEqual([
+      { key: "description", header: "التفاصيل", align: "right" },
+      { key: "name", header: "الاسم", align: "right" },
+    ]);
+    expect(searchInput?.tableDirection).toBe("rtl");
+    expect(searchInput?.tableWidth).toBe("content");
+    expect(searchInput?.tableMaxWidth).toBe(88);
+    expect(searchInput?.tableAlign).toBe("right");
+    expect(searchInput?.showColumnHeaders).toBe(false);
+    expect(searchInput?.hint).toBe("↑↓ navigate   ENTER select   CTRL+C exit");
+    expect(searchInput?.options.find((option) => option.id === "web-search-none")?.group).toBeUndefined();
+  });
+
+  it("groups DDGS install skip as navigation without grouping web search provider choices", async () => {
+    const prompt = fakePrompt({ values: ["ddgs", false] });
+    const selectInputs = captureSelectInputs(prompt);
+
+    const webSearch = await promptWebSearchCapability(prompt, { ddgsCapabilityStatus: "missing" });
+
+    const searchInput = selectInputs.find((input) => input.title === "Search provider");
+    const installInput = selectInputs.find((input) => input.title === "DDGS setup");
+    expect(webSearch).toEqual({ provider: "ddgs", ddgsSetupConfirmed: false });
+    expect(searchInput?.options.find((option) => option.id === "web-search-brave")?.group).toBeUndefined();
+    expect(searchInput?.options.find((option) => option.id === "web-search-ddgs")?.group).toBeUndefined();
+    expect(searchInput?.options.find((option) => option.id === "web-search-none")?.group).toBeUndefined();
+    expect(installInput?.options.find((option) => option.id === "web-search-ddgs-install-confirm")?.group)
+      .toBeUndefined();
+    expect(installInput?.options.find((option) => option.id === "web-search-ddgs-install-skip")?.group)
+      .toBe("navigation");
+  });
+
+  it("groups every post-apply action as navigation without changing selected action ids", async () => {
+    const prompt = fakePrompt({ values: ["repair-again"] });
+    const selectInputs = captureSelectInputs(prompt);
+
+    const action = await promptConfigEditorPostApplyAction(prompt, {
+      state: "degraded",
+      launchEligible: true,
+      limitedModeEligible: true,
+    });
+
+    const postApplyInput = selectInputs.find((input) => input.title === "Setup next action");
+    expect(action).toBe("repair-again");
+    expect(postApplyInput?.options.map((option) => option.id)).toEqual([
+      "launch",
+      "accept-limited-mode",
+      "repair-again",
+      "exit",
+    ]);
+    expect(postApplyInput?.options.map((option) => option.value)).toEqual([
+      "launch",
+      "accept-limited-mode",
+      "repair-again",
+      "exit",
+    ]);
+    expect(postApplyInput?.options.every((option) => option.group === "navigation")).toBe(true);
+  });
+
+  it("marks DDGS as current when web search state is explicitly DDGS", async () => {
+    const prompt = fakePrompt();
+    const selectInputs = captureSelectInputs(prompt);
+
+    const webSearch = await promptWebSearchCapability(prompt, {
+      searchBackend: "ddgs",
+      ddgsCapabilityStatus: "ready",
+    });
+
+    const searchInput = selectInputs.find((input) => input.title === "Search provider");
+    expect(webSearch).toEqual({ provider: "ddgs", ddgsSetupConfirmed: false });
+    expect(searchInput?.defaultIndex).toBe(1);
+    expect(searchInput?.statusLines).toEqual([{ text: "Current: DuckDuckGo / DDGS", tone: "active", direction: "ltr" }]);
+    expect(searchInput?.showCurrentBadge).toBe(false);
+    expect(searchInput?.options.find((option) => option.id === "web-search-ddgs")?.current).toBe(true);
+    expect(searchInput?.options.find((option) => option.id === "web-search-none")?.current).toBe(false);
   });
 
   it("prepares the read-only verification route without applying changes", async () => {
@@ -414,7 +935,7 @@ describe("runConfigEditor", () => {
       },
     });
     await trustWorkspace(tempDir, workspaceRoot);
-    const prompts: Array<{ title: string; labels: string[]; descriptions: Array<string | undefined> }> = [];
+    const prompts: Array<{ title: string; labels: string[]; descriptions: Array<string | undefined>; groups: Array<string | undefined> }> = [];
     const prompt = fakePrompt({ values: ["ar"] });
     const baseSelect = prompt.select!;
     prompt.select = async (input) => {
@@ -422,6 +943,7 @@ describe("runConfigEditor", () => {
         title: input.title,
         labels: input.options.map((option) => option.label),
         descriptions: input.options.map((option) => option.description),
+        groups: input.options.map((option) => option.group),
       });
       return baseSelect(input);
     };
@@ -447,7 +969,9 @@ describe("runConfigEditor", () => {
     expect(result.completed).toBe(true);
     expect(result.selectedActionId).toBe("edit-language");
     expect(prompts[0]?.title).toBe("Setup language");
-    expect(prompts[0]?.labels).toEqual(["English", "العربية"]);
+    expect(prompts[0]?.labels).toEqual(["English", "العربية", "Back"]);
+    expect(prompts[0]?.descriptions[2]).toBe("Return to the previous step.");
+    expect(prompts[0]?.groups[2]).toBe("navigation");
     expect(prompts.map((prompt) => prompt.title)).not.toContain("أسلوب الواجهة");
     expect(uiLine?.review.values).toEqual(expect.objectContaining({
       language: "ar",
@@ -461,6 +985,307 @@ describe("runConfigEditor", () => {
     });
     expect(config.security?.approvalMode).toBe("adaptive");
     expect(config.model).toEqual((localReadyConfig() as { model: unknown }).model);
+  });
+
+  it("returns from setup editor language Back to the action menu without applying changes", async () => {
+    const initialConfig = {
+      ...localReadyConfig(),
+      ui: {
+        language: "en",
+        flavor: "standard",
+        activityLabels: "en",
+      },
+    };
+    await writeUserConfig(tempDir, initialConfig);
+    await trustWorkspace(tempDir, workspaceRoot);
+    const promptTitles: string[] = [];
+    const prompt = fakePrompt({ values: ["Back", "exit"] });
+    const baseSelect = prompt.select!;
+    prompt.select = async (input) => {
+      promptTitles.push(input.title);
+      return baseSelect(input);
+    };
+    const apply = vi.fn();
+
+    const result = await runConfigEditor({
+      homeDir: tempDir,
+      workspaceRoot,
+      prompt,
+      defaultActionId: "edit-language",
+      applyExecutor: { apply },
+    });
+
+    const config = JSON.parse(await readFile(profileConfigPath(tempDir), "utf8")) as {
+      ui?: { language?: string; flavor?: string; activityLabels?: string };
+    };
+
+    expect(result.completed).toBe(true);
+    expect(result.selectedActionId).toBe("exit");
+    expect(result.reviewManifest).toBeUndefined();
+    expect(result.applyPlanningResult).toBeUndefined();
+    expect(apply).not.toHaveBeenCalled();
+    expect(config.ui).toEqual(initialConfig.ui);
+    expect(promptTitles).toEqual(["Setup language", "Setup editor"]);
+  });
+
+  it("returns from first-level setup editor choices to the action menu without drafting", async () => {
+    await writeUserConfig(tempDir, localReadyConfig());
+    await trustWorkspace(tempDir, workspaceRoot);
+    const cases = [
+      {
+        actionId: "edit-security-mode" as const,
+        expectedFirstTitle: "Security mode",
+      },
+      {
+        actionId: "edit-workflow-learning" as const,
+        expectedFirstTitle: "Agent Evolution",
+      },
+      {
+        actionId: "configure-channels" as const,
+        expectedFirstTitle: "Choose channel",
+      },
+      {
+        actionId: "edit-auxiliary-model-route" as const,
+        expectedFirstTitle: "Choose auxiliary model.",
+      },
+    ];
+
+    for (const { actionId, expectedFirstTitle } of cases) {
+      const promptTitles: string[] = [];
+      const prompt = fakePrompt({ values: ["Back", "exit"] });
+      const baseSelect = prompt.select!;
+      prompt.select = async (input) => {
+        promptTitles.push(input.title);
+        return baseSelect(input);
+      };
+      const apply = vi.fn();
+
+      const result = await runConfigEditor({
+        homeDir: tempDir,
+        workspaceRoot,
+        prompt,
+        defaultActionId: actionId,
+        applyExecutor: { apply },
+      });
+
+      expect(result.completed).toBe(true);
+      expect(result.selectedActionId).toBe("exit");
+      expect(result.reviewManifest).toBeUndefined();
+      expect(result.applyPlanningResult).toBeUndefined();
+      expect(apply).not.toHaveBeenCalled();
+      expect(promptTitles).toEqual([expectedFirstTitle, "Setup editor"]);
+    }
+  });
+
+  it("returns from channel optional action Back to the channel selector", async () => {
+    await writeUserConfig(tempDir, localReadyConfig());
+    await trustWorkspace(tempDir, workspaceRoot);
+    const promptTitles: string[] = [];
+    const prompt = fakePrompt({ values: ["Telegram", "Back", "Back", "exit"] });
+    const baseSelect = prompt.select!;
+    prompt.select = async (input) => {
+      promptTitles.push(input.title);
+      return baseSelect(input);
+    };
+    const apply = vi.fn();
+
+    const result = await runConfigEditor({
+      homeDir: tempDir,
+      workspaceRoot,
+      prompt,
+      defaultActionId: "configure-channels",
+      applyExecutor: { apply },
+    });
+
+    expect(result.completed).toBe(true);
+    expect(result.selectedActionId).toBe("exit");
+    expect(result.reviewManifest).toBeUndefined();
+    expect(apply).not.toHaveBeenCalled();
+    expect(promptTitles).toEqual(["Choose channel", "Telegram/channels", "Choose channel", "Setup editor"]);
+  });
+
+  it("returns from browser mode Back to the optional action card", async () => {
+    await writeUserConfig(tempDir, localReadyConfig());
+    await trustWorkspace(tempDir, workspaceRoot);
+    const promptTitles: string[] = [];
+    const prompt = fakePrompt({ values: ["Configure", "Back", "Back", "exit"] });
+    const baseSelect = prompt.select!;
+    prompt.select = async (input) => {
+      promptTitles.push(input.title);
+      return baseSelect(input);
+    };
+    const apply = vi.fn();
+
+    const result = await runConfigEditor({
+      homeDir: tempDir,
+      workspaceRoot,
+      prompt,
+      defaultActionId: "configure-browser",
+      applyExecutor: { apply },
+    });
+
+    expect(result.completed).toBe(true);
+    expect(result.selectedActionId).toBe("exit");
+    expect(result.reviewManifest).toBeUndefined();
+    expect(apply).not.toHaveBeenCalled();
+    expect(promptTitles).toEqual(["Browser", "Browser configuration", "Browser", "Setup editor"]);
+  });
+
+  it("returns from web search provider Back to the action menu without drafting", async () => {
+    await writeUserConfig(tempDir, localReadyConfig());
+    await trustWorkspace(tempDir, workspaceRoot);
+    const before = await readFile(profileConfigPath(tempDir), "utf8");
+    const selectInputs: SelectPromptInput<unknown>[] = [];
+    const prompt = fakePrompt({ values: ["Configure", "Back", "exit"] });
+    const baseSelect = prompt.select!;
+    prompt.select = async (input) => {
+      selectInputs.push(input as SelectPromptInput<unknown>);
+      return baseSelect(input);
+    };
+    const apply = vi.fn();
+
+    const result = await runConfigEditor({
+      homeDir: tempDir,
+      workspaceRoot,
+      prompt,
+      defaultActionId: "configure-web-search",
+      applyExecutor: { apply },
+    });
+
+    const searchProviderInput = selectInputs.find((input) => input.title === "Search provider");
+    expect(result.completed).toBe(true);
+    expect(result.selectedActionId).toBe("exit");
+    expect(result.reviewManifest).toBeUndefined();
+    expect(result.applyPlanningResult).toBeUndefined();
+    expect(apply).not.toHaveBeenCalled();
+    await expect(readFile(profileConfigPath(tempDir), "utf8")).resolves.toBe(before);
+    expect(searchProviderInput?.options.find((option) => option.label === "Back")?.group).toBe("navigation");
+    expect(selectInputs.map((input) => input.title)).toEqual(["Search", "Search provider", "Setup editor"]);
+  });
+
+  it("returns from DDGS install Back to the web search provider card without drafting", async () => {
+    await writeUserConfig(tempDir, localReadyConfig());
+    await trustWorkspace(tempDir, workspaceRoot);
+    vi.spyOn(capabilityManager, "checkManagedPythonCapabilityStatus").mockResolvedValue({
+      ok: false,
+      capabilityId: DDGS_CAPABILITY_ID,
+      reason: "install_required",
+      message: "Managed Python capability environment has not been installed.",
+    });
+    const before = await readFile(profileConfigPath(tempDir), "utf8");
+    const selectInputs: SelectPromptInput<unknown>[] = [];
+    const prompt = fakePrompt({ values: ["Configure", "ddgs", "Back", "Back", "exit"] });
+    const baseSelect = prompt.select!;
+    prompt.select = async (input) => {
+      selectInputs.push(input as SelectPromptInput<unknown>);
+      return baseSelect(input);
+    };
+    const apply = vi.fn();
+
+    const result = await runConfigEditor({
+      homeDir: tempDir,
+      workspaceRoot,
+      prompt,
+      defaultActionId: "configure-web-search",
+      applyExecutor: { apply },
+    });
+
+    const ddgsInstallInput = selectInputs.find((input) => input.title === "DDGS setup");
+    expect(result.completed).toBe(true);
+    expect(result.selectedActionId).toBe("exit");
+    expect(result.reviewManifest).toBeUndefined();
+    expect(result.applyPlanningResult).toBeUndefined();
+    expect(apply).not.toHaveBeenCalled();
+    await expect(readFile(profileConfigPath(tempDir), "utf8")).resolves.toBe(before);
+    expect(ddgsInstallInput?.options.find((option) => option.label === "Back")?.group).toBe("navigation");
+    expect(selectInputs.map((input) => input.title)).toEqual([
+      "Search",
+      "Search provider",
+      "DDGS setup",
+      "Search provider",
+      "Setup editor",
+    ]);
+  });
+
+  it("returns from image generation provider Back to the action menu without drafting", async () => {
+    await writeUserConfig(tempDir, localReadyConfig());
+    await trustWorkspace(tempDir, workspaceRoot);
+    const before = await readFile(profileConfigPath(tempDir), "utf8");
+    const selectInputs: SelectPromptInput<unknown>[] = [];
+    const prompt = fakePrompt({ values: ["Configure", "Back", "exit"] });
+    const baseSelect = prompt.select!;
+    prompt.select = async (input) => {
+      selectInputs.push(input as SelectPromptInput<unknown>);
+      return baseSelect(input);
+    };
+    const apply = vi.fn();
+
+    const result = await runConfigEditor({
+      homeDir: tempDir,
+      workspaceRoot,
+      prompt,
+      defaultActionId: "configure-image-generation",
+      applyExecutor: { apply },
+    });
+
+    const imageProviderInput = selectInputs.find((input) => input.title === "Vision and Image Generation");
+    expect(result.completed).toBe(true);
+    expect(result.selectedActionId).toBe("exit");
+    expect(result.reviewManifest).toBeUndefined();
+    expect(result.applyPlanningResult).toBeUndefined();
+    expect(apply).not.toHaveBeenCalled();
+    await expect(readFile(profileConfigPath(tempDir), "utf8")).resolves.toBe(before);
+    expect(imageProviderInput?.options.find((option) => option.label === "Back")?.group).toBe("navigation");
+    expect(selectInputs.map((input) => input.title)).toEqual([
+      "Vision and image generation",
+      "Vision and Image Generation",
+      "Setup editor",
+    ]);
+  });
+
+  it("returns from local STT model Back to STT provider and then voice mode", async () => {
+    await writeUserConfig(tempDir, localReadyConfig());
+    await trustWorkspace(tempDir, workspaceRoot);
+    const promptTitles: string[] = [];
+    const prompt = fakePrompt({
+      values: [
+        "Speech to Text (STT)",
+        "Configure",
+        "Local (via faster-whisper)",
+        "Back",
+        "Back",
+        "Back",
+        "exit",
+      ],
+    });
+    const baseSelect = prompt.select!;
+    prompt.select = async (input) => {
+      promptTitles.push(input.title);
+      return baseSelect(input);
+    };
+    const apply = vi.fn();
+
+    const result = await runConfigEditor({
+      homeDir: tempDir,
+      workspaceRoot,
+      prompt,
+      defaultActionId: "configure-voice",
+      applyExecutor: { apply },
+    });
+
+    expect(result.completed).toBe(true);
+    expect(result.selectedActionId).toBe("exit");
+    expect(result.reviewManifest).toBeUndefined();
+    expect(apply).not.toHaveBeenCalled();
+    expect(promptTitles).toEqual([
+      "Configure voice",
+      "Voice",
+      "Voice",
+      "Configure STT",
+      "Voice",
+      "Configure voice",
+      "Setup editor",
+    ]);
   });
 
   it("resets Arabic activity labels when changing language back to English", async () => {
@@ -703,10 +1528,20 @@ describe("runConfigEditor", () => {
     });
     await trustWorkspace(tempDir, workspaceRoot);
 
+    const prompt = fakePrompt({ values: ["OpenAI", "gpt-5.5", true], secret: "sk-pr8-provider-route" });
+    const routePrompts: SelectPromptInput<unknown>[] = [];
+    const baseSelect = prompt.select!;
+    prompt.select = async (input) => {
+      if (input.title === "Primary provider" || input.title === "Primary model") {
+        routePrompts.push(input as SelectPromptInput<unknown>);
+      }
+      return baseSelect(input);
+    };
+
     const result = await runConfigEditor({
       homeDir: tempDir,
       workspaceRoot,
-      prompt: fakePrompt({ values: ["OpenAI", "gpt-5.5", true], secret: "sk-pr8-provider-route" }),
+      prompt,
       defaultActionId: "edit-primary-model-route",
       flowEngine: flowEngine({ credentialAction: "collect", envVarName: "PR8_OPENAI_KEY" }),
       applyExecutor: createReviewedSetupApplyExecutor({
@@ -743,9 +1578,151 @@ describe("runConfigEditor", () => {
     expect(config.providers?.openai?.apiMode).toBeUndefined();
     expect(config.providers?.openai?.authMethod).toBeUndefined();
     expect(config.security?.assessor?.enabled).toBe(true);
+    expect(routePrompts.map((input) => input.title)).toEqual(["Primary provider", "Primary model"]);
+    expect(routePrompts[0]?.columns).toEqual([
+      { key: "name", header: "Name" },
+      { key: "details", header: "Details" },
+    ]);
+    expect(routePrompts[0]?.options.map((option) => option.id)).toContain("back");
+    expect(routePrompts[0]?.options.map((option) => option.id)).toContain("cancel");
+    expect(routePrompts[1]?.options.map((option) => option.id)).toContain("back");
+    expect(routePrompts[1]?.options.map((option) => option.id)).toContain("cancel");
+    expect(routePrompts[0]?.technicalLines).toBeUndefined();
+    expect(routePrompts[0]?.statusLines).toEqual([
+      { text: "Current: local/local-test-model", tone: "active", direction: "ltr" },
+    ]);
+    expect(routePrompts[0]?.showCurrentBadge).toBe(false);
+    expect(routePrompts[0]?.options.find((option) => option.id === "openai")?.cells?.details).toBe("Frontier models for high-quality primary reasoning. Direct API.");
+    expect(routePrompts[1]?.showCurrentBadge).toBe(false);
+    expect(routePrompts[1]?.options.find((option) => option.id === "gpt-5.5")?.cells?.details).toContain("Tools | Vision | Reasoning");
     expect(envFile).toContain("PR8_OPENAI_KEY=");
     expect(rawConfig).not.toContain("sk-pr8-provider-route");
     expect(JSON.stringify(result)).not.toContain("sk-pr8-provider-route");
+  });
+
+  it("returns to setup actions when provider-card Back is selected", async () => {
+    await writeUserConfig(tempDir, localReadyConfig());
+    await trustWorkspace(tempDir, workspaceRoot);
+
+    const prompt = fakePrompt({ values: ["Back", "exit"] });
+    const selectTitles: string[] = [];
+    const baseSelect = prompt.select!;
+    prompt.select = async (input) => {
+      selectTitles.push(input.title);
+      return baseSelect(input);
+    };
+
+    const result = await runConfigEditor({
+      homeDir: tempDir,
+      workspaceRoot,
+      prompt,
+      defaultActionId: "edit-primary-model-route",
+      flowEngine: flowEngine({ credentialAction: "collect", envVarName: "PR8_OPENAI_KEY" }),
+    });
+
+    expect(result.completed).toBe(true);
+    expect(result.exitCode).toBe(0);
+    expect(result.selectedActionId).toBe("exit");
+    expect(selectTitles).toEqual(["Primary provider", "Setup editor"]);
+    await expect(readFile(profileConfigPath(tempDir), "utf8")).resolves.toContain("\"provider\": \"local\"");
+  });
+
+  it("keeps repair-again re-entry available after provider-card Back returns to menu", () => {
+    const repairAgainDecision = {
+      kind: "configured-menu",
+      title: "Setup editor",
+      summary: "Ready",
+      state: { kind: "configured-ready" },
+      actions: [],
+      warnings: [],
+      blockers: [],
+      readOnly: true,
+    } as unknown as SetupRouteDecision;
+    const initialLoopState = {
+      repairAgainReentered: false,
+      menuBackReentryCount: 0,
+    };
+    const afterBack = __decideConfigEditorLoopForTest({
+      result: {
+        completed: false,
+        exitCode: 0,
+        output: "",
+        initialDecision: repairAgainDecision,
+        selectedActionId: "edit-primary-model-route",
+        menuBackRequested: true,
+      },
+      ...initialLoopState,
+    });
+
+    expect(afterBack).toEqual({
+      kind: "menu-back",
+      state: {
+        repairAgainReentered: false,
+        menuBackReentryCount: 1,
+      },
+    });
+    if (afterBack.kind !== "menu-back") {
+      throw new Error("Expected provider-card Back to request setup menu re-entry.");
+    }
+    expect(__decideConfigEditorLoopForTest({
+      result: {
+        completed: true,
+        exitCode: 0,
+        output: "",
+        initialDecision: repairAgainDecision,
+        selectedActionId: "edit-security-mode",
+        nextActionId: "repair-again",
+        repairAgainDecision,
+      },
+      repairAgainReentered: afterBack.state.repairAgainReentered,
+      menuBackReentryCount: afterBack.state.menuBackReentryCount,
+    })).toEqual({
+      kind: "repair-again",
+      state: {
+        repairAgainReentered: true,
+        menuBackReentryCount: 1,
+      },
+      initialDecision: repairAgainDecision,
+    });
+  });
+
+  it("returns from model-card Back to provider selection before final setup route selection", async () => {
+    await writeUserConfig(tempDir, localReadyConfig());
+    await trustWorkspace(tempDir, workspaceRoot);
+
+    const prompt = fakePrompt({ values: ["OpenAI", "Back", "OpenAI", "gpt-5.5", true], secret: "sk-pr8-provider-route" });
+    const routePrompts: SelectPromptInput<unknown>[] = [];
+    const baseSelect = prompt.select!;
+    prompt.select = async (input) => {
+      if (input.title === "Primary provider" || input.title === "Primary model") {
+        routePrompts.push(input as SelectPromptInput<unknown>);
+      }
+      return baseSelect(input);
+    };
+
+    const result = await runConfigEditor({
+      homeDir: tempDir,
+      workspaceRoot,
+      prompt,
+      defaultActionId: "edit-primary-model-route",
+      flowEngine: flowEngine({ credentialAction: "collect", envVarName: "PR8_OPENAI_KEY" }),
+      applyExecutor: createReviewedSetupApplyExecutor({
+        homeDir: tempDir,
+        workspaceRoot,
+        collectVerification: () => readyVerification(profileConfigPath(tempDir)),
+      }),
+    });
+
+    expect(result.completed).toBe(true);
+    expect(result.selectedActionId).toBe("edit-primary-model-route");
+    expect(routePrompts.map((input) => input.title)).toEqual([
+      "Primary provider",
+      "Primary model",
+      "Primary provider",
+      "Primary model",
+    ]);
+    const rawConfig = await readFile(profileConfigPath(tempDir), "utf8");
+    expect(rawConfig).toContain("\"provider\": \"openai\"");
   });
 
   it("prompts to reuse a saved profile credential and keeps the existing key without raw key prompt", async () => {
@@ -800,11 +1777,11 @@ describe("runConfigEditor", () => {
       values: ["OpenAI", "gpt-5.5", true],
       secret: "sk-fallback-add-secret",
     });
-    const fallbackChoiceTitles: string[] = [];
+    const promptTitles: string[] = [];
     const baseSelect = prompt.select!;
     prompt.select = async (input) => {
-      if (input.title === "Fallback models") {
-        fallbackChoiceTitles.push(input.title);
+      if (input.title === "Fallback models" || input.title === "Fallback provider" || input.title === "Fallback model") {
+        promptTitles.push(input.title);
       }
       return baseSelect(input);
     };
@@ -828,7 +1805,7 @@ describe("runConfigEditor", () => {
 
     expect(result.completed).toBe(true);
     expect(result.selectedActionId).toBe("edit-fallback-model-route");
-    expect(fallbackChoiceTitles).toEqual([]);
+    expect(promptTitles).toEqual(["Fallback provider", "Fallback model"]);
     expect(result.reviewManifest?.sections["provider-model-network"][0]?.review.values).toEqual(expect.objectContaining({
       fallbackOperation: "add",
       provider: "openai",
@@ -865,9 +1842,13 @@ describe("runConfigEditor", () => {
     });
     await trustWorkspace(tempDir, workspaceRoot);
     const prompt = fakePrompt({ values: ["fallback-add", "Anthropic", "claude-sonnet-4-5", true] });
+    const promptTitles: string[] = [];
     const fallbackChoiceLabels: string[][] = [];
     const baseSelect = prompt.select!;
     prompt.select = async (input) => {
+      if (input.title === "Fallback models" || input.title === "Fallback provider" || input.title === "Fallback model") {
+        promptTitles.push(input.title);
+      }
       if (input.title === "Fallback models") {
         fallbackChoiceLabels.push(input.options.map((option) => option.label));
       }
@@ -887,10 +1868,12 @@ describe("runConfigEditor", () => {
     });
 
     expect(result.completed).toBe(true);
+    expect(promptTitles).toEqual(["Fallback models", "Fallback provider", "Fallback model"]);
     expect(fallbackChoiceLabels).toEqual([[
       "Edit fallback 1: openai/gpt-5.5",
       "Edit fallback 2: kimi/kimi-k2",
       "Add another fallback model",
+      "Back",
     ]]);
     expect(result.reviewManifest?.sections["provider-model-network"][0]?.review.values).toEqual(expect.objectContaining({
       fallbackOperation: "add",
@@ -961,8 +1944,12 @@ describe("runConfigEditor", () => {
       secret: "sk-auxiliary-compression-secret",
     });
     const taskOptions: Array<{ labels: string[]; values: unknown[] }> = [];
+    const promptTitles: string[] = [];
     const baseSelect = prompt.select!;
     prompt.select = async (input) => {
+      if (input.title === "Choose auxiliary model." || input.title === "Auxiliary provider" || input.title === "Auxiliary model") {
+        promptTitles.push(input.title);
+      }
       if (input.title === "Choose auxiliary model.") {
         taskOptions.push({
           labels: input.options.map((option) => option.label),
@@ -993,10 +1980,16 @@ describe("runConfigEditor", () => {
 
     expect(result.completed).toBe(true);
     expect(result.selectedActionId).toBe("edit-auxiliary-model-route");
-    expect(taskOptions).toEqual([{
-      labels: ["Assessor", "Compression", "Session search", "Memory compaction", "Profile context"],
-      values: ["assessor", "compression", "session_search", "memory_compaction", "profile_context"],
-    }]);
+    expect(promptTitles).toEqual(["Choose auxiliary model.", "Auxiliary provider", "Auxiliary model"]);
+    expect(taskOptions[0]?.labels).toEqual(["Assessor", "Compression", "Session search", "Memory compaction", "Profile context", "Back"]);
+    expect(taskOptions[0]?.values.slice(0, 5)).toEqual([
+      "assessor",
+      "compression",
+      "session_search",
+      "memory_compaction",
+      "profile_context",
+    ]);
+    expect(typeof taskOptions[0]?.values[5]).toBe("symbol");
     expect(result.reviewManifest?.sections["provider-model-network"][0]?.review).toEqual(expect.objectContaining({
       summaryKey: "setupDrafts.auxiliaryModelRoute.summary",
       values: expect.objectContaining({
@@ -1419,8 +2412,8 @@ describe("runConfigEditor", () => {
     });
 
     expect(result.completed).toBe(true);
-    expect(optionLabels[0]).toEqual(["Telegram", "WhatsApp beta", "Discord beta"]);
-    expect(optionLabels[1]).toEqual(["Configure", "Leave unchanged"]);
+    expect(optionLabels[0]).toEqual(["Telegram", "WhatsApp beta", "Discord beta", "Back"]);
+    expect(optionLabels[1]).toEqual(["Configure", "Leave unchanged", "Back"]);
     expect(defaultLabels[1]).toBe("Configure");
     expect(optionLabels).toHaveLength(2);
     expect(result.reviewManifest).toBeUndefined();
@@ -1456,7 +2449,7 @@ describe("runConfigEditor", () => {
       });
 
       expect(result.completed).toBe(true);
-      expect(optionLabels.at(-1)).toEqual(["Configure", "Leave unchanged", "Skip"]);
+      expect(optionLabels.at(-1)).toEqual(["Configure", "Leave unchanged", "Skip", "Back"]);
       expect(defaultLabels.at(-1)).toBe("Configure");
       expect(result.reviewManifest).toBeUndefined();
     }
@@ -1655,21 +2648,28 @@ describe("runConfigEditor", () => {
     await writeUserConfig(tempDir, localReadyConfig());
     await trustWorkspace(tempDir, workspaceRoot);
     const actions = gatewayServiceActions();
+    const selectInputs: Record<string, SelectPromptInput<unknown>> = {};
+    const prompt = fakePrompt({
+      values: [
+        "telegram",
+        "enable",
+        "42",
+        "-100",
+        true,
+        "Not now",
+      ],
+      secret: "123456:stored-telegram-token",
+    });
+    const baseSelect = prompt.select!;
+    prompt.select = async (input) => {
+      selectInputs[input.title] = input as SelectPromptInput<unknown>;
+      return baseSelect(input);
+    };
 
     const result = await runConfigEditor({
       homeDir: tempDir,
       workspaceRoot,
-      prompt: fakePrompt({
-        values: [
-          "telegram",
-          "enable",
-          "42",
-          "-100",
-          true,
-          "Not now",
-        ],
-        secret: "123456:stored-telegram-token",
-      }),
+      prompt,
       defaultActionId: "configure-channels",
       applyExecutor: createReviewedSetupApplyExecutor({
         homeDir: tempDir,
@@ -1685,6 +2685,10 @@ describe("runConfigEditor", () => {
     expect(actions.install).not.toHaveBeenCalled();
     expect(actions.start).not.toHaveBeenCalled();
     expect(result.output).toContain(gatewayServiceActivationNotNowGuidance);
+    expect(selectInputs[gatewayServiceActivationPromptTitle]?.options.find((option) => option.id === "yes")?.group)
+      .toBeUndefined();
+    expect(selectInputs[gatewayServiceActivationPromptTitle]?.options.find((option) => option.id === "not-now")?.group)
+      .toBe("navigation");
   });
 
   it("does not offer gateway activation when a ready channel already existed before setup editor apply", async () => {
@@ -2497,13 +3501,16 @@ describe("runConfigEditor", () => {
       "Base (recommended for everyday use)",
       "Small",
       "Medium",
+      "Back",
     ]);
     expect(localModelPrompt?.descriptions).toEqual([
       "Balanced speed and accuracy for most voice notes.",
       "Better accuracy than Base, with higher CPU and memory use.",
       "Higher accuracy for difficult audio, but slower and heavier.",
+      "Return to the previous step.",
     ]);
-    expect(localModelPrompt?.values).toEqual(["base", "small", "medium"]);
+    expect(localModelPrompt?.values.slice(0, 3)).toEqual(["base", "small", "medium"]);
+    expect(typeof localModelPrompt?.values[3]).toBe("symbol");
     expect(rawConfig).not.toContain("sk-");
     expect(JSON.stringify(result)).not.toContain("sk-");
   });
@@ -3075,12 +4082,18 @@ describe("runConfigEditor", () => {
     await mkdir(dirname(profileConfigPath(tempDir)), { recursive: true });
     await writeFile(profileConfigPath(tempDir), "{not-json", "utf8");
     const output: string[] = [];
+    const selectInputs: SelectPromptInput<unknown>[] = [];
+    const prompt = fakePrompt({ values: ["show-diagnostics"] });
+    const baseSelect = prompt.select!;
+    prompt.select = async (input) => {
+      selectInputs.push(input as SelectPromptInput<unknown>);
+      return baseSelect(input);
+    };
 
     const result = await runConfigEditor({
       homeDir: tempDir,
       workspaceRoot,
-      prompt: fakePrompt(),
-      defaultActionId: "show-diagnostics",
+      prompt,
       output: { write: (value) => output.push(value) },
     });
 
@@ -3098,12 +4111,19 @@ describe("runConfigEditor", () => {
     expect(result.output).toContain("Error:");
     expect(result.output).toContain("Normal config edits are blocked until the config file can be parsed.");
     expect(result.output).toContain("Only diagnostics, verification, and exit are available");
-    expect(output.join("")).toContain("verify-setup - Run setup verification");
-    expect(output.join("")).toContain("show-diagnostics - Show diagnostics");
+    expect(output.join("")).toContain("verify-setup - Setup verification");
+    expect(output.join("")).toContain("show-diagnostics - Diagnostics");
     expect(output.join("")).toContain("exit - Exit without changes");
     expect(output.join("")).not.toContain("edit-primary-model-route");
     expect(output.join("")).not.toContain("edit-security-mode");
     expect(output.join("")).not.toContain("repair-state-directory");
+    const menuInput = selectInputs[0];
+    expect(menuInput?.options.map((option) =>
+      typeof option.value === "object" && option.value !== null && "id" in option.value ? option.value.id : option.id
+    )).toEqual(["verify-setup", "show-diagnostics", "exit"]);
+    expect(menuInput?.options.find((option) => option.id === "verify-setup")?.group).toBeUndefined();
+    expect(menuInput?.options.find((option) => option.id === "show-diagnostics")?.group).toBeUndefined();
+    expect(menuInput?.options.find((option) => option.id === "exit")?.group).toBe("navigation");
   });
 
   it("renders state-not-writable as a repair-first diagnostic surface", async () => {
@@ -3210,6 +4230,16 @@ function fakePrompt(options: { readonly values?: readonly unknown[]; readonly se
   prompt.onboardingCard = () => undefined;
   prompt.close = () => undefined;
   return prompt;
+}
+
+function captureSelectInputs(prompt: Prompt): SelectPromptInput<unknown>[] {
+  const selectInputs: SelectPromptInput<unknown>[] = [];
+  const baseSelect = prompt.select!;
+  prompt.select = async (input) => {
+    selectInputs.push(input as SelectPromptInput<unknown>);
+    return baseSelect(input);
+  };
+  return selectInputs;
 }
 
 function readyDdgsStatus(homeDir: string): Awaited<ReturnType<typeof capabilityManager.checkManagedPythonCapabilityStatus>> {
@@ -3350,44 +4380,6 @@ function gatewayServiceActions(input: {
     start: vi.fn<GatewayActivationServiceActions["start"]>().mockResolvedValue({
       ok: true,
     }),
-  };
-}
-
-function modelStatusCandidates(provider: ProviderId): ModelCandidate[] {
-  return [
-    modelStatusCandidate(provider, "model-alpha", "alpha"),
-    modelStatusCandidate(provider, "model-beta", "beta"),
-    modelStatusCandidate(provider, "model-deprecated", "deprecated"),
-    modelStatusCandidate(provider, "model-unknown", "unknown"),
-    modelStatusCandidate(provider, "model-stable", "stable"),
-    modelStatusCandidate(provider, "model-missing"),
-  ];
-}
-
-function modelStatusCandidate(
-  provider: ProviderId,
-  id: string,
-  status?: ModelCandidate["profile"]["status"]
-): ModelCandidate {
-  return {
-    id,
-    provider,
-    configured: true,
-    executable: true,
-    catalogOnly: false,
-    supportsVision: false,
-    lifecycle: "available",
-    usageClass: "primary-chat",
-    profile: {
-      id,
-      provider,
-      contextWindowTokens: 128000,
-      supportsTools: false,
-      supportsVision: false,
-      supportsReasoning: false,
-      supportsStructuredOutput: true,
-      ...(status !== undefined ? { status } : {}),
-    },
   };
 }
 

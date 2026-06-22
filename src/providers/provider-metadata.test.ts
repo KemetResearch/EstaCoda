@@ -25,7 +25,7 @@ describe("provider-metadata", () => {
     it.each([
       ["openai", "OpenAI", "https://api.openai.com/v1", "OPENAI_API_KEY", true, true, "api_key", "openai_chat_completions"],
       ["deepseek", "DeepSeek", "https://api.deepseek.com/v1", "DEEPSEEK_API_KEY", true, true, "api_key", "openai_chat_completions"],
-      ["kimi", "Kimi For Coding", "https://api.moonshot.ai/v1", "KIMI_API_KEY", true, true, "api_key", "openai_chat_completions"],
+      ["kimi", "Kimi", "https://api.moonshot.ai/v1", "KIMI_API_KEY", true, true, "api_key", "openai_chat_completions"],
       ["google", "Google", "https://generativelanguage.googleapis.com/v1beta/openai", "GOOGLE_API_KEY", true, true, "api_key", "openai_chat_completions"],
       ["openrouter", "OpenRouter", "https://openrouter.ai/api/v1", "OPENROUTER_API_KEY", true, true, "api_key", "openai_chat_completions"],
       ["zai", "Z.AI", "https://api.z.ai/api/paas/v4", "ZAI_API_KEY", true, true, "api_key", "openai_chat_completions"],

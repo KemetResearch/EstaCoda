@@ -256,10 +256,19 @@ export function buildPickerViewModel(input: BuildPickerInput): PickerViewModel {
 export interface BuildOnboardingPromptCardInput {
   readonly title: string;
   readonly bodyLines: readonly string[];
+  readonly bodyLineStyles?: OnboardingPromptCardViewModel["bodyLineStyles"];
   readonly technicalLines?: readonly string[];
+  readonly statusLines?: OnboardingPromptCardViewModel["statusLines"];
+  readonly columns?: OnboardingPromptCardViewModel["columns"];
   readonly options: readonly OnboardingPromptOption[];
   readonly selectedOptionIndex: number;
   readonly hint?: string;
+  readonly showCurrentBadge?: boolean;
+  readonly showColumnHeaders?: boolean;
+  readonly tableDirection?: OnboardingPromptCardViewModel["tableDirection"];
+  readonly tableWidth?: OnboardingPromptCardViewModel["tableWidth"];
+  readonly tableMaxWidth?: OnboardingPromptCardViewModel["tableMaxWidth"];
+  readonly tableAlign?: OnboardingPromptCardViewModel["tableAlign"];
   readonly locale?: "en" | "ar";
   readonly direction?: "ltr" | "rtl";
 }
@@ -271,10 +280,19 @@ export function buildOnboardingPromptCardViewModel(
     kind: "onboardingPromptCard",
     title: input.title,
     bodyLines: input.bodyLines,
+    bodyLineStyles: input.bodyLineStyles,
     technicalLines: input.technicalLines,
+    statusLines: input.statusLines,
+    columns: input.columns,
     options: input.options,
     selectedOptionIndex: input.selectedOptionIndex,
     hint: input.hint,
+    showCurrentBadge: input.showCurrentBadge,
+    showColumnHeaders: input.showColumnHeaders,
+    tableDirection: input.tableDirection,
+    tableWidth: input.tableWidth,
+    tableMaxWidth: input.tableMaxWidth,
+    tableAlign: input.tableAlign,
     locale: input.locale,
     direction: input.direction,
   };

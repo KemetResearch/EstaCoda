@@ -268,13 +268,33 @@ describe("ViewModel builders", () => {
     const vm = buildOnboardingPromptCardViewModel({
       title: "Workspace trust",
       bodyLines: ["Trust this workspace?"],
+      bodyLineStyles: [{ emphasis: "strong" }],
       technicalLines: ["/workspace"],
+      statusLines: [
+        { text: "Current: alpha", tone: "active", direction: "ltr" },
+      ],
+      columns: [
+        { key: "name", header: "Name", align: "right" },
+        { key: "description", header: "Description" },
+      ],
       options: [
-        { id: "trust", label: "Trust workspace" },
-        { id: "skip", label: "Not now" },
+        {
+          id: "alpha",
+          label: "Alpha",
+          cells: { name: "Alpha", description: "First generic option" },
+          badges: ["Current"],
+          current: true,
+        },
+        { id: "skip", label: "Not now", description: "Return later", group: "navigation" },
       ],
       selectedOptionIndex: 0,
       hint: "Use arrow keys to choose.",
+      showCurrentBadge: false,
+      showColumnHeaders: false,
+      tableDirection: "rtl",
+      tableWidth: "content",
+      tableMaxWidth: 88,
+      tableAlign: "right",
       locale: "en",
       direction: "ltr",
     });
@@ -282,10 +302,37 @@ describe("ViewModel builders", () => {
     expect(vm.kind).toBe("onboardingPromptCard");
     expect(vm.title).toBe("Workspace trust");
     expect(vm.bodyLines).toEqual(["Trust this workspace?"]);
+    expect(vm.bodyLineStyles).toEqual([{ emphasis: "strong" }]);
     expect(vm.technicalLines).toEqual(["/workspace"]);
+    expect(vm.statusLines).toEqual([
+      { text: "Current: alpha", tone: "active", direction: "ltr" },
+    ]);
+    expect(vm.columns).toEqual([
+      { key: "name", header: "Name", align: "right" },
+      { key: "description", header: "Description" },
+    ]);
     expect(vm.options).toHaveLength(2);
+    expect(vm.options[0]).toEqual({
+      id: "alpha",
+      label: "Alpha",
+      cells: { name: "Alpha", description: "First generic option" },
+      badges: ["Current"],
+      current: true,
+    });
+    expect(vm.options[1]).toEqual({
+      id: "skip",
+      label: "Not now",
+      description: "Return later",
+      group: "navigation",
+    });
     expect(vm.selectedOptionIndex).toBe(0);
     expect(vm.hint).toBe("Use arrow keys to choose.");
+    expect(vm.showCurrentBadge).toBe(false);
+    expect(vm.showColumnHeaders).toBe(false);
+    expect(vm.tableDirection).toBe("rtl");
+    expect(vm.tableWidth).toBe("content");
+    expect(vm.tableMaxWidth).toBe(88);
+    expect(vm.tableAlign).toBe("right");
     expect(vm.locale).toBe("en");
     expect(vm.direction).toBe("ltr");
     expect(Object.getPrototypeOf(vm)).toBe(Object.prototype);

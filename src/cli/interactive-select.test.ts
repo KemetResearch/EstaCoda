@@ -2,7 +2,7 @@ import { describe, expect, it, vi, afterEach } from "vitest";
 import { PassThrough, Readable, Writable } from "node:stream";
 import { selectOption, type SelectPromptInput } from "./interactive-select.js";
 import { stripAnsi } from "../ui/renderers/layout.js";
-import { isolateLtr, isolateRtl } from "../ui/bidi.js";
+import { isolateLtr, isolateRtl, LRI, PDI, RLI } from "../ui/bidi.js";
 
 type TtyInput = PassThrough & {
   isTTY: true;
@@ -32,6 +32,10 @@ afterEach(() => {
   }
   vi.restoreAllMocks();
 });
+
+function stripTrailingBidiControls(text: string): string {
+  return text.replace(new RegExp(`[${LRI}${RLI}${PDI}]+$`, "gu"), "");
+}
 
 describe("interactive-select prompt card surface", () => {
   it("renders prompt cards while preserving arrow navigation and Enter confirmation", async () => {
@@ -110,6 +114,141 @@ describe("interactive-select prompt card surface", () => {
       "> Trust workspace",
       "  Not now",
     ].join("\n"));
+  });
+
+  it("passes structured prompt-card table fields through plain fallback rendering", async () => {
+    const input = Readable.from(["1\n"]);
+    const output = makeOutput(false);
+
+    const selected = await selectOption(input, output, {
+      surface: "promptCard",
+      title: "Choose mode",
+      body: "Pick a generic mode.",
+      bodyLineStyles: [{ emphasis: "strong" }],
+      statusLines: [
+        { text: "Current: Alpha", tone: "active", direction: "ltr" },
+      ],
+      showCurrentBadge: false,
+      columns: [
+        { key: "name", header: "Name" },
+        { key: "description", header: "Description" },
+      ],
+      options: [
+        {
+          value: "alpha",
+          label: "Alpha",
+          cells: { name: "Alpha", description: "First generic option" },
+          badges: ["Recommended"],
+          current: true,
+        },
+        {
+          value: "back",
+          label: "Back",
+          group: "navigation",
+          cells: { name: "Back", description: "Return to previous step" },
+        },
+        {
+          value: "cancel",
+          label: "Cancel",
+          group: "navigation",
+          cells: { name: "Cancel", description: "Exit without changes" },
+        },
+      ],
+      hint: "Type a number to choose.",
+      fallbackPrompt: "Choose: ",
+    });
+
+    const rendered = output.getText();
+    expect(selected).toBe("alpha");
+    expect(rendered).toContain("Pick a generic mode.");
+    expect(rendered).toContain("Name");
+    expect(rendered).toContain("Description");
+    expect(rendered).toContain("Current: Alpha");
+    expect(rendered).toContain("> Alpha");
+    expect(rendered).toContain("First generic option");
+    expect(rendered).toContain("Recommended");
+    expect(rendered).not.toContain("Recommended  Current");
+    expect(rendered).toContain("Back");
+    expect(rendered).toContain("Cancel");
+    expect(rendered).toContain("Type a number to choose.");
+    const lines = rendered.split("\n");
+    const backIndex = lines.findIndex((line) => line.includes("Back"));
+    const cancelIndex = lines.findIndex((line) => line.includes("Cancel"));
+    expect(lines[backIndex - 1]).toBe("");
+    expect(cancelIndex).toBe(backIndex + 1);
+  });
+
+  it("passes prompt-card showColumnHeaders through plain fallback rendering", async () => {
+    const input = Readable.from(["1\n"]);
+    const output = makeOutput(false);
+
+    await selectOption(input, output, {
+      surface: "promptCard",
+      title: "Choose mode",
+      body: "Pick a generic mode.",
+      showColumnHeaders: false,
+      columns: [
+        { key: "name", header: "Name" },
+        { key: "description", header: "Description" },
+      ],
+      options: [
+        {
+          value: "alpha",
+          label: "Alpha",
+          description: "First generic option",
+        },
+        {
+          value: "beta",
+          label: "Beta",
+          description: "Second generic option",
+        },
+      ],
+      hint: "↑↓ navigate   ENTER select   CTRL+C exit",
+      fallbackPrompt: "Choose: ",
+    });
+
+    const rendered = output.getText();
+    expect(rendered).not.toContain("  Name");
+    expect(rendered).not.toContain("Description");
+    expect(rendered).toContain("> Alpha");
+    expect(rendered).toContain("First generic option");
+    expect(rendered).toContain("↑↓ navigate   ENTER select   CTRL+C exit");
+  });
+
+  it("passes prompt-card table direction and column alignment through plain fallback rendering", async () => {
+    const input = Readable.from(["1\n"]);
+    const output = makeOutput(false);
+
+    await selectOption(input, output, {
+      surface: "promptCard",
+      title: "اختر الوضع",
+      body: "اختر وضعًا عامًا.",
+      columns: [
+        { key: "description", header: "التفاصيل", align: "right" },
+        { key: "name", header: "الاسم", align: "right" },
+      ],
+      tableDirection: "rtl",
+      tableWidth: "content",
+      tableMaxWidth: 44,
+      tableAlign: "right",
+      locale: "ar",
+      direction: "rtl",
+      options: [
+        {
+          value: "alpha",
+          label: "ألفا",
+          cells: { description: "خيار عام", name: "ألفا" },
+        },
+      ],
+      fallbackPrompt: "Choose: ",
+    });
+
+    const rendered = output.getText();
+    const selectedLine = rendered.split("\n").find((line) => line.includes("ألفا"));
+    expect(selectedLine).toBeDefined();
+    expect(selectedLine).toContain("خيار عام");
+    expect(stripTrailingBidiControls(selectedLine!.trimEnd()).endsWith("<")).toBe(true);
+    expect(selectedLine!.startsWith(" ".repeat(20))).toBe(true);
   });
 
   it("localizes and bolds Arabic selected output", async () => {

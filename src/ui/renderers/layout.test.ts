@@ -8,6 +8,7 @@ import {
   padVisibleEnd,
   padVisibleStart,
   padVisibleAlign,
+  centerVisibleBlock,
   indentLines,
   openHorizontalFrame,
   solidPromptRail,
@@ -243,6 +244,62 @@ describe("padVisibleAlign", () => {
 
   it("returns text unchanged if wider than width", () => {
     expect(padVisibleAlign("hello world", 3, "left")).toBe("hello world");
+  });
+});
+
+describe("centerVisibleBlock", () => {
+  it("centers a simple multi-line block based on maximum visible width", () => {
+    expect(centerVisibleBlock("abc\nabcd", 10)).toBe("   abc\n   abcd");
+  });
+
+  it("uses ANSI-aware width measurement", () => {
+    const text = "\x1b[31mred\x1b[0m\nblue";
+    const centered = centerVisibleBlock(text, 10);
+    expect(centered).toBe("   \x1b[31mred\x1b[0m\n   blue");
+  });
+
+  it("leaves text unchanged when terminal width is narrower than block width", () => {
+    const text = "short\nlonger";
+    expect(centerVisibleBlock(text, 5)).toBe(text);
+  });
+
+  it("leaves text unchanged when terminal width equals block width", () => {
+    const text = "short\nlonger";
+    expect(centerVisibleBlock(text, 6)).toBe(text);
+  });
+
+  it("preserves empty lines", () => {
+    expect(centerVisibleBlock("top\n\nbottom", 12)).toBe("   top\n\n   bottom");
+  });
+
+  it("does not strip ANSI sequences", () => {
+    const text = "\x1b[1mBold\x1b[0m";
+    const centered = centerVisibleBlock(text, 10);
+    expect(centered).toContain("\x1b[1m");
+    expect(centered).toContain("\x1b[0m");
+    expect(stripAnsi(centered)).toBe("   Bold");
+  });
+
+  it("centers based on whole-block width rather than each individual line", () => {
+    expect(centerVisibleBlock("x\n12345678", 12)).toBe("  x\n  12345678");
+  });
+
+  it("handles a dashboard-like block with hero, blank line, and frame lines", () => {
+    const block = [
+      "\x1b[1mEstaCoda\x1b[0m",
+      "",
+      "╭────────╮",
+      "  model",
+      "╰────────╯",
+    ].join("\n");
+
+    expect(centerVisibleBlock(block, 20)).toBe([
+      "     \x1b[1mEstaCoda\x1b[0m",
+      "",
+      "     ╭────────╮",
+      "       model",
+      "     ╰────────╯",
+    ].join("\n"));
   });
 });
 

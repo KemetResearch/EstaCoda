@@ -1,5 +1,11 @@
 import type { SelectPromptInput } from "../cli/interactive-select.js";
 import type { Prompt } from "../cli/readline-prompt.js";
+import type {
+  PromptCardBodyLineStyle,
+  PromptCardStatusLine,
+  PromptCardTableAlign,
+  PromptCardTableWidth,
+} from "../contracts/view-model.js";
 import { isolateLtr, isolateRtl } from "../ui/bidi.js";
 import {
   promptUiContextForLocale,
@@ -19,7 +25,22 @@ export type SetupChoice<T> = {
   readonly id: string;
   readonly label: string;
   readonly description?: string;
+  readonly technical?: boolean;
+  readonly cells?: Readonly<Record<string, string>>;
+  readonly badges?: readonly string[];
+  readonly current?: boolean;
+  readonly group?: "main" | "navigation";
   readonly value: T;
+};
+
+export type SetupChoiceResult<T> =
+  | { readonly kind: "selected"; readonly value: T }
+  | { readonly kind: "back" };
+
+export type SetupChoiceColumn = {
+  readonly key: string;
+  readonly header: string;
+  readonly align?: "left" | "right";
 };
 
 export type SetupPromptValue = string | number | readonly string[] | boolean | undefined;
@@ -62,12 +83,29 @@ const REVIEW_SECTION_COPY_KEYS: Record<SetupReviewManifestSection, SetupCopyKey>
 
 type SetupPromptTarget = Prompt | SetupPromptContext;
 
-export async function promptSetupChoice<T>(target: SetupPromptTarget, input: {
+export type PromptSetupChoiceInput<T> = {
   readonly title: string;
   readonly message: string;
+  readonly bodyLineStyles?: readonly PromptCardBodyLineStyle[];
   readonly choices: readonly SetupChoice<T>[];
   readonly defaultValue?: T;
-}): Promise<T> {
+  readonly columns?: readonly SetupChoiceColumn[];
+  readonly statusLines?: readonly PromptCardStatusLine[];
+  readonly hint?: string;
+  readonly showCurrentBadge?: boolean;
+  readonly showColumnHeaders?: boolean;
+  readonly tableDirection?: "ltr" | "rtl";
+  readonly tableWidth?: PromptCardTableWidth;
+  readonly tableMaxWidth?: number;
+  readonly tableAlign?: PromptCardTableAlign;
+};
+
+const SETUP_BACK_CHOICE_VALUE = Symbol("setup-back-choice");
+
+export async function promptSetupChoice<T>(
+  target: SetupPromptTarget,
+  input: PromptSetupChoiceInput<T>
+): Promise<T> {
   if (input.choices.length === 0) {
     throw new Error(`${input.title} has no choices.`);
   }
@@ -78,15 +116,30 @@ export async function promptSetupChoice<T>(target: SetupPromptTarget, input: {
     return prompt.select({
       title: input.title,
       body: input.message.trim(),
+      bodyLineStyles: input.bodyLineStyles,
       options: input.choices.map((choice) => ({
         id: choice.id,
         label: choice.label,
         description: choice.description,
+        technical: choice.technical,
+        cells: choice.cells,
+        badges: choice.badges,
+        current: choice.current,
+        group: choice.group,
         value: choice.value,
       })),
       defaultIndex,
       fallbackPrompt: "Choose: ",
       surface: "promptCard",
+      columns: input.columns,
+      statusLines: input.statusLines,
+      hint: input.hint ?? setupNavigationHint(uiContext.locale),
+      showCurrentBadge: input.showCurrentBadge,
+      showColumnHeaders: input.showColumnHeaders,
+      tableDirection: input.tableDirection,
+      tableWidth: input.tableWidth,
+      tableMaxWidth: input.tableMaxWidth,
+      tableAlign: input.tableAlign,
       locale: uiContext.locale,
       direction: uiContext.direction,
     } satisfies SelectPromptInput<T>);
@@ -96,6 +149,96 @@ export async function promptSetupChoice<T>(target: SetupPromptTarget, input: {
   const raw = await prompt(`${input.message}${options}\nChoose [${(defaultIndex === -1 ? 0 : defaultIndex) + 1}]: `);
   const selectedIndex = Number.parseInt(raw.trim(), 10) - 1;
   return input.choices[selectedIndex]?.value ?? input.choices[defaultIndex === -1 ? 0 : defaultIndex]!.value;
+}
+
+export async function promptSetupChoiceResult<T>(
+  target: SetupPromptTarget,
+  input: PromptSetupChoiceInput<T> & {
+    readonly allowBack?: boolean;
+  }
+): Promise<SetupChoiceResult<T>> {
+  const { uiContext } = resolveSetupPromptTarget(target);
+  const choices: readonly SetupChoice<T | typeof SETUP_BACK_CHOICE_VALUE>[] = input.allowBack === true
+    ? [...input.choices, setupBackChoice(uiContext.locale)]
+    : input.choices;
+  const selected = await promptSetupChoice<T | typeof SETUP_BACK_CHOICE_VALUE>(target, {
+    ...input,
+    choices,
+    defaultValue: input.defaultValue,
+  });
+  if (selected === SETUP_BACK_CHOICE_VALUE) {
+    return { kind: "back" };
+  }
+  return { kind: "selected", value: selected };
+}
+
+function setupBackChoice(locale: SetupCopyLocale): SetupChoice<typeof SETUP_BACK_CHOICE_VALUE> {
+  return setupNavigationChoice({
+    id: "back",
+    label: locale === "ar" ? "رجوع" : "Back",
+    description: setupCopyText(locale, "onboarding.providers.navigation.back.description"),
+    value: SETUP_BACK_CHOICE_VALUE,
+  });
+}
+
+export function setupChoiceColumns(locale: SetupCopyLocale): readonly SetupChoiceColumn[] {
+  if (locale === "ar") {
+    return [
+      { key: "description", header: "التفاصيل", align: "right" },
+      { key: "name", header: "الاسم", align: "right" },
+    ];
+  }
+
+  return [
+    { key: "name", header: "Name", align: "left" },
+    { key: "description", header: "Details", align: "left" },
+  ];
+}
+
+export function setupChoiceTableDirection(locale: SetupCopyLocale): "ltr" | "rtl" {
+  return locale === "ar" ? "rtl" : "ltr";
+}
+
+export function setupChoiceTableWidth(locale: SetupCopyLocale): PromptCardTableWidth {
+  return locale === "ar" ? "content" : "full";
+}
+
+export function setupChoiceTableMaxWidth(locale: SetupCopyLocale): number | undefined {
+  return locale === "ar" ? 88 : undefined;
+}
+
+export function setupChoiceTableAlign(locale: SetupCopyLocale): PromptCardTableAlign | undefined {
+  return locale === "ar" ? "right" : undefined;
+}
+
+export function setupNavigationHint(_locale: SetupCopyLocale): string {
+  return "↑↓ navigate   ENTER select   CTRL+C exit";
+}
+
+export function setupCurrentStatusLine(
+  locale: SetupCopyLocale,
+  text: string
+): PromptCardStatusLine {
+  const label = locale === "ar" ? "الحالي" : "Current";
+  return {
+    text: `${label}: ${text}`,
+    tone: "active",
+    direction: locale === "ar" ? "rtl" : "ltr",
+  };
+}
+
+export function setupCurrentStatusLines(
+  locale: SetupCopyLocale,
+  text: string | undefined
+): readonly PromptCardStatusLine[] | undefined {
+  return text === undefined ? undefined : [setupCurrentStatusLine(locale, text)];
+}
+
+export function setupNavigationChoice<T>(choice: Omit<SetupChoice<T>, "group">): SetupChoice<T> {
+  return {
+    ...choice,
+    group: "navigation",
+  };
 }
 
 export async function promptSetupYesNo(target: SetupPromptTarget, input: {

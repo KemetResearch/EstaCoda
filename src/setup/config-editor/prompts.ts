@@ -1,17 +1,19 @@
 import type { Prompt } from "../../cli/readline-prompt.js";
 import { promptForApiKeyInput } from "../../cli/secret-prompt.js";
 import type { BrowserBackendKind, BrowserCloudProviderKind } from "../../contracts/browser.js";
-import type { AuxiliaryModelTask, ModelProfile } from "../../contracts/provider.js";
+import type { AuxiliaryModelTask } from "../../contracts/provider.js";
 import type { SecurityApprovalMode } from "../../contracts/security.js";
 import type { BrowserEngineKind, ImageGenerationProvider, SttProvider, TtsProvider } from "../../config/runtime-config.js";
 import type { ModelFallbackConfig } from "../../config/runtime-config.js";
-import type { ModelCandidate, ProviderCandidate } from "../../providers/provider-model-selection-flow.js";
 import type { SkillAutonomy } from "../../skills/skill-learning.js";
 import type { SetupReviewManifest } from "../setup-review-manifest.js";
 import {
   formatSetupCopy,
   promptSetupChoice,
+  promptSetupChoiceResult,
   type SetupChoice,
+  type SetupChoiceResult,
+  type PromptSetupChoiceInput,
   promptSetupStringWithDefault,
   setupCsvPromptLabel,
   setupOutputLine,
@@ -19,6 +21,13 @@ import {
   setupPromptWithDefault,
   setupPromptContext,
   setupTechnicalToken,
+  setupChoiceColumns,
+  setupChoiceTableAlign,
+  setupChoiceTableDirection,
+  setupChoiceTableMaxWidth,
+  setupChoiceTableWidth,
+  setupCurrentStatusLines,
+  setupNavigationChoice,
   showSetupCard,
   setupTelegramAllowedChatIdsQuestion,
   setupTelegramAllowedUserIdsQuestion,
@@ -51,6 +60,62 @@ type BrowserSetupModeChoice =
 export type BrowserModeChoice =
   | "recommended"
   | BrowserSetupModeChoice;
+
+type BackPromptOptions = {
+  readonly allowBack?: boolean;
+};
+
+type BackEnabled = {
+  readonly allowBack: true;
+};
+
+export type WebSearchCapabilityResult =
+  | {
+      readonly provider: "brave";
+      readonly braveApiKeyEnv: string;
+    }
+  | {
+      readonly provider: "ddgs";
+      readonly ddgsSetupConfirmed: boolean;
+    }
+  | {
+      readonly provider: "none";
+    };
+
+export type TtsCapabilityResult = {
+  readonly ttsProvider: TtsProvider;
+  readonly ttsModel: string;
+  readonly ttsApiKeyEnv: string;
+};
+
+export type SttCapabilityResult = {
+  readonly sttProvider: SttProvider;
+  readonly sttModel: string;
+  readonly sttApiKeyEnv: string;
+};
+
+export type VisionCapabilityResult = {
+  readonly provider: ImageGenerationProvider;
+  readonly model: string;
+  readonly apiKeyEnv: string;
+  readonly useGateway: boolean;
+};
+
+export type BrowserCapabilityResult = {
+  readonly backend: BrowserBackendKind;
+  readonly cloudProvider?: BrowserCloudProviderKind;
+  readonly cdpUrl?: string;
+  readonly launchExecutable?: string;
+  readonly launchArgs: string[];
+  readonly chromeFlags: string[];
+  readonly launchCommand?: string;
+  readonly autoLaunch: boolean;
+  readonly supervised?: boolean;
+  readonly engine?: BrowserEngineKind;
+  readonly hybridRouting?: boolean;
+  readonly cloudFallback?: boolean;
+  readonly cloudSpendApproved?: boolean;
+};
 
 const promptedBrowserModes = new WeakMap<object, BrowserSetupModeChoice>();
 
@@ -96,84 +161,160 @@ export async function promptConfigEditorAction(
   return promptSetupChoice(prompt, {
     title: setupCopyText(locale, "setupEditor.prompt.action.title"),
     message: `${setupCopyText(locale, "setupEditor.prompt.action.body")}\n`,
+    bodyLineStyles: [{ emphasis: "strong" }],
+    columns: setupChoiceColumns(locale),
+    tableDirection: setupChoiceTableDirection(locale),
+    tableWidth: setupChoiceTableWidth(locale),
+    tableMaxWidth: setupChoiceTableMaxWidth(locale),
+    tableAlign: setupChoiceTableAlign(locale),
+    showColumnHeaders: false,
     choices: actions.map((action) => ({
       id: action.id,
       label: action.label,
       description: action.description,
+      group: action.group,
       value: action,
     })),
     defaultValue: defaultAction,
   });
 }
 
+async function promptSetupChoiceMaybeBack<T>(
+  prompt: Prompt,
+  input: PromptSetupChoiceInput<T>,
+  options: BackPromptOptions = {}
+): Promise<T | SetupChoiceResult<T>> {
+  if (options.allowBack === true) {
+    return promptSetupChoiceResult(prompt, {
+      ...input,
+      allowBack: true,
+    });
+  }
+  return promptSetupChoice(prompt, input);
+}
+
+function isSetupChoiceBackResult<T>(
+  result: T | SetupChoiceResult<T>
+): result is Extract<SetupChoiceResult<T>, { readonly kind: "back" }> {
+  return typeof result === "object" && result !== null && "kind" in result && result.kind === "back";
+}
+
+function setupChoiceSelectedValue<T>(result: T | SetupChoiceResult<T>): T {
+  if (typeof result === "object" && result !== null && "kind" in result && result.kind === "selected") {
+    return result.value;
+  }
+  return result as T;
+}
+
+export function promptSecurityMode(
+  prompt: Prompt,
+  currentValue: SecurityApprovalMode,
+  locale: SetupCopyLocale,
+  options: BackEnabled
+): Promise<SetupChoiceResult<SecurityApprovalMode>>;
+export function promptSecurityMode(
+  prompt: Prompt,
+  currentValue: SecurityApprovalMode,
+  locale?: SetupCopyLocale,
+  options?: BackPromptOptions
+): Promise<SecurityApprovalMode>;
 export async function promptSecurityMode(
   prompt: Prompt,
   currentValue: SecurityApprovalMode,
-  locale: SetupCopyLocale = "en"
-): Promise<SecurityApprovalMode> {
-  return promptSetupChoice(prompt, {
+  locale: SetupCopyLocale = "en",
+  options: BackPromptOptions = {}
+): Promise<SecurityApprovalMode | SetupChoiceResult<SecurityApprovalMode>> {
+  const choices = [
+    {
+      id: "strict",
+      label: setupCopyText(locale, "onboarding.security.options.strict.label"),
+      description: setupCopyText(locale, "onboarding.security.options.strict.description"),
+      value: "strict" as const,
+      current: currentValue === "strict",
+    },
+    {
+      id: "adaptive",
+      label: setupCopyText(locale, "onboarding.security.options.adaptive.label"),
+      description: setupCopyText(locale, "onboarding.security.options.adaptive.description"),
+      value: "adaptive" as const,
+      current: currentValue === "adaptive",
+    },
+    {
+      id: "open",
+      label: setupCopyText(locale, "onboarding.security.options.open.label"),
+      description: setupCopyText(locale, "onboarding.security.options.open.description"),
+      value: "open" as const,
+      current: currentValue === "open",
+    },
+  ] as const;
+  const currentLabel = choices.find((choice) => choice.value === currentValue)?.label ?? currentValue;
+  return promptSetupChoiceMaybeBack(prompt, {
     title: setupCopyText(locale, "onboarding.security.title"),
     message: `${setupCopyText(locale, "onboarding.security")}\n`,
-    choices: [
-      {
-        id: "strict",
-        label: setupCopyText(locale, "onboarding.security.options.strict.label"),
-        description: setupCopyText(locale, "onboarding.security.options.strict.description"),
-        value: "strict" as const,
-      },
-      {
-        id: "adaptive",
-        label: setupCopyText(locale, "onboarding.security.options.adaptive.label"),
-        description: setupCopyText(locale, "onboarding.security.options.adaptive.description"),
-        value: "adaptive" as const,
-      },
-      {
-        id: "open",
-        label: setupCopyText(locale, "onboarding.security.options.open.label"),
-        description: setupCopyText(locale, "onboarding.security.options.open.description"),
-        value: "open" as const,
-      },
-    ],
+    statusLines: setupCurrentStatusLines(locale, currentLabel),
+    showCurrentBadge: false,
+    choices,
     defaultValue: currentValue,
-  });
+  }, options);
 }
 
+export function promptWorkflowLearning(
+  prompt: Prompt,
+  currentValue: SkillAutonomy,
+  locale: SetupCopyLocale,
+  options: BackEnabled
+): Promise<SetupChoiceResult<SkillAutonomy>>;
+export function promptWorkflowLearning(
+  prompt: Prompt,
+  currentValue: SkillAutonomy,
+  locale?: SetupCopyLocale,
+  options?: BackPromptOptions
+): Promise<SkillAutonomy>;
 export async function promptWorkflowLearning(
   prompt: Prompt,
   currentValue: SkillAutonomy,
-  locale: SetupCopyLocale = "en"
-): Promise<SkillAutonomy> {
-  return promptSetupChoice(prompt, {
+  locale: SetupCopyLocale = "en",
+  options: BackPromptOptions = {}
+): Promise<SkillAutonomy | SetupChoiceResult<SkillAutonomy>> {
+  const choices = [
+    {
+      id: "suggest",
+      label: setupCopyText(locale, "onboarding.workflowLearning.options.suggest.label"),
+      description: setupCopyText(locale, "onboarding.workflowLearning.options.suggest.description"),
+      value: "suggest" as const,
+      current: currentValue === "suggest",
+    },
+    {
+      id: "proactive",
+      label: setupCopyText(locale, "onboarding.workflowLearning.options.proactive.label"),
+      description: setupCopyText(locale, "onboarding.workflowLearning.options.proactive.description"),
+      value: "proactive" as const,
+      current: currentValue === "proactive",
+    },
+    {
+      id: "autonomous",
+      label: setupCopyText(locale, "onboarding.workflowLearning.options.autonomous.label"),
+      description: setupCopyText(locale, "onboarding.workflowLearning.options.autonomous.description"),
+      value: "autonomous" as const,
+      current: currentValue === "autonomous",
+    },
+    {
+      id: "none",
+      label: setupCopyText(locale, "onboarding.workflowLearning.options.none.label"),
+      description: setupCopyText(locale, "onboarding.workflowLearning.options.none.description"),
+      value: "none" as const,
+      current: currentValue === "none",
+    },
+  ] as const;
+  const currentLabel = choices.find((choice) => choice.value === currentValue)?.label ?? currentValue;
+  return promptSetupChoiceMaybeBack(prompt, {
     title: setupCopyText(locale, "onboarding.workflowLearning.title"),
     message: `${setupCopyText(locale, "onboarding.workflowLearning")}\n`,
-    choices: [
-      {
-        id: "none",
-        label: setupCopyText(locale, "onboarding.workflowLearning.options.none.label"),
-        description: setupCopyText(locale, "onboarding.workflowLearning.options.none.description"),
-        value: "none" as const,
-      },
-      {
-        id: "suggest",
-        label: setupCopyText(locale, "onboarding.workflowLearning.options.suggest.label"),
-        description: setupCopyText(locale, "onboarding.workflowLearning.options.suggest.description"),
-        value: "suggest" as const,
-      },
-      {
-        id: "proactive",
-        label: setupCopyText(locale, "onboarding.workflowLearning.options.proactive.label"),
-        description: setupCopyText(locale, "onboarding.workflowLearning.options.proactive.description"),
-        value: "proactive" as const,
-      },
-      {
-        id: "autonomous",
-        label: setupCopyText(locale, "onboarding.workflowLearning.options.autonomous.label"),
-        description: setupCopyText(locale, "onboarding.workflowLearning.options.autonomous.description"),
-        value: "autonomous" as const,
-      },
-    ],
+    statusLines: setupCurrentStatusLines(locale, currentLabel),
+    showCurrentBadge: false,
+    choices,
     defaultValue: currentValue,
-  });
+  }, options);
 }
 
 export async function promptWorkspaceTrustConfirmation(
@@ -199,69 +340,15 @@ export async function promptWorkspaceTrustConfirmation(
         description: setupCopyText(locale, "onboarding.workspace.trustAction.description"),
         value: true,
       },
-      {
+      setupNavigationChoice({
         id: "cancel",
         label: setupCopyText(locale, "onboarding.review.cancelAction"),
         description: setupCopyText(locale, "setupApply.review.cancelled"),
         value: false,
-      },
+      }),
     ],
     defaultValue: false,
   });
-}
-
-export async function promptProviderCandidate(
-  prompt: Prompt,
-  input: {
-    readonly candidates: readonly ProviderCandidate[];
-    readonly currentProviderId?: string;
-  },
-  locale: SetupCopyLocale = "en"
-): Promise<ProviderCandidate> {
-  return promptSetupChoice(prompt, {
-    title: setupCopyText(locale, "onboarding.providers.primary.title"),
-    message: `${setupCopyText(locale, "onboarding.providers.primary")}\n`,
-    choices: input.candidates.map((candidate) => ({
-      id: candidate.id,
-      label: candidate.displayName,
-      description: candidate.baseUrl
-        ? `${candidate.baseUrl} (${candidate.modelsCount} models)`
-        : `${candidate.modelsCount} models`,
-      value: candidate,
-    })),
-    defaultValue: input.candidates.find((candidate) => candidate.id === input.currentProviderId) ?? input.candidates[0],
-  });
-}
-
-export async function promptModelCandidate(
-  prompt: Prompt,
-  input: {
-    readonly providerId: string;
-    readonly candidates: readonly ModelCandidate[];
-    readonly currentModelId?: string;
-  },
-  locale: SetupCopyLocale = "en"
-): Promise<ModelCandidate> {
-  return promptSetupChoice(prompt, {
-    title: setupCopyText(locale, "onboarding.providers.primaryModel.title"),
-    message: `${setupCopyText(locale, "onboarding.providers.primaryModel").replace("{providerId}", input.providerId)}\n`,
-    choices: input.candidates.map((candidate) => ({
-      id: candidate.id,
-      label: candidate.id,
-      description: [
-        candidate.profile.supportsTools ? setupCopyText(locale, "onboarding.catalog.model.features.tools") : undefined,
-        candidate.profile.supportsVision ? setupCopyText(locale, "onboarding.catalog.model.features.vision") : undefined,
-        candidate.profile.supportsReasoning ? setupCopyText(locale, "onboarding.catalog.model.features.reasoning") : undefined,
-        renderableModelStatus(candidate.profile.status),
-      ].filter((part): part is string => part !== undefined).join(", "),
-      value: candidate,
-    })),
-    defaultValue: input.candidates.find((candidate) => candidate.id === input.currentModelId) ?? input.candidates[0],
-  });
-}
-
-function renderableModelStatus(status: ModelProfile["status"]): ModelProfile["status"] | undefined {
-  return status === "alpha" || status === "beta" || status === "deprecated" ? status : undefined;
 }
 
 export async function promptConfigEditorReviewApproval(
@@ -287,12 +374,12 @@ export async function promptConfigEditorReviewApproval(
         description: setupCopyText(locale, "setupEditor.review.confirm.description"),
         value: true,
       },
-      {
+      setupNavigationChoice({
         id: "cancel",
         label: setupCopyText(locale, "setupEditor.review.cancel"),
         description: setupCopyText(locale, "setupEditor.review.cancel.description"),
         value: false,
-      },
+      }),
     ],
     defaultValue: true,
   });
@@ -365,13 +452,30 @@ function manifestHasChannel(
   );
 }
 
+export function promptChannelCapability(
+  prompt: Prompt,
+  locale: SetupCopyLocale,
+  options: BackEnabled
+): Promise<SetupChoiceResult<ChannelCapabilityPromptId>>;
+export function promptChannelCapability(
+  prompt: Prompt,
+  locale?: SetupCopyLocale,
+  options?: BackPromptOptions
+): Promise<ChannelCapabilityPromptId>;
 export async function promptChannelCapability(
   prompt: Prompt,
-  locale: SetupCopyLocale = "en"
-): Promise<ChannelCapabilityPromptId> {
-  return promptSetupChoice(prompt, {
+  locale: SetupCopyLocale = "en",
+  options: BackPromptOptions = {}
+): Promise<ChannelCapabilityPromptId | SetupChoiceResult<ChannelCapabilityPromptId>> {
+  return promptSetupChoiceMaybeBack(prompt, {
     title: setupCopyText(locale, "setupEditor.prompt.channels.title"),
     message: `${setupCopyText(locale, "setupEditor.prompt.channels.body")}\n`,
+    columns: setupChoiceColumns(locale),
+    tableDirection: setupChoiceTableDirection(locale),
+    tableWidth: setupChoiceTableWidth(locale),
+    tableMaxWidth: setupChoiceTableMaxWidth(locale),
+    tableAlign: setupChoiceTableAlign(locale),
+    showColumnHeaders: false,
     choices: [
       {
         id: "channel-telegram",
@@ -393,7 +497,7 @@ export async function promptChannelCapability(
       },
     ],
     defaultValue: "telegram" as const,
-  });
+  }, options);
 }
 
 export async function promptCredentialReuseChoice(
@@ -421,6 +525,26 @@ export async function promptCredentialReuseChoice(
   });
 }
 
+export function promptWebSearchCapability(
+  prompt: Prompt,
+  current: {
+    readonly searchBackend?: string;
+    readonly braveApiKeyEnv?: string;
+    readonly ddgsCapabilityStatus?: "ready" | "missing" | "failed" | "unknown";
+  },
+  locale: SetupCopyLocale,
+  options: BackEnabled
+): Promise<WebSearchCapabilityResult | { readonly kind: "back" }>;
+export function promptWebSearchCapability(
+  prompt: Prompt,
+  current: {
+    readonly searchBackend?: string;
+    readonly braveApiKeyEnv?: string;
+    readonly ddgsCapabilityStatus?: "ready" | "missing" | "failed" | "unknown";
+  },
+  locale?: SetupCopyLocale,
+  options?: BackPromptOptions
+): Promise<WebSearchCapabilityResult>;
 export async function promptWebSearchCapability(
   prompt: Prompt,
   current: {
@@ -428,105 +552,133 @@ export async function promptWebSearchCapability(
     readonly braveApiKeyEnv?: string;
     readonly ddgsCapabilityStatus?: "ready" | "missing" | "failed" | "unknown";
   },
-  locale: SetupCopyLocale = "en"
-): Promise<
-  | {
-      readonly provider: "brave";
-      readonly braveApiKeyEnv: string;
-    }
-  | {
-      readonly provider: "ddgs";
-      readonly ddgsSetupConfirmed: boolean;
-    }
-  | {
-      readonly provider: "none";
-    }
-> {
+  locale: SetupCopyLocale = "en",
+  options: BackPromptOptions = {}
+): Promise<WebSearchCapabilityResult | { readonly kind: "back" }> {
   const defaultProvider: WebSearchProviderChoice = current.searchBackend === "brave" || current.searchBackend === "ddgs"
     ? current.searchBackend
     : "none";
-  const provider = await promptSetupChoice<WebSearchProviderChoice>(prompt, {
-    title: setupCopyText(locale, "setupEditor.prompt.webSearch.provider.title"),
-    message: `${setupCopyText(locale, "setupEditor.prompt.webSearch.provider.body")}\n`,
-    choices: [
-      {
-        id: "web-search-brave",
-        label: setupCopyText(locale, "setupEditor.prompt.webSearch.provider.brave"),
-        description: setupCopyText(locale, "setupEditor.prompt.webSearch.provider.brave.description"),
-        value: "brave" as const,
-      },
-      {
-        id: "web-search-ddgs",
-        label: setupCopyText(locale, "setupEditor.prompt.webSearch.provider.ddgs"),
-        description: setupCopyText(locale, "setupEditor.prompt.webSearch.provider.ddgs.description"),
-        value: "ddgs" as const,
-      },
-      {
-        id: "web-search-none",
-        label: setupCopyText(locale, "setupEditor.prompt.webSearch.provider.none"),
-        description: setupCopyText(locale, "setupEditor.prompt.webSearch.provider.none.description"),
-        value: "none" as const,
-      },
-    ],
-    defaultValue: defaultProvider,
-  });
+  const currentProvider = current.searchBackend === "brave" || current.searchBackend === "ddgs"
+    ? current.searchBackend
+    : undefined;
+  const providerChoices = [
+    {
+      id: "web-search-brave",
+      label: setupCopyText(locale, "setupEditor.prompt.webSearch.provider.brave"),
+      description: setupCopyText(locale, "setupEditor.prompt.webSearch.provider.brave.description"),
+      value: "brave" as const,
+      current: currentProvider === "brave",
+    },
+    {
+      id: "web-search-ddgs",
+      label: setupCopyText(locale, "setupEditor.prompt.webSearch.provider.ddgs"),
+      description: setupCopyText(locale, "setupEditor.prompt.webSearch.provider.ddgs.description"),
+      value: "ddgs" as const,
+      current: currentProvider === "ddgs",
+    },
+    {
+      id: "web-search-none",
+      label: setupCopyText(locale, "setupEditor.prompt.webSearch.provider.none"),
+      description: setupCopyText(locale, "setupEditor.prompt.webSearch.provider.none.description"),
+      value: "none" as const,
+      current: false,
+    },
+  ] as const;
+  const currentProviderLabel = providerChoices.find((choice) => choice.value === currentProvider)?.label;
+  while (true) {
+    const providerResult = await promptSetupChoiceMaybeBack<WebSearchProviderChoice>(prompt, {
+      title: setupCopyText(locale, "setupEditor.prompt.webSearch.provider.title"),
+      message: `${setupCopyText(locale, "setupEditor.prompt.webSearch.provider.body")}\n`,
+      columns: setupChoiceColumns(locale),
+      tableDirection: setupChoiceTableDirection(locale),
+      tableWidth: setupChoiceTableWidth(locale),
+      tableMaxWidth: setupChoiceTableMaxWidth(locale),
+      tableAlign: setupChoiceTableAlign(locale),
+      showColumnHeaders: false,
+      statusLines: setupCurrentStatusLines(locale, currentProviderLabel),
+      showCurrentBadge: currentProviderLabel === undefined ? undefined : false,
+      choices: providerChoices,
+      defaultValue: defaultProvider,
+    }, options);
+    if (isSetupChoiceBackResult(providerResult)) {
+      return providerResult;
+    }
+    const provider = setupChoiceSelectedValue(providerResult);
 
-  if (provider === "none") {
-    return { provider };
-  }
+    if (provider === "none") {
+      return { provider };
+    }
 
-  if (provider === "brave") {
+    if (provider === "brave") {
+      return {
+        provider,
+        braveApiKeyEnv: current.braveApiKeyEnv ?? "BRAVE_SEARCH_API_KEY",
+      };
+    }
+
+    if (current.ddgsCapabilityStatus === "ready") {
+      return {
+        provider,
+        ddgsSetupConfirmed: false,
+      };
+    }
+
+    const confirmedResult = await promptSetupChoiceMaybeBack(prompt, {
+      title: setupCopyText(locale, "setupEditor.prompt.webSearch.ddgs.install.title"),
+      message: [
+        setupCopyText(locale, "setupEditor.prompt.webSearch.ddgs.status.missing"),
+        setupCopyText(locale, "setupEditor.prompt.webSearch.ddgs.install.body"),
+        formatSetupCopy(locale, "setupEditor.prompt.webSearch.ddgs.command", {
+          command: setupTechnicalToken(locale, "estacoda python-env setup ddgs"),
+        }),
+        "",
+      ].join("\n"),
+      choices: [
+        {
+          id: "web-search-ddgs-install-confirm",
+          label: setupCopyText(locale, "setupEditor.prompt.webSearch.ddgs.install.confirm"),
+          description: setupCopyText(locale, "setupEditor.prompt.webSearch.provider.ddgs.description"),
+          value: true,
+        },
+        setupNavigationChoice({
+          id: "web-search-ddgs-install-skip",
+          label: setupCopyText(locale, "setupEditor.prompt.webSearch.ddgs.install.skip"),
+          description: setupCopyText(locale, "setupEditor.prompt.webSearch.ddgs.notInstalled"),
+          value: false,
+        }),
+      ],
+      defaultValue: false,
+    }, options);
+    if (isSetupChoiceBackResult(confirmedResult)) {
+      continue;
+    }
+    const confirmed = setupChoiceSelectedValue(confirmedResult);
+
     return {
       provider,
-      braveApiKeyEnv: current.braveApiKeyEnv ?? "BRAVE_SEARCH_API_KEY",
+      ddgsSetupConfirmed: confirmed,
     };
   }
-
-  if (current.ddgsCapabilityStatus === "ready") {
-    return {
-      provider,
-      ddgsSetupConfirmed: false,
-    };
-  }
-
-  const confirmed = await promptSetupChoice(prompt, {
-    title: setupCopyText(locale, "setupEditor.prompt.webSearch.ddgs.install.title"),
-    message: [
-      setupCopyText(locale, "setupEditor.prompt.webSearch.ddgs.status.missing"),
-      setupCopyText(locale, "setupEditor.prompt.webSearch.ddgs.install.body"),
-      formatSetupCopy(locale, "setupEditor.prompt.webSearch.ddgs.command", {
-        command: setupTechnicalToken(locale, "estacoda python-env setup ddgs"),
-      }),
-      "",
-    ].join("\n"),
-    choices: [
-      {
-        id: "web-search-ddgs-install-confirm",
-        label: setupCopyText(locale, "setupEditor.prompt.webSearch.ddgs.install.confirm"),
-        description: setupCopyText(locale, "setupEditor.prompt.webSearch.provider.ddgs.description"),
-        value: true,
-      },
-      {
-        id: "web-search-ddgs-install-skip",
-        label: setupCopyText(locale, "setupEditor.prompt.webSearch.ddgs.install.skip"),
-        description: setupCopyText(locale, "setupEditor.prompt.webSearch.ddgs.notInstalled"),
-        value: false,
-      },
-    ],
-    defaultValue: false,
-  });
-
-  return {
-    provider,
-    ddgsSetupConfirmed: confirmed,
-  };
 }
 
+export function promptFallbackRouteAction(
+  prompt: Prompt,
+  fallbacks: readonly ModelFallbackConfig[],
+  locale: SetupCopyLocale,
+  options: BackEnabled
+): Promise<SetupChoiceResult<FallbackRouteChoice>>;
+export function promptFallbackRouteAction(
+  prompt: Prompt,
+  fallbacks: readonly ModelFallbackConfig[],
+  locale?: SetupCopyLocale,
+  options?: BackPromptOptions
+): Promise<FallbackRouteChoice>;
 export async function promptFallbackRouteAction(
   prompt: Prompt,
   fallbacks: readonly ModelFallbackConfig[],
-  locale: SetupCopyLocale = "en"
-): Promise<FallbackRouteChoice> {
+  locale: SetupCopyLocale = "en",
+  options: BackPromptOptions = {}
+): Promise<FallbackRouteChoice | SetupChoiceResult<FallbackRouteChoice>> {
   const editChoices: SetupChoice<FallbackRouteChoice>[] = fallbacks.map((fallback, index) => ({
     id: `fallback-${index}`,
     label: setupCopyText(locale, "setupEditor.prompt.fallbackRoute.edit")
@@ -551,21 +703,38 @@ export async function promptFallbackRouteAction(
     },
   };
 
-  return promptSetupChoice(prompt, {
+  return promptSetupChoiceMaybeBack(prompt, {
     title: setupCopyText(locale, "setupEditor.prompt.fallbackRoute.title"),
     message: `${setupCopyText(locale, "setupEditor.prompt.fallbackRoute.body")}\n`,
     choices: [...editChoices, addChoice],
     defaultValue: editChoices[0]?.value ?? addChoice.value,
-  });
+  }, options);
 }
 
+export function promptAuxiliaryModelTask(
+  prompt: Prompt,
+  locale: SetupCopyLocale,
+  options: BackEnabled
+): Promise<SetupChoiceResult<SetupEditorAuxiliaryTask>>;
+export function promptAuxiliaryModelTask(
+  prompt: Prompt,
+  locale?: SetupCopyLocale,
+  options?: BackPromptOptions
+): Promise<SetupEditorAuxiliaryTask>;
 export async function promptAuxiliaryModelTask(
   prompt: Prompt,
-  locale: SetupCopyLocale = "en"
-): Promise<SetupEditorAuxiliaryTask> {
-  return promptSetupChoice(prompt, {
+  locale: SetupCopyLocale = "en",
+  options: BackPromptOptions = {}
+): Promise<SetupEditorAuxiliaryTask | SetupChoiceResult<SetupEditorAuxiliaryTask>> {
+  return promptSetupChoiceMaybeBack(prompt, {
     title: setupCopyText(locale, "setupEditor.prompt.auxiliaryRoute.title"),
     message: `${setupCopyText(locale, "setupEditor.prompt.auxiliaryRoute.body")}\n`,
+    columns: setupChoiceColumns(locale),
+    tableDirection: setupChoiceTableDirection(locale),
+    tableWidth: setupChoiceTableWidth(locale),
+    tableMaxWidth: setupChoiceTableMaxWidth(locale),
+    tableAlign: setupChoiceTableAlign(locale),
+    showColumnHeaders: false,
     choices: [
       {
         id: "assessor",
@@ -599,7 +768,7 @@ export async function promptAuxiliaryModelTask(
       },
     ],
     defaultValue: "assessor" as const,
-  });
+  }, options);
 }
 
 export async function promptConfigEditorPostApplyAction(
@@ -612,29 +781,29 @@ export async function promptConfigEditorPostApplyAction(
   locale: SetupCopyLocale = "en"
 ): Promise<ConfigEditorPostApplyActionId> {
   const launchChoices = input.launchEligible
-    ? [{
+    ? [setupNavigationChoice({
         id: "launch",
         label: setupCopyText(locale, "setupEditor.prompt.postApply.launch"),
         description: setupCopyText(locale, "setupEditor.prompt.postApply.launch.description"),
         value: "launch" as const,
-      }]
+      })]
     : [];
   const limitedChoices = input.limitedModeEligible
-    ? [{
+    ? [setupNavigationChoice({
         id: "accept-limited-mode",
         label: setupCopyText(locale, "setupEditor.prompt.postApply.acceptLimitedMode"),
         description: setupCopyText(locale, "setupEditor.prompt.postApply.acceptLimitedMode.description"),
         value: "accept-limited-mode" as const,
-      }]
+      })]
     : [];
   const repairChoices = input.state === "ready"
     ? []
-    : [{
+    : [setupNavigationChoice({
         id: "repair-again",
         label: setupCopyText(locale, "setupEditor.prompt.postApply.repairAgain"),
         description: setupCopyText(locale, "setupEditor.prompt.postApply.repairAgain.description"),
         value: "repair-again" as const,
-      }];
+      })];
 
   return promptSetupChoice(prompt, {
     title: setupCopyText(locale, "setupEditor.prompt.postApply.title"),
@@ -643,17 +812,37 @@ export async function promptConfigEditorPostApplyAction(
       ...launchChoices,
       ...limitedChoices,
       ...repairChoices,
-      {
+      setupNavigationChoice({
         id: "exit",
         label: setupCopyText(locale, "setupEditor.prompt.postApply.exit"),
         description: setupCopyText(locale, "setupEditor.prompt.postApply.exit.description"),
         value: "exit" as const,
-      },
+      }),
     ],
     defaultValue: "exit" as const,
   });
 }
 
+export function promptOptionalCapabilityAction(
+  prompt: Prompt,
+  input: {
+    readonly id: OptionalCapabilityPromptId;
+    readonly title: string;
+    readonly configured: boolean;
+  },
+  locale: SetupCopyLocale,
+  options: BackEnabled
+): Promise<SetupChoiceResult<OptionalCapabilityPromptAction>>;
+export function promptOptionalCapabilityAction(
+  prompt: Prompt,
+  input: {
+    readonly id: OptionalCapabilityPromptId;
+    readonly title: string;
+    readonly configured: boolean;
+  },
+  locale?: SetupCopyLocale,
+  options?: BackPromptOptions
+): Promise<OptionalCapabilityPromptAction>;
 export async function promptOptionalCapabilityAction(
   prompt: Prompt,
   input: {
@@ -661,20 +850,27 @@ export async function promptOptionalCapabilityAction(
     readonly title: string;
     readonly configured: boolean;
   },
-  locale: SetupCopyLocale = "en"
-): Promise<OptionalCapabilityPromptAction> {
+  locale: SetupCopyLocale = "en",
+  options: BackPromptOptions = {}
+): Promise<OptionalCapabilityPromptAction | SetupChoiceResult<OptionalCapabilityPromptAction>> {
   const skipChoice = input.configured
     ? []
-    : [{
+    : [setupNavigationChoice({
         id: `${input.id}-skip`,
         label: setupCopyText(locale, "setupEditor.prompt.optionalCapabilityAction.skip"),
         description: setupCopyText(locale, "setupEditor.prompt.optionalCapabilityAction.skip.description"),
         value: "skip" as const,
-      }];
+      })];
 
-  return promptSetupChoice(prompt, {
+  return promptSetupChoiceMaybeBack(prompt, {
     title: input.title,
     message: `${input.title}\n`,
+    columns: setupChoiceColumns(locale),
+    tableDirection: setupChoiceTableDirection(locale),
+    tableWidth: setupChoiceTableWidth(locale),
+    tableMaxWidth: setupChoiceTableMaxWidth(locale),
+    tableAlign: setupChoiceTableAlign(locale),
+    showColumnHeaders: false,
     choices: [
       {
         id: `${input.id}-enable`,
@@ -682,16 +878,16 @@ export async function promptOptionalCapabilityAction(
         description: setupCopyText(locale, "setupEditor.prompt.optionalCapabilityAction.enableConfigure.description"),
         value: "enable" as const,
       },
-      {
+      setupNavigationChoice({
         id: `${input.id}-unchanged`,
         label: setupCopyText(locale, "setupEditor.prompt.optionalCapabilityAction.leaveUnchanged"),
         description: setupCopyText(locale, "setupEditor.prompt.optionalCapabilityAction.leaveUnchanged.description"),
         value: "unchanged" as const,
-      },
+      }),
       ...skipChoice,
     ],
     defaultValue: "enable" as const,
-  });
+  }, options);
 }
 
 export async function promptTelegramCapability(
@@ -881,25 +1077,31 @@ export async function promptIncompleteChannelCapabilityAction(
       setupCopyText(locale, input.bodyKey),
       "",
     ].join("\n"),
+    columns: setupChoiceColumns(locale),
+    tableDirection: setupChoiceTableDirection(locale),
+    tableWidth: setupChoiceTableWidth(locale),
+    tableMaxWidth: setupChoiceTableMaxWidth(locale),
+    tableAlign: setupChoiceTableAlign(locale),
+    showColumnHeaders: false,
     choices: [
-      {
+      setupNavigationChoice({
         id: "channel-incomplete-retry",
         label: setupCopyText(locale, "setupEditor.prompt.telegram.incomplete.retry"),
         description: setupCopyText(locale, "setupEditor.prompt.telegram.incomplete.retry.description"),
         value: "retry" as const,
-      },
-      {
+      }),
+      setupNavigationChoice({
         id: "channel-incomplete-skip",
         label: setupCopyText(locale, "setupEditor.prompt.optionalCapabilityAction.skip"),
         description: setupCopyText(locale, "setupEditor.prompt.optionalCapabilityAction.skip.description"),
         value: "skip" as const,
-      },
-      {
+      }),
+      setupNavigationChoice({
         id: "channel-incomplete-unchanged",
         label: setupCopyText(locale, "setupEditor.prompt.optionalCapabilityAction.leaveUnchanged"),
         description: setupCopyText(locale, "setupEditor.prompt.optionalCapabilityAction.leaveUnchanged.description"),
         value: "unchanged" as const,
-      },
+      }),
     ],
     defaultValue: "skip" as const,
   });
@@ -916,37 +1118,60 @@ export async function promptIncompleteTelegramCapabilityAction(
       setupCopyText(locale, "setupEditor.prompt.telegram.incomplete.body"),
       "",
     ].join("\n"),
+    columns: setupChoiceColumns(locale),
+    tableDirection: setupChoiceTableDirection(locale),
+    tableWidth: setupChoiceTableWidth(locale),
+    tableMaxWidth: setupChoiceTableMaxWidth(locale),
+    tableAlign: setupChoiceTableAlign(locale),
+    showColumnHeaders: false,
     choices: [
-      {
+      setupNavigationChoice({
         id: "telegram-incomplete-retry",
         label: setupCopyText(locale, "setupEditor.prompt.telegram.incomplete.retry"),
         description: setupCopyText(locale, "setupEditor.prompt.telegram.incomplete.retry.description"),
         value: "retry" as const,
-      },
-      {
+      }),
+      setupNavigationChoice({
         id: "telegram-incomplete-skip",
         label: setupCopyText(locale, "setupEditor.prompt.optionalCapabilityAction.skip"),
         description: setupCopyText(locale, "setupEditor.prompt.optionalCapabilityAction.skip.description"),
         value: "skip" as const,
-      },
-      {
+      }),
+      setupNavigationChoice({
         id: "telegram-incomplete-unchanged",
         label: setupCopyText(locale, "setupEditor.prompt.optionalCapabilityAction.leaveUnchanged"),
         description: setupCopyText(locale, "setupEditor.prompt.optionalCapabilityAction.leaveUnchanged.description"),
         value: "unchanged" as const,
-      },
+      }),
     ],
     defaultValue: "skip" as const,
   });
 }
 
+export function promptVoiceCapability(
+  prompt: Prompt,
+  locale: SetupCopyLocale,
+  options: BackEnabled
+): Promise<SetupChoiceResult<VoiceCapabilityPromptId>>;
+export function promptVoiceCapability(
+  prompt: Prompt,
+  locale?: SetupCopyLocale,
+  options?: BackPromptOptions
+): Promise<VoiceCapabilityPromptId>;
 export async function promptVoiceCapability(
   prompt: Prompt,
-  locale: SetupCopyLocale = "en"
-): Promise<VoiceCapabilityPromptId> {
-  return promptSetupChoice(prompt, {
+  locale: SetupCopyLocale = "en",
+  options: BackPromptOptions = {}
+): Promise<VoiceCapabilityPromptId | SetupChoiceResult<VoiceCapabilityPromptId>> {
+  return promptSetupChoiceMaybeBack(prompt, {
     title: setupCopyText(locale, "setupEditor.prompt.voice.mode.title"),
     message: `${setupCopyText(locale, "setupEditor.prompt.voice.mode.body")}\n`,
+    columns: setupChoiceColumns(locale),
+    tableDirection: setupChoiceTableDirection(locale),
+    tableWidth: setupChoiceTableWidth(locale),
+    tableMaxWidth: setupChoiceTableMaxWidth(locale),
+    tableAlign: setupChoiceTableAlign(locale),
+    showColumnHeaders: false,
     choices: [
       {
         id: "voice-stt",
@@ -962,9 +1187,29 @@ export async function promptVoiceCapability(
       },
     ],
     defaultValue: "stt" as const,
-  });
+  }, options);
 }
 
+export function promptTtsCapability(
+  prompt: Prompt,
+  current: {
+    readonly ttsProvider?: TtsProvider;
+    readonly ttsModel?: string;
+    readonly ttsApiKeyEnv?: string;
+  },
+  locale: SetupCopyLocale,
+  options: BackEnabled
+): Promise<TtsCapabilityResult | { readonly kind: "back" }>;
+export function promptTtsCapability(
+  prompt: Prompt,
+  current: {
+    readonly ttsProvider?: TtsProvider;
+    readonly ttsModel?: string;
+    readonly ttsApiKeyEnv?: string;
+  },
+  locale?: SetupCopyLocale,
+  options?: BackPromptOptions
+): Promise<TtsCapabilityResult>;
 export async function promptTtsCapability(
   prompt: Prompt,
   current: {
@@ -972,22 +1217,36 @@ export async function promptTtsCapability(
     readonly ttsModel?: string;
     readonly ttsApiKeyEnv?: string;
   },
-  locale: SetupCopyLocale = "en"
-): Promise<{
-  readonly ttsProvider: TtsProvider;
-  readonly ttsModel: string;
-  readonly ttsApiKeyEnv: string;
-}> {
-  const ttsProvider = await promptSetupChoice(prompt, {
+  locale: SetupCopyLocale = "en",
+  options: BackPromptOptions = {}
+): Promise<TtsCapabilityResult | { readonly kind: "back" }> {
+  const defaultProvider = current.ttsProvider ?? "openai";
+  const currentTtsRoute = current.ttsProvider === undefined && current.ttsModel === undefined
+    ? undefined
+    : setupRouteStatusText(locale, current.ttsProvider, current.ttsModel);
+  const ttsProviderResult = await promptSetupChoiceMaybeBack<TtsProvider>(prompt, {
     title: setupCopyText(locale, "setupModules.voice.title"),
     message: `${setupCopyText(locale, "setupEditor.prompt.voice.summary")}\n${setupCopyText(locale, "setupEditor.prompt.voice.ttsProvider")}\n`,
+    columns: setupChoiceColumns(locale),
+    tableDirection: setupChoiceTableDirection(locale),
+    tableWidth: setupChoiceTableWidth(locale),
+    tableMaxWidth: setupChoiceTableMaxWidth(locale),
+    tableAlign: setupChoiceTableAlign(locale),
+    showColumnHeaders: false,
+    statusLines: setupCurrentStatusLines(locale, currentTtsRoute),
+    showCurrentBadge: currentTtsRoute === undefined ? undefined : false,
     choices: ttsProviders.map((provider) => ({
       id: `tts-${provider}`,
       label: provider,
+      current: current.ttsProvider === provider,
       value: provider,
     })),
-    defaultValue: current.ttsProvider ?? "openai",
-  });
+    defaultValue: defaultProvider,
+  }, options);
+  if (isSetupChoiceBackResult(ttsProviderResult)) {
+    return ttsProviderResult;
+  }
+  const ttsProvider = setupChoiceSelectedValue(ttsProviderResult);
   const ttsModel = await promptSetupStringWithDefault(
     prompt,
     setupPromptLabel(locale, setupCopyText(locale, "setupEditor.prompt.voice.ttsModel")),
@@ -1006,6 +1265,26 @@ export async function promptTtsCapability(
   };
 }
 
+export function promptSttCapability(
+  prompt: Prompt,
+  current: {
+    readonly sttProvider?: SttProvider;
+    readonly sttModel?: string;
+    readonly sttApiKeyEnv?: string;
+  },
+  locale: SetupCopyLocale,
+  options: BackEnabled
+): Promise<SttCapabilityResult | { readonly kind: "back" }>;
+export function promptSttCapability(
+  prompt: Prompt,
+  current: {
+    readonly sttProvider?: SttProvider;
+    readonly sttModel?: string;
+    readonly sttApiKeyEnv?: string;
+  },
+  locale?: SetupCopyLocale,
+  options?: BackPromptOptions
+): Promise<SttCapabilityResult>;
 export async function promptSttCapability(
   prompt: Prompt,
   current: {
@@ -1013,61 +1292,95 @@ export async function promptSttCapability(
     readonly sttModel?: string;
     readonly sttApiKeyEnv?: string;
   },
-  locale: SetupCopyLocale = "en"
-): Promise<{
-  readonly sttProvider: SttProvider;
-  readonly sttModel: string;
-  readonly sttApiKeyEnv: string;
-}> {
-  const sttProvider = await promptSetupChoice(prompt, {
-    title: setupCopyText(locale, "setupModules.voice.title"),
-    message: `${setupCopyText(locale, "setupEditor.prompt.voice.summary")}\n${setupCopyText(locale, "setupEditor.prompt.voice.sttProvider")}\n`,
-    choices: sttProviders.map((provider) => ({
-      id: `stt-${provider}`,
-      label: provider === "local" ? setupCopyText(locale, "setupEditor.prompt.voice.sttProvider.local") : provider,
-      value: provider,
-    })),
-    defaultValue: current.sttProvider ?? "openai",
-  });
+  locale: SetupCopyLocale = "en",
+  options: BackPromptOptions = {}
+): Promise<SttCapabilityResult | { readonly kind: "back" }> {
+  const defaultProvider = current.sttProvider ?? "openai";
+  const currentSttRoute = current.sttProvider === undefined && current.sttModel === undefined
+    ? undefined
+    : setupRouteStatusText(locale, current.sttProvider, current.sttModel);
+  while (true) {
+    const sttProviderResult = await promptSetupChoiceMaybeBack<SttProvider>(prompt, {
+      title: setupCopyText(locale, "setupModules.voice.title"),
+      message: `${setupCopyText(locale, "setupEditor.prompt.voice.summary")}\n${setupCopyText(locale, "setupEditor.prompt.voice.sttProvider")}\n`,
+      columns: setupChoiceColumns(locale),
+      tableDirection: setupChoiceTableDirection(locale),
+      tableWidth: setupChoiceTableWidth(locale),
+      tableMaxWidth: setupChoiceTableMaxWidth(locale),
+      tableAlign: setupChoiceTableAlign(locale),
+      showColumnHeaders: false,
+      statusLines: setupCurrentStatusLines(locale, currentSttRoute),
+      showCurrentBadge: currentSttRoute === undefined ? undefined : false,
+      choices: sttProviders.map((provider) => ({
+        id: `stt-${provider}`,
+        label: provider === "local" ? setupCopyText(locale, "setupEditor.prompt.voice.sttProvider.local") : provider,
+        current: current.sttProvider === provider,
+        value: provider,
+      })),
+      defaultValue: defaultProvider,
+    }, options);
+    if (isSetupChoiceBackResult(sttProviderResult)) {
+      return sttProviderResult;
+    }
+    const sttProvider = setupChoiceSelectedValue(sttProviderResult);
 
-  let sttModel: string;
-  let sttApiKeyEnv: string;
+    let sttModel: string;
+    let sttApiKeyEnv: string;
 
-  if (sttProvider === "local") {
-    const defaultLocalModel = isSetupLocalSttModel(current.sttModel) ? current.sttModel : "base";
-    sttModel = await promptSetupChoice(prompt, {
-      title: setupCopyText(locale, "setupEditor.prompt.voice.localModel.title"),
-      message: `${setupCopyText(locale, "setupEditor.prompt.voice.localModel")}\n`,
-      choices: localSttModelChoices(locale),
-      defaultValue: defaultLocalModel,
-    });
-    sttApiKeyEnv = "";
-  } else {
-    const defaultSttModel = sttProvider === "groq" ? "whisper-large-v3"
-      : sttProvider === "mistral" ? "voxtral-mini-latest"
-      : sttProvider === "xai" ? "whisper-1"
-      : "gpt-4o-mini-transcribe";
-    const defaultSttApiKeyEnv = sttProvider === "groq" ? "GROQ_API_KEY"
-      : sttProvider === "mistral" ? "MISTRAL_API_KEY"
-      : sttProvider === "xai" ? "XAI_API_KEY"
-      : "OPENAI_API_KEY";
-    sttModel = await promptSetupStringWithDefault(
-      prompt,
-      setupPromptLabel(locale, setupCopyText(locale, "setupEditor.prompt.voice.sttModel")),
-      current.sttModel ?? defaultSttModel
-    );
-    sttApiKeyEnv = await promptSetupStringWithDefault(
-      prompt,
-      setupPromptLabel(locale, setupCopyText(locale, "setupEditor.prompt.voice.sttApiKeyEnv")),
-      current.sttApiKeyEnv ?? defaultSttApiKeyEnv
-    );
+    if (sttProvider === "local") {
+      const defaultLocalModel = isSetupLocalSttModel(current.sttModel) ? current.sttModel : "base";
+      const currentLocalModelLabel = isSetupLocalSttModel(current.sttModel)
+        ? localSttModelChoices(locale).find((choice) => choice.value === current.sttModel)?.label
+        : undefined;
+      const sttModelResult = await promptSetupChoiceMaybeBack(prompt, {
+        title: setupCopyText(locale, "setupEditor.prompt.voice.localModel.title"),
+        message: `${setupCopyText(locale, "setupEditor.prompt.voice.localModel")}\n`,
+        columns: setupChoiceColumns(locale),
+        tableDirection: setupChoiceTableDirection(locale),
+        tableWidth: setupChoiceTableWidth(locale),
+        tableMaxWidth: setupChoiceTableMaxWidth(locale),
+        tableAlign: setupChoiceTableAlign(locale),
+        showColumnHeaders: false,
+        statusLines: setupCurrentStatusLines(locale, currentLocalModelLabel),
+        showCurrentBadge: currentLocalModelLabel === undefined ? undefined : false,
+        choices: localSttModelChoices(locale).map((choice) => ({
+          ...choice,
+          current: current.sttModel === choice.value,
+        })),
+        defaultValue: defaultLocalModel,
+      }, options);
+      if (isSetupChoiceBackResult(sttModelResult)) {
+        continue;
+      }
+      sttModel = setupChoiceSelectedValue(sttModelResult);
+      sttApiKeyEnv = "";
+    } else {
+      const defaultSttModel = sttProvider === "groq" ? "whisper-large-v3"
+        : sttProvider === "mistral" ? "voxtral-mini-latest"
+        : sttProvider === "xai" ? "whisper-1"
+        : "gpt-4o-mini-transcribe";
+      const defaultSttApiKeyEnv = sttProvider === "groq" ? "GROQ_API_KEY"
+        : sttProvider === "mistral" ? "MISTRAL_API_KEY"
+        : sttProvider === "xai" ? "XAI_API_KEY"
+        : "OPENAI_API_KEY";
+      sttModel = await promptSetupStringWithDefault(
+        prompt,
+        setupPromptLabel(locale, setupCopyText(locale, "setupEditor.prompt.voice.sttModel")),
+        current.sttModel ?? defaultSttModel
+      );
+      sttApiKeyEnv = await promptSetupStringWithDefault(
+        prompt,
+        setupPromptLabel(locale, setupCopyText(locale, "setupEditor.prompt.voice.sttApiKeyEnv")),
+        current.sttApiKeyEnv ?? defaultSttApiKeyEnv
+      );
+    }
+
+    return {
+      sttProvider,
+      sttModel,
+      sttApiKeyEnv,
+    };
   }
-
-  return {
-    sttProvider,
-    sttModel,
-    sttApiKeyEnv,
-  };
 }
 
 type SetupLocalSttModel = "base" | "small" | "medium";
@@ -1099,6 +1412,28 @@ function localSttModelChoices(locale: SetupCopyLocale): readonly SetupChoice<Set
   ];
 }
 
+export function promptVisionCapability(
+  prompt: Prompt,
+  current: {
+    readonly provider?: ImageGenerationProvider;
+    readonly model?: string;
+    readonly apiKeyEnv?: string;
+    readonly useGateway?: boolean;
+  },
+  locale: SetupCopyLocale,
+  options: BackEnabled
+): Promise<VisionCapabilityResult | { readonly kind: "back" }>;
+export function promptVisionCapability(
+  prompt: Prompt,
+  current: {
+    readonly provider?: ImageGenerationProvider;
+    readonly model?: string;
+    readonly apiKeyEnv?: string;
+    readonly useGateway?: boolean;
+  },
+  locale?: SetupCopyLocale,
+  options?: BackPromptOptions
+): Promise<VisionCapabilityResult>;
 export async function promptVisionCapability(
   prompt: Prompt,
   current: {
@@ -1107,23 +1442,36 @@ export async function promptVisionCapability(
     readonly apiKeyEnv?: string;
     readonly useGateway?: boolean;
   },
-  locale: SetupCopyLocale = "en"
-): Promise<{
-  readonly provider: ImageGenerationProvider;
-  readonly model: string;
-  readonly apiKeyEnv: string;
-  readonly useGateway: boolean;
-}> {
-  const provider = await promptSetupChoice(prompt, {
+  locale: SetupCopyLocale = "en",
+  options: BackPromptOptions = {}
+): Promise<VisionCapabilityResult | { readonly kind: "back" }> {
+  const defaultProvider = current.provider ?? "fal";
+  const currentVisionRoute = current.provider === undefined && current.model === undefined
+    ? undefined
+    : setupRouteStatusText(locale, current.provider, current.model);
+  const providerResult = await promptSetupChoiceMaybeBack<ImageGenerationProvider>(prompt, {
     title: setupCopyText(locale, "setupModules.vision.title"),
     message: `${setupCopyText(locale, "setupEditor.prompt.vision.summary")}\n${setupCopyText(locale, "setupEditor.prompt.vision.provider")}\n`,
+    columns: setupChoiceColumns(locale),
+    tableDirection: setupChoiceTableDirection(locale),
+    tableWidth: setupChoiceTableWidth(locale),
+    tableMaxWidth: setupChoiceTableMaxWidth(locale),
+    tableAlign: setupChoiceTableAlign(locale),
+    showColumnHeaders: false,
+    statusLines: setupCurrentStatusLines(locale, currentVisionRoute),
+    showCurrentBadge: currentVisionRoute === undefined ? undefined : false,
     choices: imageProviders.map((candidate) => ({
       id: candidate,
       label: candidate,
+      current: current.provider === candidate,
       value: candidate,
     })),
-    defaultValue: current.provider ?? "fal",
-  });
+    defaultValue: defaultProvider,
+  }, options);
+  if (isSetupChoiceBackResult(providerResult)) {
+    return providerResult;
+  }
+  const provider = setupChoiceSelectedValue(providerResult);
   const model = await promptSetupStringWithDefault(
     prompt,
     setupPromptLabel(locale, setupCopyText(locale, "setupEditor.prompt.vision.model")),
@@ -1152,6 +1500,46 @@ export async function promptVisionCapability(
   };
 }
 
+export function promptBrowserCapability(
+  prompt: Prompt,
+  current: {
+    readonly backend?: BrowserBackendKind;
+    readonly cloudProvider?: BrowserCloudProviderKind;
+    readonly cdpUrl?: string;
+    readonly launchExecutable?: string;
+    readonly launchArgs?: readonly string[];
+    readonly chromeFlags?: readonly string[];
+    readonly launchCommand?: string;
+    readonly autoLaunch?: boolean;
+    readonly supervised?: boolean;
+    readonly engine?: BrowserEngineKind;
+    readonly hybridRouting?: boolean;
+    readonly cloudFallback?: boolean;
+    readonly cloudSpendApproved?: boolean;
+  },
+  locale: SetupCopyLocale,
+  options: BackEnabled
+): Promise<BrowserCapabilityResult | { readonly kind: "back" }>;
+export function promptBrowserCapability(
+  prompt: Prompt,
+  current: {
+    readonly backend?: BrowserBackendKind;
+    readonly cloudProvider?: BrowserCloudProviderKind;
+    readonly cdpUrl?: string;
+    readonly launchExecutable?: string;
+    readonly launchArgs?: readonly string[];
+    readonly chromeFlags?: readonly string[];
+    readonly launchCommand?: string;
+    readonly autoLaunch?: boolean;
+    readonly supervised?: boolean;
+    readonly engine?: BrowserEngineKind;
+    readonly hybridRouting?: boolean;
+    readonly cloudFallback?: boolean;
+    readonly cloudSpendApproved?: boolean;
+  },
+  locale?: SetupCopyLocale,
+  options?: BackPromptOptions
+): Promise<BrowserCapabilityResult>;
 export async function promptBrowserCapability(
   prompt: Prompt,
   current: {
@@ -1169,177 +1557,191 @@ export async function promptBrowserCapability(
     readonly cloudFallback?: boolean;
     readonly cloudSpendApproved?: boolean;
   },
-  locale: SetupCopyLocale = "en"
-): Promise<{
-  readonly backend: BrowserBackendKind;
-  readonly cloudProvider?: BrowserCloudProviderKind;
-  readonly cdpUrl?: string;
-  readonly launchExecutable?: string;
-  readonly launchArgs: string[];
-  readonly chromeFlags: string[];
-  readonly launchCommand?: string;
-  readonly autoLaunch: boolean;
-  readonly supervised?: boolean;
-  readonly engine?: BrowserEngineKind;
-  readonly hybridRouting?: boolean;
-  readonly cloudFallback?: boolean;
-  readonly cloudSpendApproved?: boolean;
-}> {
-  const mode = await promptSetupChoice(prompt, {
-    title: setupCopyText(locale, "setupEditor.prompt.browser.mode.title"),
-    message: `${setupCopyText(locale, "setupEditor.prompt.browser.mode.body")}\n`,
-    choices: [
-      {
-        id: "browser-recommended",
-        label: setupCopyText(locale, "setupEditor.prompt.browser.mode.recommended"),
-        description: setupCopyText(locale, "setupEditor.prompt.browser.mode.recommended.description"),
-        value: "recommended" as const,
-      },
-      {
-        id: "browser-local-supervised",
-        label: setupCopyText(locale, "setupEditor.prompt.browser.mode.localSupervised"),
-        description: setupCopyText(locale, "setupEditor.prompt.browser.mode.localSupervised.description"),
-        value: "local-supervised" as const,
-      },
-      {
-        id: "browser-existing-cdp",
-        label: setupCopyText(locale, "setupEditor.prompt.browser.mode.existingCdp"),
-        description: setupCopyText(locale, "setupEditor.prompt.browser.mode.existingCdp.description"),
-        value: "existing-cdp" as const,
-      },
-      {
-        id: "browser-browserbase",
-        label: setupCopyText(locale, "setupEditor.prompt.browser.mode.browserbase"),
-        description: setupCopyText(locale, "setupEditor.prompt.browser.mode.browserbase.description"),
-        value: "browserbase" as const,
-      },
-      {
-        id: "browser-disabled",
-        label: setupCopyText(locale, "setupEditor.prompt.browser.mode.disable"),
-        description: setupCopyText(locale, "setupEditor.prompt.browser.mode.disable.description"),
-        value: "disabled" as const,
-      },
-    ],
-    defaultValue: isRecommendedBrowserConfig(current) ? "recommended" : browserModeFromCurrent(current),
-  });
+  locale: SetupCopyLocale = "en",
+  options: BackPromptOptions = {}
+): Promise<BrowserCapabilityResult | { readonly kind: "back" }> {
+  const defaultMode = isRecommendedBrowserConfig(current) ? "recommended" : browserModeFromCurrent(current);
+  const hasCurrentBrowserState = browserCurrentStateIsKnown(current);
+  const modeChoices = [
+    {
+      id: "browser-recommended",
+      label: setupCopyText(locale, "setupEditor.prompt.browser.mode.recommended"),
+      description: setupCopyText(locale, "setupEditor.prompt.browser.mode.recommended.description"),
+      value: "recommended" as const,
+      current: hasCurrentBrowserState && defaultMode === "recommended",
+    },
+    {
+      id: "browser-local-supervised",
+      label: setupCopyText(locale, "setupEditor.prompt.browser.mode.localSupervised"),
+      description: setupCopyText(locale, "setupEditor.prompt.browser.mode.localSupervised.description"),
+      value: "local-supervised" as const,
+      current: hasCurrentBrowserState && defaultMode === "local-supervised",
+    },
+    {
+      id: "browser-existing-cdp",
+      label: setupCopyText(locale, "setupEditor.prompt.browser.mode.existingCdp"),
+      description: setupCopyText(locale, "setupEditor.prompt.browser.mode.existingCdp.description"),
+      value: "existing-cdp" as const,
+      current: hasCurrentBrowserState && defaultMode === "existing-cdp",
+    },
+    {
+      id: "browser-browserbase",
+      label: setupCopyText(locale, "setupEditor.prompt.browser.mode.browserbase"),
+      description: setupCopyText(locale, "setupEditor.prompt.browser.mode.browserbase.description"),
+      value: "browserbase" as const,
+      current: hasCurrentBrowserState && defaultMode === "browserbase",
+    },
+    {
+      id: "browser-disabled",
+      label: setupCopyText(locale, "setupEditor.prompt.browser.mode.disable"),
+      description: setupCopyText(locale, "setupEditor.prompt.browser.mode.disable.description"),
+      value: "disabled" as const,
+      current: hasCurrentBrowserState && defaultMode === "disabled",
+    },
+  ] as const;
+  const currentModeLabel = modeChoices.find((choice) => choice.value === defaultMode)?.label ?? defaultMode;
+  while (true) {
+    const modeResult = await promptSetupChoiceMaybeBack<BrowserModeChoice>(prompt, {
+      title: setupCopyText(locale, "setupEditor.prompt.browser.mode.title"),
+      message: `${setupCopyText(locale, "setupEditor.prompt.browser.mode.body")}\n`,
+      columns: setupChoiceColumns(locale),
+      tableDirection: setupChoiceTableDirection(locale),
+      tableWidth: setupChoiceTableWidth(locale),
+      tableMaxWidth: setupChoiceTableMaxWidth(locale),
+      tableAlign: setupChoiceTableAlign(locale),
+      showColumnHeaders: false,
+      statusLines: setupCurrentStatusLines(locale, hasCurrentBrowserState ? currentModeLabel : undefined),
+      showCurrentBadge: hasCurrentBrowserState ? false : undefined,
+      choices: modeChoices,
+      defaultValue: defaultMode,
+    }, options);
+    if (isSetupChoiceBackResult(modeResult)) {
+      return modeResult;
+    }
+    const mode = setupChoiceSelectedValue(modeResult);
 
-  if (mode === "recommended") {
-    return browserCapabilityWithMode({
-      backend: "local-cdp",
-      autoLaunch: true,
-      supervised: true,
-      engine: "cdp",
-      launchArgs: [],
-      chromeFlags: [],
-      hybridRouting: false,
-    }, "local-supervised");
-  }
+    if (mode === "recommended") {
+      return browserCapabilityWithMode({
+        backend: "local-cdp",
+        autoLaunch: true,
+        supervised: true,
+        engine: "cdp",
+        launchArgs: [],
+        chromeFlags: [],
+        hybridRouting: false,
+      }, "local-supervised");
+    }
 
-  if (mode === "disabled") {
-    return browserCapabilityWithMode({
-      backend: "unconfigured",
-      launchArgs: [],
-      chromeFlags: [],
-      autoLaunch: false,
-      supervised: false,
-    }, mode);
-  }
+    if (mode === "disabled") {
+      return browserCapabilityWithMode({
+        backend: "unconfigured",
+        launchArgs: [],
+        chromeFlags: [],
+        autoLaunch: false,
+        supervised: false,
+      }, mode);
+    }
 
-  if (mode === "browserbase") {
-    await showSetupCard(setupPromptContext(prompt, locale), {
-      title: setupCopyText(locale, "setupEditor.prompt.browser.cloud.title"),
-      bodyLines: [
-        setupCopyText(locale, "setupEditor.prompt.browser.cloud.body"),
+    if (mode === "browserbase") {
+      await showSetupCard(setupPromptContext(prompt, locale), {
+        title: setupCopyText(locale, "setupEditor.prompt.browser.cloud.title"),
+        bodyLines: [
+          setupCopyText(locale, "setupEditor.prompt.browser.cloud.body"),
+          "",
+          setupCopyText(locale, "setupEditor.prompt.browser.hybridRouting.description"),
+          setupCopyText(locale, "setupEditor.prompt.browser.cloudFallback.description"),
+        ],
+        options: [],
+      });
+      return browserCapabilityWithMode({
+        backend: "browserbase",
+        cloudProvider: "browserbase",
+        launchArgs: [],
+        chromeFlags: [],
+        autoLaunch: false,
+        supervised: false,
+        hybridRouting: true,
+        cloudFallback: true,
+        cloudSpendApproved: false,
+      }, mode);
+    }
+
+    if (mode === "existing-cdp") {
+      const cdpUrl = await promptSetupStringWithDefault(
+        prompt,
+        setupPromptLabel(locale, setupCopyText(locale, "setupEditor.prompt.browser.cdpUrl.required")),
+        current.cdpUrl ?? ""
+      );
+      return browserCapabilityWithMode({
+        backend: "local-cdp",
+        cdpUrl: optionalTrimmedString(cdpUrl),
+        launchArgs: [],
+        chromeFlags: [],
+        launchCommand: current.launchCommand,
+        autoLaunch: false,
+        supervised: true,
+      }, mode);
+    }
+
+    const autoLaunchResult = await promptSetupChoiceMaybeBack(prompt, {
+      title: setupCopyText(locale, "setupEditor.prompt.browser.local.title"),
+      message: [
+        setupCopyText(locale, "setupEditor.prompt.browser.local.body"),
+        setupCopyText(locale, "setupEditor.prompt.browser.autoLaunch"),
         "",
-        setupCopyText(locale, "setupEditor.prompt.browser.hybridRouting.description"),
-        setupCopyText(locale, "setupEditor.prompt.browser.cloudFallback.description"),
+      ].join("\n"),
+      choices: [
+        {
+          id: "browser-auto-launch-yes",
+          label: setupCopyText(locale, "setupEditor.prompt.browser.autoLaunch.yes"),
+          description: setupCopyText(locale, "setupEditor.prompt.browser.autoLaunch.description"),
+          value: true,
+        },
+        {
+          id: "browser-auto-launch-no",
+          label: setupCopyText(locale, "setupEditor.prompt.browser.autoLaunch.no"),
+          description: setupCopyText(locale, "setupEditor.prompt.browser.autoLaunch.no.description"),
+          value: false,
+        },
       ],
-      options: [],
-    });
-    return browserCapabilityWithMode({
-      backend: "browserbase",
-      cloudProvider: "browserbase",
-      launchArgs: [],
-      chromeFlags: [],
-      autoLaunch: false,
-      supervised: false,
-      hybridRouting: true,
-      cloudFallback: true,
-      cloudSpendApproved: false,
-    }, mode);
-  }
-
-  if (mode === "existing-cdp") {
+      defaultValue: current.autoLaunch ?? false,
+    }, options);
+    if (isSetupChoiceBackResult(autoLaunchResult)) {
+      continue;
+    }
+    const autoLaunch = setupChoiceSelectedValue(autoLaunchResult);
     const cdpUrl = await promptSetupStringWithDefault(
       prompt,
-      setupPromptLabel(locale, setupCopyText(locale, "setupEditor.prompt.browser.cdpUrl.required")),
+      setupPromptLabel(locale, setupCopyText(locale, "setupEditor.prompt.browser.cdpUrl.optional")),
       current.cdpUrl ?? ""
     );
+    const launchExecutable = await promptSetupStringWithDefault(
+      prompt,
+      setupPromptLabel(locale, setupCopyText(locale, "setupEditor.prompt.browser.launchExecutable")),
+      current.launchExecutable ?? ""
+    );
+    const launchArgsInput = await promptSetupStringWithDefault(
+      prompt,
+      setupPromptLabel(locale, setupCopyText(locale, "setupEditor.prompt.browser.launchArgs")),
+      current.launchArgs?.join(", ") ?? ""
+    );
+    const chromeFlagsInput = await promptSetupStringWithDefault(
+      prompt,
+      setupPromptLabel(locale, setupCopyText(locale, "setupEditor.prompt.browser.chromeFlags")),
+      current.chromeFlags?.join(", ") ?? ""
+    );
+
     return browserCapabilityWithMode({
       backend: "local-cdp",
       cdpUrl: optionalTrimmedString(cdpUrl),
-      launchArgs: [],
-      chromeFlags: [],
+      launchExecutable: optionalTrimmedString(launchExecutable),
+      launchArgs: splitCsv(launchArgsInput),
+      chromeFlags: splitCsv(chromeFlagsInput),
       launchCommand: current.launchCommand,
-      autoLaunch: false,
+      autoLaunch,
       supervised: true,
-    }, mode);
+    }, "local-supervised");
   }
-
-  const autoLaunch = await promptSetupChoice(prompt, {
-    title: setupCopyText(locale, "setupEditor.prompt.browser.local.title"),
-    message: [
-      setupCopyText(locale, "setupEditor.prompt.browser.local.body"),
-      setupCopyText(locale, "setupEditor.prompt.browser.autoLaunch"),
-      "",
-    ].join("\n"),
-    choices: [
-      {
-        id: "browser-auto-launch-yes",
-        label: setupCopyText(locale, "setupEditor.prompt.browser.autoLaunch.yes"),
-        description: setupCopyText(locale, "setupEditor.prompt.browser.autoLaunch.description"),
-        value: true,
-      },
-      {
-        id: "browser-auto-launch-no",
-        label: setupCopyText(locale, "setupEditor.prompt.browser.autoLaunch.no"),
-        description: setupCopyText(locale, "setupEditor.prompt.browser.autoLaunch.no.description"),
-        value: false,
-      },
-    ],
-    defaultValue: current.autoLaunch ?? false,
-  });
-  const cdpUrl = await promptSetupStringWithDefault(
-    prompt,
-    setupPromptLabel(locale, setupCopyText(locale, "setupEditor.prompt.browser.cdpUrl.optional")),
-    current.cdpUrl ?? ""
-  );
-  const launchExecutable = await promptSetupStringWithDefault(
-    prompt,
-    setupPromptLabel(locale, setupCopyText(locale, "setupEditor.prompt.browser.launchExecutable")),
-    current.launchExecutable ?? ""
-  );
-  const launchArgsInput = await promptSetupStringWithDefault(
-    prompt,
-    setupPromptLabel(locale, setupCopyText(locale, "setupEditor.prompt.browser.launchArgs")),
-    current.launchArgs?.join(", ") ?? ""
-  );
-  const chromeFlagsInput = await promptSetupStringWithDefault(
-    prompt,
-    setupPromptLabel(locale, setupCopyText(locale, "setupEditor.prompt.browser.chromeFlags")),
-    current.chromeFlags?.join(", ") ?? ""
-  );
-
-  return browserCapabilityWithMode({
-    backend: "local-cdp",
-    cdpUrl: optionalTrimmedString(cdpUrl),
-    launchExecutable: optionalTrimmedString(launchExecutable),
-    launchArgs: splitCsv(launchArgsInput),
-    chromeFlags: splitCsv(chromeFlagsInput),
-    launchCommand: current.launchCommand,
-    autoLaunch,
-    supervised: true,
-  }, "local-supervised");
 }
 
 export function promptedBrowserCapabilityMode(values: object): BrowserSetupModeChoice | undefined {
@@ -1388,9 +1790,40 @@ function isRecommendedBrowserConfig(current: {
     (current.engine === undefined || current.engine === "cdp");
 }
 
+function browserCurrentStateIsKnown(current: {
+  readonly backend?: BrowserBackendKind;
+  readonly cloudProvider?: BrowserCloudProviderKind;
+  readonly autoLaunch?: boolean;
+  readonly cdpUrl?: string;
+  readonly launchExecutable?: string;
+  readonly launchArgs?: readonly string[];
+  readonly chromeFlags?: readonly string[];
+  readonly engine?: BrowserEngineKind;
+}): boolean {
+  return current.backend !== undefined ||
+    current.cloudProvider !== undefined ||
+    current.autoLaunch !== undefined ||
+    current.cdpUrl !== undefined ||
+    current.launchExecutable !== undefined ||
+    current.launchArgs !== undefined ||
+    current.chromeFlags !== undefined ||
+    current.engine !== undefined;
+}
+
 function optionalTrimmedString(value: string): string | undefined {
   const trimmed = value.trim();
   return trimmed.length === 0 ? undefined : trimmed;
+}
+
+function setupRouteStatusText(
+  locale: SetupCopyLocale,
+  provider: string | undefined,
+  model: string | undefined
+): string {
+  const route = [provider, model]
+    .filter((value): value is string => value !== undefined && value.trim().length > 0)
+    .join("/");
+  return setupTechnicalToken(locale, route);
 }
 
 function splitCsv(value: string): string[] {

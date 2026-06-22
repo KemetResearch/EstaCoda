@@ -11,9 +11,12 @@ import type {
   ConversationMessageViewModel,
   KeyValueBlockViewModel,
   ListViewModel,
+  OnboardingPromptColumn,
   OnboardingPromptCardViewModel,
+  OnboardingPromptOption,
   PlainFallbackViewModel,
   PickerViewModel,
+  PromptCardStatusLine,
   ProgressContextRailViewModel,
   StartupViewModel,
   StartupDashboardViewModel,
@@ -618,15 +621,19 @@ export class StandardRenderer {
 
     const optionMarkerGap = " ";
     const optionMarkerSlotWidth = measureVisibleWidth(selectedMarker) + measureVisibleWidth(optionMarkerGap);
+    const hasStructuredRows = this.#hasStructuredOnboardingPromptRows(vm);
     const rawContentLines: string[] = [
       ...vm.bodyLines,
       ...(vm.technicalLines ?? []),
-      ...vm.options.flatMap((option) => [`${option.label}${" ".repeat(optionMarkerSlotWidth)}`, option.description ?? ""]),
+      ...(vm.statusLines ?? []).map((line) => line.text),
+      ...this.#onboardingPromptCardRawOptionLines(vm, optionMarkerSlotWidth),
       vm.hint ?? "",
     ].filter((line) => line.length > 0);
     const maxRawContent = Math.max(0, ...rawContentLines.map((line) => measureVisibleWidth(line)));
     const requestedWidth = Math.max(24, this.#capabilities.terminalWidth);
-    const naturalWidth = Math.max(40, maxRawContent + 4, measureVisibleWidth(vm.title) + 12);
+    const naturalWidth = hasStructuredRows
+      ? requestedWidth
+      : Math.max(40, maxRawContent + 4, measureVisibleWidth(vm.title) + 12);
     const width = Math.min(requestedWidth, naturalWidth);
     const contentWidth = Math.max(8, width - 4);
     const innerWidth = Math.max(8, width - 2);
@@ -641,11 +648,12 @@ export class StandardRenderer {
     const lines: string[] = [top];
 
     if (direction === "rtl") {
-      lines.push(...this.#renderRtlOnboardingBodyLines(vm.bodyLines, contentWidth));
+      lines.push(...this.#renderRtlOnboardingBodyLines(vm.bodyLines, contentWidth, vm.bodyLineStyles));
     } else {
       for (let i = 0; i < vm.bodyLines.length; i++) {
         const text = this.#localizedNatural(vm.bodyLines[i], direction, contentWidth);
-        const styled = i === 0 ? this.#primary(text) : this.#secondary(text);
+        const styledText = vm.bodyLineStyles?.[i]?.emphasis === "strong" ? this.#bold(text) : text;
+        const styled = i === 0 ? this.#primary(styledText) : this.#secondary(styledText);
         lines.push(`  ${styled}`);
       }
     }
@@ -655,38 +663,433 @@ export class StandardRenderer {
       lines.push(`  ${direction === "rtl" ? padVisibleStart(text, contentWidth) : text}`);
     }
 
-    const hasPreOptionContent = vm.bodyLines.length > 0 || (vm.technicalLines?.length ?? 0) > 0;
+    for (const statusLine of vm.statusLines ?? []) {
+      lines.push(`  ${this.#renderOnboardingPromptCardStatusLine(statusLine, locale, direction, contentWidth)}`);
+    }
+
+    const hasPreOptionContent = vm.bodyLines.length > 0
+      || (vm.technicalLines?.length ?? 0) > 0
+      || (vm.statusLines?.length ?? 0) > 0;
     if (hasPreOptionContent && vm.options.length > 0) {
       lines.push("  ");
     }
 
-    for (let i = 0; i < vm.options.length; i++) {
-      const option = vm.options[i];
-      const isSelected = i === vm.selectedOptionIndex;
-      const marker = isSelected ? this.#action(selectedMarker) : " ";
-      const optionLabelWidth = Math.max(1, contentWidth - optionMarkerSlotWidth);
-      const optionText = option.technical === true
-        ? this.#localizedTechnical(option.label, locale, optionLabelWidth)
-        : this.#localizedNatural(option.label, direction, optionLabelWidth);
-      const styledOption = this.#primary(optionText);
-      const optionRow = direction === "rtl"
-        ? isolateRtl(closeOpenBidiIsolates(`${styledOption}${optionMarkerGap}${marker}`))
-        : `${marker}${optionMarkerGap}${styledOption}`;
-      lines.push(direction === "rtl"
-        ? `  ${padVisibleStart(optionRow, contentWidth)}`
-        : `  ${optionRow}`);
-      if (option.description !== undefined) {
-        lines.push(...this.#renderOnboardingPromptCardOptionDescription(option.description, direction, contentWidth));
+    if (hasStructuredRows) {
+      lines.push(...this.#renderStructuredOnboardingPromptCardOptions(
+        vm,
+        selectedMarker,
+        optionMarkerGap,
+        optionMarkerSlotWidth,
+        locale,
+        contentWidth
+      ));
+    } else {
+      let renderedNavigationSeparator = false;
+      for (let i = 0; i < vm.options.length; i++) {
+        const option = vm.options[i];
+        if (option.group === "navigation" && !renderedNavigationSeparator && i > 0) {
+          lines.push("  ");
+          renderedNavigationSeparator = true;
+        }
+        const isSelected = i === vm.selectedOptionIndex;
+        const marker = isSelected ? this.#action(selectedMarker) : " ";
+        const optionLabelWidth = Math.max(1, contentWidth - optionMarkerSlotWidth);
+        const optionText = option.technical === true
+          ? this.#localizedTechnical(option.label, locale, optionLabelWidth)
+          : this.#localizedNatural(option.label, direction, optionLabelWidth);
+        const styledOption = this.#primary(optionText);
+        const optionRow = direction === "rtl"
+          ? isolateRtl(closeOpenBidiIsolates(`${styledOption}${optionMarkerGap}${marker}`))
+          : `${marker}${optionMarkerGap}${styledOption}`;
+        lines.push(direction === "rtl"
+          ? `  ${padVisibleStart(optionRow, contentWidth)}`
+          : `  ${optionRow}`);
+        if (option.description !== undefined) {
+          lines.push(...this.#renderOnboardingPromptCardOptionDescription(option.description, direction, contentWidth));
+        }
       }
     }
 
     if (vm.hint !== undefined && vm.hint.length > 0) {
-      const hint = this.#muted(this.#localizedNatural(vm.hint, direction, contentWidth));
-      lines.push(`  ${direction === "rtl" ? padVisibleStart(hint, contentWidth) : hint}`);
+      const hint = this.#muted(this.#localizedTechnical(vm.hint, locale, contentWidth));
+      lines.push(`  ${direction === "rtl" ? hint : padVisibleStart(hint, contentWidth)}`);
     }
 
     lines.push(bottom);
     return lines.join("\n");
+  }
+
+  #hasStructuredOnboardingPromptRows(vm: OnboardingPromptCardViewModel): boolean {
+    return (vm.columns?.length ?? 0) > 0;
+  }
+
+  #renderOnboardingPromptCardStatusLine(
+    line: PromptCardStatusLine,
+    locale: UiLocale,
+    cardDirection: TextDirection,
+    contentWidth: number
+  ): string {
+    const direction = line.direction ?? "auto";
+    const textDirection = direction === "auto" ? cardDirection : direction;
+    const rendered = textDirection === "ltr"
+      ? this.#localizedTechnical(line.text, locale, contentWidth)
+      : this.#localizedNatural(line.text, "rtl", contentWidth);
+    const styled = this.#stylePromptCardStatusLine(rendered, line.tone ?? "default");
+    return textDirection === "rtl" ? padVisibleStart(styled, contentWidth) : styled;
+  }
+
+  #stylePromptCardStatusLine(
+    text: string,
+    tone: NonNullable<PromptCardStatusLine["tone"]>
+  ): string {
+    switch (tone) {
+      case "active":
+        return this.#severity(text, "ok");
+      case "warning":
+        return this.#severity(text, "warn");
+      case "muted":
+        return this.#muted(text);
+      case "default":
+        return this.#primary(text);
+    }
+  }
+
+  #onboardingPromptCardRawOptionLines(vm: OnboardingPromptCardViewModel, optionMarkerSlotWidth: number): string[] {
+    if (!this.#hasStructuredOnboardingPromptRows(vm)) {
+      return vm.options.flatMap((option) => [`${option.label}${" ".repeat(optionMarkerSlotWidth)}`, option.description ?? ""]);
+    }
+
+    const columns = vm.columns ?? [];
+    return [
+      ...(vm.showColumnHeaders === false ? [] : [columns.map((column) => column.header).join("  ")]),
+      ...vm.options.map((option) => [
+        ...columns.map((column) => option.cells?.[column.key] ?? (column.key === "name" ? option.label : "")),
+        ...this.#onboardingOptionBadges(option, vm.showCurrentBadge),
+      ].filter((part) => part.length > 0).join("  ")),
+    ];
+  }
+
+  #renderStructuredOnboardingPromptCardOptions(
+    vm: OnboardingPromptCardViewModel,
+    selectedMarker: string,
+    optionMarkerGap: string,
+    optionMarkerSlotWidth: number,
+    locale: UiLocale,
+    contentWidth: number
+  ): string[] {
+    const columns = vm.columns ?? [];
+    if (columns.length === 0) return [];
+
+    const tableDirection = vm.tableDirection ?? "ltr";
+    const layout = this.#structuredPromptTableLayout(columns, vm.options, {
+      contentWidth,
+      markerSlotWidth: optionMarkerSlotWidth,
+      showColumnHeaders: vm.showColumnHeaders !== false,
+      tableWidth: vm.tableWidth ?? "full",
+      tableMaxWidth: vm.tableMaxWidth,
+      showCurrentBadge: vm.showCurrentBadge,
+    });
+    const tableSelectedMarker = tableDirection === "rtl"
+      ? (this.#useUnicode ? "◂" : "<")
+      : selectedMarker;
+    const lines: string[] = [];
+
+    if (vm.showColumnHeaders !== false) {
+      const headerCells = this.#structuredPromptRenderedCells(
+        columns,
+        Object.fromEntries(columns.map((column) => [column.key, column.header])),
+        [],
+        layout.widths,
+        locale,
+        "ltr",
+        "header"
+      );
+      const header = headerCells.join("  ");
+      const line = tableDirection === "rtl"
+        ? this.#structuredPromptRtlPhysicalLine(headerCells, " ".repeat(optionMarkerSlotWidth))
+        : `  ${" ".repeat(optionMarkerSlotWidth)}${header}`;
+      lines.push(this.#alignStructuredPromptTableLine(line, contentWidth, layout.lineWidth, vm.tableAlign));
+    }
+
+    let renderedNavigationSeparator = false;
+    for (let i = 0; i < vm.options.length; i++) {
+      const option = vm.options[i];
+      if (option.group === "navigation" && !renderedNavigationSeparator && i > 0) {
+        lines.push("  ");
+        renderedNavigationSeparator = true;
+      }
+      const isSelected = i === vm.selectedOptionIndex;
+      const marker = isSelected ? this.#action(tableSelectedMarker) : " ";
+      const cells = this.#structuredPromptRenderedCells(
+        columns,
+        this.#structuredPromptOptionCells(option, columns),
+        this.#onboardingOptionBadges(option, vm.showCurrentBadge),
+        layout.widths,
+        locale,
+        "ltr",
+        "option"
+      );
+      const row = tableDirection === "rtl" ? "" : cells.join("  ");
+      const line = tableDirection === "rtl"
+        ? this.#structuredPromptRtlPhysicalLine(cells, `${optionMarkerGap}${marker}`)
+        : `  ${marker}${optionMarkerGap}${row}`;
+      lines.push(this.#alignStructuredPromptTableLine(line, contentWidth, layout.lineWidth, vm.tableAlign));
+    }
+
+    return lines;
+  }
+
+  #structuredPromptTableLayout(
+    columns: readonly OnboardingPromptColumn[],
+    options: readonly OnboardingPromptOption[],
+    options_: {
+      readonly contentWidth: number;
+      readonly markerSlotWidth: number;
+      readonly showColumnHeaders: boolean;
+      readonly tableWidth: NonNullable<OnboardingPromptCardViewModel["tableWidth"]>;
+      readonly tableMaxWidth?: number;
+      readonly showCurrentBadge?: boolean;
+    }
+  ): StructuredPromptTableLayout {
+    const dataWidth = Math.max(1, options_.contentWidth - options_.markerSlotWidth);
+    if (columns.length === 1) {
+      const width = options_.tableWidth === "content"
+        ? Math.min(dataWidth, this.#structuredPromptNaturalColumnWidth(columns[0]!, 0, columns, options, options_.showColumnHeaders, options_.showCurrentBadge))
+        : dataWidth;
+      return { widths: [Math.max(1, width)], lineWidth: Math.min(options_.contentWidth, Math.max(1, width) + options_.markerSlotWidth) };
+    }
+
+    const gapWidth = 2 * (columns.length - 1);
+    const available = Math.max(columns.length, dataWidth - gapWidth);
+    const primaryIndex = this.#structuredPromptPrimaryColumnIndex(columns);
+    const primaryColumn = columns[primaryIndex]!;
+    const primaryNaturalWidth = Math.max(
+      measureVisibleWidth(primaryColumn.header),
+      ...options.map((option) => measureVisibleWidth(option.cells?.[primaryColumn.key] ?? option.label))
+    );
+    const nonPrimaryIndices = columns
+      .map((_, index) => index)
+      .filter((index) => index !== primaryIndex);
+    const maxPrimaryWidth = Math.max(1, Math.min(24, available - nonPrimaryIndices.length));
+    const primaryWidth = Math.max(1, Math.min(Math.max(8, primaryNaturalWidth), maxPrimaryWidth));
+    const widths = Array.from({ length: columns.length }, () => 1);
+    widths[primaryIndex] = primaryWidth;
+    const remainingWidth = Math.max(nonPrimaryIndices.length, available - primaryWidth);
+    const baseRemainingWidth = Math.max(1, Math.floor(remainingWidth / nonPrimaryIndices.length));
+    let assigned = primaryWidth;
+    for (let i = 0; i < nonPrimaryIndices.length; i++) {
+      const index = nonPrimaryIndices[i]!;
+      const width = i === nonPrimaryIndices.length - 1
+        ? Math.max(1, available - assigned)
+        : baseRemainingWidth;
+      widths[index] = width;
+      assigned += width;
+    }
+    if (options_.tableWidth !== "content") {
+      return { widths, lineWidth: options_.contentWidth };
+    }
+
+    const contentWidths = columns.map((column, index) => this.#structuredPromptNaturalColumnWidth(
+      column,
+      index,
+      columns,
+      options,
+      options_.showColumnHeaders,
+      options_.showCurrentBadge
+    ));
+    const compactWidths = columns.map((_, index) => {
+      const fullWidth = widths[index] ?? 1;
+      const naturalWidth = contentWidths[index] ?? 1;
+      return Math.max(1, Math.min(fullWidth, naturalWidth));
+    });
+    const maxLineWidth = Math.max(
+      columns.length + options_.markerSlotWidth,
+      Math.min(
+        options_.contentWidth,
+        options_.tableMaxWidth ?? options_.contentWidth
+      )
+    );
+    this.#shrinkStructuredPromptWidthsToLineWidth(compactWidths, primaryIndex, gapWidth, options_.markerSlotWidth, maxLineWidth);
+    const compactDataWidth = compactWidths.reduce((sum, width) => sum + width, 0) + gapWidth;
+    return {
+      widths: compactWidths,
+      lineWidth: Math.min(options_.contentWidth, compactDataWidth + options_.markerSlotWidth),
+    };
+  }
+
+  #structuredPromptNaturalColumnWidth(
+    column: OnboardingPromptColumn,
+    columnIndex: number,
+    columns: readonly OnboardingPromptColumn[],
+    options: readonly OnboardingPromptOption[],
+    showColumnHeaders: boolean,
+    showCurrentBadge?: boolean
+  ): number {
+    const values = options.map((option) => {
+      const cells = this.#structuredPromptOptionCells(option, columns);
+      const value = cells[column.key] ?? "";
+      const badges = columnIndex === columns.length - 1
+        ? this.#onboardingOptionBadges(option, showCurrentBadge)
+        : [];
+      if (badges.length === 0) return measureVisibleWidth(value);
+      return measureVisibleWidth(value) + 2 + measureVisibleWidth(badges.join("  "));
+    });
+    const widths = [
+      ...(showColumnHeaders ? [measureVisibleWidth(column.header)] : []),
+      ...values,
+    ];
+    return Math.max(1, ...widths);
+  }
+
+  #shrinkStructuredPromptWidthsToLineWidth(
+    widths: number[],
+    primaryIndex: number,
+    gapWidth: number,
+    markerSlotWidth: number,
+    maxLineWidth: number
+  ): void {
+    const minWidth = 1;
+    const currentLineWidth = () => widths.reduce((sum, width) => sum + width, 0) + gapWidth + markerSlotWidth;
+    const shrinkOrder = [
+      ...widths.map((_, index) => index).filter((index) => index !== primaryIndex),
+      primaryIndex,
+    ];
+    for (const index of shrinkOrder) {
+      while (currentLineWidth() > maxLineWidth && (widths[index] ?? 0) > minWidth) {
+        widths[index] = (widths[index] ?? minWidth) - 1;
+      }
+    }
+  }
+
+  #alignStructuredPromptTableLine(
+    line: string,
+    contentWidth: number,
+    lineWidth: number,
+    align: OnboardingPromptCardViewModel["tableAlign"]
+  ): string {
+    if (lineWidth >= contentWidth) return line;
+    const padWidth = Math.max(0, contentWidth - lineWidth);
+    const padding = " ".repeat(align === "center" ? Math.floor(padWidth / 2) : align === "right" ? padWidth : 0);
+    return padding.length === 0 ? line : `  ${padding}${line.slice(2)}`;
+  }
+
+  #structuredPromptOptionCells(
+    option: OnboardingPromptOption,
+    columns: readonly OnboardingPromptColumn[]
+  ): Record<string, string> {
+    const cells: Record<string, string> = { ...(option.cells ?? {}) };
+    const primaryColumn = this.#structuredPromptPrimaryColumn(columns);
+    if (primaryColumn !== undefined && cells[primaryColumn.key] === undefined) {
+      cells[primaryColumn.key] = option.label;
+    }
+    if (columns.length === 1 && option.description !== undefined && cells[primaryColumn?.key ?? ""] === option.label) {
+      cells[primaryColumn!.key] = `${option.label} ${option.description}`;
+    }
+    if (columns.length > 1 && option.description !== undefined) {
+      const descriptionColumn = this.#structuredPromptDescriptionColumn(columns);
+      if (descriptionColumn !== undefined && cells[descriptionColumn.key] === undefined) {
+        cells[descriptionColumn.key] = option.description;
+      }
+    }
+    return cells;
+  }
+
+  #structuredPromptPrimaryColumnIndex(columns: readonly OnboardingPromptColumn[]): number {
+    const nameIndex = columns.findIndex((column) => column.key === "name");
+    return nameIndex >= 0 ? nameIndex : 0;
+  }
+
+  #structuredPromptPrimaryColumn(columns: readonly OnboardingPromptColumn[]): OnboardingPromptColumn | undefined {
+    return columns[this.#structuredPromptPrimaryColumnIndex(columns)];
+  }
+
+  #structuredPromptDescriptionColumn(columns: readonly OnboardingPromptColumn[]): OnboardingPromptColumn | undefined {
+    const descriptionColumn = columns.find((column) => column.key === "description");
+    if (descriptionColumn !== undefined) return descriptionColumn;
+    const primaryIndex = this.#structuredPromptPrimaryColumnIndex(columns);
+    return columns.find((_, index) => index !== primaryIndex) ?? columns[columns.length - 1];
+  }
+
+  #structuredPromptRenderedCells(
+    columns: readonly OnboardingPromptColumn[],
+    cells: Readonly<Record<string, string>>,
+    badges: readonly string[],
+    widths: readonly number[],
+    locale: UiLocale,
+    direction: TextDirection,
+    kind: "header" | "option"
+  ): string[] {
+    return columns.map((column, index) => {
+      const rawValue = cells[column.key] ?? "";
+      const width = widths[index] ?? 1;
+      if (kind === "option" && index === columns.length - 1 && badges.length > 0) {
+        const primaryValue = column.key === "name" || (index === 0 && columns.every((candidate) => candidate.key !== "name"));
+        return this.#structuredPromptCellWithBadges(rawValue, badges, width, locale, direction, primaryValue);
+      }
+      const text = kind === "header"
+        ? this.#secondary(this.#localizedPromptCell(rawValue, locale, direction, width))
+        : column.key === "name" || (index === 0 && columns.every((candidate) => candidate.key !== "name"))
+          ? this.#primary(this.#localizedPromptCell(rawValue, locale, direction, width))
+          : this.#muted(this.#localizedPromptCell(rawValue, locale, direction, width));
+      return this.#padStructuredPromptCell(text, width, column.align);
+    });
+  }
+
+  #structuredPromptRtlPhysicalLine(cells: readonly string[], markerCell: string): string {
+    const physicalCells = cells.map((cell) => isolateLtr(cell));
+    return `  ${physicalCells.join(isolateLtr("  "))}${isolateLtr(markerCell)}`;
+  }
+
+  #structuredPromptCellWithBadges(
+    value: string,
+    badges: readonly string[],
+    width: number,
+    locale: UiLocale,
+    direction: TextDirection,
+    primaryValue: boolean
+  ): string {
+    const badgeText = badges.join("  ");
+    const badgeWidth = measureVisibleWidth(badgeText);
+    if (badgeWidth >= width) {
+      return padVisibleEnd(this.#secondary(this.#localizedPromptCell(badgeText, locale, direction, width)), width);
+    }
+
+    const gap = "  ";
+    const gapWidth = measureVisibleWidth(gap);
+    const valueWidth = Math.max(0, width - badgeWidth - gapWidth);
+    const valueText = valueWidth > 0
+      ? this.#localizedPromptCell(value, locale, direction, valueWidth)
+      : "";
+    const styledValue = primaryValue ? this.#primary(valueText) : this.#muted(valueText);
+    const styledBadges = this.#secondary(this.#localizedPromptCell(badgeText, locale, direction, badgeWidth));
+    if (valueWidth === 0) {
+      return padVisibleEnd(styledBadges, width);
+    }
+    return `${padVisibleEnd(styledValue, valueWidth)}${gap}${styledBadges}`;
+  }
+
+  #padStructuredPromptCell(text: string, width: number, align?: OnboardingPromptColumn["align"]): string {
+    return align === "right" ? padVisibleStart(text, width) : padVisibleEnd(text, width);
+  }
+
+  #localizedPromptCell(value: string, locale: UiLocale, direction: TextDirection, maxWidth: number): string {
+    const truncated = truncateVisible(value, maxWidth);
+    if (locale === "ar") {
+      return containsArabicScript(value)
+        ? isolateRtl(closeOpenBidiIsolates(truncated))
+        : /[A-Za-z0-9]/u.test(value)
+        ? isolateLtr(truncated)
+        : isolateRtl(closeOpenBidiIsolates(truncated));
+    }
+    return direction === "rtl" ? isolateRtl(closeOpenBidiIsolates(truncated)) : truncated;
+  }
+
+  #onboardingOptionBadges(option: OnboardingPromptOption, showCurrentBadge = true): readonly string[] {
+    const badges = [...(option.badges ?? [])];
+    if (showCurrentBadge && option.current === true && !badges.includes("Current")) {
+      badges.push("Current");
+    }
+    return badges;
   }
 
   #renderLtrOnboardingPromptCardTop(
@@ -750,13 +1153,21 @@ export class StandardRenderer {
     return direction === "rtl" ? isolateRtl(truncated) : truncated;
   }
 
-  #renderRtlOnboardingBodyLines(bodyLines: readonly string[], contentWidth: number): string[] {
+  #renderRtlOnboardingBodyLines(
+    bodyLines: readonly string[],
+    contentWidth: number,
+    bodyLineStyles?: OnboardingPromptCardViewModel["bodyLineStyles"]
+  ): string[] {
     if (bodyLines.length === 0) return [];
 
     const blockWidth = computeRtlOnboardingBodyBlockWidth(bodyLines, contentWidth);
     const rendered: string[] = [];
     for (let i = 0; i < bodyLines.length; i++) {
-      const style = i === 0 ? this.#primary.bind(this) : this.#secondary.bind(this);
+      const baseStyle = i === 0 ? this.#primary.bind(this) : this.#secondary.bind(this);
+      const style = (value: string): string => {
+        const styled = bodyLineStyles?.[i]?.emphasis === "strong" ? this.#bold(value) : value;
+        return baseStyle(styled);
+      };
       const numbered = splitNumberedRtlLine(bodyLines[i]);
       if (numbered !== undefined) {
         rendered.push(...this.#renderRtlNumberedBodyLine(numbered, blockWidth, contentWidth, style));
@@ -1854,6 +2265,11 @@ type RtlNumberedBodyLine = {
   readonly text: string;
 };
 
+type StructuredPromptTableLayout = {
+  readonly widths: readonly number[];
+  readonly lineWidth: number;
+};
+
 function splitNumberedRtlLine(line: string): RtlNumberedBodyLine | undefined {
   const match = /^(\d+\.)\s+(.+)$/u.exec(line);
   if (match === null) return undefined;
@@ -1867,6 +2283,10 @@ function computeRtlOnboardingBodyBlockWidth(bodyLines: readonly string[], conten
   }));
   const preferredWidth = Math.min(88, Math.max(56, widestLine));
   return Math.max(8, Math.min(contentWidth, preferredWidth));
+}
+
+function containsArabicScript(value: string): boolean {
+  return /\p{Script=Arabic}/u.test(value);
 }
 
 function boundedFileChangePreviewLines(

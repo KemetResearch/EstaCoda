@@ -4,6 +4,7 @@ import {
   getSetupCopyEntry,
   hasSetupCopyKey,
   listSetupCopyEntries,
+  modelDescriptionOverride,
   rawSetupCopy,
   resolveSetupCopy,
   setupCopy,
@@ -35,6 +36,31 @@ const FIRST_RUN_KEYS = [
   "onboarding.providers.primaryCredential",
   "onboarding.providers.primaryCredential.validation.reference",
   "onboarding.providers.primaryCredential.localProviderSkip",
+  "onboarding.providers.current",
+  "onboarding.providers.currentRoute",
+  "onboarding.providers.currentModelNotShown",
+  "onboarding.providers.navigation.back.description",
+  "onboarding.providers.description.openai",
+  "onboarding.providers.description.google",
+  "onboarding.providers.description.deepseek",
+  "onboarding.providers.description.kimi",
+  "onboarding.providers.description.openrouter",
+  "onboarding.providers.description.zai",
+  "onboarding.providers.description.local",
+  "onboarding.providers.description.codex",
+  "onboarding.providers.description.custom",
+  "onboarding.providers.description.customBaseUrl",
+  "onboarding.catalog.model.features.tools",
+  "onboarding.catalog.model.features.vision",
+  "onboarding.catalog.model.features.reasoning",
+  "onboarding.catalog.model.features.structuredOutput",
+  "onboarding.catalog.model.context",
+  "onboarding.catalog.model.status.alpha",
+  "onboarding.catalog.model.status.beta",
+  "onboarding.catalog.model.status.deprecated",
+  "onboarding.catalog.model.status.retired",
+  "onboarding.catalog.model.description.local",
+  "onboarding.catalog.model.description.custom",
   "onboarding.security",
   "onboarding.security.validation.selected",
   "onboarding.workflowLearning",
@@ -594,6 +620,9 @@ describe("setup copy", () => {
     expect(resolveSetupCopy("ar", "setupModules.provider.review")).toContain(isolateLtr("{modelId}"));
     expect(resolveSetupCopy("ar", "setupApply.operations.configPatch")).toContain(isolateLtr("{scope}"));
     expect(resolveSetupCopy("ar", "setupApply.operations.configPatch")).toContain(isolateLtr("{configPath}"));
+    expect(resolveSetupCopy("ar", "onboarding.providers.currentRoute")).toContain(isolateLtr("{route}"));
+    expect(resolveSetupCopy("ar", "onboarding.providers.currentModelNotShown")).toContain(isolateLtr("{route}"));
+    expect(resolveSetupCopy("ar", "onboarding.providers.description.customBaseUrl")).toContain(isolateLtr("{baseUrl}"));
     expect(resolveSetupCopy("ar", "setupModules.telegram.title")).toBe(isolateLtr("Telegram"));
     expect(resolveSetupCopy("ar", "onboarding.providers.primaryCredential.localProviderSkip")).toContain(isolateLtr("API"));
     expect(resolveSetupCopy("ar", "setupRouter.configured.title")).toContain(isolateLtr("EstaCoda"));
@@ -650,8 +679,16 @@ describe("setup copy", () => {
     expect(resolveSetupCopy("ar", "setupEditor.prompt.browser.chromeFlags")).toContain(`خيارات ${isolateLtr("Chrome")} المتقدمة`);
     expect(resolveSetupCopy("ar", "setupEditor.prompt.browser.chromeFlags")).not.toContain("أعلام Chrome");
     expect(resolveSetupCopy("ar", "setupEditor.prompt.vision.useGateway")).toContain(isolateLtr("image gateway"));
-    expect(resolveSetupCopy("ar", "setupEditor.prompt.voice.mode.stt")).toContain(isolateLtr("STT"));
-    expect(resolveSetupCopy("ar", "setupEditor.prompt.voice.mode.tts")).toContain(isolateLtr("TTS"));
+    expect(rawSetupCopy("en", "setupEditor.prompt.voice.mode.body")).toBe("Choose a voice capability to configure:");
+    expect(rawSetupCopy("en", "setupEditor.prompt.voice.mode.stt")).toBe("Speech to Text (STT)");
+    expect(rawSetupCopy("en", "setupEditor.prompt.voice.mode.stt.description")).toBe("Convert spoken audio into text.");
+    expect(rawSetupCopy("en", "setupEditor.prompt.voice.mode.tts")).toBe("Text to Speech (TTS)");
+    expect(rawSetupCopy("en", "setupEditor.prompt.voice.mode.tts.description")).toBe("Convert text into spoken audio.");
+    expect(rawSetupCopy("ar", "setupEditor.prompt.voice.mode.body")).toBe("اختر قدرة الصوت التي تريد ضبطها:");
+    expect(rawSetupCopy("ar", "setupEditor.prompt.voice.mode.stt.description")).toBe("تحويل الصوت المنطوق إلى نص.");
+    expect(rawSetupCopy("ar", "setupEditor.prompt.voice.mode.tts.description")).toBe("تحويل النص إلى صوت منطوق.");
+    expect(resolveSetupCopy("ar", "setupEditor.prompt.voice.mode.stt")).toBe(`Speech to Text (${isolateLtr("STT")})`);
+    expect(resolveSetupCopy("ar", "setupEditor.prompt.voice.mode.tts")).toBe(`Text to Speech (${isolateLtr("TTS")})`);
     expect(resolveSetupCopy("ar", "setupEditor.prompt.voice.ttsProvider")).toContain(isolateLtr("TTS"));
     expect(resolveSetupCopy("ar", "setupEditor.prompt.voice.summary")).toContain(isolateLtr("faster-whisper"));
     expect(resolveSetupCopy("ar", "setupEditor.prompt.voice.summary")).toContain(isolateLtr("pythonBinary"));
@@ -691,6 +728,34 @@ describe("setup copy", () => {
     expect(resolveSetupCopy("ar", "setupEditor.prompt.telegram.allowedUserIds.body")).toContain(isolateLtr("/start"));
     expect(resolveSetupCopy("ar", "setupEditor.prompt.telegram.allowedChatIds.body")).toContain(isolateLtr("@getidsbot"));
     expect(resolveSetupCopy("ar", "setupEditor.prompt.telegram.allowedChatIds.body")).toContain(isolateLtr("@chatIDrobot"));
+  });
+
+  it("resolves sparse model description overrides by provider and model id", () => {
+    expect(modelDescriptionOverride("en", "openai", "gpt-5-mini")).toBe("Cost-conscious choice for auxiliary tasks.");
+    expect(modelDescriptionOverride("ar", "openai", "gpt-5-mini")).toBe("خيار منخفض التكلفة للمهام المساعدة.");
+    expect(modelDescriptionOverride("en", "google", "gpt-5-mini")).toBeUndefined();
+    expect(modelDescriptionOverride("en", "openai", "unknown-model")).toBeUndefined();
+  });
+
+  it("uses provider navigation back copy for the previous step", () => {
+    expect(resolveSetupCopy("en", "onboarding.providers.navigation.back.description")).toBe("Return to the previous step.");
+    expect(resolveSetupCopy("ar", "onboarding.providers.navigation.back.description")).toBe("ارجع إلى الخطوة السابقة.");
+  });
+
+  it("uses curated provider descriptions in English and Arabic", () => {
+    expect(resolveSetupCopy("en", "onboarding.providers.description.deepseek")).toBe("Cost-efficient models for primary or auxiliary use. Direct API.");
+    expect(resolveSetupCopy("en", "onboarding.providers.description.google")).toBe("Gemini models with strong utility and multimodal coverage. Direct API.");
+    expect(resolveSetupCopy("en", "onboarding.providers.description.kimi")).toBe("Moonshot Kimi models with strong quality/cost balance. Direct API.");
+    expect(resolveSetupCopy("en", "onboarding.providers.description.local")).toBe("Local OpenAI-compatible models running on your machine.");
+    expect(resolveSetupCopy("en", "onboarding.providers.description.openai")).toBe("Frontier models for high-quality primary reasoning. Direct API.");
+    expect(resolveSetupCopy("en", "onboarding.providers.description.openrouter")).toBe("Pay-per-use aggregator for routing across many model providers.");
+    expect(resolveSetupCopy("en", "onboarding.providers.description.zai")).toBe("GLM models with strong quality/cost balance. Direct API.");
+
+    expect(resolveSetupCopy("ar", "onboarding.providers.description.deepseek")).toContain(isolateLtr("API"));
+    expect(resolveSetupCopy("ar", "onboarding.providers.description.google")).toContain(isolateLtr("Gemini"));
+    expect(resolveSetupCopy("ar", "onboarding.providers.description.kimi")).toContain(isolateLtr("Moonshot"));
+    expect(resolveSetupCopy("ar", "onboarding.providers.description.local")).toContain(isolateLtr("OpenAI"));
+    expect(resolveSetupCopy("ar", "onboarding.providers.description.zai")).toContain(isolateLtr("GLM"));
   });
 
   it("resolves onboarding local STT skipped warning copy", () => {
@@ -848,36 +913,41 @@ describe("setup copy", () => {
   it("contains Phase 1 setup editor foundation copy", () => {
     expect(rawSetupCopy("en", "setupEditor.shell.title")).toBe("Setup Editor");
     expect(rawSetupCopy("en", "setupEditor.prompt.action.title")).toBe("Setup editor");
-    expect(rawSetupCopy("en", "setupEditor.prompt.action.body")).toBe("Choose what to configure.");
-    expect(rawSetupCopy("en", "setupEditor.actions.editPrimaryModelRoute")).toBe("Edit primary model");
-    expect(rawSetupCopy("en", "setupEditor.actions.editPrimaryModelRoute.description")).toBe("Set the default provider and model used by the agent.");
-    expect(rawSetupCopy("en", "setupEditor.actions.editFallbackModelRoute")).toBe("Edit fallback models");
-    expect(rawSetupCopy("en", "setupEditor.actions.editFallbackModelRoute.description")).toBe("Configure backup providers and models used when the primary model fails.");
-    expect(rawSetupCopy("en", "setupEditor.actions.editAuxiliaryModelRoute")).toBe("Edit auxiliary models");
-    expect(rawSetupCopy("en", "setupEditor.actions.editAuxiliaryModelRoute.description")).toBe("Configure specialist models for assessment, compression, recall, and memory.");
-    expect(rawSetupCopy("en", "setupEditor.actions.configureChannels")).toBe("Configure channels");
-    expect(rawSetupCopy("en", "setupEditor.actions.configureChannels.description")).toBe("Set up remote-control channels such as Telegram.");
-    expect(rawSetupCopy("en", "setupEditor.actions.configureVoice")).toBe("Configure voice");
-    expect(rawSetupCopy("en", "setupEditor.actions.configureVoice.description")).toBe("Set speech-to-text and text-to-speech providers.");
-    expect(rawSetupCopy("en", "setupEditor.actions.configureImageGeneration")).toBe("Configure image generation");
-    expect(rawSetupCopy("en", "setupEditor.actions.configureImageGeneration.description")).toBe("Set the image generation provider.");
-    expect(rawSetupCopy("en", "setupEditor.actions.configureWebSearch")).toBe("Configure search");
-    expect(rawSetupCopy("en", "setupEditor.actions.configureBrowser")).toBe("Configure browser");
-    expect(rawSetupCopy("en", "setupEditor.actions.configureBrowser.description")).toBe("Set browser behavior without launching a browser.");
-    expect(rawSetupCopy("en", "setupEditor.actions.editSecurityMode")).toBe("Edit security mode");
-    expect(rawSetupCopy("en", "setupEditor.actions.editSecurityMode.description")).toBe("Choose how strictly EstaCoda reviews risky actions.");
+    expect(rawSetupCopy("en", "setupEditor.prompt.action.body")).toBe("Choose what to configure:");
+    expect(rawSetupCopy("en", "setupEditor.prompt.action.body")).not.toContain("\x1b[");
+    expect(rawSetupCopy("en", "setupEditor.actions.editPrimaryModelRoute")).toBe("Primary model");
+    expect(rawSetupCopy("en", "setupEditor.actions.editPrimaryModelRoute.description")).toBe("Default model used by the agent.");
+    expect(rawSetupCopy("en", "setupEditor.actions.editFallbackModelRoute")).toBe("Fallback models");
+    expect(rawSetupCopy("en", "setupEditor.actions.editFallbackModelRoute.description")).toBe("Backup model used if the primary model fails.");
+    expect(rawSetupCopy("en", "setupEditor.actions.editAuxiliaryModelRoute")).toBe("Auxiliary models");
+    expect(rawSetupCopy("en", "setupEditor.actions.editAuxiliaryModelRoute.description")).toBe("Models used for assessment, compression, recall, and memory.");
+    expect(rawSetupCopy("en", "setupEditor.actions.configureChannels")).toBe("Channels");
+    expect(rawSetupCopy("en", "setupEditor.actions.configureChannels.description")).toBe("Remote-control channels such as Telegram and WhatsApp.");
+    expect(rawSetupCopy("en", "setupEditor.actions.configureVoice")).toBe("Voice");
+    expect(rawSetupCopy("en", "setupEditor.actions.configureVoice.description")).toBe("Speech-to-text and text-to-speech providers.");
+    expect(rawSetupCopy("en", "setupEditor.actions.configureImageGeneration")).toBe("Image generation");
+    expect(rawSetupCopy("en", "setupEditor.actions.configureImageGeneration.description")).toBe("Image generation provider and model.");
+    expect(rawSetupCopy("en", "setupEditor.actions.configureWebSearch")).toBe("Search");
+    expect(rawSetupCopy("en", "setupEditor.actions.configureWebSearch.description")).toBe("Configure how EstaCoda finds and retrieves web results.");
+    expect(rawSetupCopy("en", "setupEditor.actions.configureBrowser")).toBe("Browser");
+    expect(rawSetupCopy("en", "setupEditor.actions.configureBrowser.description")).toBe("Configure how EstaCoda opens and controls browsers.");
+    expect(rawSetupCopy("en", "setupEditor.actions.editSecurityMode")).toBe("Security mode");
+    expect(rawSetupCopy("en", "setupEditor.actions.editSecurityMode.description")).toBe("Review policy for risky actions.");
     expect(rawSetupCopy("en", "onboarding.workflowLearning")).toBe("Agent Evolution controls EstaCoda's reviewable self-improvement: evidence, proposals, evals, and manual promotion.");
-    expect(rawSetupCopy("en", "setupEditor.actions.editWorkflowLearning")).toBe("Configure Agent Evolution");
-    expect(rawSetupCopy("en", "setupEditor.actions.editWorkflowLearning.description")).toBe("Agent Evolution controls reviewable self-improvement proposals backed by evidence, evals, and manual promotion.");
-    expect(rawSetupCopy("ar", "setupEditor.actions.editWorkflowLearning.description")).toBe("يتحكم Agent Evolution في proposal تحسين ذاتي قابلة للمراجعة ومدعومة بالأدلة، والتقييمات، والترقية اليدوية.");
-    expect(resolveSetupCopy("ar", "setupEditor.actions.editWorkflowLearning.description")).toContain(isolateLtr("Agent Evolution"));
-    expect(resolveSetupCopy("ar", "setupEditor.actions.editWorkflowLearning.description")).toContain(isolateLtr("proposal"));
-    expect(rawSetupCopy("en", "setupEditor.actions.chooseLanguage")).toBe("Choose language");
-    expect(rawSetupCopy("en", "setupEditor.actions.chooseLanguage.description")).toBe("Choose English or Arabic. Arabic support is beta and may fall back to English.");
-    expect(rawSetupCopy("en", "setupEditor.actions.runReadonlyVerification")).toBe("Run setup verification");
+    expect(rawSetupCopy("en", "setupEditor.actions.editWorkflowLearning")).toBe("Agent Evolution");
+    expect(rawSetupCopy("en", "setupEditor.actions.editWorkflowLearning.description")).toBe("Reviewable self-improvement proposals.");
+    expect(rawSetupCopy("en", "onboarding.workflowLearning.options.autonomous.description")).toBe(
+      "Record shadow-only autonomous decisions for review. No automatic promotion is active in v0.1.0."
+    );
+    expect(rawSetupCopy("ar", "onboarding.workflowLearning.options.autonomous.description")).toContain("v0.1.0");
+    expect(rawSetupCopy("ar", "setupEditor.actions.editWorkflowLearning.description")).toBe("مقترحات تحسين ذاتي قابلة للمراجعة.");
+    expect(resolveSetupCopy("ar", "setupEditor.actions.editWorkflowLearning")).toBe(isolateLtr("Agent Evolution"));
+    expect(rawSetupCopy("en", "setupEditor.actions.chooseLanguage")).toBe("Language");
+    expect(rawSetupCopy("en", "setupEditor.actions.chooseLanguage.description")).toBe("Interface language and Arabic beta support.");
+    expect(rawSetupCopy("en", "setupEditor.actions.runReadonlyVerification")).toBe("Setup verification");
     expect(rawSetupCopy("en", "setupEditor.actions.runReadonlyVerification.description")).toBe("Check setup state without changing config.");
-    expect(rawSetupCopy("en", "setupEditor.actions.showDiagnostics")).toBe("Show diagnostics");
-    expect(rawSetupCopy("en", "setupEditor.actions.showDiagnostics.description")).toBe("List blockers, warnings, and detected state.");
+    expect(rawSetupCopy("en", "setupEditor.actions.showDiagnostics")).toBe("Diagnostics");
+    expect(rawSetupCopy("en", "setupEditor.actions.showDiagnostics.description")).toBe("Show blockers, warnings, and detected state.");
     expect(rawSetupCopy("en", "setupEditor.actions.exitWithoutChanges")).toBe("Exit without changes");
     expect(rawSetupCopy("en", "setupEditor.actions.exitWithoutChanges.description")).toBe("Leave setup without modifying config.");
     expect(rawSetupCopy("en", "setupEditor.actions.storeProviderCredentialReference")).toBe("Store provider credential reference.");
@@ -900,14 +970,41 @@ describe("setup copy", () => {
     expect(rawSetupCopy("en", "setupEditor.prompt.webSearch.brave.secretValue")).toBe("Enter Brave Search API key:");
 
     expect(rawSetupCopy("ar", "setupEditor.shell.title")).toBe("محرّر الإعدادات");
-    expect(rawSetupCopy("ar", "setupEditor.prompt.action.body")).toBe("اختار اللي تحب تضبطه.");
-    expect(rawSetupCopy("ar", "setupEditor.actions.configureWebSearch")).toBe("اضبط البحث");
+    expect(rawSetupCopy("ar", "setupEditor.prompt.action.body")).toBe("اختار اللي تحب تضبطه:");
+    expect(rawSetupCopy("ar", "setupEditor.actions.configureWebSearch")).toBe("البحث");
     expect(rawSetupCopy("ar", "setupEditor.prompt.optionalCapabilityAction.enableConfigure")).toBe("اضبط");
     expect(rawSetupCopy("ar", "setupEditor.prompt.webSearch.provider.brave.description")).toBe("استخدم Brave Search API مع مفتاح API.");
     expect(rawSetupCopy("ar", "setupEditor.prompt.webSearch.provider.ddgs.description")).toBe("استخدم DuckDuckGo مجانًا. يتطلب الإعداد تثبيت قدرة DDGS المسجلة عبر مراجعة Python.");
     expect(rawSetupCopy("ar", "setupEditor.prompt.webSearch.brave.secretValue")).toBe("أدخل مفتاح API لـ Brave Search:");
-    expect(rawSetupCopy("ar", "setupEditor.actions.configureChannels.description")).toContain("Telegram");
-    expect(rawSetupCopy("ar", "setupEditor.actions.editSecurityMode.description")).toContain("EstaCoda");
+    expect(rawSetupCopy("ar", "setupEditor.actions.editPrimaryModelRoute")).toBe("النموذج الأساسي");
+    expect(rawSetupCopy("ar", "setupEditor.actions.editPrimaryModelRoute.description")).toBe("النموذج الافتراضي الذي يستخدمه الوكيل.");
+    expect(rawSetupCopy("ar", "setupEditor.actions.editFallbackModelRoute")).toBe("النماذج الاحتياطية");
+    expect(rawSetupCopy("ar", "setupEditor.actions.editFallbackModelRoute.description")).toBe("نماذج احتياطية تُستخدم إذا فشل النموذج الأساسي.");
+    expect(rawSetupCopy("ar", "setupEditor.actions.editAuxiliaryModelRoute")).toBe("النماذج المساعدة");
+    expect(rawSetupCopy("ar", "setupEditor.actions.editAuxiliaryModelRoute.description")).toBe("نماذج تُستخدم للتقييم، والضغط، والاستدعاء، والذاكرة.");
+    expect(rawSetupCopy("ar", "setupEditor.actions.configureChannels")).toBe("القنوات");
+    expect(rawSetupCopy("ar", "setupEditor.actions.configureChannels.description")).toBe("قنوات تحكم عن بُعد مثل Telegram وWhatsApp.");
+    expect(rawSetupCopy("ar", "setupEditor.actions.configureVoice")).toBe("الصوت");
+    expect(rawSetupCopy("ar", "setupEditor.actions.configureVoice.description")).toBe("مزودو تحويل الكلام إلى نص وتحويل النص إلى كلام.");
+    expect(rawSetupCopy("ar", "setupEditor.actions.configureImageGeneration")).toBe("توليد الصور");
+    expect(rawSetupCopy("ar", "setupEditor.actions.configureImageGeneration.description")).toBe("مزود ونموذج توليد الصور.");
+    expect(rawSetupCopy("ar", "setupEditor.actions.configureWebSearch.description")).toBe("اضبط كيف تعثر EstaCoda على نتائج الويب وتسترجعها.");
+    expect(rawSetupCopy("ar", "setupEditor.actions.configureBrowser")).toBe("المتصفح");
+    expect(rawSetupCopy("ar", "setupEditor.actions.configureBrowser.description")).toBe("اضبط كيف تفتح EstaCoda المتصفحات وتتحكم بها.");
+    expect(rawSetupCopy("ar", "setupEditor.actions.editSecurityMode")).toBe("وضع الأمان");
+    expect(rawSetupCopy("ar", "setupEditor.actions.editSecurityMode.description")).toBe("سياسة المراجعة للإجراءات عالية المخاطر.");
+    expect(rawSetupCopy("ar", "setupEditor.actions.editWorkflowLearning")).toBe("Agent Evolution");
+    expect(rawSetupCopy("ar", "setupEditor.actions.chooseLanguage")).toBe("اللغة");
+    expect(rawSetupCopy("ar", "setupEditor.actions.chooseLanguage.description")).toBe("لغة الواجهة ودعم العربية التجريبي.");
+    expect(rawSetupCopy("ar", "setupEditor.actions.runReadonlyVerification")).toBe("التحقق من الإعداد");
+    expect(rawSetupCopy("ar", "setupEditor.actions.runReadonlyVerification.description")).toBe("افحص حالة الإعداد دون تغيير التكوين.");
+    expect(rawSetupCopy("ar", "setupEditor.actions.showDiagnostics")).toBe("التشخيصات");
+    expect(rawSetupCopy("ar", "setupEditor.actions.showDiagnostics.description")).toBe("اعرض العوائق، والتحذيرات، والحالة المكتشفة.");
+    expect(rawSetupCopy("ar", "setupEditor.actions.exitWithoutChanges")).toBe("الخروج دون تغييرات");
+    expect(rawSetupCopy("ar", "setupEditor.actions.exitWithoutChanges.description")).toBe("غادر الإعداد دون تعديل التكوين.");
+    expect(resolveSetupCopy("ar", "setupEditor.actions.configureChannels.description")).toContain(isolateLtr("Telegram"));
+    expect(resolveSetupCopy("ar", "setupEditor.actions.configureChannels.description")).toContain(isolateLtr("WhatsApp"));
+    expect(resolveSetupCopy("ar", "setupEditor.actions.configureWebSearch.description")).toContain(isolateLtr("EstaCoda"));
     expect(resolveSetupCopy("ar", "setupEditor.prompt.webSearch.provider.brave.description")).toContain(isolateLtr("Brave Search"));
     expect(resolveSetupCopy("ar", "setupEditor.prompt.webSearch.provider.ddgs.description")).toContain(isolateLtr("DuckDuckGo"));
     expect(resolveSetupCopy("ar", "setupEditor.prompt.webSearch.provider.ddgs.description")).toContain(isolateLtr("DDGS"));

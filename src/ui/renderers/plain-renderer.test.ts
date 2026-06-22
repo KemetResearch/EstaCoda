@@ -57,7 +57,7 @@ import {
   renderActiveTurnSpinner,
   renderFileChangePreview,
 } from "./plain-renderer.js";
-import { isolateLtr, isolateRtl, RLI } from "../bidi.js";
+import { closeOpenBidiIsolates, isolateLtr, isolateRtl, LRI, PDI, RLI } from "../bidi.js";
 import { measureVisibleWidth } from "./layout.js";
 
 function assertNoAnsi(text: string): void {
@@ -68,6 +68,26 @@ function assertAsciiSafe(text: string): void {
   for (const ch of text) {
     expect(ch.charCodeAt(0)).toBeLessThan(128);
   }
+}
+
+function stripTrailingBidiControls(text: string): string {
+  return text.replace(new RegExp(`[${LRI}${RLI}${PDI}]+$`, "gu"), "");
+}
+
+function visibleMarkerColumn(line: string, marker: string): number {
+  const markerIndex = line.indexOf(marker);
+  expect(markerIndex).toBeGreaterThanOrEqual(0);
+  return measureVisibleWidth(line.slice(0, markerIndex));
+}
+
+function visibleTextEndColumn(line: string, text: string): number {
+  const textIndex = line.indexOf(text);
+  expect(textIndex).toBeGreaterThanOrEqual(0);
+  return measureVisibleWidth(line.slice(0, textIndex)) + measureVisibleWidth(text);
+}
+
+function countBidiControl(line: string, control: string): number {
+  return [...line].filter((char) => char === control).length;
 }
 
 function onboardingTrustCard(overrides: Partial<Parameters<typeof buildOnboardingPromptCardViewModel>[0]> = {}) {
@@ -150,6 +170,349 @@ describe("PlainRenderer — renderOnboardingPromptCard", () => {
     expect(out).toContain("> Not now");
   });
 
+  it("renders structured generic prompt-card rows with badges, current, ordinary Back/Cancel, and hint", () => {
+    const out = renderOnboardingPromptCard(buildOnboardingPromptCardViewModel({
+      title: "Choose mode",
+      bodyLines: ["Pick a generic mode."],
+      statusLines: [
+        { text: "Current: Alpha", tone: "active", direction: "ltr" },
+      ],
+      columns: [
+        { key: "name", header: "Name" },
+        { key: "description", header: "Description" },
+      ],
+      options: [
+        {
+          id: "alpha",
+          label: "Alpha",
+          cells: { name: "Alpha", description: "First generic option" },
+          badges: ["Recommended"],
+          current: true,
+        },
+        {
+          id: "beta",
+          label: "Beta",
+          cells: { name: "Beta", description: "Second generic option" },
+        },
+        {
+          id: "back",
+          label: "Back",
+          group: "navigation",
+          cells: { name: "Back", description: "Return to previous step" },
+        },
+        {
+          id: "cancel",
+          label: "Cancel",
+          group: "navigation",
+          cells: { name: "Cancel", description: "Exit without changes" },
+        },
+      ],
+      selectedOptionIndex: 0,
+      hint: "Type a number to choose.",
+    }));
+
+    expect(out).toContain("  Name");
+    expect(out).toContain("Description");
+    expect(out).toContain("Current: Alpha");
+    expect(out).toContain("> Alpha");
+    expect(out).toContain("First generic option");
+    expect(out).toContain("Recommended  Current");
+    expect(out).toContain("  Beta");
+    expect(out).toContain("Back");
+    expect(out).toContain("Cancel");
+    expect(out).toContain("Type a number to choose.");
+    const lines = out.split("\n");
+    const backIndex = lines.findIndex((line) => line.includes("Back"));
+    const cancelIndex = lines.findIndex((line) => line.includes("Cancel"));
+    expect(backIndex).toBeGreaterThan(0);
+    expect(lines[backIndex - 1]).toBe("");
+    expect(cancelIndex).toBe(backIndex + 1);
+    assertNoAnsi(out);
+  });
+
+  it("renders strong prompt-card body line metadata as readable plain text", () => {
+    const out = renderOnboardingPromptCard(buildOnboardingPromptCardViewModel({
+      title: "Setup editor",
+      bodyLines: ["Choose what to configure:"],
+      bodyLineStyles: [{ emphasis: "strong" }],
+      options: [
+        { id: "primary", label: "Primary model", description: "Default model used by the agent." },
+      ],
+      selectedOptionIndex: 0,
+    }));
+
+    expect(out).toContain("Choose what to configure:");
+    assertNoAnsi(out);
+  });
+
+  it("hides structured prompt-card headers when explicitly disabled", () => {
+    const out = renderOnboardingPromptCard(buildOnboardingPromptCardViewModel({
+      title: "Choose mode",
+      bodyLines: [],
+      showColumnHeaders: false,
+      columns: [
+        { key: "name", header: "Name" },
+        { key: "description", header: "Description" },
+      ],
+      options: [
+        { id: "alpha", label: "Alpha", description: "First generic option" },
+        { id: "beta", label: "Beta", description: "Second generic option" },
+      ],
+      selectedOptionIndex: 0,
+    }));
+
+    expect(out).not.toContain("  Name");
+    expect(out).not.toContain("Description");
+    const selectedLine = out.split("\n").find((line) => line.includes("> Alpha"));
+    const betaLine = out.split("\n").find((line) => line.includes("  Beta"));
+    expect(selectedLine).toBeDefined();
+    expect(selectedLine).toContain("First generic option");
+    expect(betaLine).toBeDefined();
+    expect(betaLine).toContain("Second generic option");
+    assertNoAnsi(out);
+  });
+
+  it("inserts one generic separator before non-structured navigation prompt-card rows", () => {
+    const out = renderOnboardingPromptCard(buildOnboardingPromptCardViewModel({
+      title: "Choose mode",
+      bodyLines: [],
+      options: [
+        { id: "alpha", label: "Alpha" },
+        { id: "beta", label: "Beta" },
+        { id: "back", label: "Back", group: "navigation" },
+        { id: "cancel", label: "Cancel", group: "navigation" },
+      ],
+      selectedOptionIndex: 0,
+    }));
+
+    const lines = out.split("\n");
+    const backIndex = lines.findIndex((line) => line.includes("Back"));
+    const cancelIndex = lines.findIndex((line) => line.includes("Cancel"));
+    expect(lines[backIndex - 1]).toBe("");
+    expect(cancelIndex).toBe(backIndex + 1);
+    assertNoAnsi(out);
+  });
+
+  it("renders prompt-card status lines readably without color", () => {
+    const out = renderOnboardingPromptCard(buildOnboardingPromptCardViewModel({
+      title: "Choose mode",
+      bodyLines: [],
+      statusLines: [
+        { text: "Current: Alpha", tone: "active", direction: "ltr" },
+      ],
+      options: [{ id: "alpha", label: "Alpha" }],
+      selectedOptionIndex: 0,
+    }));
+
+    expect(out).toContain("Current: Alpha");
+    assertNoAnsi(out);
+  });
+
+  it("resolves prompt-card status auto direction from card direction instead of locale", () => {
+    const out = renderOnboardingPromptCard(buildOnboardingPromptCardViewModel({
+      title: "Choose mode",
+      bodyLines: [],
+      statusLines: [
+        { text: "Current: Alpha", direction: "auto" },
+      ],
+      options: [{ id: "alpha", label: "Alpha" }],
+      selectedOptionIndex: 0,
+      locale: "ar",
+      direction: "ltr",
+    }), "ar");
+
+    expect(out).toContain(isolateLtr("Current: Alpha"));
+    expect(out).not.toContain(isolateRtl("Current: Alpha"));
+    assertNoAnsi(out);
+  });
+
+  it("suppresses automatic current badges while preserving explicit badges", () => {
+    const out = renderOnboardingPromptCard(buildOnboardingPromptCardViewModel({
+      title: "Choose mode",
+      bodyLines: [],
+      showCurrentBadge: false,
+      columns: [
+        { key: "name", header: "Name" },
+        { key: "description", header: "Description" },
+      ],
+      options: [
+        {
+          id: "alpha",
+          label: "Alpha",
+          cells: { name: "Alpha", description: "First generic option" },
+          badges: ["Recommended"],
+          current: true,
+        },
+      ],
+      selectedOptionIndex: 0,
+    }));
+
+    const selectedLine = out.split("\n").find((line) => line.includes("> Alpha"));
+    expect(selectedLine).toBeDefined();
+    expect(selectedLine).toContain("Recommended");
+    expect(selectedLine).not.toContain("Current");
+    assertNoAnsi(out);
+  });
+
+  it("renders structured columns from label and description without cells", () => {
+    const out = renderOnboardingPromptCard(buildOnboardingPromptCardViewModel({
+      title: "Choose mode",
+      bodyLines: [],
+      columns: [
+        { key: "name", header: "Name" },
+        { key: "description", header: "Description" },
+      ],
+      options: [
+        { id: "alpha", label: "Alpha", description: "First generic option" },
+        { id: "beta", label: "Beta", description: "Second generic option" },
+      ],
+      selectedOptionIndex: 0,
+    }));
+
+    const selectedLine = out.split("\n").find((line) => line.includes("> Alpha"));
+    expect(selectedLine).toBeDefined();
+    expect(selectedLine).toContain("First generic option");
+    expect(out).toContain("Description");
+    assertNoAnsi(out);
+  });
+
+  it("renders compact structured prompt-card tables as content-width blocks", () => {
+    const out = renderOnboardingPromptCard(buildOnboardingPromptCardViewModel({
+      title: "Choose mode",
+      bodyLines: [],
+      showColumnHeaders: false,
+      tableWidth: "content",
+      columns: [
+        { key: "name", header: "Name" },
+        { key: "description", header: "Description" },
+      ],
+      options: [
+        { id: "alpha", label: "Alpha", description: "First option", current: true },
+      ],
+      selectedOptionIndex: 0,
+    }));
+
+    const selectedLine = out.split("\n").find((line) => line.includes("Alpha"));
+    expect(selectedLine).toBeDefined();
+    expect(measureVisibleWidth(selectedLine!.trimStart())).toBeLessThan(40);
+    expect(selectedLine!.startsWith("> Alpha")).toBe(true);
+    expect(selectedLine).toContain("Current");
+  });
+
+  it("caps compact structured plain prompt-card tables with tableMaxWidth", () => {
+    const out = renderOnboardingPromptCard(buildOnboardingPromptCardViewModel({
+      title: "Choose mode",
+      bodyLines: [],
+      showColumnHeaders: false,
+      tableWidth: "content",
+      tableMaxWidth: 36,
+      columns: [
+        { key: "name", header: "Name" },
+        { key: "description", header: "Description" },
+      ],
+      options: [
+        {
+          id: "alpha",
+          label: "Alpha",
+          description: "This long description should be capped by compact table max width.",
+        },
+      ],
+      selectedOptionIndex: 0,
+    }));
+
+    const selectedLine = out.split("\n").find((line) => line.includes("Alpha"));
+    expect(selectedLine).toBeDefined();
+    expect(measureVisibleWidth(selectedLine!.trimStart())).toBeLessThanOrEqual(36);
+    expect(selectedLine).toContain("...");
+  });
+
+  it("physically aligns compact structured plain prompt-card tables", () => {
+    const base = {
+      title: "Choose mode",
+      bodyLines: [],
+      showColumnHeaders: false,
+      tableWidth: "content" as const,
+      tableMaxWidth: 36,
+      columns: [
+        { key: "name", header: "Name" },
+        { key: "description", header: "Description" },
+      ],
+      options: [
+        { id: "alpha", label: "Alpha", description: "First option" },
+      ],
+      selectedOptionIndex: 0,
+    };
+    const lineFor = (tableAlign: "left" | "center" | "right") => {
+      const out = renderOnboardingPromptCard(buildOnboardingPromptCardViewModel({ ...base, tableAlign }));
+      return out.split("\n").find((line) => line.includes("Alpha")) ?? "";
+    };
+
+    const left = lineFor("left");
+    const center = lineFor("center");
+    const right = lineFor("right");
+    expect(left.indexOf(">")).toBe(0);
+    expect(center.indexOf(">")).toBeGreaterThan(left.indexOf(">"));
+    expect(right.indexOf(">")).toBeGreaterThan(center.indexOf(">"));
+  });
+
+  it("truncates long structured plain rows readably", () => {
+    const out = renderOnboardingPromptCard(buildOnboardingPromptCardViewModel({
+      title: "Choose mode",
+      bodyLines: [],
+      columns: [
+        { key: "name", header: "Name" },
+        { key: "description", header: "Description" },
+      ],
+      options: [
+        {
+          id: "alpha",
+          label: "Alpha option with a long name",
+          cells: {
+            name: "Alpha option with a long name",
+            description: "A very long generic option description that should truncate in deterministic plain rendering.",
+          },
+          current: true,
+        },
+      ],
+      selectedOptionIndex: 0,
+    }));
+
+    expect(out).toContain("...");
+    expect(out).toContain("Current");
+    for (const line of out.split("\n")) {
+      expect(measureVisibleWidth(line)).toBeLessThanOrEqual(94);
+    }
+  });
+
+  it("keeps current visible when structured plain descriptions are long", () => {
+    const out = renderOnboardingPromptCard(buildOnboardingPromptCardViewModel({
+      title: "Choose mode",
+      bodyLines: [],
+      columns: [
+        { key: "name", header: "Name" },
+        { key: "description", header: "Description" },
+      ],
+      options: [
+        {
+          id: "alpha",
+          label: "Alpha",
+          cells: {
+            name: "Alpha",
+            description: "A very long generic option description that would previously hide the current badge.",
+          },
+          current: true,
+        },
+      ],
+      selectedOptionIndex: 0,
+    }));
+
+    const selectedLine = out.split("\n").find((line) => line.includes("> Alpha"));
+    expect(selectedLine).toBeDefined();
+    expect(selectedLine).toContain("...");
+    expect(selectedLine).toContain("Current");
+    assertNoAnsi(out);
+  });
+
   it("isolates Arabic technical lines and keeps selected marker after the label", () => {
     const out = renderOnboardingPromptCard(buildOnboardingPromptCardViewModel({
       title: "الثقة بمساحة العمل",
@@ -198,6 +561,291 @@ describe("PlainRenderer — renderOnboardingPromptCard", () => {
       expect(line).toMatch(/^  /u);
       expect(measureVisibleWidth(line)).toBeLessThanOrEqual(90);
     }
+  });
+
+  it("keeps Arabic structured row marker placement stable", () => {
+    const out = renderOnboardingPromptCard(buildOnboardingPromptCardViewModel({
+      title: "اختر الوضع",
+      bodyLines: ["اختر وضعًا عامًا."],
+      columns: [
+        { key: "name", header: "الاسم" },
+        { key: "description", header: "الوصف" },
+      ],
+      options: [
+        {
+          id: "alpha",
+          label: "ألفا",
+          cells: { name: "ألفا", description: `خيار عام مع ${isolateLtr("CLI")}.` },
+          current: true,
+        },
+        {
+          id: "beta",
+          label: "بيتا",
+          cells: { name: "بيتا", description: "خيار عام آخر." },
+        },
+      ],
+      selectedOptionIndex: 0,
+      locale: "ar",
+      direction: "rtl",
+    }), "ar");
+
+    const selectedLine = out.split("\n").find((line) => line.includes(isolateLtr("CLI")));
+    expect(selectedLine).toBeDefined();
+    expect(selectedLine!.startsWith("> ")).toBe(true);
+    expect(out).toContain(isolateLtr("CLI"));
+  });
+
+  it("renders explicit RTL structured prompt-card rows in declared physical column order", () => {
+    const out = renderOnboardingPromptCard(buildOnboardingPromptCardViewModel({
+      title: "اختر الوضع",
+      bodyLines: ["اختر وضعًا عامًا."],
+      showColumnHeaders: false,
+      tableDirection: "rtl",
+      columns: [
+        { key: "description", header: "التفاصيل", align: "right" },
+        { key: "name", header: "الاسم", align: "right" },
+      ],
+      options: [
+        {
+          id: "alpha",
+          label: "ألفا",
+          cells: { description: `خيار عام مع ${isolateLtr("CLI")}.`, name: "ألفا" },
+        },
+        {
+          id: "back",
+          label: "رجوع",
+          group: "navigation",
+          cells: { description: "ارجع إلى الخطوة السابقة.", name: "رجوع" },
+        },
+      ],
+      selectedOptionIndex: 0,
+      locale: "ar",
+      direction: "rtl",
+    }), "ar");
+
+    expect(out).not.toContain("التفاصيل");
+    expect(out).not.toContain("الاسم");
+    const selectedLine = out.split("\n").find((line) => line.includes("ألفا"));
+    expect(selectedLine).toBeDefined();
+    expect(selectedLine!.indexOf("خيار عام")).toBeLessThan(selectedLine!.indexOf("ألفا"));
+    expect(selectedLine!.indexOf("ألفا")).toBeLessThan(selectedLine!.indexOf("<"));
+    expect(stripTrailingBidiControls(selectedLine!.trimEnd()).endsWith("<")).toBe(true);
+    expect(out).toContain(isolateLtr("CLI"));
+    const lines = out.split("\n");
+    const backIndex = lines.findIndex((line) => line.includes("رجوع"));
+    expect(backIndex).toBeGreaterThan(0);
+    expect(lines[backIndex - 1]).toBe("");
+  });
+
+  it("uses label and description fallback in explicit RTL prompt-card tables", () => {
+    const out = renderOnboardingPromptCard(buildOnboardingPromptCardViewModel({
+      title: "اختر الوضع",
+      bodyLines: [],
+      showColumnHeaders: false,
+      tableDirection: "rtl",
+      columns: [
+        { key: "description", header: "التفاصيل", align: "right" },
+        { key: "name", header: "الاسم", align: "right" },
+      ],
+      options: [
+        {
+          id: "alpha",
+          label: "ألفا",
+          description: "وصف عربي طويل يثبت أن التفاصيل تأخذ المساحة الأكبر.",
+        },
+      ],
+      selectedOptionIndex: 0,
+      locale: "ar",
+      direction: "rtl",
+    }), "ar");
+
+    const selectedLine = out.split("\n").find((line) => line.includes("ألفا"));
+    expect(selectedLine).toBeDefined();
+    const descriptionIndex = selectedLine!.indexOf("وصف عربي");
+    const labelIndex = selectedLine!.indexOf("ألفا");
+    expect(descriptionIndex).toBeGreaterThanOrEqual(0);
+    expect(labelIndex).toBeGreaterThan(descriptionIndex);
+    expect(labelIndex - descriptionIndex).toBeGreaterThan(20);
+    const markerIndex = selectedLine!.indexOf("<");
+    expect(markerIndex).toBeGreaterThan(labelIndex);
+    expect(markerIndex - labelIndex).toBeLessThan(12);
+    expect(stripTrailingBidiControls(selectedLine!.trimEnd()).endsWith("<")).toBe(true);
+  });
+
+  it("keeps Arabic descriptions with technical tokens in the RTL description column", () => {
+    const description = `اضبط كيف تعثر ${isolateLtr("EstaCoda")} على نتائج الويب وتسترجعها.`;
+    const out = renderOnboardingPromptCard(buildOnboardingPromptCardViewModel({
+      title: "محرر الإعدادات",
+      bodyLines: [],
+      showColumnHeaders: false,
+      tableDirection: "rtl",
+      columns: [
+        { key: "description", header: "التفاصيل", align: "right" },
+        { key: "name", header: "الاسم", align: "right" },
+      ],
+      options: [
+        {
+          id: "search",
+          label: "البحث",
+          description,
+        },
+      ],
+      selectedOptionIndex: 0,
+      locale: "ar",
+      direction: "rtl",
+    }), "ar");
+
+    const selectedLine = out.split("\n").find((line) => line.includes("البحث"));
+    expect(selectedLine).toBeDefined();
+    expect(selectedLine).toContain(isolateRtl(closeOpenBidiIsolates(description)));
+    expect(selectedLine).not.toContain(isolateLtr(description));
+    expect(selectedLine!.indexOf("اضبط كيف")).toBeLessThan(selectedLine!.indexOf("البحث"));
+    expect(stripTrailingBidiControls(selectedLine!.trimEnd()).endsWith("<")).toBe(true);
+  });
+
+  it("keeps RTL structured prompt-card markers in one fixed visible column", () => {
+    const base = {
+      title: "محرر الإعدادات",
+      bodyLines: [],
+      showColumnHeaders: false,
+      tableDirection: "rtl" as const,
+      tableWidth: "content" as const,
+      tableMaxWidth: 88,
+      tableAlign: "right" as const,
+      columns: [
+        { key: "description", header: "التفاصيل", align: "right" as const },
+        { key: "name", header: "الاسم", align: "right" as const },
+      ],
+      options: [
+        {
+          id: "primary",
+          label: "النموذج الأساسي",
+          description: "النموذج الافتراضي الذي يستخدمه الوكيل.",
+        },
+        {
+          id: "security",
+          label: "وضع الأمان",
+          description: "سياسة المراجعة للإجراءات عالية المخاطر.",
+        },
+        {
+          id: "diagnostics",
+          label: "التشخيصات",
+          description: "اعرض العوائق، والتحذيرات، والحالة المكتشفة.",
+        },
+      ],
+      locale: "ar" as const,
+      direction: "rtl" as const,
+    };
+    const markerLineFor = (selectedOptionIndex: number) => {
+      const out = renderOnboardingPromptCard(buildOnboardingPromptCardViewModel({
+        ...base,
+        selectedOptionIndex,
+      }), "ar");
+      return out.split("\n").find((line) => line.includes("<")) ?? "";
+    };
+
+    const firstMarkerColumn = visibleMarkerColumn(markerLineFor(0), "<");
+    const lastMarkerColumn = visibleMarkerColumn(markerLineFor(2), "<");
+    expect(lastMarkerColumn).toBe(firstMarkerColumn);
+  });
+
+  it("renders Arabic setup-editor style RTL rows as physical cells without a row-level LTR isolate", () => {
+    const base = {
+      title: "محرّر الإعدادات",
+      bodyLines: ["اختار اللي تحب تضبطه:"],
+      showColumnHeaders: false,
+      tableDirection: "rtl" as const,
+      tableWidth: "content" as const,
+      tableMaxWidth: 88,
+      tableAlign: "right" as const,
+      columns: [
+        { key: "description", header: "التفاصيل", align: "right" as const },
+        { key: "name", header: "الاسم", align: "right" as const },
+      ],
+      options: [
+        {
+          id: "primary",
+          label: "النموذج الأساسي",
+          description: "النموذج الافتراضي الذي يستخدمه الوكيل.",
+        },
+        {
+          id: "fallback",
+          label: "النماذج الاحتياطية",
+          description: "نماذج احتياطية تُستخدم إذا فشل النموذج الأساسي.",
+        },
+        {
+          id: "auxiliary",
+          label: "النماذج المساعدة",
+          description: "نماذج تُستخدم للتقييم، والضغط، والاستدعاء، والذاكرة.",
+        },
+        {
+          id: "channels",
+          label: "القنوات",
+          description: `قنوات تحكم عن بُعد مثل ${isolateLtr("Telegram")} و${isolateLtr("WhatsApp")}.`,
+        },
+        {
+          id: "search",
+          label: "البحث",
+          description: `اضبط كيف تعثر ${isolateLtr("EstaCoda")} على نتائج الويب وتسترجعها.`,
+        },
+        {
+          id: "evolution",
+          label: isolateLtr("Agent Evolution"),
+          description: "مقترحات تحسين ذاتي قابلة للمراجعة.",
+        },
+        {
+          id: "exit",
+          label: "الخروج دون تغييرات",
+          description: "غادر الإعداد دون تعديل التكوين.",
+          group: "navigation" as const,
+        },
+      ],
+      locale: "ar" as const,
+      direction: "rtl" as const,
+    };
+    const renderedFor = (selectedOptionIndex: number) => renderOnboardingPromptCard(buildOnboardingPromptCardViewModel({
+      ...base,
+      selectedOptionIndex,
+    }), "ar");
+    const markerLineFor = (selectedOptionIndex: number) =>
+      renderedFor(selectedOptionIndex).split("\n").find((line) => line.includes("<")) ?? "";
+
+    const auxiliaryLine = markerLineFor(2);
+    expect(auxiliaryLine.trimStart().startsWith(LRI)).toBe(true);
+    expect(countBidiControl(auxiliaryLine, LRI)).toBeGreaterThanOrEqual(3);
+    expect(auxiliaryLine.indexOf("نماذج تُستخدم")).toBeLessThan(auxiliaryLine.indexOf("النماذج المساعدة"));
+    expect(stripTrailingBidiControls(auxiliaryLine.trimEnd()).endsWith("<")).toBe(true);
+
+    const searchLine = markerLineFor(4);
+    expect(searchLine).toContain(isolateLtr("EstaCoda"));
+    expect(searchLine.indexOf("اضبط كيف")).toBeLessThan(searchLine.indexOf("البحث"));
+    expect(visibleMarkerColumn(searchLine, "<")).toBe(visibleMarkerColumn(auxiliaryLine, "<"));
+    expect(visibleTextEndColumn(searchLine, "البحث")).toBe(visibleTextEndColumn(auxiliaryLine, "النماذج المساعدة"));
+
+    const evolutionLine = markerLineFor(5);
+    expect(evolutionLine).toContain(isolateLtr("Agent Evolution"));
+    expect(evolutionLine.indexOf("مقترحات تحسين")).toBeLessThan(evolutionLine.indexOf("Agent Evolution"));
+    expect(visibleMarkerColumn(evolutionLine, "<")).toBe(visibleMarkerColumn(auxiliaryLine, "<"));
+    expect(visibleTextEndColumn(evolutionLine, "Agent Evolution")).toBe(visibleTextEndColumn(auxiliaryLine, "النماذج المساعدة"));
+
+    const channelLine = renderedFor(2).split("\n").find((line) => line.includes("Telegram"));
+    expect(channelLine).toContain(isolateLtr("Telegram"));
+    expect(channelLine).toContain(isolateLtr("WhatsApp"));
+  });
+
+  it("renders Arabic prompt-card hints as LTR technical text", () => {
+    const out = renderOnboardingPromptCard(buildOnboardingPromptCardViewModel({
+      title: "اختر الوضع",
+      bodyLines: ["اختر وضعًا عامًا."],
+      options: [{ id: "alpha", label: "ألفا" }],
+      selectedOptionIndex: 0,
+      hint: "↑↓ navigate   ENTER select   CTRL+C exit",
+      locale: "ar",
+      direction: "rtl",
+    }), "ar");
+
+    expect(out).toContain(isolateLtr("↑↓ navigate   ENTER select   CTRL+C exit"));
+    assertNoAnsi(out);
   });
 });
 

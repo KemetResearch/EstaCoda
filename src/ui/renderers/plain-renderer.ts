@@ -2,7 +2,7 @@
 // Deterministic, ASCII-safe plain-text output for all ViewModel types.
 // No ANSI, no emoji, no color, no animation, no terminal-width detection.
 
-import { measureTextWidth, measureVisibleWidth, padVisibleAlign, padVisibleEnd, truncateVisible, wrapText } from "./layout.js";
+import { measureTextWidth, measureVisibleWidth, padVisibleAlign, padVisibleEnd, padVisibleStart, truncateVisible, wrapText } from "./layout.js";
 import type { UiLocale } from "../../ui/cli-ui-copy.js";
 import { chromeCopy } from "../../ui/cli-ui-copy.js";
 import { closeOpenBidiIsolates, isolateLtr, isolateRtl } from "../../ui/bidi.js";
@@ -14,9 +14,12 @@ import type {
   ConversationMessageViewModel,
   KeyValueBlockViewModel,
   ListViewModel,
+  OnboardingPromptColumn,
   OnboardingPromptCardViewModel,
+  OnboardingPromptOption,
   PlainFallbackViewModel,
   PickerViewModel,
+  PromptCardStatusLine,
   ProgressContextRailViewModel,
   StartupViewModel,
   StartupDashboardViewModel,
@@ -510,6 +513,7 @@ export function renderOnboardingPromptCard(
   locale: UiLocale = "en"
 ): string {
   const effectiveLocale = vm.locale ?? locale;
+  const effectiveDirection = vm.direction ?? (effectiveLocale === "ar" ? "rtl" : "ltr");
   const lines: string[] = [vm.title];
 
   for (const bodyLine of vm.bodyLines) {
@@ -520,30 +524,342 @@ export function renderOnboardingPromptCard(
     lines.push(effectiveLocale === "ar" ? isolateLtr(technicalLine) : technicalLine);
   }
 
-  const hasPreOptionContent = vm.bodyLines.length > 0 || (vm.technicalLines?.length ?? 0) > 0;
+  for (const statusLine of vm.statusLines ?? []) {
+    lines.push(renderPlainPromptStatusLine(statusLine, effectiveLocale, effectiveDirection));
+  }
+
+  const hasPreOptionContent = vm.bodyLines.length > 0
+    || (vm.technicalLines?.length ?? 0) > 0
+    || (vm.statusLines?.length ?? 0) > 0;
   if (hasPreOptionContent && vm.options.length > 0) {
     lines.push("");
   }
 
-  for (let i = 0; i < vm.options.length; i++) {
-    const option = vm.options[i];
-    const marker = i === vm.selectedOptionIndex ? ">" : " ";
-    const label = option.technical === true && effectiveLocale === "ar"
-      ? isolateLtr(option.label)
-      : effectiveLocale === "ar"
-        ? isolateRtl(option.label)
-      : option.label;
-    lines.push(effectiveLocale === "ar" ? `${label} ${marker}` : `${marker} ${label}`);
-    if (option.description !== undefined) {
-      lines.push(...renderPlainOnboardingOptionDescription(option.description, effectiveLocale));
+  if (hasStructuredPromptRows(vm)) {
+    lines.push(...renderPlainStructuredOnboardingOptions(vm, effectiveLocale));
+  } else {
+    let renderedNavigationSeparator = false;
+    for (let i = 0; i < vm.options.length; i++) {
+      const option = vm.options[i];
+      if (option.group === "navigation" && !renderedNavigationSeparator && i > 0) {
+        lines.push("");
+        renderedNavigationSeparator = true;
+      }
+      const marker = i === vm.selectedOptionIndex ? ">" : " ";
+      const label = option.technical === true && effectiveLocale === "ar"
+        ? isolateLtr(option.label)
+        : effectiveLocale === "ar"
+          ? isolateRtl(option.label)
+        : option.label;
+      lines.push(effectiveLocale === "ar" ? `${label} ${marker}` : `${marker} ${label}`);
+      if (option.description !== undefined) {
+        lines.push(...renderPlainOnboardingOptionDescription(option.description, effectiveLocale));
+      }
     }
   }
 
   if (vm.hint !== undefined && vm.hint.length > 0) {
-    lines.push(vm.hint);
+    lines.push(effectiveLocale === "ar" ? isolateLtr(vm.hint) : vm.hint);
   }
 
   return lines.join("\n");
+}
+
+function renderPlainPromptStatusLine(
+  line: PromptCardStatusLine,
+  locale: UiLocale,
+  cardDirection: "ltr" | "rtl"
+): string {
+  const direction = line.direction ?? "auto";
+  const textDirection = direction === "auto" ? cardDirection : direction;
+  if (textDirection === "ltr") {
+    return locale === "ar" ? isolateLtr(line.text) : line.text;
+  }
+  return isolateRtl(closeOpenBidiIsolates(line.text));
+}
+
+function hasStructuredPromptRows(vm: OnboardingPromptCardViewModel): boolean {
+  return (vm.columns?.length ?? 0) > 0;
+}
+
+type PlainStructuredTableLayout = {
+  readonly widths: readonly number[];
+  readonly lineWidth: number;
+};
+
+function renderPlainStructuredOnboardingOptions(vm: OnboardingPromptCardViewModel, locale: UiLocale): string[] {
+  const columns = vm.columns ?? [];
+  const tableDirection = vm.tableDirection ?? "ltr";
+  const layout = plainStructuredTableLayout(columns, vm.options, {
+    showColumnHeaders: vm.showColumnHeaders !== false,
+    tableWidth: vm.tableWidth ?? "full",
+    tableMaxWidth: vm.tableMaxWidth,
+    showCurrentBadge: vm.showCurrentBadge,
+  });
+  const lines: string[] = vm.showColumnHeaders === false
+    ? []
+    : [tableDirection === "rtl"
+      ? plainAlignStructuredLine(
+        plainStructuredRtlPhysicalLine(
+          plainStructuredCells(columns, Object.fromEntries(columns.map((column) => [column.key, column.header])), [], layout.widths, locale),
+          "  "
+        ),
+        layout.lineWidth,
+        vm.tableAlign
+      )
+      : plainAlignStructuredLine(
+        `  ${plainStructuredRow(columns, Object.fromEntries(columns.map((column) => [column.key, column.header])), [], layout.widths, locale)}`,
+        layout.lineWidth,
+        vm.tableAlign
+      )];
+
+  let renderedNavigationSeparator = false;
+  for (let i = 0; i < vm.options.length; i++) {
+    const option = vm.options[i];
+    if (option.group === "navigation" && !renderedNavigationSeparator && i > 0) {
+      lines.push("");
+      renderedNavigationSeparator = true;
+    }
+    const marker = i === vm.selectedOptionIndex
+      ? (tableDirection === "rtl" ? "<" : ">")
+      : " ";
+    const cells = plainStructuredCells(columns, plainStructuredOptionCells(option, columns), plainOptionBadges(option, vm.showCurrentBadge), layout.widths, locale);
+    const row = cells.join("  ");
+    const line = tableDirection === "rtl"
+      ? plainStructuredRtlPhysicalLine(cells, ` ${marker}`)
+      : `${marker} ${row}`;
+    lines.push(plainAlignStructuredLine(line, layout.lineWidth, vm.tableAlign));
+  }
+
+  return lines;
+}
+
+function plainStructuredTableLayout(
+  columns: readonly OnboardingPromptColumn[],
+  options: readonly OnboardingPromptOption[],
+  layoutOptions: {
+    readonly showColumnHeaders: boolean;
+    readonly tableWidth: NonNullable<OnboardingPromptCardViewModel["tableWidth"]>;
+    readonly tableMaxWidth?: number;
+    readonly showCurrentBadge?: boolean;
+  }
+): PlainStructuredTableLayout {
+  if (columns.length === 0) return { widths: [], lineWidth: 0 };
+  if (columns.length === 1) {
+    const width = layoutOptions.tableWidth === "content"
+      ? Math.min(PLAIN_ONBOARDING_DESCRIPTION_WIDTH, plainStructuredNaturalColumnWidth(columns[0]!, 0, columns, options, layoutOptions.showColumnHeaders, layoutOptions.showCurrentBadge))
+      : PLAIN_ONBOARDING_DESCRIPTION_WIDTH;
+    return { widths: [Math.max(1, width)], lineWidth: Math.max(1, width) + 2 };
+  }
+
+  const primaryIndex = plainStructuredPrimaryColumnIndex(columns);
+  const primary = columns[primaryIndex]!;
+  const primaryWidth = Math.min(24, Math.max(
+    measureVisibleWidth(primary.header),
+    ...options.map((option) => measureVisibleWidth(option.cells?.[primary.key] ?? option.label))
+  ));
+  const nonPrimaryIndices = columns
+    .map((_, index) => index)
+    .filter((index) => index !== primaryIndex);
+  const remaining = Math.max(16, PLAIN_ONBOARDING_DESCRIPTION_WIDTH - primaryWidth - (2 * (columns.length - 1)));
+  const widths = Array.from({ length: columns.length }, () => 1);
+  widths[primaryIndex] = primaryWidth;
+  for (let i = 0; i < nonPrimaryIndices.length; i++) {
+    widths[nonPrimaryIndices[i]!] = i === nonPrimaryIndices.length - 1
+      ? remaining
+      : Math.max(8, Math.floor(remaining / nonPrimaryIndices.length));
+  }
+  if (layoutOptions.tableWidth !== "content") {
+    return { widths, lineWidth: PLAIN_ONBOARDING_DESCRIPTION_WIDTH };
+  }
+
+  const compactWidths = columns.map((column, index) => Math.max(
+    1,
+    Math.min(widths[index] ?? 1, plainStructuredNaturalColumnWidth(column, index, columns, options, layoutOptions.showColumnHeaders, layoutOptions.showCurrentBadge))
+  ));
+  const markerSlotWidth = 2;
+  const gapWidth = 2 * (columns.length - 1);
+  const maxLineWidth = Math.max(
+    columns.length + markerSlotWidth,
+    Math.min(PLAIN_ONBOARDING_DESCRIPTION_WIDTH, layoutOptions.tableMaxWidth ?? PLAIN_ONBOARDING_DESCRIPTION_WIDTH)
+  );
+  plainShrinkStructuredWidthsToLineWidth(compactWidths, primaryIndex, gapWidth, markerSlotWidth, maxLineWidth);
+  const compactDataWidth = compactWidths.reduce((sum, width) => sum + width, 0) + gapWidth;
+  return {
+    widths: compactWidths,
+    lineWidth: Math.min(PLAIN_ONBOARDING_DESCRIPTION_WIDTH, compactDataWidth + markerSlotWidth),
+  };
+}
+
+function plainStructuredNaturalColumnWidth(
+  column: OnboardingPromptColumn,
+  columnIndex: number,
+  columns: readonly OnboardingPromptColumn[],
+  options: readonly OnboardingPromptOption[],
+  showColumnHeaders: boolean,
+  showCurrentBadge?: boolean
+): number {
+  const values = options.map((option) => {
+    const cells = plainStructuredOptionCells(option, columns);
+    const value = cells[column.key] ?? "";
+    const badges = columnIndex === columns.length - 1
+      ? plainOptionBadges(option, showCurrentBadge)
+      : [];
+    if (badges.length === 0) return measureVisibleWidth(value);
+    return measureVisibleWidth(value) + 2 + measureVisibleWidth(badges.join("  "));
+  });
+  return Math.max(
+    1,
+    ...(showColumnHeaders ? [measureVisibleWidth(column.header)] : []),
+    ...values
+  );
+}
+
+function plainShrinkStructuredWidthsToLineWidth(
+  widths: number[],
+  primaryIndex: number,
+  gapWidth: number,
+  markerSlotWidth: number,
+  maxLineWidth: number
+): void {
+  const minWidth = 1;
+  const lineWidth = () => widths.reduce((sum, width) => sum + width, 0) + gapWidth + markerSlotWidth;
+  const shrinkOrder = [
+    ...widths.map((_, index) => index).filter((index) => index !== primaryIndex),
+    primaryIndex,
+  ];
+  for (const index of shrinkOrder) {
+    while (lineWidth() > maxLineWidth && (widths[index] ?? 0) > minWidth) {
+      widths[index] = (widths[index] ?? minWidth) - 1;
+    }
+  }
+}
+
+function plainAlignStructuredLine(
+  line: string,
+  lineWidth: number,
+  align: OnboardingPromptCardViewModel["tableAlign"]
+): string {
+  if (lineWidth >= PLAIN_ONBOARDING_DESCRIPTION_WIDTH) return line;
+  const padWidth = Math.max(0, PLAIN_ONBOARDING_DESCRIPTION_WIDTH - lineWidth);
+  const padding = " ".repeat(align === "center" ? Math.floor(padWidth / 2) : align === "right" ? padWidth : 0);
+  return `${padding}${line}`;
+}
+
+function plainStructuredOptionCells(
+  option: OnboardingPromptOption,
+  columns: readonly OnboardingPromptColumn[]
+): Record<string, string> {
+  const cells: Record<string, string> = { ...(option.cells ?? {}) };
+  const primaryColumn = plainStructuredPrimaryColumn(columns);
+  if (primaryColumn !== undefined && cells[primaryColumn.key] === undefined) {
+    cells[primaryColumn.key] = option.label;
+  }
+  if (columns.length > 1 && option.description !== undefined) {
+    const descriptionColumn = plainStructuredDescriptionColumn(columns);
+    if (descriptionColumn !== undefined && cells[descriptionColumn.key] === undefined) {
+      cells[descriptionColumn.key] = option.description;
+    }
+  }
+  return cells;
+}
+
+function plainStructuredPrimaryColumnIndex(columns: readonly OnboardingPromptColumn[]): number {
+  const nameIndex = columns.findIndex((column) => column.key === "name");
+  return nameIndex >= 0 ? nameIndex : 0;
+}
+
+function plainStructuredPrimaryColumn(columns: readonly OnboardingPromptColumn[]): OnboardingPromptColumn | undefined {
+  return columns[plainStructuredPrimaryColumnIndex(columns)];
+}
+
+function plainStructuredDescriptionColumn(columns: readonly OnboardingPromptColumn[]): OnboardingPromptColumn | undefined {
+  const descriptionColumn = columns.find((column) => column.key === "description");
+  if (descriptionColumn !== undefined) return descriptionColumn;
+  const primaryIndex = plainStructuredPrimaryColumnIndex(columns);
+  return columns.find((_, index) => index !== primaryIndex) ?? columns[columns.length - 1];
+}
+
+function plainStructuredRow(
+  columns: readonly OnboardingPromptColumn[],
+  cells: Readonly<Record<string, string>>,
+  badges: readonly string[],
+  widths: readonly number[],
+  locale: UiLocale
+): string {
+  return plainStructuredCells(columns, cells, badges, widths, locale).join("  ");
+}
+
+function plainStructuredCells(
+  columns: readonly OnboardingPromptColumn[],
+  cells: Readonly<Record<string, string>>,
+  badges: readonly string[],
+  widths: readonly number[],
+  locale: UiLocale
+): string[] {
+  return columns.map((column, index) => {
+    const width = widths[index] ?? 1;
+    const value = cells[column.key] ?? "";
+    if (index === columns.length - 1 && badges.length > 0) {
+      return plainStructuredCellWithBadges(value, badges, width, locale);
+    }
+    const localized = locale === "ar" ? plainStructuredArabicCell(value) : value;
+    return plainStructuredPadCell(truncateVisible(localized, width), width, column.align);
+  });
+}
+
+function plainStructuredRtlPhysicalLine(cells: readonly string[], markerCell: string): string {
+  return `${cells.map((cell) => isolateLtr(cell)).join(isolateLtr("  "))}${isolateLtr(markerCell)}`;
+}
+
+function plainStructuredPadCell(text: string, width: number, align?: OnboardingPromptColumn["align"]): string {
+  return align === "right" ? padVisibleStart(text, width) : padVisibleEnd(text, width);
+}
+
+function plainStructuredCellWithBadges(
+  value: string,
+  badges: readonly string[],
+  width: number,
+  locale: UiLocale
+): string {
+  const badgeText = badges.join("  ");
+  const badgeWidth = measureVisibleWidth(badgeText);
+  const localizedBadges = locale === "ar" ? plainStructuredArabicCell(badgeText) : badgeText;
+  if (badgeWidth >= width) {
+    return padVisibleEnd(truncateVisible(localizedBadges, width), width);
+  }
+
+  const gap = "  ";
+  const gapWidth = measureVisibleWidth(gap);
+  const valueWidth = Math.max(0, width - badgeWidth - gapWidth);
+  if (valueWidth === 0) {
+    return padVisibleEnd(localizedBadges, width);
+  }
+
+  const localizedValue = locale === "ar" ? plainStructuredArabicCell(value) : value;
+  return `${padVisibleEnd(truncateVisible(localizedValue, valueWidth), valueWidth)}${gap}${localizedBadges}`;
+}
+
+function plainStructuredArabicCell(value: string): string {
+  if (value.length === 0) return value;
+  if (containsArabicScript(value)) {
+    return isolateRtl(closeOpenBidiIsolates(value));
+  }
+  return /[A-Za-z0-9]/u.test(value)
+    ? isolateLtr(value)
+    : isolateRtl(closeOpenBidiIsolates(value));
+}
+
+function containsArabicScript(value: string): boolean {
+  return /\p{Script=Arabic}/u.test(value);
+}
+
+function plainOptionBadges(option: OnboardingPromptOption, showCurrentBadge = true): readonly string[] {
+  const badges = [...(option.badges ?? [])];
+  if (showCurrentBadge && option.current === true && !badges.includes("Current")) {
+    badges.push("Current");
+  }
+  return badges;
 }
 
 function renderPlainOnboardingOptionDescription(description: string, locale: UiLocale): string[] {

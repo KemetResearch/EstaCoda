@@ -184,16 +184,49 @@ export interface OnboardingPromptOption {
   readonly label: string;
   readonly description?: string;
   readonly technical?: boolean;
+  readonly group?: "main" | "navigation";
+  readonly cells?: Readonly<Record<string, string>>;
+  readonly badges?: readonly string[];
+  readonly current?: boolean;
+}
+
+export type PromptCardTableDirection = "ltr" | "rtl";
+export type PromptCardTableWidth = "full" | "content";
+export type PromptCardTableAlign = "left" | "center" | "right";
+
+export interface OnboardingPromptColumn {
+  readonly key: string;
+  readonly header: string;
+  readonly align?: "left" | "right";
+}
+
+export interface PromptCardStatusLine {
+  readonly text: string;
+  readonly tone?: "default" | "muted" | "active" | "warning";
+  readonly direction?: "auto" | "ltr" | "rtl";
+}
+
+export interface PromptCardBodyLineStyle {
+  readonly emphasis?: "strong";
 }
 
 export interface OnboardingPromptCardViewModel {
   readonly kind: "onboardingPromptCard";
   readonly title: string;
   readonly bodyLines: readonly string[];
+  readonly bodyLineStyles?: readonly PromptCardBodyLineStyle[];
   readonly technicalLines?: readonly string[];
+  readonly statusLines?: readonly PromptCardStatusLine[];
+  readonly columns?: readonly OnboardingPromptColumn[];
   readonly options: readonly OnboardingPromptOption[];
   readonly selectedOptionIndex: number;
   readonly hint?: string;
+  readonly showCurrentBadge?: boolean;
+  readonly showColumnHeaders?: boolean;
+  readonly tableDirection?: PromptCardTableDirection;
+  readonly tableWidth?: PromptCardTableWidth;
+  readonly tableMaxWidth?: number;
+  readonly tableAlign?: PromptCardTableAlign;
   readonly locale?: "en" | "ar";
   readonly direction?: "ltr" | "rtl";
 }

@@ -2,7 +2,7 @@ import { emitKeypressEvents } from "node:readline";
 import { createInterface as createPromptInterface } from "node:readline/promises";
 import type { Readable, Writable } from "node:stream";
 import { buildOnboardingPromptCardViewModel, buildPickerViewModel } from "../ui/view-models/builders.js";
-import type { OnboardingPromptOption, PickerOption, ViewModel } from "../contracts/view-model.js";
+import type { OnboardingPromptOption, PickerOption, PromptCardBodyLineStyle, PromptCardStatusLine, ViewModel } from "../contracts/view-model.js";
 import type { Locale, TextDirection } from "../contracts/ui.js";
 import { createSessionRenderer } from "./session-renderer.js";
 import { isolateLtr, isolateRtl } from "../ui/bidi.js";
@@ -10,14 +10,25 @@ import { isolateLtr, isolateRtl } from "../ui/bidi.js";
 export type SelectPromptInput<T> = {
   title: string;
   body?: string;
+  bodyLineStyles?: readonly PromptCardBodyLineStyle[];
   instruction?: string;
+  hint?: string;
   selectedLabel?: string;
+  columns?: readonly {
+    key: string;
+    header: string;
+    align?: "left" | "right";
+  }[];
   options: Array<{
     id?: string;
     value: T;
     label: string;
     description?: string;
     technical?: boolean;
+    group?: "main" | "navigation";
+    cells?: Readonly<Record<string, string>>;
+    badges?: readonly string[];
+    current?: boolean;
   }>;
   defaultIndex?: number;
   fallbackPrompt: string;
@@ -25,6 +36,13 @@ export type SelectPromptInput<T> = {
   locale?: Locale;
   direction?: TextDirection;
   technicalLines?: readonly string[];
+  statusLines?: readonly PromptCardStatusLine[];
+  showCurrentBadge?: boolean;
+  showColumnHeaders?: boolean;
+  tableDirection?: "ltr" | "rtl";
+  tableWidth?: "full" | "content";
+  tableMaxWidth?: number;
+  tableAlign?: "left" | "center" | "right";
 };
 
 export async function selectOption<T>(input: Readable, output: Writable, selection: SelectPromptInput<T>): Promise<T> {
@@ -132,14 +150,27 @@ function buildSelectionViewModel<T>(selection: SelectPromptInput<T>, selectedInd
       label: opt.label,
       description: opt.description,
       technical: opt.technical ?? false,
+      group: opt.group,
+      cells: opt.cells,
+      badges: opt.badges,
+      current: opt.current,
     }));
     return buildOnboardingPromptCardViewModel({
       title: selection.title,
       bodyLines: splitBodyLines(selection.body),
+      bodyLineStyles: selection.bodyLineStyles,
       technicalLines: selection.technicalLines,
+      statusLines: selection.statusLines,
+      columns: selection.columns,
       options,
       selectedOptionIndex: selectedIndex,
-      hint: selection.instruction,
+      hint: selection.hint ?? selection.instruction,
+      showCurrentBadge: selection.showCurrentBadge,
+      showColumnHeaders: selection.showColumnHeaders,
+      tableDirection: selection.tableDirection,
+      tableWidth: selection.tableWidth,
+      tableMaxWidth: selection.tableMaxWidth,
+      tableAlign: selection.tableAlign,
       locale: selection.locale,
       direction: selection.direction,
     });
