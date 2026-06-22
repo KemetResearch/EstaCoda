@@ -84,14 +84,10 @@ export type WebSearchCapabilityResult =
 
 export type TtsCapabilityResult = {
   readonly ttsProvider: TtsProvider;
-  readonly ttsModel: string;
-  readonly ttsApiKeyEnv: string;
 };
 
 export type SttCapabilityResult = {
   readonly sttProvider: SttProvider;
-  readonly sttModel: string;
-  readonly sttApiKeyEnv: string;
 };
 
 export type VisionCapabilityResult = {
@@ -1194,8 +1190,6 @@ export function promptTtsCapability(
   prompt: Prompt,
   current: {
     readonly ttsProvider?: TtsProvider;
-    readonly ttsModel?: string;
-    readonly ttsApiKeyEnv?: string;
   },
   locale: SetupCopyLocale,
   options: BackEnabled
@@ -1204,8 +1198,6 @@ export function promptTtsCapability(
   prompt: Prompt,
   current: {
     readonly ttsProvider?: TtsProvider;
-    readonly ttsModel?: string;
-    readonly ttsApiKeyEnv?: string;
   },
   locale?: SetupCopyLocale,
   options?: BackPromptOptions
@@ -1214,16 +1206,12 @@ export async function promptTtsCapability(
   prompt: Prompt,
   current: {
     readonly ttsProvider?: TtsProvider;
-    readonly ttsModel?: string;
-    readonly ttsApiKeyEnv?: string;
   },
   locale: SetupCopyLocale = "en",
   options: BackPromptOptions = {}
 ): Promise<TtsCapabilityResult | { readonly kind: "back" }> {
-  const defaultProvider = current.ttsProvider ?? "openai";
-  const currentTtsRoute = current.ttsProvider === undefined && current.ttsModel === undefined
-    ? undefined
-    : setupRouteStatusText(locale, current.ttsProvider, current.ttsModel);
+  const defaultProvider = current.ttsProvider ?? "edge";
+  const currentTtsRoute = current.ttsProvider;
   const ttsProviderResult = await promptSetupChoiceMaybeBack<TtsProvider>(prompt, {
     title: setupCopyText(locale, "setupModules.voice.title"),
     message: `${setupCopyText(locale, "setupEditor.prompt.voice.ttsProvider.body")}\n`,
@@ -1247,22 +1235,9 @@ export async function promptTtsCapability(
   if (isSetupChoiceBackResult(ttsProviderResult)) {
     return ttsProviderResult;
   }
-  const ttsProvider = setupChoiceSelectedValue(ttsProviderResult);
-  const ttsModel = await promptSetupStringWithDefault(
-    prompt,
-    setupPromptLabel(locale, setupCopyText(locale, "setupEditor.prompt.voice.ttsModel")),
-    current.ttsModel ?? "gpt-4o-mini-tts"
-  );
-  const ttsApiKeyEnv = await promptSetupStringWithDefault(
-    prompt,
-    setupPromptLabel(locale, setupCopyText(locale, "setupEditor.prompt.voice.ttsApiKeyEnv")),
-    current.ttsApiKeyEnv ?? "OPENAI_API_KEY"
-  );
 
   return {
-    ttsProvider,
-    ttsModel,
-    ttsApiKeyEnv,
+    ttsProvider: setupChoiceSelectedValue(ttsProviderResult),
   };
 }
 
@@ -1270,8 +1245,6 @@ export function promptSttCapability(
   prompt: Prompt,
   current: {
     readonly sttProvider?: SttProvider;
-    readonly sttModel?: string;
-    readonly sttApiKeyEnv?: string;
   },
   locale: SetupCopyLocale,
   options: BackEnabled
@@ -1280,8 +1253,6 @@ export function promptSttCapability(
   prompt: Prompt,
   current: {
     readonly sttProvider?: SttProvider;
-    readonly sttModel?: string;
-    readonly sttApiKeyEnv?: string;
   },
   locale?: SetupCopyLocale,
   options?: BackPromptOptions
@@ -1290,128 +1261,38 @@ export async function promptSttCapability(
   prompt: Prompt,
   current: {
     readonly sttProvider?: SttProvider;
-    readonly sttModel?: string;
-    readonly sttApiKeyEnv?: string;
   },
   locale: SetupCopyLocale = "en",
   options: BackPromptOptions = {}
 ): Promise<SttCapabilityResult | { readonly kind: "back" }> {
-  const defaultProvider = current.sttProvider ?? "openai";
-  const currentSttRoute = current.sttProvider === undefined && current.sttModel === undefined
-    ? undefined
-    : setupRouteStatusText(locale, current.sttProvider, current.sttModel);
-  while (true) {
-    const sttProviderResult = await promptSetupChoiceMaybeBack<SttProvider>(prompt, {
-      title: setupCopyText(locale, "setupModules.voice.title"),
-      message: `${setupCopyText(locale, "setupEditor.prompt.voice.sttProvider.body")}\n`,
-      columns: setupChoiceColumns(locale),
-      tableDirection: setupChoiceTableDirection(locale),
-      tableWidth: setupChoiceTableWidth(locale),
-      tableMaxWidth: setupChoiceTableMaxWidth(locale),
-      tableAlign: setupChoiceTableAlign(locale),
-      showColumnHeaders: false,
-      statusLines: setupCurrentStatusLines(locale, currentSttRoute),
-      showCurrentBadge: currentSttRoute === undefined ? undefined : false,
-      choices: sttProviders.map((provider) => ({
-        id: `stt-${provider}`,
-        label: provider === "local" ? setupCopyText(locale, "setupEditor.prompt.voice.sttProvider.local") : provider,
-        description: sttProviderDescription(locale, provider),
-        current: current.sttProvider === provider,
-        value: provider,
-      })),
-      defaultValue: defaultProvider,
-    }, options);
-    if (isSetupChoiceBackResult(sttProviderResult)) {
-      return sttProviderResult;
-    }
-    const sttProvider = setupChoiceSelectedValue(sttProviderResult);
-
-    let sttModel: string;
-    let sttApiKeyEnv: string;
-
-    if (sttProvider === "local") {
-      const defaultLocalModel = isSetupLocalSttModel(current.sttModel) ? current.sttModel : "base";
-      const currentLocalModelLabel = isSetupLocalSttModel(current.sttModel)
-        ? localSttModelChoices(locale).find((choice) => choice.value === current.sttModel)?.label
-        : undefined;
-      const sttModelResult = await promptSetupChoiceMaybeBack(prompt, {
-        title: setupCopyText(locale, "setupEditor.prompt.voice.localModel.title"),
-        message: `${setupCopyText(locale, "setupEditor.prompt.voice.localModel")}\n`,
-        columns: setupChoiceColumns(locale),
-        tableDirection: setupChoiceTableDirection(locale),
-        tableWidth: setupChoiceTableWidth(locale),
-        tableMaxWidth: setupChoiceTableMaxWidth(locale),
-        tableAlign: setupChoiceTableAlign(locale),
-        showColumnHeaders: false,
-        statusLines: setupCurrentStatusLines(locale, currentLocalModelLabel),
-        showCurrentBadge: currentLocalModelLabel === undefined ? undefined : false,
-        choices: localSttModelChoices(locale).map((choice) => ({
-          ...choice,
-          current: current.sttModel === choice.value,
-        })),
-        defaultValue: defaultLocalModel,
-      }, options);
-      if (isSetupChoiceBackResult(sttModelResult)) {
-        continue;
-      }
-      sttModel = setupChoiceSelectedValue(sttModelResult);
-      sttApiKeyEnv = "";
-    } else {
-      const defaultSttModel = sttProvider === "groq" ? "whisper-large-v3"
-        : sttProvider === "mistral" ? "voxtral-mini-latest"
-        : sttProvider === "xai" ? "whisper-1"
-        : "gpt-4o-mini-transcribe";
-      const defaultSttApiKeyEnv = sttProvider === "groq" ? "GROQ_API_KEY"
-        : sttProvider === "mistral" ? "MISTRAL_API_KEY"
-        : sttProvider === "xai" ? "XAI_API_KEY"
-        : "OPENAI_API_KEY";
-      sttModel = await promptSetupStringWithDefault(
-        prompt,
-        setupPromptLabel(locale, setupCopyText(locale, "setupEditor.prompt.voice.sttModel")),
-        current.sttModel ?? defaultSttModel
-      );
-      sttApiKeyEnv = await promptSetupStringWithDefault(
-        prompt,
-        setupPromptLabel(locale, setupCopyText(locale, "setupEditor.prompt.voice.sttApiKeyEnv")),
-        current.sttApiKeyEnv ?? defaultSttApiKeyEnv
-      );
-    }
-
-    return {
-      sttProvider,
-      sttModel,
-      sttApiKeyEnv,
-    };
+  const defaultProvider = current.sttProvider ?? "local";
+  const currentSttRoute = current.sttProvider;
+  const sttProviderResult = await promptSetupChoiceMaybeBack<SttProvider>(prompt, {
+    title: setupCopyText(locale, "setupModules.voice.title"),
+    message: `${setupCopyText(locale, "setupEditor.prompt.voice.sttProvider.body")}\n`,
+    columns: setupChoiceColumns(locale),
+    tableDirection: setupChoiceTableDirection(locale),
+    tableWidth: setupChoiceTableWidth(locale),
+    tableMaxWidth: setupChoiceTableMaxWidth(locale),
+    tableAlign: setupChoiceTableAlign(locale),
+    showColumnHeaders: false,
+    statusLines: setupCurrentStatusLines(locale, currentSttRoute),
+    showCurrentBadge: currentSttRoute === undefined ? undefined : false,
+    choices: sttProviders.map((provider) => ({
+      id: `stt-${provider}`,
+      label: provider === "local" ? setupCopyText(locale, "setupEditor.prompt.voice.sttProvider.local") : provider,
+      description: sttProviderDescription(locale, provider),
+      current: current.sttProvider === provider,
+      value: provider,
+    })),
+    defaultValue: defaultProvider,
+  }, options);
+  if (isSetupChoiceBackResult(sttProviderResult)) {
+    return sttProviderResult;
   }
-}
-
-type SetupLocalSttModel = "base" | "small" | "medium";
-
-function isSetupLocalSttModel(value: string | undefined): value is SetupLocalSttModel {
-  return value === "base" || value === "small" || value === "medium";
-}
-
-function localSttModelChoices(locale: SetupCopyLocale): readonly SetupChoice<SetupLocalSttModel>[] {
-  return [
-    {
-      id: "local-stt-model-base",
-      label: setupCopyText(locale, "setupEditor.prompt.voice.localModel.base"),
-      description: setupCopyText(locale, "setupEditor.prompt.voice.localModel.base.description"),
-      value: "base",
-    },
-    {
-      id: "local-stt-model-small",
-      label: setupCopyText(locale, "setupEditor.prompt.voice.localModel.small"),
-      description: setupCopyText(locale, "setupEditor.prompt.voice.localModel.small.description"),
-      value: "small",
-    },
-    {
-      id: "local-stt-model-medium",
-      label: setupCopyText(locale, "setupEditor.prompt.voice.localModel.medium"),
-      description: setupCopyText(locale, "setupEditor.prompt.voice.localModel.medium.description"),
-      value: "medium",
-    },
-  ];
+  return {
+    sttProvider: setupChoiceSelectedValue(sttProviderResult),
+  };
 }
 
 export function promptVisionCapability(
@@ -1756,9 +1637,9 @@ function browserCapabilityWithMode<T extends object>(values: T, mode: BrowserSet
 }
 
 const ttsProviders: readonly TtsProvider[] = ["edge", "elevenlabs", "openai", "minimax", "mistral", "gemini", "xai", "neutts", "kittentts"];
-type SetupEditorSttProvider = "local" | "groq" | "openai" | "mistral";
+type SetupEditorSttProvider = "local" | "groq" | "openai" | "mistral" | "xai";
 
-const sttProviders: readonly SetupEditorSttProvider[] = ["local", "groq", "openai", "mistral"];
+const sttProviders: readonly SetupEditorSttProvider[] = ["local", "groq", "openai", "mistral", "xai"];
 const imageProviders: readonly ImageGenerationProvider[] = ["fal", "byteplus"];
 
 function ttsProviderLabel(provider: TtsProvider): string {
@@ -1817,6 +1698,8 @@ function sttProviderDescription(locale: SetupCopyLocale, provider: SetupEditorSt
       return setupCopyText(locale, "setupEditor.prompt.voice.sttProvider.openai.description");
     case "mistral":
       return setupCopyText(locale, "setupEditor.prompt.voice.sttProvider.mistral.description");
+    case "xai":
+      return setupCopyText(locale, "setupEditor.prompt.voice.sttProvider.xai.description");
   }
 }
 

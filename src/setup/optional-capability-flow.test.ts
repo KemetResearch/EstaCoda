@@ -11,7 +11,7 @@ import {
   optionalPromptId,
   setupModuleContextFromConfig,
 } from "./optional-capability-flow.js";
-import { browserSetupModule, webSearchSetupModule, type SetupModuleContext } from "./setup-modules.js";
+import { browserSetupModule, voiceSetupModule, webSearchSetupModule, type SetupModuleContext } from "./setup-modules.js";
 
 describe("optional Search capability flow", () => {
   let tempDir: string;
@@ -26,6 +26,7 @@ describe("optional Search capability flow", () => {
   afterEach(async () => {
     vi.restoreAllMocks();
     delete process.env.BRAVE_SEARCH_API_KEY;
+    delete process.env.OPENAI_API_KEY;
     await rm(tempDir, { recursive: true, force: true });
   });
 
@@ -213,6 +214,73 @@ describe("optional Search capability flow", () => {
     }), baseContext(), webSearchSetupModule, undefined, { allowBack: true });
 
     expect(collected).toEqual({ kind: "back" });
+  });
+
+  it("collects a reviewed deferred hosted TTS secret write", async () => {
+    const seenQuestions: { question: string; secret: boolean }[] = [];
+    const collected = await collectOptionalCapabilityContext(options({
+      values: ["openai"],
+      secret: "voice-tts-secret",
+      seenQuestions,
+    }), baseContext(), voiceSetupModule, "tts");
+
+    expect(collected.kind).toBe("configured");
+    if (collected.kind === "configured") {
+      expect(collected.context.voice).toMatchObject({
+        ttsProvider: "openai",
+        ttsApiKeyEnv: "VOICE_TOOLS_OPENAI_KEY",
+        credentialSurface: "voice-tts",
+        credentialEnvVars: ["VOICE_TOOLS_OPENAI_KEY"],
+        credentialReady: true,
+        credentialValuesIncluded: false,
+      });
+      expect(collected.pendingCredentialWrites).toEqual([
+        { envVarName: "VOICE_TOOLS_OPENAI_KEY", value: "voice-tts-secret" },
+      ]);
+      expect(JSON.stringify(collected.context)).not.toContain("voice-tts-secret");
+    }
+    expect(seenQuestions).toContainEqual({
+      question: "Enter TTS provider API key for VOICE_TOOLS_OPENAI_KEY: ",
+      secret: true,
+    });
+  });
+
+  it("reuses an existing provider credential for hosted Voice setup", async () => {
+    process.env.OPENAI_API_KEY = "existing-openai-secret";
+
+    const collected = await collectOptionalCapabilityContext(options({
+      values: ["openai", "existing"],
+      secret: "should-not-be-read",
+    }), baseContext({
+      provider: {
+        id: "openai",
+        credentialEnv: "OPENAI_API_KEY",
+      },
+    }), voiceSetupModule, "stt");
+
+    expect(collected.kind).toBe("configured");
+    if (collected.kind === "configured") {
+      expect(collected.context.voice).toMatchObject({
+        sttProvider: "openai",
+        sttApiKeyEnv: "OPENAI_API_KEY",
+        credentialSurface: "voice-stt",
+        credentialEnvVars: ["OPENAI_API_KEY"],
+        credentialReady: true,
+        credentialValuesIncluded: false,
+      });
+      expect(collected.pendingCredentialWrites).toEqual([]);
+      expect(JSON.stringify(collected)).not.toContain("existing-openai-secret");
+      expect(JSON.stringify(collected)).not.toContain("should-not-be-read");
+    }
+  });
+
+  it("skips Voice stubs without a config draft or deferred secret write", async () => {
+    const collected = await collectOptionalCapabilityContext(options({
+      values: ["mistral"],
+      secret: "should-not-be-read",
+    }), baseContext(), voiceSetupModule, "stt");
+
+    expect(collected).toEqual({ kind: "skip" });
   });
 
   it("propagates Back from Browser provider selection when enabled", async () => {

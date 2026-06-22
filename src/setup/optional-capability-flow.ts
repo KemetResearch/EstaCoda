@@ -33,6 +33,7 @@ import type { SetupRouteDecision } from "./setup-router.js";
 import {
   promptBrowserCapability,
   promptedBrowserCapabilityMode,
+  promptCredentialReuseChoice,
   promptDiscordCapability,
   promptIncompleteChannelCapabilityAction,
   promptIncompleteTelegramCapabilityAction,
@@ -50,6 +51,21 @@ import {
   type VoiceCapabilityPromptId,
   type WebSearchCapabilityResult,
 } from "./config-editor/prompts.js";
+
+type VoiceCredentialSelection =
+  | {
+      readonly kind: "no-key";
+    }
+  | {
+      readonly kind: "api-key";
+      readonly apiKeyEnv: string;
+      readonly pendingCredentialWrites: readonly SetupDeferredSecretWrite[];
+      readonly credentialReady: boolean;
+    }
+  | {
+      readonly kind: "stub";
+      readonly blocker: string;
+    };
 
 export type OptionalCapabilityModule =
   | typeof telegramSetupModule
@@ -371,18 +387,58 @@ export async function collectOptionalCapabilityContext(
       if (voiceMode === undefined) {
         throw new Error("Configure voice must select STT or TTS before collecting provider settings.");
       }
-      const values = voiceMode === "stt"
-        ? await promptSttCapabilityWithOptionalBack(options, baseContext.voice ?? {}, navigation)
-        : await promptTtsCapabilityWithOptionalBack(options, baseContext.voice ?? {}, navigation);
+      if (voiceMode === "stt") {
+        const values = await promptSttCapabilityWithOptionalBack(options, baseContext.voice ?? {}, navigation);
+        if (isOptionalCapabilityBack(values)) {
+          return values;
+        }
+        const credential = await collectSttCredentialSelection(options, baseContext, values.sttProvider);
+        if (credential.kind === "stub") {
+          return { kind: "skip" };
+        }
+        return {
+          kind: "configured",
+          context: {
+            ...baseContext,
+            voice: {
+              sttProvider: values.sttProvider,
+              ...(credential.kind === "api-key" ? {
+                sttApiKeyEnv: credential.apiKeyEnv,
+                credentialSurface: "voice-stt" as const,
+                credentialEnvVars: [credential.apiKeyEnv],
+                credentialReady: credential.credentialReady,
+                credentialValuesIncluded: false,
+              } : {}),
+            },
+          },
+          pendingCredentialWrites: credential.kind === "api-key" ? credential.pendingCredentialWrites : [],
+        };
+      }
+
+      const values = await promptTtsCapabilityWithOptionalBack(options, baseContext.voice ?? {}, navigation);
       if (isOptionalCapabilityBack(values)) {
         return values;
+      }
+      const credential = await collectTtsCredentialSelection(options, baseContext, values.ttsProvider);
+      if (credential.kind === "stub") {
+        return { kind: "skip" };
       }
       return {
         kind: "configured",
         context: {
           ...baseContext,
-          voice: values,
+          voice: {
+            ttsProvider: values.ttsProvider,
+            ...(credential.kind === "api-key" ? {
+              ttsApiKeyEnv: credential.apiKeyEnv,
+              credentialSurface: "voice-tts" as const,
+              credentialEnvVars: [credential.apiKeyEnv],
+              credentialReady: credential.credentialReady,
+              credentialValuesIncluded: false,
+            } : {}),
+          },
         },
+        pendingCredentialWrites: credential.kind === "api-key" ? credential.pendingCredentialWrites : [],
       };
     }
     case "vision": {
@@ -606,6 +662,198 @@ async function collectBrowserbaseCredentials(options: OptionalCapabilityContextO
   };
 }
 
+async function collectTtsCredentialSelection(
+  options: OptionalCapabilityContextOptions & {
+    readonly prompt: Prompt;
+    readonly locale: SetupCopyLocale;
+  },
+  baseContext: SetupModuleContext,
+  provider: TtsProvider
+): Promise<VoiceCredentialSelection> {
+  switch (provider) {
+    case "edge":
+      return { kind: "no-key" };
+    case "elevenlabs":
+    case "openai":
+    case "minimax":
+    case "gemini":
+    case "xai":
+      return collectVoiceApiKeyCredential(options, {
+        baseContext,
+        mode: "tts",
+        provider,
+        currentApiKeyEnv: baseContext.voice?.ttsApiKeyEnv,
+      });
+    case "mistral":
+    case "neutts":
+    case "kittentts":
+      return {
+        kind: "stub",
+        blocker: `${provider} TTS is not enabled yet.`,
+      };
+  }
+}
+
+async function collectSttCredentialSelection(
+  options: OptionalCapabilityContextOptions & {
+    readonly prompt: Prompt;
+    readonly locale: SetupCopyLocale;
+  },
+  baseContext: SetupModuleContext,
+  provider: SttProvider
+): Promise<VoiceCredentialSelection> {
+  switch (provider) {
+    case "local":
+      return { kind: "no-key" };
+    case "groq":
+    case "openai":
+    case "xai":
+      return collectVoiceApiKeyCredential(options, {
+        baseContext,
+        mode: "stt",
+        provider,
+        currentApiKeyEnv: baseContext.voice?.sttApiKeyEnv,
+      });
+    case "mistral":
+      return {
+        kind: "stub",
+        blocker: "mistral STT is not enabled yet.",
+      };
+  }
+}
+
+async function collectVoiceApiKeyCredential(
+  options: OptionalCapabilityContextOptions & {
+    readonly prompt: Prompt;
+    readonly locale: SetupCopyLocale;
+  },
+  input: {
+    readonly baseContext: SetupModuleContext;
+    readonly mode: "stt" | "tts";
+    readonly provider: SttProvider | TtsProvider;
+    readonly currentApiKeyEnv?: string;
+  }
+): Promise<Extract<VoiceCredentialSelection, { readonly kind: "api-key" }>> {
+  const profileId = options.profileId ?? readActiveProfile({ homeDir: options.homeDir }).profileId ?? defaultProfileId();
+  const candidates = voiceCredentialEnvCandidates(input);
+  const existingEnvVar = await firstExistingEnvCredentialSource({
+    homeDir: options.homeDir,
+    profileId,
+    envVarNames: candidates,
+  });
+  let apiKeyEnv = existingEnvVar ?? candidates[0]!;
+  let reusedExistingCredential = existingEnvVar !== undefined;
+  const pendingCredentialWrites: SetupDeferredSecretWrite[] = [];
+
+  if (existingEnvVar !== undefined) {
+    const reuseChoice = await promptCredentialReuseChoice(options.prompt, options.locale);
+    if (reuseChoice === "new") {
+      reusedExistingCredential = false;
+      apiKeyEnv = candidates[0]!;
+      const entered = await options.prompt(voiceCredentialQuestion(options.locale, input.mode, apiKeyEnv), { secret: true });
+      if (entered.trim().length > 0) {
+        pendingCredentialWrites.push({ envVarName: apiKeyEnv, value: entered });
+      }
+    }
+  } else {
+    const entered = await options.prompt(voiceCredentialQuestion(options.locale, input.mode, apiKeyEnv), { secret: true });
+    if (entered.trim().length > 0) {
+      pendingCredentialWrites.push({ envVarName: apiKeyEnv, value: entered });
+    }
+  }
+
+  return {
+    kind: "api-key",
+    apiKeyEnv,
+    pendingCredentialWrites,
+    credentialReady: reusedExistingCredential || pendingCredentialWrites.length > 0,
+  };
+}
+
+function voiceCredentialEnvCandidates(input: {
+  readonly baseContext: SetupModuleContext;
+  readonly mode: "stt" | "tts";
+  readonly provider: SttProvider | TtsProvider;
+  readonly currentApiKeyEnv?: string;
+}): readonly string[] {
+  const candidates = [
+    input.currentApiKeyEnv,
+    input.mode === "stt" ? defaultSttApiKeyEnv(input.provider as SttProvider) : defaultTtsApiKeyEnv(input.provider as TtsProvider),
+    ...providerCredentialEnvCandidates(input.baseContext, input.provider),
+  ].filter((value): value is string => typeof value === "string" && value.trim().length > 0);
+  return [...new Set(candidates)];
+}
+
+function providerCredentialEnvCandidates(context: SetupModuleContext, provider: SttProvider | TtsProvider): readonly string[] {
+  if (provider === "openai") {
+    return [
+      context.provider?.id === "openai" ? context.provider.credentialEnv : undefined,
+      "OPENAI_API_KEY",
+    ].filter((value): value is string => typeof value === "string" && value.trim().length > 0);
+  }
+  if (provider === "gemini") {
+    return [
+      context.provider?.id === "google" ? context.provider.credentialEnv : undefined,
+      "GOOGLE_API_KEY",
+    ].filter((value): value is string => typeof value === "string" && value.trim().length > 0);
+  }
+  if (provider === "minimax" && context.provider?.id === "minimax" && context.provider.credentialEnv !== undefined) {
+    return [context.provider.credentialEnv];
+  }
+  return [];
+}
+
+function defaultTtsApiKeyEnv(provider: TtsProvider): string | undefined {
+  switch (provider) {
+    case "edge":
+    case "mistral":
+    case "neutts":
+    case "kittentts":
+      return undefined;
+    case "elevenlabs":
+      return "ELEVENLABS_API_KEY";
+    case "openai":
+      return "VOICE_TOOLS_OPENAI_KEY";
+    case "minimax":
+      return "MINIMAX_API_KEY";
+    case "gemini":
+      return "GEMINI_API_KEY";
+    case "xai":
+      return "XAI_API_KEY";
+  }
+}
+
+function defaultSttApiKeyEnv(provider: SttProvider): string | undefined {
+  switch (provider) {
+    case "local":
+    case "mistral":
+      return undefined;
+    case "groq":
+      return "GROQ_API_KEY";
+    case "openai":
+      return "VOICE_TOOLS_OPENAI_KEY";
+    case "xai":
+      return "XAI_API_KEY";
+  }
+}
+
+async function firstExistingEnvCredentialSource(input: {
+  readonly homeDir?: string;
+  readonly profileId: string;
+  readonly envVarNames: readonly string[];
+}): Promise<string | undefined> {
+  for (const envVarName of input.envVarNames) {
+    if (await hasExistingEnvCredentialSource({
+      homeDir: input.homeDir,
+      profileId: input.profileId,
+      envVarName,
+    })) {
+      return envVarName;
+    }
+  }
+  return undefined;
+}
+
 async function detectDdgsCapabilityStatus(options: Pick<OptionalCapabilityContextOptions, "homeDir">): Promise<NonNullable<SetupModuleContext["web"]>["ddgsCapabilityStatus"]> {
   const stateRoot = resolveGlobalStateHome({ homeDir: options.homeDir }).stateRoot;
   try {
@@ -655,6 +903,14 @@ function braveSearchCredentialQuestion(locale: SetupCopyLocale, envVarName: stri
   return setupOutputLine(locale, `${formatSetupCopy(locale, "setupEditor.prompt.webSearch.brave.secretValue", {
     envVar: setupTechnicalToken(locale, envVarName),
     serviceName: setupTechnicalToken(locale, "Brave Search"),
+  })} `);
+}
+
+function voiceCredentialQuestion(locale: SetupCopyLocale, mode: "stt" | "tts", envVarName: string): string {
+  return setupOutputLine(locale, `${formatSetupCopy(locale, mode === "stt"
+    ? "setupEditor.prompt.voice.sttSecretValue"
+    : "setupEditor.prompt.voice.ttsSecretValue", {
+    envVar: setupTechnicalToken(locale, envVarName),
   })} `);
 }
 

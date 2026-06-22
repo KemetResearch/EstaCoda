@@ -332,14 +332,17 @@ const SETUP_EDITOR_KEYS = [
   "setupEditor.prompt.voice.ttsProvider.kittentts.description",
   "setupEditor.prompt.voice.ttsModel",
   "setupEditor.prompt.voice.ttsApiKeyEnv",
+  "setupEditor.prompt.voice.ttsSecretValue",
   "setupEditor.prompt.voice.sttProvider",
   "setupEditor.prompt.voice.sttProvider.body",
   "setupEditor.prompt.voice.sttProvider.local.description",
   "setupEditor.prompt.voice.sttProvider.groq.description",
   "setupEditor.prompt.voice.sttProvider.openai.description",
   "setupEditor.prompt.voice.sttProvider.mistral.description",
+  "setupEditor.prompt.voice.sttProvider.xai.description",
   "setupEditor.prompt.voice.sttModel",
   "setupEditor.prompt.voice.sttApiKeyEnv",
+  "setupEditor.prompt.voice.sttSecretValue",
   "setupEditor.prompt.vision.summary",
   "setupEditor.prompt.vision.provider",
   "setupEditor.prompt.vision.model",
@@ -993,6 +996,8 @@ describe("setup copy", () => {
     expect(rawSetupCopy("en", "setupEditor.prompt.webSearch.provider.brave.description")).toBe("Use the Brave Search API with an API key");
     expect(rawSetupCopy("en", "setupEditor.prompt.webSearch.provider.ddgs.description")).toBe("Use DuckDuckGo (free). Setup requires installing the registered DDGS capability via Python review.");
     expect(rawSetupCopy("en", "setupEditor.prompt.webSearch.brave.secretValue")).toBe("Enter Brave Search API key:");
+    expect(rawSetupCopy("en", "setupEditor.prompt.voice.ttsSecretValue")).toBe("Enter TTS provider API key for {envVar}:");
+    expect(rawSetupCopy("en", "setupEditor.prompt.voice.sttSecretValue")).toBe("Enter STT provider API key for {envVar}:");
 
     expect(rawSetupCopy("ar", "setupEditor.shell.title")).toBe("محرّر الإعدادات");
     expect(rawSetupCopy("ar", "setupEditor.prompt.action.body")).toBe("اختار اللي تحب تضبطه:");
@@ -1001,6 +1006,8 @@ describe("setup copy", () => {
     expect(rawSetupCopy("ar", "setupEditor.prompt.webSearch.provider.brave.description")).toBe("استخدم Brave Search API مع مفتاح API.");
     expect(rawSetupCopy("ar", "setupEditor.prompt.webSearch.provider.ddgs.description")).toBe("استخدم DuckDuckGo مجانًا. يتطلب الإعداد تثبيت قدرة DDGS المسجلة عبر مراجعة Python.");
     expect(rawSetupCopy("ar", "setupEditor.prompt.webSearch.brave.secretValue")).toBe("أدخل مفتاح API لـ Brave Search:");
+    expect(rawSetupCopy("ar", "setupEditor.prompt.voice.ttsSecretValue")).toBe("أدخل مفتاح API لمزوّد TTS لـ {envVar}:");
+    expect(rawSetupCopy("ar", "setupEditor.prompt.voice.sttSecretValue")).toBe("أدخل مفتاح API لمزوّد STT لـ {envVar}:");
     expect(rawSetupCopy("ar", "setupEditor.actions.editPrimaryModelRoute")).toBe("النموذج الأساسي");
     expect(rawSetupCopy("ar", "setupEditor.actions.editPrimaryModelRoute.description")).toBe("النموذج الافتراضي الذي يستخدمه الوكيل.");
     expect(rawSetupCopy("ar", "setupEditor.actions.editFallbackModelRoute")).toBe("النماذج الاحتياطية");
@@ -1035,6 +1042,8 @@ describe("setup copy", () => {
     expect(resolveSetupCopy("ar", "setupEditor.prompt.webSearch.provider.ddgs.description")).toContain(isolateLtr("DDGS"));
     expect(resolveSetupCopy("ar", "setupEditor.prompt.webSearch.provider.ddgs.description")).toContain(isolateLtr("Python"));
     expect(resolveSetupCopy("ar", "setupEditor.prompt.webSearch.brave.secretValue")).toContain(isolateLtr("Brave Search"));
+    expect(resolveSetupCopy("ar", "setupEditor.prompt.voice.ttsSecretValue")).toContain(isolateLtr("{envVar}"));
+    expect(resolveSetupCopy("ar", "setupEditor.prompt.voice.sttSecretValue")).toContain(isolateLtr("{envVar}"));
     expect(rawSetupCopy("ar", "setupEditor.prompt.auxiliaryRoute.assessor.description")).toContain("assessor");
     expect(rawSetupCopy("ar", "setupEditor.prompt.auxiliaryRoute.compression.description")).toContain("compression");
     expect(rawSetupCopy("ar", "setupEditor.prompt.auxiliaryRoute.sessionSearch.description")).toContain("session_search");

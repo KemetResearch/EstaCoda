@@ -1284,6 +1284,7 @@ describe("runFirstRunSetup", () => {
         "Primary provider": "OpenAI",
         "Optional capabilities": "Yes",
         "Configure optional capability": "Voice",
+        "Voice": "openai",
         "Configure other capabilities now": "Skip",
       }, seenOptions),
       flowEngine: flowEngine({
@@ -2460,8 +2461,9 @@ describe("runFirstRunSetup", () => {
       prompt: fakePrompt({
         "Optional capabilities": "Yes",
         "Configure optional capability": "Voice",
+        "Voice": "openai",
         "Configure other capabilities now": "Skip",
-        __prompt: ["", ""],
+        __secret: "voice-stt-secret",
       }),
       flowEngine: flowEngine(),
     });
@@ -2473,7 +2475,6 @@ describe("runFirstRunSetup", () => {
     });
     expect(result.reviewManifest.sections["enabled-optional-capabilities"][0]?.review.values).toMatchObject({
       sttProvider: "openai",
-      sttModel: "gpt-4o-mini-transcribe",
       sttApiKeyEnv: "OPENAI_API_KEY",
     });
     expect(result.reviewManifest.sections["enabled-optional-capabilities"][0]?.review.values).not.toHaveProperty("ttsProvider");
@@ -2487,8 +2488,9 @@ describe("runFirstRunSetup", () => {
         "Optional capabilities": "Yes",
         "Configure optional capability": "Voice",
         "Configure voice": "Text to Speech (TTS)",
+        "Voice": "openai",
         "Configure other capabilities now": "Skip",
-        __prompt: ["", ""],
+        __secret: "voice-tts-secret",
       }),
       flowEngine: flowEngine(),
     });
@@ -2500,7 +2502,6 @@ describe("runFirstRunSetup", () => {
     });
     expect(result.reviewManifest.sections["enabled-optional-capabilities"][0]?.review.values).toMatchObject({
       ttsProvider: "openai",
-      ttsModel: "gpt-4o-mini-tts",
       ttsApiKeyEnv: "OPENAI_API_KEY",
     });
     expect(result.reviewManifest.sections["enabled-optional-capabilities"][0]?.review.values).not.toHaveProperty("sttProvider");
@@ -2520,7 +2521,6 @@ describe("runFirstRunSetup", () => {
         "Configure optional capability": "Voice",
         "Configure voice": "Speech to Text (STT)",
         "Voice": "Local (via faster-whisper)",
-        "Configure STT": "base",
         "Configure other capabilities now": "Skip",
       }),
       flowEngine: flowEngine(),
@@ -2555,9 +2555,8 @@ describe("runFirstRunSetup", () => {
         "Configure optional capability": ["Voice", "Voice"],
         "Configure voice": ["Speech to Text (STT)", "Text to Speech (TTS)"],
         "Voice": ["Local (via faster-whisper)", "openai"],
-        "Configure STT": "base",
         "Configure other capabilities now": ["Yes", "Skip"],
-        __prompt: ["", ""],
+        __secret: "voice-tts-secret",
       }),
       flowEngine: flowEngine(),
       applyExecutor: reviewedExecutor(tempDir, workspaceRoot),
@@ -2576,7 +2575,6 @@ describe("runFirstRunSetup", () => {
       provider: "openai",
       speed: 1,
       openai: {
-        model: "gpt-4o-mini-tts",
         apiKeyEnv: "OPENAI_API_KEY",
       },
     });
