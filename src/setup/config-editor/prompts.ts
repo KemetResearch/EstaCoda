@@ -185,6 +185,19 @@ async function promptSetupChoiceMaybeBack<T>(
   return promptSetupChoice(prompt, input);
 }
 
+function isSetupChoiceBackResult<T>(
+  result: T | SetupChoiceResult<T>
+): result is Extract<SetupChoiceResult<T>, { readonly kind: "back" }> {
+  return typeof result === "object" && result !== null && "kind" in result && result.kind === "back";
+}
+
+function setupChoiceSelectedValue<T>(result: T | SetupChoiceResult<T>): T {
+  if (typeof result === "object" && result !== null && "kind" in result && result.kind === "selected") {
+    return result.value;
+  }
+  return result as T;
+}
+
 export function promptSecurityMode(
   prompt: Prompt,
   currentValue: SecurityApprovalMode,
@@ -571,10 +584,10 @@ export async function promptWebSearchCapability(
       choices: providerChoices,
       defaultValue: defaultProvider,
     }, options);
-    if (typeof providerResult === "object" && providerResult.kind === "back") {
+    if (isSetupChoiceBackResult(providerResult)) {
       return providerResult;
     }
-    const provider = typeof providerResult === "object" ? providerResult.value : providerResult;
+    const provider = setupChoiceSelectedValue(providerResult);
 
     if (provider === "none") {
       return { provider };
@@ -620,10 +633,10 @@ export async function promptWebSearchCapability(
       ],
       defaultValue: false,
     }, options);
-    if (typeof confirmedResult === "object" && confirmedResult.kind === "back") {
+    if (isSetupChoiceBackResult(confirmedResult)) {
       continue;
     }
-    const confirmed = typeof confirmedResult === "object" ? confirmedResult.value : confirmedResult;
+    const confirmed = setupChoiceSelectedValue(confirmedResult);
 
     return {
       provider,
@@ -1190,10 +1203,10 @@ export async function promptTtsCapability(
     })),
     defaultValue: defaultProvider,
   }, options);
-  if (typeof ttsProviderResult === "object" && ttsProviderResult.kind === "back") {
+  if (isSetupChoiceBackResult(ttsProviderResult)) {
     return ttsProviderResult;
   }
-  const ttsProvider = typeof ttsProviderResult === "object" ? ttsProviderResult.value : ttsProviderResult;
+  const ttsProvider = setupChoiceSelectedValue(ttsProviderResult);
   const ttsModel = await promptSetupStringWithDefault(
     prompt,
     setupPromptLabel(locale, setupCopyText(locale, "setupEditor.prompt.voice.ttsModel")),
@@ -1262,10 +1275,10 @@ export async function promptSttCapability(
       })),
       defaultValue: defaultProvider,
     }, options);
-    if (typeof sttProviderResult === "object" && sttProviderResult.kind === "back") {
+    if (isSetupChoiceBackResult(sttProviderResult)) {
       return sttProviderResult;
     }
-    const sttProvider = typeof sttProviderResult === "object" ? sttProviderResult.value : sttProviderResult;
+    const sttProvider = setupChoiceSelectedValue(sttProviderResult);
 
     let sttModel: string;
     let sttApiKeyEnv: string;
@@ -1288,10 +1301,10 @@ export async function promptSttCapability(
         })),
         defaultValue: defaultLocalModel,
       }, options);
-      if (typeof sttModelResult === "object" && sttModelResult.kind === "back") {
+      if (isSetupChoiceBackResult(sttModelResult)) {
         continue;
       }
-      sttModel = typeof sttModelResult === "object" ? sttModelResult.value : sttModelResult;
+      sttModel = setupChoiceSelectedValue(sttModelResult);
       sttApiKeyEnv = "";
     } else {
       const defaultSttModel = sttProvider === "groq" ? "whisper-large-v3"
@@ -1403,10 +1416,10 @@ export async function promptVisionCapability(
     })),
     defaultValue: defaultProvider,
   }, options);
-  if (typeof providerResult === "object" && providerResult.kind === "back") {
+  if (isSetupChoiceBackResult(providerResult)) {
     return providerResult;
   }
-  const provider = typeof providerResult === "object" ? providerResult.value : providerResult;
+  const provider = setupChoiceSelectedValue(providerResult);
   const model = await promptSetupStringWithDefault(
     prompt,
     setupPromptLabel(locale, setupCopyText(locale, "setupEditor.prompt.vision.model")),
@@ -1546,10 +1559,10 @@ export async function promptBrowserCapability(
       choices: modeChoices,
       defaultValue: defaultMode,
     }, options);
-    if (typeof modeResult === "object" && modeResult.kind === "back") {
+    if (isSetupChoiceBackResult(modeResult)) {
       return modeResult;
     }
-    const mode = typeof modeResult === "object" ? modeResult.value : modeResult;
+    const mode = setupChoiceSelectedValue(modeResult);
 
     if (mode === "recommended") {
       return browserCapabilityWithMode({
@@ -1637,10 +1650,10 @@ export async function promptBrowserCapability(
       ],
       defaultValue: current.autoLaunch ?? false,
     }, options);
-    if (typeof autoLaunchResult === "object" && autoLaunchResult.kind === "back") {
+    if (isSetupChoiceBackResult(autoLaunchResult)) {
       continue;
     }
-    const autoLaunch = typeof autoLaunchResult === "object" ? autoLaunchResult.value : autoLaunchResult;
+    const autoLaunch = setupChoiceSelectedValue(autoLaunchResult);
     const cdpUrl = await promptSetupStringWithDefault(
       prompt,
       setupPromptLabel(locale, setupCopyText(locale, "setupEditor.prompt.browser.cdpUrl.optional")),
