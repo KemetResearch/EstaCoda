@@ -10,7 +10,7 @@ import type { Runtime } from "../runtime/create-runtime.js";
 import { deriveAgentEvolutionPolicy } from "../contracts/agent-evolution.js";
 import type { AgentLoopResponse } from "../runtime/agent-loop.js";
 import type { RuntimeEvent } from "../contracts/runtime-event.js";
-import type { TerminalCapabilities } from "../contracts/ui.js";
+import type { TerminalCapabilities, UiLocale } from "../contracts/ui.js";
 import type { CompactResult } from "../prompt/session-compression-service.js";
 import { isolateLtr } from "../ui/bidi.js";
 import { renderPlain } from "../ui/renderers/plain-renderer.js";
@@ -147,6 +147,7 @@ function createMockRuntime(overrides: Partial<Runtime> = {}): Runtime {
 async function captureStartupSession(options: {
   runtime?: Runtime;
   capabilities?: TerminalCapabilities;
+  locale?: UiLocale;
 } = {}): Promise<{ raw: string; chunks: string[]; promptOptions?: PromptOptions }> {
   const outputChunks: string[] = [];
   const capabilities = options.capabilities ?? interactiveCaps({ supportsAnimation: false });
@@ -163,6 +164,7 @@ async function captureStartupSession(options: {
       columns: capabilities.terminalWidth,
     } as unknown as NodeJS.WritableStream,
     capabilities,
+    locale: options.locale,
     prompt: Object.assign(
       async (_question: string, options?: PromptOptions) => {
         promptOptions = options;
@@ -596,6 +598,17 @@ describe("runSessionLoop — user prompt rail behavior", () => {
   it("horizontally pads TTY startup dashboard lines", async () => {
     const { raw } = await captureStartupSession({
       capabilities: interactiveCaps({ terminalWidth: 160, supportsAnimation: false }),
+    });
+
+    const plain = stripAnsi(raw.slice(STARTUP_VISIBLE_SCREEN_CLEAR.length));
+    const frameLine = plain.split("\n").find((line) => line.includes("╭"));
+    expect(frameLine).toMatch(/^ +╭/u);
+  });
+
+  it("horizontally pads Arabic TTY startup dashboard lines", async () => {
+    const { raw } = await captureStartupSession({
+      capabilities: interactiveCaps({ terminalWidth: 160, supportsAnimation: false }),
+      locale: "ar",
     });
 
     const plain = stripAnsi(raw.slice(STARTUP_VISIBLE_SCREEN_CLEAR.length));

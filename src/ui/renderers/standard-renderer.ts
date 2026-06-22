@@ -1880,10 +1880,15 @@ export class StandardRenderer {
       Math.max(40, titleWidth + 4, rawBlockWidth + 4)
     );
     const contentWidth = Math.max(8, frameWidth - 4);
+    const blockOffset = rawBlockWidth < contentWidth ? Math.floor((contentWidth - rawBlockWidth) / 2) : 0;
     const frameRows = dashboardRows.map((row) => {
       if (row.length === 0) return "";
-      const bounded = this.#natural(row, contentWidth);
-      return padVisibleStart(bounded, contentWidth);
+      const rowWidth = rawBlockWidth < contentWidth ? rawBlockWidth : contentWidth;
+      const bounded = this.#natural(row, rowWidth);
+      const alignedRow = rawBlockWidth < contentWidth
+        ? `${" ".repeat(blockOffset)}${padVisibleStart(bounded, rawBlockWidth)}`
+        : padVisibleStart(bounded, contentWidth);
+      return truncateVisible(alignedRow, contentWidth);
     });
 
     const heroLines = [

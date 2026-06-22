@@ -2046,6 +2046,44 @@ describe("StandardRenderer — startup dashboard", () => {
     }
   });
 
+  it("centers Arabic startup dashboard rows when the title widens the frame", () => {
+    const r = new StandardRenderer({ tokens: resolveTokens("standard", "dark", "kemetBlue"), capabilities: fullCaps(), locale: "ar" });
+    const vm = buildStartupDashboardViewModel({
+      agentName: "EstaCoda",
+      taglines: [],
+      version: "v0.0.5-build-title-wide-enough-to-drive-the-frame-width",
+      sessionId: "session-title-wide",
+      model: { provider: "openrouter", id: "i" },
+      workspaceTrust: "trusted",
+      workspaceVerification: "verified",
+      securityMode: "open",
+      providerReadiness: "ready",
+      availableCommands: [{ name: "/x", description: "س" }],
+      warnings: [],
+    });
+    const lines = stripAnsi(r.renderStartupDashboard(vm)).split("\n");
+    const top = lines.find((line) => line.startsWith("╭"));
+    const modelLine = lines.find((line) => line.includes("النموذج"));
+    expect(top).toBeDefined();
+    expect(modelLine).toBeDefined();
+
+    const contentWidth = measureVisibleWidth(top ?? "") - 4;
+    const frameRows = lines.filter((line) => !line.startsWith("╭") && !line.startsWith("╰"));
+    const rawBlockWidth = Math.max(
+      0,
+      ...frameRows
+        .map((line) => line.trimStart())
+        .filter((line) => line.length > 0)
+        .map((line) => measureVisibleWidth(line))
+    );
+    expect(rawBlockWidth).toBeLessThan(contentWidth);
+
+    const modelTextWidth = measureVisibleWidth((modelLine ?? "").trimStart());
+    const blockOffset = Math.floor((contentWidth - rawBlockWidth) / 2);
+    const expectedLeadingSpaces = 2 + blockOffset + rawBlockWidth - modelTextWidth;
+    expect((modelLine ?? "").match(/^ */u)?.[0].length).toBe(expectedLeadingSpaces);
+  });
+
   it("keeps narrow Arabic startup dashboard stacked and bounded", () => {
     const r = new StandardRenderer({ tokens: resolveTokens("standard", "dark", "kemetBlue"), capabilities: narrowCaps(), locale: "ar" });
     const vm = buildStartupDashboardViewModel({
