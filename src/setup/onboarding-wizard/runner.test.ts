@@ -1321,8 +1321,8 @@ describe("runFirstRunSetup", () => {
 
     expect(onboardingOptions["Primary provider"]).toEqual(["Local", "OpenAI"]);
     expect(onboardingDescriptions["Primary provider"]).toEqual([
-      "Local OpenAI-compatible models.",
-      "Hosted OpenAI models.",
+      "Local OpenAI-compatible models running on your machine.",
+      "Frontier models for high-quality primary reasoning. Direct API.",
     ]);
     expect(onboardingSelects["Primary provider"]?.surface).toBe("promptCard");
     expect(onboardingSelects["Primary provider"]?.columns).toEqual([

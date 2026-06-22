@@ -247,7 +247,7 @@ describe("selectProviderModelRoute", () => {
       label: "OpenAI",
       cells: {
         name: "OpenAI",
-        details: "Hosted OpenAI models.",
+        details: "Frontier models for high-quality primary reasoning. Direct API.",
       },
     });
     expect(modelPrompt.options[0]).toMatchObject({
@@ -463,7 +463,13 @@ describe("selectProviderModelRoute", () => {
   });
 
   it("uses provider descriptions with custom fallback behavior", () => {
-    expect(providerCandidateDescription("en", providerCandidate("google", "Google", 1))).toBe("Hosted Google Gemini models.");
+    expect(providerCandidateDescription("en", providerCandidate("deepseek", "DeepSeek", 1))).toBe("Cost-efficient models for primary or auxiliary use. Direct API.");
+    expect(providerCandidateDescription("en", providerCandidate("google", "Google", 1))).toBe("Gemini models with strong utility and multimodal coverage. Direct API.");
+    expect(providerCandidateDescription("en", providerCandidate("kimi", "Kimi", 1))).toBe("Moonshot Kimi models with strong quality/cost balance. Direct API.");
+    expect(providerCandidateDescription("en", providerCandidate("local", "Local", 1))).toBe("Local OpenAI-compatible models running on your machine.");
+    expect(providerCandidateDescription("en", providerCandidate("openai", "OpenAI", 1))).toBe("Frontier models for high-quality primary reasoning. Direct API.");
+    expect(providerCandidateDescription("en", providerCandidate("openrouter", "OpenRouter", 1))).toBe("Pay-per-use aggregator for routing across many model providers.");
+    expect(providerCandidateDescription("en", providerCandidate("zai", "Z.AI", 1))).toBe("GLM models with strong quality/cost balance. Direct API.");
     expect(providerCandidateDescription("en", {
       ...providerCandidate("custom-provider" as ProviderId, "Custom", 1),
       baseUrl: "https://models.example/v1",

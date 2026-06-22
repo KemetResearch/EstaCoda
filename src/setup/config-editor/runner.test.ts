@@ -1592,7 +1592,7 @@ describe("runConfigEditor", () => {
       { text: "Current: local/local-test-model", tone: "active", direction: "ltr" },
     ]);
     expect(routePrompts[0]?.showCurrentBadge).toBe(false);
-    expect(routePrompts[0]?.options.find((option) => option.id === "openai")?.cells?.details).toBe("Hosted OpenAI models.");
+    expect(routePrompts[0]?.options.find((option) => option.id === "openai")?.cells?.details).toBe("Frontier models for high-quality primary reasoning. Direct API.");
     expect(routePrompts[1]?.showCurrentBadge).toBe(false);
     expect(routePrompts[1]?.options.find((option) => option.id === "gpt-5.5")?.cells?.details).toContain("Tools | Vision | Reasoning");
     expect(envFile).toContain("PR8_OPENAI_KEY=");

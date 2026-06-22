@@ -215,7 +215,7 @@ describe("cli model", () => {
       const gpt4oOption = selectInputs[1]?.options.find((option) => option.id === "gpt-4o");
       expect(openAiOption).toMatchObject({
         label: "OpenAI",
-        cells: { name: "OpenAI", details: "Hosted OpenAI models." },
+        cells: { name: "OpenAI", details: "Frontier models for high-quality primary reasoning. Direct API." },
         current: true
       });
       expect(openAiOption?.badges).toBeUndefined();

@@ -19,7 +19,7 @@ function createMockSnapshot(): Record<string, unknown> {
       { id: "openai", name: "OpenAI" },
       { id: "anthropic", name: "Anthropic" },
       { id: "deepseek", name: "DeepSeek" },
-      { id: "kimi", name: "Kimi For Coding" },
+      { id: "kimi", name: "Kimi" },
       { id: "google", name: "Google" },
       { id: "openrouter", name: "OpenRouter" },
       { id: "local", name: "Local" },

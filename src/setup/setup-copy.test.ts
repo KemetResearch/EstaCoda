@@ -742,6 +742,22 @@ describe("setup copy", () => {
     expect(resolveSetupCopy("ar", "onboarding.providers.navigation.back.description")).toBe("ارجع إلى الخطوة السابقة.");
   });
 
+  it("uses curated provider descriptions in English and Arabic", () => {
+    expect(resolveSetupCopy("en", "onboarding.providers.description.deepseek")).toBe("Cost-efficient models for primary or auxiliary use. Direct API.");
+    expect(resolveSetupCopy("en", "onboarding.providers.description.google")).toBe("Gemini models with strong utility and multimodal coverage. Direct API.");
+    expect(resolveSetupCopy("en", "onboarding.providers.description.kimi")).toBe("Moonshot Kimi models with strong quality/cost balance. Direct API.");
+    expect(resolveSetupCopy("en", "onboarding.providers.description.local")).toBe("Local OpenAI-compatible models running on your machine.");
+    expect(resolveSetupCopy("en", "onboarding.providers.description.openai")).toBe("Frontier models for high-quality primary reasoning. Direct API.");
+    expect(resolveSetupCopy("en", "onboarding.providers.description.openrouter")).toBe("Pay-per-use aggregator for routing across many model providers.");
+    expect(resolveSetupCopy("en", "onboarding.providers.description.zai")).toBe("GLM models with strong quality/cost balance. Direct API.");
+
+    expect(resolveSetupCopy("ar", "onboarding.providers.description.deepseek")).toContain(isolateLtr("API"));
+    expect(resolveSetupCopy("ar", "onboarding.providers.description.google")).toContain(isolateLtr("Gemini"));
+    expect(resolveSetupCopy("ar", "onboarding.providers.description.kimi")).toContain(isolateLtr("Moonshot"));
+    expect(resolveSetupCopy("ar", "onboarding.providers.description.local")).toContain(isolateLtr("OpenAI"));
+    expect(resolveSetupCopy("ar", "onboarding.providers.description.zai")).toContain(isolateLtr("GLM"));
+  });
+
   it("resolves onboarding local STT skipped warning copy", () => {
     expect(resolveSetupCopy("en", "setupApply.warnings.title")).toBe("Optional capability warnings");
     expect(resolveSetupCopy("ar", "setupApply.warnings.title")).toBe("تحذيرات القدرات الاختيارية");
