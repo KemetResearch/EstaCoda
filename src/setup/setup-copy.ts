@@ -296,6 +296,7 @@ export const SETUP_COPY_ENTRIES = [
   copy("onboarding.summary.labels.agentEvolution", "Agent Evolution", "تطوّر الوكيل", [], "config-summary"),
   copy("onboarding.summary.labels.optionalCapabilities", "Optional Capabilities", "القدرات الاختيارية", [], "config-summary"),
   copy("onboarding.summary.labels.channelsTelegram", "Channels / Telegram", "القنوات / Telegram", [], "config-summary"),
+  copy("onboarding.summary.labels.channelsDiscord", "Channels / Discord", "القنوات / Discord", [], "config-summary"),
   copy("onboarding.summary.labels.channelsWhatsApp", "Channels / WhatsApp", "القنوات / WhatsApp", [], "config-summary"),
   copy("onboarding.summary.labels.voiceStt", "Voice STT", "الصوت STT", [], "config-summary"),
   copy("onboarding.summary.labels.voiceTts", "Voice TTS", "الصوت TTS", [], "config-summary"),

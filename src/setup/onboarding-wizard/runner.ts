@@ -72,6 +72,7 @@ import {
 } from "../config-editor/prompts.js";
 import {
   collectOptionalCapabilityContext,
+  channelCapabilityModule,
   setupModuleContextFromConfig,
 } from "../optional-capability-flow.js";
 import {
@@ -81,7 +82,6 @@ import {
 } from "../gateway-service-activation.js";
 import {
   browserSetupModule,
-  telegramSetupModule,
   webSearchSetupModule,
   whatsappSetupModule,
   voiceSetupModule,
@@ -148,10 +148,24 @@ type OnboardingOptionalCapabilityFlowResult = {
   readonly drafts: readonly SetupDraft[];
   readonly pendingCredentialWrites: readonly PendingCredentialWrite[];
   readonly channelSummaries?: {
+    readonly discord?: OnboardingOptionalCapabilitySummaryStatus;
     readonly whatsapp?: OnboardingOptionalCapabilitySummaryStatus;
     readonly webSearch?: OnboardingOptionalCapabilitySummaryStatus;
   };
+  readonly context: SetupModuleContext;
 };
+
+type OptionalCapabilitiesScreen = "start" | "capability-menu";
+
+type OnboardingOptionalCapabilityNavigationResult =
+  | {
+      readonly kind: "completed";
+      readonly flow: OnboardingOptionalCapabilityFlowResult;
+      readonly summaryBackTarget: OnboardingStep;
+    }
+  | {
+      readonly kind: "back";
+    };
 
 type OnboardingWizardDraft = {
   localizedOptions?: FirstRunSetupRunnerOptions;
@@ -177,6 +191,7 @@ type OnboardingWizardDraft = {
   reviewAccepted?: boolean;
   finalSelections?: OnboardingWizardSelections;
   summaryBackTarget?: OnboardingStep;
+  optionalInitialScreen?: OptionalCapabilitiesScreen;
 };
 
 export async function runFirstRunSetup(
@@ -487,10 +502,17 @@ export async function runFirstRunSetup(
           primaryModel: primaryRoute.model,
           securityMode,
           workflowLearning,
+          initialFlow: draft.optionalCapabilityFlow,
+          initialScreen: draft.optionalInitialScreen ?? "start",
         });
-        draft.optionalCapabilityFlow = optionalCapabilityFlow;
-        draft.optionalPendingCredentialWrites = [...optionalCapabilityFlow.pendingCredentialWrites];
-        draft.summaryBackTarget = "optional-menu";
+        draft.optionalInitialScreen = undefined;
+        if (optionalCapabilityFlow.kind === "back") {
+          step = "agent-evolution";
+          break;
+        }
+        draft.optionalCapabilityFlow = optionalCapabilityFlow.flow;
+        draft.optionalPendingCredentialWrites = [...optionalCapabilityFlow.flow.pendingCredentialWrites];
+        draft.summaryBackTarget = optionalCapabilityFlow.summaryBackTarget;
         step = "summary";
         break;
       }
@@ -537,6 +559,7 @@ export async function runFirstRunSetup(
 
         const summaryAction = await promptOnboardingSummaryAction(promptContext, interfaceChoice.language, summaryText, options.defaultSelections?.reviewAccepted ?? true);
         if (summaryAction === "back") {
+          draft.optionalInitialScreen = draft.summaryBackTarget === "optional-menu" ? "capability-menu" : "start";
           step = draft.summaryBackTarget ?? "optional-start";
           break;
         }
@@ -948,9 +971,119 @@ async function chooseOptionalCapabilities(
     readonly primaryModel: OnboardingWizardSelections["primaryModel"];
     readonly securityMode: OnboardingWizardSelections["securityMode"];
     readonly workflowLearning: OnboardingWizardSelections["workflowLearning"];
+    readonly initialFlow?: OnboardingOptionalCapabilityFlowResult;
+    readonly initialScreen?: OptionalCapabilitiesScreen;
   }
-): Promise<OnboardingOptionalCapabilityFlowResult> {
-  const configureNow = await promptSetupChoice(options.prompt, {
+): Promise<OnboardingOptionalCapabilityNavigationResult> {
+  const loaded = await loadRuntimeConfig(options);
+  let context = setupModuleContextFromConfig({
+    homeDir: options.homeDir,
+    profileId: contextInput.profileId,
+    workspaceRoot: contextInput.workspaceRoot,
+    trustStorePath: resolveStateHome({ homeDir: options.homeDir }).trustJsonPath,
+    configPath: contextInput.configPath,
+  }, loaded.config, {
+    provider: contextInput.primaryProvider,
+    model: contextInput.primaryModel,
+    workspaceTrusted: contextInput.workspaceTrusted,
+    securityMode: contextInput.securityMode,
+    workflowLearning: contextInput.workflowLearning,
+  });
+  context = contextInput.initialFlow?.context ?? context;
+  const selected = new Set<OnboardingSupportedOptionalCapabilityId>(contextInput.initialFlow?.selected ?? []);
+  const draftMap = new Map<string, SetupDraft>((contextInput.initialFlow?.drafts ?? []).map((draft) => [draft.id, draft]));
+  const pendingCredentialWriteMap = new Map<string, PendingCredentialWrite>(
+    (contextInput.initialFlow?.pendingCredentialWrites ?? []).map((write) => [write.envVarName, write])
+  );
+  const capabilitySummaries: {
+    discord?: OnboardingOptionalCapabilitySummaryStatus;
+    whatsapp?: OnboardingOptionalCapabilitySummaryStatus;
+    browser?: OnboardingOptionalCapabilitySummaryStatus;
+    webSearch?: OnboardingOptionalCapabilitySummaryStatus;
+  } = {
+    discord: contextInput.initialFlow?.channelSummaries?.discord,
+    whatsapp: contextInput.initialFlow?.channelSummaries?.whatsapp,
+    browser: contextInput.initialFlow?.summaries.browser,
+    webSearch: contextInput.initialFlow?.channelSummaries?.webSearch,
+  };
+  let screen = contextInput.initialScreen ?? "start";
+
+  while (true) {
+    if (screen === "start") {
+      const configureNow = await promptOptionalCapabilitiesStart(options.prompt, locale, (options.defaultSelections?.optionalCapabilities?.length ?? 0) > 0);
+      if (configureNow.kind === "back") {
+        return { kind: "back" };
+      }
+      if (!configureNow.value) {
+        return {
+          kind: "completed",
+          flow: onboardingOptionalCapabilityResult(context, selected, draftMap, pendingCredentialWriteMap, capabilitySummaries),
+          summaryBackTarget: "optional-start",
+        };
+      }
+      screen = "capability-menu";
+    }
+
+    const action = await promptOnboardingOptionalCapabilityAction(options.prompt, locale, context);
+    if (action.kind === "back") {
+      screen = "start";
+      continue;
+    }
+    if (action.value === "skip") {
+      return {
+        kind: "completed",
+        flow: onboardingOptionalCapabilityResult(context, selected, draftMap, pendingCredentialWriteMap, capabilitySummaries),
+        summaryBackTarget: "optional-menu",
+      };
+    }
+
+    const collected = await collectOnboardingOptionalCapability(options, locale, context, action.value);
+    if (collected.kind === "back") {
+      screen = "capability-menu";
+      continue;
+    }
+    if (collected.kind === "configured") {
+      context = collected.context;
+      selected.add(action.value);
+      for (const draft of collected.drafts) {
+        draftMap.set(draft.id, draft);
+      }
+      for (const pendingCredentialWrite of collected.pendingCredentialWrites) {
+        pendingCredentialWriteMap.set(pendingCredentialWrite.envVarName, pendingCredentialWrite);
+      }
+    }
+    if (collected.channelSummaries?.discord !== undefined) {
+      capabilitySummaries.discord = collected.channelSummaries.discord;
+    }
+    if (collected.channelSummaries?.whatsapp !== undefined) {
+      capabilitySummaries.whatsapp = collected.channelSummaries.whatsapp;
+    }
+    if (collected.channelSummaries?.browser !== undefined) {
+      capabilitySummaries.browser = collected.channelSummaries.browser;
+    }
+    if (collected.channelSummaries?.webSearch !== undefined) {
+      capabilitySummaries.webSearch = collected.channelSummaries.webSearch;
+    }
+
+    const configureMore = await promptConfigureAnotherOptionalCapability(options.prompt, locale);
+    if (configureMore.kind === "back" || configureMore.value) {
+      screen = "capability-menu";
+      continue;
+    }
+    return {
+      kind: "completed",
+      flow: onboardingOptionalCapabilityResult(context, selected, draftMap, pendingCredentialWriteMap, capabilitySummaries),
+      summaryBackTarget: "optional-menu",
+    };
+  }
+}
+
+async function promptOptionalCapabilitiesStart(
+  prompt: Prompt,
+  locale: SetupCopyLocale,
+  defaultValue: boolean
+): Promise<SetupChoiceResult<boolean>> {
+  return promptSetupChoiceResult(prompt, {
     title: setupCopyText(locale, "onboarding.optionalCapabilities.title"),
     message: [
       setupCopyText(locale, "onboarding.optionalCapabilities.configureNow"),
@@ -969,97 +1102,18 @@ async function chooseOptionalCapabilities(
         value: false,
       },
     ],
-    defaultValue: (options.defaultSelections?.optionalCapabilities?.length ?? 0) > 0,
+    defaultValue,
+    allowBack: true,
   });
-
-  const loaded = await loadRuntimeConfig(options);
-  let context = setupModuleContextFromConfig({
-    homeDir: options.homeDir,
-    profileId: contextInput.profileId,
-    workspaceRoot: contextInput.workspaceRoot,
-    trustStorePath: resolveStateHome({ homeDir: options.homeDir }).trustJsonPath,
-    configPath: contextInput.configPath,
-  }, loaded.config, {
-    provider: contextInput.primaryProvider,
-    model: contextInput.primaryModel,
-    workspaceTrusted: contextInput.workspaceTrusted,
-    securityMode: contextInput.securityMode,
-    workflowLearning: contextInput.workflowLearning,
-  });
-  const selected = new Set<OnboardingSupportedOptionalCapabilityId>();
-  const draftMap = new Map<OnboardingSupportedOptionalCapabilityId, readonly SetupDraft[]>();
-  const pendingCredentialWrites: PendingCredentialWrite[] = [];
-  const capabilitySummaries: {
-    whatsapp?: OnboardingOptionalCapabilitySummaryStatus;
-    browser?: OnboardingOptionalCapabilitySummaryStatus;
-    webSearch?: OnboardingOptionalCapabilitySummaryStatus;
-  } = {};
-
-  if (!configureNow) {
-    return onboardingOptionalCapabilityResult(context, selected, draftMap, pendingCredentialWrites);
-  }
-
-  while (true) {
-    const action = await promptOnboardingOptionalCapabilityAction(options.prompt, locale, context);
-    if (action === "skip") {
-      break;
-    }
-
-    const collected = await collectOnboardingOptionalCapability(options, locale, context, action);
-    if (collected.kind === "configured") {
-      context = collected.context;
-      selected.add(action);
-      draftMap.set(action, [...(draftMap.get(action) ?? []), ...collected.drafts]);
-      pendingCredentialWrites.push(...collected.pendingCredentialWrites);
-    }
-    if (collected.channelSummaries?.whatsapp !== undefined) {
-      capabilitySummaries.whatsapp = collected.channelSummaries.whatsapp;
-    }
-    if (collected.channelSummaries?.browser !== undefined) {
-      capabilitySummaries.browser = collected.channelSummaries.browser;
-    }
-    if (collected.channelSummaries?.webSearch !== undefined) {
-      capabilitySummaries.webSearch = collected.channelSummaries.webSearch;
-    }
-
-    if (onboardingOptionalCapabilityActions(context).length === 0) {
-      break;
-    }
-
-    const configureMore = await promptSetupChoice(options.prompt, {
-      title: setupCopyText(locale, "onboarding.optionalCapabilities.more.title"),
-      message: `${setupCopyText(locale, "onboarding.optionalCapabilities.note")}\n`,
-      choices: [
-        {
-          id: "yes",
-          label: setupCopyText(locale, "onboarding.optionalCapabilities.more.yes"),
-          value: true,
-        },
-        {
-          id: "skip",
-          label: setupCopyText(locale, "onboarding.optionalCapabilities.skip"),
-          description: setupCopyText(locale, "onboarding.optionalCapabilities.note"),
-          value: false,
-        },
-      ],
-      defaultValue: false,
-    });
-
-    if (!configureMore) {
-      break;
-    }
-  }
-
-  return onboardingOptionalCapabilityResult(context, selected, draftMap, pendingCredentialWrites, capabilitySummaries);
 }
 
 async function promptOnboardingOptionalCapabilityAction(
   prompt: Prompt,
   locale: SetupCopyLocale,
   context: SetupModuleContext
-): Promise<OnboardingSupportedOptionalCapabilityId | "skip"> {
+): Promise<SetupChoiceResult<OnboardingSupportedOptionalCapabilityId | "skip">> {
   const actions = onboardingOptionalCapabilityActions(context);
-  return promptSetupChoice(prompt, {
+  return promptSetupChoiceResult(prompt, {
     title: setupCopyText(locale, "onboarding.optionalCapabilities.menu.title"),
     message: `${setupCopyText(locale, "onboarding.optionalCapabilities")}\n${setupCopyText(locale, "onboarding.optionalCapabilities.note")}\n`,
     choices: [
@@ -1072,29 +1126,39 @@ async function promptOnboardingOptionalCapabilityAction(
       },
     ],
     defaultValue: "skip" as const,
+    allowBack: true,
+  });
+}
+
+async function promptConfigureAnotherOptionalCapability(
+  prompt: Prompt,
+  locale: SetupCopyLocale
+): Promise<SetupChoiceResult<boolean>> {
+  return promptSetupChoiceResult(prompt, {
+    title: setupCopyText(locale, "onboarding.optionalCapabilities.more.title"),
+    message: `${setupCopyText(locale, "onboarding.optionalCapabilities.note")}\n`,
+    choices: [
+      {
+        id: "yes",
+        label: setupCopyText(locale, "onboarding.optionalCapabilities.more.yes"),
+        value: true,
+      },
+      {
+        id: "skip",
+        label: setupCopyText(locale, "onboarding.optionalCapabilities.skip"),
+        description: setupCopyText(locale, "onboarding.optionalCapabilities.note"),
+        value: false,
+      },
+    ],
+    defaultValue: false,
+    allowBack: true,
   });
 }
 
 function onboardingOptionalCapabilityActions(
-  context: SetupModuleContext
+  _context: SetupModuleContext
 ): readonly OnboardingSupportedOptionalCapabilityId[] {
-  const actions: OnboardingSupportedOptionalCapabilityId[] = [];
-  if (
-    telegramSetupModule.detect(context).status !== "configured" ||
-    whatsappSetupModule.detect(context).status !== "configured"
-  ) {
-    actions.push("channels");
-  }
-  if (context.voice?.sttProvider === undefined || context.voice.ttsProvider === undefined) {
-    actions.push("voice");
-  }
-  if (browserSetupModule.detect(context).status !== "configured") {
-    actions.push("browser");
-  }
-  if (webSearchSetupModule.detect(context).status !== "configured") {
-    actions.push("web-search");
-  }
-  return actions;
+  return ["channels", "voice", "browser", "web-search"];
 }
 
 function onboardingOptionalCapabilityChoice(
@@ -1150,6 +1214,7 @@ async function collectOnboardingOptionalCapability(
       readonly drafts: readonly SetupDraft[];
       readonly pendingCredentialWrites: readonly PendingCredentialWrite[];
       readonly channelSummaries?: {
+        readonly discord?: OnboardingOptionalCapabilitySummaryStatus;
         readonly whatsapp?: OnboardingOptionalCapabilitySummaryStatus;
         readonly browser?: OnboardingOptionalCapabilitySummaryStatus;
         readonly webSearch?: OnboardingOptionalCapabilitySummaryStatus;
@@ -1158,18 +1223,26 @@ async function collectOnboardingOptionalCapability(
   | {
       readonly kind: "skip" | "unchanged" | "incomplete";
       readonly channelSummaries?: {
+        readonly discord?: OnboardingOptionalCapabilitySummaryStatus;
         readonly whatsapp?: OnboardingOptionalCapabilitySummaryStatus;
         readonly browser?: OnboardingOptionalCapabilitySummaryStatus;
         readonly webSearch?: OnboardingOptionalCapabilitySummaryStatus;
       };
     }
+  | {
+      readonly kind: "back";
+    }
 > {
   if (action === "channels") {
-    const channel = await promptChannelCapability(options.prompt, locale);
+    const channelResult = await promptChannelCapability(options.prompt, locale, { allowBack: true });
+    if (channelResult.kind === "back") {
+      return channelResult;
+    }
+    const channel = channelResult.value;
     if (channel === "whatsapp") {
       return collectOnboardingWhatsAppSetup(options, locale, context);
     }
-    const module = telegramSetupModule;
+    const module = channelCapabilityModule(channel);
     const collected = await collectOptionalCapabilityContext({
       homeDir: options.homeDir,
       profileId: options.profileId,
@@ -1178,9 +1251,9 @@ async function collectOnboardingOptionalCapability(
       configPath: context.configPath,
       prompt: options.prompt,
       locale,
-    }, context, module);
+    }, context, module, undefined, { allowBack: true });
 
-    if (collected.kind !== "configured") {
+    if (collected.kind === "back" || collected.kind !== "configured") {
       return collected;
     }
 
@@ -1190,6 +1263,7 @@ async function collectOnboardingOptionalCapability(
       context: collected.context,
       drafts: module.toDrafts(collected.context, configuration),
       pendingCredentialWrites: collected.pendingCredentialWrites ?? [],
+      channelSummaries: channel === "discord" ? { discord: "configured" } : undefined,
     };
   }
 
@@ -1198,9 +1272,28 @@ async function collectOnboardingOptionalCapability(
     : action === "web-search"
       ? webSearchSetupModule
       : browserSetupModule;
-  const voiceMode = action === "voice"
-    ? await promptVoiceCapability(options.prompt, locale)
-    : undefined;
+  if (action === "voice") {
+    while (true) {
+      const voiceModeResult = await promptVoiceCapability(options.prompt, locale, { allowBack: true });
+      if (voiceModeResult.kind === "back") {
+        return voiceModeResult;
+      }
+      const collected = await collectOptionalCapabilityContext({
+        homeDir: options.homeDir,
+        profileId: options.profileId,
+        workspaceRoot: context.workspaceRoot ?? options.workspaceRoot,
+        trustStorePath: context.trustStorePath,
+        configPath: context.configPath,
+        prompt: options.prompt,
+        locale,
+      }, context, module, voiceModeResult.value, { allowBack: true });
+      if (collected.kind === "back") {
+        continue;
+      }
+      return collectedOnboardingOptionalCapabilityResult(action, module, context, collected);
+    }
+  }
+
   const collected = await collectOptionalCapabilityContext({
     homeDir: options.homeDir,
     profileId: options.profileId,
@@ -1209,8 +1302,21 @@ async function collectOnboardingOptionalCapability(
     configPath: context.configPath,
     prompt: options.prompt,
     locale,
-  }, context, module, voiceMode);
+  }, context, module, undefined, { allowBack: true });
 
+  if (collected.kind === "back") {
+    return collected;
+  }
+
+  return collectedOnboardingOptionalCapabilityResult(action, module, context, collected);
+}
+
+function collectedOnboardingOptionalCapabilityResult(
+  action: OnboardingSupportedOptionalCapabilityId,
+  module: typeof voiceSetupModule | typeof webSearchSetupModule | typeof browserSetupModule,
+  context: SetupModuleContext,
+  collected: Exclude<Awaited<ReturnType<typeof collectOptionalCapabilityContext>>, { readonly kind: "back" }>
+): Exclude<Awaited<ReturnType<typeof collectOnboardingOptionalCapability>>, { readonly kind: "back" }> {
   if (collected.kind !== "configured") {
     if (action === "web-search" && collected.kind === "skip") {
       return {
@@ -1355,9 +1461,10 @@ async function collectOnboardingWhatsAppSetup(
 function onboardingOptionalCapabilityResult(
   context: SetupModuleContext,
   selected: ReadonlySet<OnboardingSupportedOptionalCapabilityId>,
-  draftMap: ReadonlyMap<OnboardingSupportedOptionalCapabilityId, readonly SetupDraft[]>,
-  pendingCredentialWrites: readonly PendingCredentialWrite[],
+  draftMap: ReadonlyMap<string, SetupDraft>,
+  pendingCredentialWriteMap: ReadonlyMap<string, PendingCredentialWrite>,
   capabilitySummaries: {
+    readonly discord?: OnboardingOptionalCapabilitySummaryStatus;
     readonly whatsapp?: OnboardingOptionalCapabilitySummaryStatus;
     readonly browser?: OnboardingOptionalCapabilitySummaryStatus;
     readonly webSearch?: OnboardingOptionalCapabilitySummaryStatus;
@@ -1368,7 +1475,8 @@ function onboardingOptionalCapabilityResult(
     summaries: {
       selected: [...selected],
       channels: {
-        telegram: telegramSetupModule.detect(context).status === "configured" ? "configured" : "not_set",
+        telegram: channelCapabilityModule("telegram").detect(context).status === "configured" ? "configured" : "not_set",
+        discord: capabilitySummaries.discord ?? (channelCapabilityModule("discord").detect(context).status === "configured" ? "configured" : "not_set"),
         whatsapp: capabilitySummaries.whatsapp ?? (whatsappSetupModule.detect(context).status === "configured" ? "configured" : "not_set"),
       },
       voice: {
@@ -1378,8 +1486,14 @@ function onboardingOptionalCapabilityResult(
       browser: capabilitySummaries.browser ?? (browserSetupModule.detect(context).status === "configured" ? "configured" : "not_set"),
       webSearch: capabilitySummaries.webSearch ?? (webSearchSetupModule.detect(context).status === "configured" ? "configured" : "not_set"),
     },
-    drafts: [...draftMap.values()].flat(),
-    pendingCredentialWrites,
+    drafts: [...draftMap.values()],
+    pendingCredentialWrites: [...pendingCredentialWriteMap.values()],
+    channelSummaries: {
+      discord: capabilitySummaries.discord,
+      whatsapp: capabilitySummaries.whatsapp,
+      webSearch: capabilitySummaries.webSearch,
+    },
+    context,
   };
 }
 

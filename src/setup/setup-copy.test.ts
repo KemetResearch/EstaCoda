@@ -95,6 +95,7 @@ const FIRST_RUN_KEYS = [
   "onboarding.summary.labels.agentEvolution",
   "onboarding.summary.labels.optionalCapabilities",
   "onboarding.summary.labels.channelsTelegram",
+  "onboarding.summary.labels.channelsDiscord",
   "onboarding.summary.labels.channelsWhatsApp",
   "onboarding.summary.labels.voiceStt",
   "onboarding.summary.labels.voiceTts",

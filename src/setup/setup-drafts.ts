@@ -347,6 +347,7 @@ function onboardingSelectedOptionalCapabilities(
   const capabilities: OnboardingOptionalCapabilityDraftId[] = [];
   if (
     state.optionalCapabilities?.channels?.telegram === "configured" ||
+    state.optionalCapabilities?.channels?.discord === "configured" ||
     state.optionalCapabilities?.channels?.whatsapp === "configured"
   ) {
     capabilities.push("channels");

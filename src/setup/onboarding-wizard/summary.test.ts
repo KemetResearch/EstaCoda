@@ -32,6 +32,7 @@ describe("onboarding wizard summary", () => {
       optionalCapabilities: {
         channels: {
           telegram: "configured",
+          discord: "configured",
           whatsapp: "configured",
         },
         voice: {
@@ -56,6 +57,7 @@ describe("onboarding wizard summary", () => {
       "Agent Evolution: suggest",
       "Optional Capabilities:",
       "  - Channels / Telegram: Configured",
+      "  - Channels / Discord: Configured",
       "  - Channels / WhatsApp: Configured",
       "  - Voice STT: Configured",
       "  - Voice TTS: Not set",
@@ -87,6 +89,7 @@ describe("onboarding wizard summary", () => {
       optionalCapabilities: {
         channels: {
           telegram: "not_set",
+          discord: "configured",
           whatsapp: "incomplete",
         },
         voice: {
@@ -111,6 +114,7 @@ describe("onboarding wizard summary", () => {
     expect(rendered).toContain(`تطوّر الوكيل: ${isolateLtr("suggest")}`);
     expect(rendered).toContain("القدرات الاختيارية:");
     expect(rendered).toContain(`القنوات / ${isolateLtr("Telegram")}: غير مهيأ`);
+    expect(rendered).toContain(`القنوات / ${isolateLtr("Discord")}: مهيأ`);
     expect(rendered).toContain(`القنوات / ${isolateLtr("WhatsApp")}: الإعداد غير مكتمل`);
     expect(rendered).toContain(`الصوت ${isolateLtr("STT")}: مهيأ`);
     expect(rendered).toContain(`الصوت ${isolateLtr("TTS")}: غير مهيأ`);
@@ -134,6 +138,7 @@ describe("onboarding wizard summary", () => {
       "Agent Evolution: Not set",
       "Optional Capabilities:",
       "  - Channels / Telegram: Not set",
+      "  - Channels / Discord: Not set",
       "  - Channels / WhatsApp: Not set",
       "  - Voice STT: Not set",
       "  - Voice TTS: Not set",

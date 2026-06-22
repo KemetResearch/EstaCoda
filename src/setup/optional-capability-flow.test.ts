@@ -11,7 +11,7 @@ import {
   optionalPromptId,
   setupModuleContextFromConfig,
 } from "./optional-capability-flow.js";
-import { webSearchSetupModule, type SetupModuleContext } from "./setup-modules.js";
+import { browserSetupModule, webSearchSetupModule, type SetupModuleContext } from "./setup-modules.js";
 
 describe("optional Search capability flow", () => {
   let tempDir: string;
@@ -205,6 +205,22 @@ describe("optional Search capability flow", () => {
       expect(JSON.stringify(confirmed.context.web)).not.toContain("ddgs==");
     }
     expect(skipped).toEqual({ kind: "skip" });
+  });
+
+  it("propagates Back from Search provider selection when enabled", async () => {
+    const collected = await collectOptionalCapabilityContext(options({
+      values: ["Back"],
+    }), baseContext(), webSearchSetupModule, undefined, { allowBack: true });
+
+    expect(collected).toEqual({ kind: "back" });
+  });
+
+  it("propagates Back from Browser provider selection when enabled", async () => {
+    const collected = await collectOptionalCapabilityContext(options({
+      values: ["Back"],
+    }), baseContext(), browserSetupModule, undefined, { allowBack: true });
+
+    expect(collected).toEqual({ kind: "back" });
   });
 
   function options(input: {
