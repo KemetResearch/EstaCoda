@@ -82,9 +82,9 @@ export function renderChannelProgressLabel(
         : `${toolEmoji(event.tool)} ${event.tool}: "${summary}"`;
     }
     case "provider-attempt":
-      return event.fallback
-        ? `${providerRoutingLabel(locale, true)} · ${event.model}`
-        : `${providerRoutingLabel(locale, false)} · ${event.model}`;
+      return "";
+    case "provider-serving-transition":
+      return `${providerServingTransitionLabel(locale, event.transition)} · ${event.model}`;
     case "agent-final":
     case "provider-token":
       return "";
@@ -93,11 +93,18 @@ export function renderChannelProgressLabel(
   }
 }
 
-function providerRoutingLabel(locale: ActivityLabelLocale, fallback: boolean): string {
+function providerServingTransitionLabel(
+  locale: ActivityLabelLocale,
+  transition: Extract<RuntimeEvent, { kind: "provider-serving-transition" }>["transition"]
+): string {
   if (locale === "ar") {
-    return fallback ? "✦ توجيه احتياطي" : "✦ توجيه النموذج";
+    return transition === "fallback-active"
+      ? "✦ استخدام النموذج الاحتياطي"
+      : "✦ النموذج الأساسي متاح مجددًا";
   }
-  return fallback ? "✦ Routing fallback" : "✦ Routing provider";
+  return transition === "fallback-active"
+    ? "✦ Using fallback"
+    : "✦ Primary model available again";
 }
 
 export function toolEmoji(tool: string): string {

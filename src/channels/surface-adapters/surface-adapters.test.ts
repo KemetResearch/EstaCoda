@@ -106,19 +106,31 @@ describe("PlainLogSurfaceAdapter", () => {
     assertNoEmoji(out);
   });
 
-  it("renders provider attempt progress labels without emoji", () => {
+  it("hides provider attempts and renders serving transitions without emoji", () => {
     expect(adapter.renderProgressLabel({
       kind: "provider-attempt",
       provider: "openrouter",
       model: "k2",
       fallback: false,
-    })).toBe("Routing provider · k2");
+    })).toBe("");
     expect(adapter.renderProgressLabel({
       kind: "provider-attempt",
       provider: "openrouter",
       model: "deepseek-v4-pro",
       fallback: true,
-    })).toBe("Routing fallback · deepseek-v4-pro");
+    })).toBe("");
+    expect(adapter.renderProgressLabel({
+      kind: "provider-serving-transition",
+      transition: "fallback-active",
+      provider: "openrouter",
+      model: "deepseek-v4-pro",
+    })).toBe("Using fallback · deepseek-v4-pro");
+    expect(adapter.renderProgressLabel({
+      kind: "provider-serving-transition",
+      transition: "primary-recovered",
+      provider: "openrouter",
+      model: "k2",
+    })).toBe("Primary model available again · k2");
   });
 
   it("renders assistant response without ANSI or emoji", () => {
