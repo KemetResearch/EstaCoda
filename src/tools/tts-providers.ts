@@ -27,7 +27,7 @@ export const TTS_PROVIDER_CAPS: Record<TtsProvider, number | undefined> = {
   minimax: 4096,
   gemini: 4096,
   xai: 4096,
-  edge: 4096,
+  edge: 5000,
   mistral: 4096,
   neutts: 4096,
   kittentts: 4096
@@ -48,6 +48,11 @@ export function elevenLabsCap(modelId?: string): number {
   return modelId?.includes("turbo") ? 2000 : 5000;
 }
 
+export function edgeRateForSpeed(speed: number): string {
+  const percent = Math.round((speed - 1) * 100);
+  return `${percent >= 0 ? "+" : ""}${percent}%`;
+}
+
 export async function synthesizeSpeech(input: SpeechSynthesisInput): Promise<SpeechSynthesisResult> {
   switch (input.tts.provider) {
     case "openai":
@@ -61,6 +66,7 @@ export async function synthesizeSpeech(input: SpeechSynthesisInput): Promise<Spe
     case "xai":
       return synthesizeXai(input);
     case "edge":
+      return synthesizeEdge(input);
     case "mistral":
     case "neutts":
     case "kittentts":
@@ -69,7 +75,7 @@ export async function synthesizeSpeech(input: SpeechSynthesisInput): Promise<Spe
         content: [
           `TTS execution for ${input.tts.provider} is not enabled yet.`,
           "Configured providers are visible through estacoda voice status.",
-          "This execution pass supports hosted TTS providers: openai, elevenlabs, minimax, gemini, and xai."
+          "This execution pass supports hosted TTS providers: openai, elevenlabs, minimax, gemini, xai, and edge."
         ].join("\n"),
         metadata: { provider: input.tts.provider }
       };
@@ -371,6 +377,52 @@ async function synthesizeXai(input: SpeechSynthesisInput): Promise<SpeechSynthes
     model,
     voice
   });
+}
+
+async function synthesizeEdge(input: SpeechSynthesisInput): Promise<SpeechSynthesisResult> {
+  const provider = "edge";
+  const voice = input.voice ?? input.tts.edge?.voice ?? "en-US-AriaNeural";
+  const speed = input.tts.edge?.speed ?? input.tts.speed ?? 1;
+
+  let generateSpeech: typeof import("@bestcodes/edge-tts").generateSpeech;
+  try {
+    ({ generateSpeech } = await import("@bestcodes/edge-tts"));
+  } catch (error) {
+    return {
+      ok: false,
+      content: "Edge TTS library not available. Install dependencies and retry.",
+      metadata: {
+        provider,
+        reason: "missing-dependency",
+        error: stableErrorMessage(error)
+      }
+    };
+  }
+
+  try {
+    const buffer = await generateSpeech({
+      text: input.text,
+      voice,
+      rate: edgeRateForSpeed(speed)
+    });
+
+    return audioResult({
+      provider,
+      bytes: Buffer.from(buffer),
+      mimeType: "audio/mpeg",
+      model: "edge",
+      voice
+    });
+  } catch (error) {
+    return {
+      ok: false,
+      content: `Edge TTS synthesis failed: ${stableErrorMessage(error)}`,
+      metadata: {
+        provider,
+        reason: "synthesis-error"
+      }
+    };
+  }
 }
 
 async function fetchProvider(input: {
