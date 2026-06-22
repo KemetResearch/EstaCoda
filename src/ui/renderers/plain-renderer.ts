@@ -600,7 +600,7 @@ function renderPlainStructuredOnboardingOptions(vm: OnboardingPromptCardViewMode
     ? []
     : [tableDirection === "rtl"
       ? plainAlignStructuredLine(
-        `  ${isolateLtr(`${plainStructuredRow(columns, Object.fromEntries(columns.map((column) => [column.key, column.header])), [], layout.widths, locale)}  `)}`,
+        `  ${plainStructuredRow(columns, Object.fromEntries(columns.map((column) => [column.key, column.header])), [], layout.widths, locale)}  `,
         layout.lineWidth,
         vm.tableAlign
       )
@@ -627,7 +627,7 @@ function renderPlainStructuredOnboardingOptions(vm: OnboardingPromptCardViewMode
       layout.widths,
       locale
     );
-    const line = tableDirection === "rtl" ? isolateLtr(`${row} ${marker}`) : `${marker} ${row}`;
+    const line = tableDirection === "rtl" ? `${row} ${marker}` : `${marker} ${row}`;
     lines.push(plainAlignStructuredLine(line, layout.lineWidth, vm.tableAlign));
   }
 

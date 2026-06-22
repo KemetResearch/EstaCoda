@@ -1015,6 +1015,89 @@ describe("StandardRenderer — dark theme", () => {
     expect(lastMarkerColumn).toBe(firstMarkerColumn);
   });
 
+  it("renders Arabic setup-editor style RTL rows as physical cells without a row-level LTR isolate", () => {
+    const r = renderer("dark", noColorCaps());
+    const base = {
+      title: "محرّر الإعدادات",
+      bodyLines: ["اختار اللي تحب تضبطه:"],
+      showColumnHeaders: false,
+      tableDirection: "rtl" as const,
+      tableWidth: "content" as const,
+      tableMaxWidth: 88,
+      tableAlign: "right" as const,
+      columns: [
+        { key: "description", header: "التفاصيل", align: "right" as const },
+        { key: "name", header: "الاسم", align: "right" as const },
+      ],
+      options: [
+        {
+          id: "primary",
+          label: "النموذج الأساسي",
+          description: "النموذج الافتراضي الذي يستخدمه الوكيل.",
+        },
+        {
+          id: "fallback",
+          label: "النماذج الاحتياطية",
+          description: "نماذج احتياطية تُستخدم إذا فشل النموذج الأساسي.",
+        },
+        {
+          id: "auxiliary",
+          label: "النماذج المساعدة",
+          description: "نماذج تُستخدم للتقييم، والضغط، والاستدعاء، والذاكرة.",
+        },
+        {
+          id: "channels",
+          label: "القنوات",
+          description: `قنوات تحكم عن بُعد مثل ${isolateLtr("Telegram")} و${isolateLtr("WhatsApp")}.`,
+        },
+        {
+          id: "search",
+          label: "البحث",
+          description: `اضبط كيف تعثر ${isolateLtr("EstaCoda")} على نتائج الويب وتسترجعها.`,
+        },
+        {
+          id: "evolution",
+          label: isolateLtr("Agent Evolution"),
+          description: "مقترحات تحسين ذاتي قابلة للمراجعة.",
+        },
+        {
+          id: "exit",
+          label: "الخروج دون تغييرات",
+          description: "غادر الإعداد دون تعديل التكوين.",
+          group: "navigation" as const,
+        },
+      ],
+      locale: "ar" as const,
+      direction: "rtl" as const,
+    };
+    const renderedFor = (selectedOptionIndex: number) => stripAnsi(r.renderOnboardingPromptCard(buildOnboardingPromptCardViewModel({
+      ...base,
+      selectedOptionIndex,
+    })));
+    const markerLineFor = (selectedOptionIndex: number) =>
+      renderedFor(selectedOptionIndex).split("\n").find((line) => line.includes("◂")) ?? "";
+
+    const auxiliaryLine = markerLineFor(2);
+    expect(auxiliaryLine.trimStart().startsWith(LRI)).toBe(false);
+    expect(auxiliaryLine.trimStart().startsWith(RLI)).toBe(true);
+    expect(auxiliaryLine.indexOf("نماذج تُستخدم")).toBeLessThan(auxiliaryLine.indexOf("النماذج المساعدة"));
+    expect(stripTrailingBidiControls(auxiliaryLine.trimEnd()).endsWith("◂")).toBe(true);
+
+    const searchLine = markerLineFor(4);
+    expect(searchLine).toContain(isolateLtr("EstaCoda"));
+    expect(searchLine.indexOf("اضبط كيف")).toBeLessThan(searchLine.indexOf("البحث"));
+    expect(visibleMarkerColumn(searchLine, "◂")).toBe(visibleMarkerColumn(auxiliaryLine, "◂"));
+
+    const evolutionLine = markerLineFor(5);
+    expect(evolutionLine).toContain(isolateLtr("Agent Evolution"));
+    expect(evolutionLine.indexOf("مقترحات تحسين")).toBeLessThan(evolutionLine.indexOf("Agent Evolution"));
+    expect(visibleMarkerColumn(evolutionLine, "◂")).toBe(visibleMarkerColumn(auxiliaryLine, "◂"));
+
+    const channelLine = renderedFor(2).split("\n").find((line) => line.includes("Telegram"));
+    expect(channelLine).toContain(isolateLtr("Telegram"));
+    expect(channelLine).toContain(isolateLtr("WhatsApp"));
+  });
+
   it("keeps explicit RTL structured prompt-card rows bounded with no Unicode fallback", () => {
     const r = renderer("dark", { ...narrowCaps(), supportsUnicode: false });
     const plain = stripAnsi(r.renderOnboardingPromptCard(buildOnboardingPromptCardViewModel({
