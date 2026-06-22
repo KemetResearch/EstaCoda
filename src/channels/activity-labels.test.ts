@@ -5,10 +5,13 @@ describe("channel activity labels", () => {
   it("renders updated localized lifecycle labels", () => {
     expect(renderChannelProgressLabel({ kind: "agent-start", sessionId: "s1", input: "hello" }, "en")).toBe("◉ Thinking");
     expect(renderChannelProgressLabel({ kind: "agent-start", sessionId: "s1", input: "hello" }, "ar")).toBe("◉ جارٍ التفكير");
-    expect(renderChannelProgressLabel({ kind: "provider-attempt", provider: "openrouter", model: "k2", fallback: false }, "en")).toBe("✦ Routing provider · k2");
-    expect(renderChannelProgressLabel({ kind: "provider-attempt", provider: "openrouter", model: "k2", fallback: false }, "ar")).toBe("✦ توجيه النموذج · k2");
-    expect(renderChannelProgressLabel({ kind: "provider-attempt", provider: "openrouter", model: "deepseek-v4-pro", fallback: true }, "en")).toBe("✦ Routing fallback · deepseek-v4-pro");
-    expect(renderChannelProgressLabel({ kind: "provider-attempt", provider: "openrouter", model: "deepseek-v4-pro", fallback: true }, "ar")).toBe("✦ توجيه احتياطي · deepseek-v4-pro");
+    expect(renderChannelProgressLabel({ kind: "provider-attempt", provider: "openrouter", model: "k2", fallback: false }, "en")).toBe("");
+    expect(renderChannelProgressLabel({ kind: "provider-attempt", provider: "openrouter", model: "k2", fallback: false }, "ar")).toBe("");
+    expect(renderChannelProgressLabel({ kind: "provider-attempt", provider: "openrouter", model: "deepseek-v4-pro", fallback: true }, "en")).toBe("");
+    expect(renderChannelProgressLabel({ kind: "provider-serving-transition", transition: "fallback-active", provider: "openrouter", model: "deepseek-v4-pro" }, "en")).toBe("✦ Using fallback · deepseek-v4-pro");
+    expect(renderChannelProgressLabel({ kind: "provider-serving-transition", transition: "fallback-active", provider: "openrouter", model: "deepseek-v4-pro" }, "ar")).toBe("✦ استخدام النموذج الاحتياطي · deepseek-v4-pro");
+    expect(renderChannelProgressLabel({ kind: "provider-serving-transition", transition: "primary-recovered", provider: "openrouter", model: "k2" }, "en")).toBe("✦ Primary model available again · k2");
+    expect(renderChannelProgressLabel({ kind: "provider-serving-transition", transition: "primary-recovered", provider: "openrouter", model: "k2" }, "ar")).toBe("✦ النموذج الأساسي متاح مجددًا · k2");
   });
 
   it("renders tool starts with tool name and target summary", () => {

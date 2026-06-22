@@ -81,9 +81,9 @@ export function renderPlainProgressLabel(
     case "tool-start":
       return plainActivityLabel(locale, plainActivityKeyForTool(event.tool));
     case "provider-attempt":
-      return event.fallback
-        ? `${plainProviderRoutingLabel(locale, true)} · ${event.model}`
-        : `${plainProviderRoutingLabel(locale, false)} · ${event.model}`;
+      return "";
+    case "provider-serving-transition":
+      return `${plainProviderServingTransitionLabel(locale, event.transition)} · ${event.model}`;
     case "agent-final":
     case "provider-token":
       return "";
@@ -92,11 +92,18 @@ export function renderPlainProgressLabel(
   }
 }
 
-function plainProviderRoutingLabel(locale: ActivityLabelLocale, fallback: boolean): string {
+function plainProviderServingTransitionLabel(
+  locale: ActivityLabelLocale,
+  transition: Extract<RuntimeEvent, { kind: "provider-serving-transition" }>["transition"]
+): string {
   if (locale === "ar") {
-    return fallback ? "توجيه احتياطي" : "توجيه النموذج";
+    return transition === "fallback-active"
+      ? "استخدام النموذج الاحتياطي"
+      : "النموذج الأساسي متاح مجددًا";
   }
-  return fallback ? "Routing fallback" : "Routing provider";
+  return transition === "fallback-active"
+    ? "Using fallback"
+    : "Primary model available again";
 }
 
 export function plainActivityKeyForTool(tool: string): ActivityLabelKey {

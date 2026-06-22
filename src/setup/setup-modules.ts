@@ -104,6 +104,11 @@ export type SetupModuleContext = SetupDraftBundleOptions & {
     readonly sttModel?: string;
     readonly sttApiKeyEnv?: string;
     readonly sttApiKey?: string;
+    readonly credentialSurface?: "voice-tts" | "voice-stt";
+    readonly credentialEnvVars?: readonly string[];
+    readonly credentialReady?: boolean;
+    readonly credentialValuesIncluded?: boolean;
+    readonly credentialBlockers?: readonly string[];
   };
   readonly vision?: {
     readonly provider?: ImageGenerationProvider;
@@ -441,8 +446,31 @@ export const voiceSetupModule: SetupModule = optionalCapabilityModule({
     ...(context.voice?.sttProvider === undefined ? {} : { sttProvider: context.voice.sttProvider }),
     ...(context.voice?.sttModel === undefined ? {} : { sttModel: context.voice.sttModel }),
     ...optionalStringReviewValue("sttApiKeyEnv", context.voice?.sttApiKeyEnv),
+    credentialSurface: context.voice?.credentialSurface,
+    envVars: context.voice?.credentialEnvVars,
+    credentialReady: context.voice?.credentialReady,
+    credentialValuesIncluded: context.voice?.credentialValuesIncluded,
     secretValuesIncluded: false,
   }),
+  blockers: (context) => [
+    ...(context.voice?.credentialReady === false && (context.voice.credentialEnvVars?.length ?? 0) > 0
+      ? [`Voice setup requires ${context.voice.credentialEnvVars?.join(", ")} from the environment, profile secret store, or reviewed setup entry.`]
+      : []),
+    ...(context.voice?.credentialBlockers ?? []),
+  ],
+  extraDrafts: (context) => context.voice?.credentialSurface !== undefined &&
+    context.voice.credentialReady === true &&
+    (context.voice.credentialEnvVars?.length ?? 0) > 0
+    ? [
+        credentialDraft({
+          id: `setup-module.voice.${context.voice.credentialSurface}-credential`,
+          moduleId: "voice",
+          envVars: context.voice.credentialEnvVars ?? [],
+          credentialSurface: context.voice.credentialSurface,
+          configPath: context.configPath,
+        }),
+      ]
+    : [],
 });
 
 export const visionSetupModule: SetupModule = optionalCapabilityModule({
@@ -806,14 +834,17 @@ function credentialDraft(input: {
   readonly envVars: readonly string[];
   readonly configPath?: string;
   readonly blockers?: readonly string[];
-  readonly credentialSurface?: "browserbase" | "web-search-brave";
+  readonly credentialSurface?: "browserbase" | "web-search-brave" | "voice-tts" | "voice-stt";
 }): SetupDraft {
   return {
     id: input.id,
     kind: "credential-reference",
     source: moduleSource(input.moduleId, "configure-env-refs"),
     riskSurface: "credential-reference",
-    target: input.credentialSurface === "browserbase" || input.credentialSurface === "web-search-brave"
+    target: input.credentialSurface === "browserbase" ||
+      input.credentialSurface === "web-search-brave" ||
+      input.credentialSurface === "voice-tts" ||
+      input.credentialSurface === "voice-stt"
       ? { kind: "diagnostic-only" }
       : configTarget(["providers.*.apiKeyEnv"], input.configPath),
     review: review("setupModules.credentials.draft", {

@@ -25,11 +25,12 @@ If voice providers, local audio tooling, or live credentials are absent, core CL
 
 | Provider | Notes |
 |----------|-------|
-| OpenAI | Default. Uses shared OpenAI audio credential resolver. |
+| OpenAI | Hosted API-key TTS provider. Uses shared OpenAI audio credential resolver. |
 | ElevenLabs | Uses `xi-api-key` and provider text limits. |
 | MiniMax | Decodes base64 JSON audio responses. |
 | Gemini | Sends `speechConfig.voiceConfig.prebuiltVoiceConfig.voiceName`. |
 | xAI | Uses native `{baseUrl}/tts`; not OpenAI-compatible. |
+| Edge | Recommended/default guided setup option. No API key required; synthesis text is sent to Microsoft's Edge speech service, so this is networked and not local/offline TTS. Returns MP3 (`audio/mpeg`). |
 
 ### Hosted STT — stable
 
@@ -48,7 +49,7 @@ If voice providers, local audio tooling, or live credentials are absent, core CL
 
 ### Deferred or experimental
 
-- Local TTS providers — not implemented in v0.1.0.
+- Local/offline TTS providers `neutts` and `kittentts` — not implemented in v0.1.0.
 - Mistral TTS/STT — config shape may exist, but execution is unavailable.
 
 Do not configure deferred providers as production-ready.
@@ -94,7 +95,7 @@ Core fields:
 
 | Field | Meaning |
 |-------|---------|
-| `tts.provider` | Implemented hosted values: `openai`, `elevenlabs`, `minimax`, `gemini`, `xai`. |
+| `tts.provider` | Implemented values: `openai`, `elevenlabs`, `minimax`, `gemini`, `xai`, `edge`. |
 | `tts.enabled` | When `false`, TTS readiness fails even if credentials are present. |
 | `stt.provider` | Implemented values: `openai`, `groq`, `xai`, `local`. |
 | `stt.enabled` | When `false`, STT readiness fails before transcription side effects. |
@@ -102,9 +103,21 @@ Core fields:
 | `voice.autoTtsMaxCharsPerReply` | Optional per-reply cap checked before synthesis. |
 | `voice.autoTtsMaxCharsPerHourPerChat` | Optional hourly cap tracked per platform/chat. |
 
+### Guided setup
+
+The Setup Editor and Onboarding Wizard ask you to choose STT and TTS providers. They do not ask for model names or env-var reference names; runtime config defaults provide models, voices, and provider settings.
+
+For hosted Voice providers, setup collects the real API key through masked input. The review/apply step stores only env-var references in config and writes profile-local secret values to the selected profile `.env` after you confirm. Raw API keys are not stored in config, shown in review manifests, inserted into prompt context, logged, or returned in errors.
+
+No-key providers are STT `local` and TTS `edge`. Edge does not require an API key, but it still performs a network request to Microsoft's Edge speech service and sends the synthesis text to that service. Hosted key-required providers are STT `openai`, `groq`, and `xai`; and TTS `openai`, `elevenlabs`, `minimax`, `gemini`, and `xai`. Deferred providers are STT `mistral`; and TTS `mistral`, `neutts`, and `kittentts`.
+
+Setup can reuse existing credentials through env-var references such as `VOICE_TOOLS_OPENAI_KEY`, `OPENAI_API_KEY`, `GEMINI_API_KEY`, `GROQ_API_KEY`, and `XAI_API_KEY`, and through existing compatible provider config/routes where supported. Direct operator CLI flags such as `estacoda voice setup --tts-model`, `--stt-model`, `--tts-api-key-env`, `--stt-api-key-env`, `--tts-api-key`, and `--stt-api-key` remain available for explicit scripted setup.
+
 ### Credentials
 
-Voice credentials are direct environment variables only. There are no voice credential pools, gateway brokers, managed fallbacks, or non-env sources.
+Voice config stores direct environment-variable references only. There are no voice credential pools, gateway brokers, managed fallbacks, or non-env sources.
+
+Edge TTS does not use an API key. It still performs a network request to Microsoft's Edge speech service and sends the synthesis text to that service.
 
 OpenAI audio credential resolver order:
 
@@ -119,6 +132,7 @@ Provider-specific notes:
 - xAI TTS uses `voiceId`, `language`, `sampleRate`, `bitRate`, `baseUrl`, `apiKeyEnv`, and optional `speed`. It does not use `tts.xai.model`.
 - xAI STT uses `baseUrl`/`base_url`, `apiKeyEnv`/`api_key_env`, optional `language`, `format`, `diarize`, `keyterms`, `fillerWords`, and raw-audio hints. It does not use `stt.xai.model`.
 - Gemini TTS sends `speechConfig.voiceConfig.prebuiltVoiceConfig.voiceName`.
+- Edge TTS uses `tts.edge.voice`, optional `tts.edge.speed`, and provider-level `tts.speed` fallback. The default voice is `en-US-AriaNeural`.
 
 ## CLI push-to-talk
 
@@ -220,6 +234,8 @@ Gateway auto-TTS is opt-in and text-first:
 - Text delivery remains primary.
 - Auto-TTS is best-effort and fail-open to text.
 - Provider and delivery failures log safe warnings and leave text intact.
+- Telegram `/voice on` enables spoken replies only after incoming voice messages, `/voice all` speaks eligible text replies too, `/voice off` disables spoken replies, and `/voice status` reports the resolved mode.
+- With `/voice on`, an incoming Telegram voice message follows this path: Telegram voice message -> STT transcript -> agent text response -> configured TTS provider -> Telegram voice/audio reply.
 
 Auto-TTS skips:
 
@@ -235,7 +251,9 @@ Auto-TTS skips:
 - `voice.autoTtsMaxCharsPerHourPerChat` breaches
 - provider readiness failures
 
-Auto-TTS media is ephemeral. Generated files are written under selected profile temp audio space, delivered as artifact-shaped objects with `metadata.deliveryHint: "voice"` and `metadata.ephemeral: true`, and deleted in a best-effort `finally` block after delivery succeeds or fails.
+Auto-TTS media is ephemeral. Generated files are written under selected profile temp audio space, delivered as artifact-shaped objects with `metadata.deliveryHint: "voice"` and `metadata.ephemeral: true`, and deleted in a best-effort `finally` block after delivery succeeds or fails. They are not durable artifact history, prompt context, model-visible attachments, or normal long-term artifacts.
+
+Telegram tries to deliver auto-TTS as a native voice bubble. Edge returns MP3 (`audio/mpeg`), so voice-bubble delivery usually requires ffmpeg conversion to OGG/Opus. With ffmpeg, Telegram gets a native voice bubble; without ffmpeg, Telegram receives a normal audio file instead.
 
 Arbitrary model-emitted `MEDIA:/path` text is not an auto-TTS signal.
 

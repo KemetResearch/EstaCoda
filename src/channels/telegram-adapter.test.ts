@@ -1256,6 +1256,40 @@ describe("TelegramAdapter", () => {
     });
   });
 
+  it("delivery.sendProgress provider-attempt sends typing without visible progress", async () => {
+    const { adapter, calls } = createTelegramStreamingHarness();
+
+    await adapter.delivery.sendProgress!({ platform: "telegram", chatId: "123" }, {
+      kind: "provider-attempt",
+      provider: "openrouter",
+      model: "kimi-k2.6",
+      fallback: false
+    });
+
+    expect(callsFor(calls, "sendChatAction")).toHaveLength(1);
+    expect(callsFor(calls, "sendChatAction")[0]?.body).toMatchObject({
+      chat_id: "123",
+      action: "typing"
+    });
+    expect(callsFor(calls, "sendMessage")).toHaveLength(0);
+    expect(callsFor(calls, "editMessageText")).toHaveLength(0);
+  });
+
+  it("delivery.sendProgress provider-serving-transition creates visible progress", async () => {
+    const { adapter, calls } = createTelegramStreamingHarness();
+
+    await adapter.delivery.sendProgress!({ platform: "telegram", chatId: "123" }, {
+      kind: "provider-serving-transition",
+      transition: "fallback-active",
+      provider: "openrouter",
+      model: "deepseek-v4-pro"
+    });
+
+    expect(callsFor(calls, "sendChatAction")).toHaveLength(0);
+    expect(callsFor(calls, "sendMessage")).toHaveLength(1);
+    expect(callsFor(calls, "sendMessage")[0]?.body.text).toBe("✦ Using fallback · deepseek-v4-pro");
+  });
+
   it("delivery.startStreamingText segmentBreak rotates progress state for the chat", async () => {
     vi.useFakeTimers();
     const { adapter, calls } = createTelegramStreamingHarness();

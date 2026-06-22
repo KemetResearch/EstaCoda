@@ -80,6 +80,12 @@ export type RuntimeEvent =
       reasoningMetadata?: ProviderReasoningMetadata;
     }
   | {
+      kind: "provider-serving-transition";
+      transition: "fallback-active" | "primary-recovered";
+      provider: string;
+      model: string;
+    }
+  | {
       kind: "provider-budget-exhausted";
       budget: string;
       limit: number;

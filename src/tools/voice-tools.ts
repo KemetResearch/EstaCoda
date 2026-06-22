@@ -56,6 +56,10 @@ export function checkTtsProviderStatus(
     return { ready: false, reason: "TTS disabled" };
   }
 
+  if (provider === "edge") {
+    return { ready: true };
+  }
+
   const apiKeyEnv = ttsApiKeyEnv(provider, config);
   if (apiKeyEnv !== undefined) {
     if (provider === "openai") {
@@ -177,7 +181,7 @@ export function createVoiceTools(options: VoiceToolOptions): readonly Registered
         },
         required: ["text"]
       },
-      riskClass: tts.provider === "edge" || tts.provider === "neutts" || tts.provider === "kittentts"
+      riskClass: tts.provider === "neutts" || tts.provider === "kittentts"
         ? "workspace-write"
         : "external-side-effect",
       toolsets: ["media", "core"],

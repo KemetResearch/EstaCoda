@@ -847,6 +847,9 @@ function ensureCredentialReferenceCanApply(
   if (operation.review.values.credentialSurface === "web-search-brave") {
     return;
   }
+  if (operation.review.values.credentialSurface === "voice-tts" || operation.review.values.credentialSurface === "voice-stt") {
+    return;
+  }
   if (context.provider === undefined || context.model === undefined) {
     throw new Error("Credential reference apply requires provider/model context.");
   }

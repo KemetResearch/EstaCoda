@@ -2046,6 +2046,44 @@ describe("StandardRenderer — startup dashboard", () => {
     }
   });
 
+  it("centers Arabic startup dashboard rows when the title widens the frame", () => {
+    const r = new StandardRenderer({ tokens: resolveTokens("standard", "dark", "kemetBlue"), capabilities: fullCaps(), locale: "ar" });
+    const vm = buildStartupDashboardViewModel({
+      agentName: "EstaCoda",
+      taglines: [],
+      version: "v0.0.5-build-title-wide-enough-to-drive-the-frame-width",
+      sessionId: "session-title-wide",
+      model: { provider: "openrouter", id: "i" },
+      workspaceTrust: "trusted",
+      workspaceVerification: "verified",
+      securityMode: "open",
+      providerReadiness: "ready",
+      availableCommands: [{ name: "/x", description: "س" }],
+      warnings: [],
+    });
+    const lines = stripAnsi(r.renderStartupDashboard(vm)).split("\n");
+    const top = lines.find((line) => line.startsWith("╭"));
+    const modelLine = lines.find((line) => line.includes("النموذج"));
+    expect(top).toBeDefined();
+    expect(modelLine).toBeDefined();
+
+    const contentWidth = measureVisibleWidth(top ?? "") - 4;
+    const frameRows = lines.filter((line) => !line.startsWith("╭") && !line.startsWith("╰"));
+    const rawBlockWidth = Math.max(
+      0,
+      ...frameRows
+        .map((line) => line.trimStart())
+        .filter((line) => line.length > 0)
+        .map((line) => measureVisibleWidth(line))
+    );
+    expect(rawBlockWidth).toBeLessThan(contentWidth);
+
+    const modelTextWidth = measureVisibleWidth((modelLine ?? "").trimStart());
+    const blockOffset = Math.floor((contentWidth - rawBlockWidth) / 2);
+    const expectedLeadingSpaces = 2 + blockOffset + rawBlockWidth - modelTextWidth;
+    expect((modelLine ?? "").match(/^ */u)?.[0].length).toBe(expectedLeadingSpaces);
+  });
+
   it("keeps narrow Arabic startup dashboard stacked and bounded", () => {
     const r = new StandardRenderer({ tokens: resolveTokens("standard", "dark", "kemetBlue"), capabilities: narrowCaps(), locale: "ar" });
     const vm = buildStartupDashboardViewModel({
@@ -2541,7 +2579,7 @@ describe("StandardRenderer — prompt chrome rails", () => {
     expect(shortcuts).toContain("\u2066Ctrl+C\u2069");
   });
 
-  it("renders Arabic session status rail in RTL-friendly order", () => {
+  it("renders Arabic session status rail in English-like slot order", () => {
     const r = new StandardRenderer({ tokens: resolveTokens("standard", "dark", "kemetBlue"), capabilities: fullCaps(), locale: "ar" });
     const out = stripAnsi(r.render(buildSessionStatusRailViewModel({
       modelLabel: "kimi-k2.6",
@@ -2549,13 +2587,35 @@ describe("StandardRenderer — prompt chrome rails", () => {
       contextUsage: { filled: 0, total: 262000 },
       sessionElapsedMs: 251000,
     })));
+    const expected = isolateLtr(`𓂀  ${isolateLtr("kimi-k2.6")} | ${isolateRtl("السياق")} ${isolateLtr("0/262k")} | ▱ ▱ ▱ ▱ ▱ ▱ ▱ ▱ ▱ ▱ 0% | ${isolateLtr("◷ 4د 11ث")} | ${isolateRtl("خامل")}`);
 
-    expect(out).toContain(`خامل | ◷ 4m 11s | ▱ ▱ ▱ ▱ ▱ ▱ ▱ ▱ ▱ ▱ 0% | ${isolateLtr("0/262k")} السياق | ${isolateLtr("kimi-k2.6")}  𓂀`);
-    expect(out.indexOf("خامل")).toBeLessThan(out.indexOf("◷ 4m 11s"));
-    expect(out.indexOf("◷ 4m 11s")).toBeLessThan(out.indexOf(isolateLtr("0/262k")));
-    expect(out.indexOf(isolateLtr("0/262k"))).toBeLessThan(out.indexOf(isolateLtr("kimi-k2.6")));
+    expect(out).toContain(expected);
+    expect(out).not.toContain("4m 11s");
+    expect(out.indexOf(isolateLtr("kimi-k2.6"))).toBeLessThan(out.indexOf(isolateRtl("السياق")));
+    expect(out.indexOf(isolateRtl("السياق"))).toBeLessThan(out.indexOf("▱ ▱ ▱"));
+    expect(out.indexOf("▱ ▱ ▱")).toBeLessThan(out.indexOf(isolateLtr("◷ 4د 11ث")));
+    expect(out.indexOf(isolateLtr("◷ 4د 11ث"))).toBeLessThan(out.indexOf(isolateRtl("خامل")));
     expect(measureVisibleWidth(out)).toBeLessThanOrEqual(fullCaps().terminalWidth);
     expect(out.split("\n")).toHaveLength(1);
+    expectBalancedBidiIsolates(out);
+  });
+
+  it("renders Arabic active turn timer before the localized running state", () => {
+    const r = new StandardRenderer({ tokens: resolveTokens("standard", "dark", "kemetBlue"), capabilities: fullCaps(), locale: "ar" });
+    const out = stripAnsi(r.render(buildSessionStatusRailViewModel({
+      modelLabel: "kimi-k2.6",
+      turnState: "running",
+      sessionElapsedMs: 86_000,
+      currentTurnSeconds: 12,
+    })));
+
+    expect(out).toContain(isolateLtr(`𓂀  ${isolateLtr("kimi-k2.6")} | ${isolateLtr("◷ 1د 26ث")} | ${isolateLtr("⧖ 12ث")} | ${isolateRtl("شغال")}`));
+    expect(out).not.toContain("1m 26s");
+    expect(out).not.toContain("12s");
+    expect(out.indexOf(isolateLtr("◷ 1د 26ث"))).toBeLessThan(out.indexOf(isolateLtr("⧖ 12ث")));
+    expect(out.indexOf(isolateLtr("⧖ 12ث"))).toBeLessThan(out.indexOf(isolateRtl("شغال")));
+    expect(out.split("\n")).toHaveLength(1);
+    expectBalancedBidiIsolates(out);
   });
 
   it("wraps Arabic shortcut rail text while isolating command tokens", () => {

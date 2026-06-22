@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
@@ -63,8 +63,13 @@ function fakeOpenAiSpeechFetch(bytes = Buffer.from("audio")): VoiceFetchLike {
   });
 }
 
+afterEach(() => {
+  vi.doUnmock("@bestcodes/edge-tts");
+  vi.clearAllMocks();
+});
+
 describe("voice tool readiness", () => {
-  it("does not advertise edge TTS as available in Stage 1", async () => {
+  it("advertises edge TTS as available when enabled", async () => {
     const roots = await createRoots();
     const tts: LoadedRuntimeConfig["tts"] = { provider: "edge", speed: 1, enabled: true };
     const tools = createVoiceTools({
@@ -75,11 +80,21 @@ describe("voice tool readiness", () => {
     });
 
     const speak = tools.find((tool) => tool.name === "voice.speak");
-    expect(speak?.isAvailable()).toBe(false);
-    expect(checkTtsProviderStatus("edge", tts)).toEqual({
-      ready: false,
-      reason: "edge TTS is not implemented in v0.1.0 Stage 1"
+    expect(speak?.isAvailable()).toBe(true);
+    expect(checkTtsProviderStatus("edge", tts)).toEqual({ ready: true });
+  });
+
+  it("classifies edge TTS as an external side effect", async () => {
+    const roots = await createRoots();
+    const tools = createVoiceTools({
+      ...roots,
+      artifactStore: artifactStore(),
+      tts: { provider: "edge", speed: 1, enabled: true },
+      stt: { provider: "local", enabled: true, local: { command: "printf transcript" } }
     });
+
+    const speak = tools.find((tool) => tool.name === "voice.speak");
+    expect(speak?.riskClass).toBe("external-side-effect");
   });
 
   it("advertises OpenAI TTS only when a key is present", async () => {
@@ -254,6 +269,43 @@ describe("ephemeral auto-TTS helper", () => {
         expect(await readFile(result.artifact.localPath ?? result.artifact.path)).toEqual(Buffer.from("audio"));
       }
     });
+  });
+
+  it("creates an ephemeral voice delivery artifact with edge TTS", async () => {
+    vi.doMock("@bestcodes/edge-tts", () => ({
+      generateSpeech: vi.fn(async () => Buffer.from("edge-audio"))
+    }));
+
+    const roots = await createRoots();
+    const result = await synthesizeSpeechToEphemeralArtifact({
+      text: "hello",
+      tempRoot: roots.audioCacheRoot,
+      tts: {
+        provider: "edge",
+        enabled: true,
+        speed: 1,
+        edge: { voice: "en-US-AriaNeural" }
+      },
+      id: () => "edge-auto-1"
+    });
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.artifact).toMatchObject({
+        id: "auto-tts-edge-auto-1",
+        kind: "audio",
+        mimeType: "audio/mpeg",
+        metadata: {
+          provider: "edge",
+          model: "edge",
+          voice: "en-US-AriaNeural",
+          format: "audio/mpeg",
+          deliveryHint: "voice",
+          ephemeral: true
+        }
+      });
+      expect(await readFile(result.artifact.localPath ?? result.artifact.path)).toEqual(Buffer.from("edge-audio"));
+    }
   });
 });
 

@@ -379,18 +379,30 @@ describe("setup modules", () => {
   });
 
   it("voice module does not print hosted secrets", () => {
-    const draft = voiceSetupModule.toDrafts(context({
+    const drafts = voiceSetupModule.toDrafts(context({
       voice: {
         ttsProvider: "openai",
-        ttsModel: "gpt-4o-mini-tts",
         ttsApiKeyEnv: "OPENAI_API_KEY",
         ttsApiKey: "sk-voice-do-not-render",
+        credentialSurface: "voice-tts",
+        credentialEnvVars: ["OPENAI_API_KEY"],
+        credentialReady: true,
+        credentialValuesIncluded: false,
       },
-    }))[0];
+    }));
+    const draft = drafts[0];
+    const credentialDraft = drafts[1];
     const json = JSON.stringify(draft);
 
     expect(draft?.review.values.ttsApiKeyEnv).toBe("OPENAI_API_KEY");
     expect(draft?.review.values.secretValuesIncluded).toBe(false);
+    expect(credentialDraft?.kind).toBe("credential-reference");
+    expect(credentialDraft?.target.kind).toBe("diagnostic-only");
+    expect(credentialDraft?.review.values).toMatchObject({
+      credentialSurface: "voice-tts",
+      envVars: ["OPENAI_API_KEY"],
+      credentialValuesIncluded: false,
+    });
     expect(json).not.toContain("sk-voice-do-not-render");
   });
 
@@ -398,14 +410,12 @@ describe("setup modules", () => {
     const sttDraft = voiceSetupModule.toDrafts(context({
       voice: {
         sttProvider: "openai",
-        sttModel: "gpt-4o-mini-transcribe",
         sttApiKeyEnv: "OPENAI_API_KEY",
       },
     }))[0];
     const ttsDraft = voiceSetupModule.toDrafts(context({
       voice: {
         ttsProvider: "openai",
-        ttsModel: "gpt-4o-mini-tts",
         ttsApiKeyEnv: "OPENAI_API_KEY",
       },
     }))[0];
@@ -419,14 +429,12 @@ describe("setup modules", () => {
 
     expect(sttDraft?.review.values).toMatchObject({
       sttProvider: "openai",
-      sttModel: "gpt-4o-mini-transcribe",
       sttApiKeyEnv: "OPENAI_API_KEY",
       secretValuesIncluded: false,
     });
     expect(sttDraft?.review.values).not.toHaveProperty("ttsProvider");
     expect(ttsDraft?.review.values).toMatchObject({
       ttsProvider: "openai",
-      ttsModel: "gpt-4o-mini-tts",
       ttsApiKeyEnv: "OPENAI_API_KEY",
       secretValuesIncluded: false,
     });

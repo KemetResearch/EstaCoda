@@ -95,6 +95,7 @@ const FIRST_RUN_KEYS = [
   "onboarding.summary.labels.agentEvolution",
   "onboarding.summary.labels.optionalCapabilities",
   "onboarding.summary.labels.channelsTelegram",
+  "onboarding.summary.labels.channelsDiscord",
   "onboarding.summary.labels.channelsWhatsApp",
   "onboarding.summary.labels.voiceStt",
   "onboarding.summary.labels.voiceTts",
@@ -319,11 +320,29 @@ const SETUP_EDITOR_KEYS = [
   "setupEditor.prompt.voice.mode.tts.description",
   "setupEditor.prompt.voice.summary",
   "setupEditor.prompt.voice.ttsProvider",
+  "setupEditor.prompt.voice.ttsProvider.body",
+  "setupEditor.prompt.voice.ttsProvider.edge.description",
+  "setupEditor.prompt.voice.ttsProvider.elevenlabs.description",
+  "setupEditor.prompt.voice.ttsProvider.openai.description",
+  "setupEditor.prompt.voice.ttsProvider.minimax.description",
+  "setupEditor.prompt.voice.ttsProvider.mistral.description",
+  "setupEditor.prompt.voice.ttsProvider.gemini.description",
+  "setupEditor.prompt.voice.ttsProvider.xai.description",
+  "setupEditor.prompt.voice.ttsProvider.neutts.description",
+  "setupEditor.prompt.voice.ttsProvider.kittentts.description",
   "setupEditor.prompt.voice.ttsModel",
   "setupEditor.prompt.voice.ttsApiKeyEnv",
+  "setupEditor.prompt.voice.ttsSecretValue",
   "setupEditor.prompt.voice.sttProvider",
+  "setupEditor.prompt.voice.sttProvider.body",
+  "setupEditor.prompt.voice.sttProvider.local.description",
+  "setupEditor.prompt.voice.sttProvider.groq.description",
+  "setupEditor.prompt.voice.sttProvider.openai.description",
+  "setupEditor.prompt.voice.sttProvider.mistral.description",
+  "setupEditor.prompt.voice.sttProvider.xai.description",
   "setupEditor.prompt.voice.sttModel",
   "setupEditor.prompt.voice.sttApiKeyEnv",
+  "setupEditor.prompt.voice.sttSecretValue",
   "setupEditor.prompt.vision.summary",
   "setupEditor.prompt.vision.provider",
   "setupEditor.prompt.vision.model",
@@ -690,6 +709,11 @@ describe("setup copy", () => {
     expect(resolveSetupCopy("ar", "setupEditor.prompt.voice.mode.stt")).toBe(`Speech to Text (${isolateLtr("STT")})`);
     expect(resolveSetupCopy("ar", "setupEditor.prompt.voice.mode.tts")).toBe(`Text to Speech (${isolateLtr("TTS")})`);
     expect(resolveSetupCopy("ar", "setupEditor.prompt.voice.ttsProvider")).toContain(isolateLtr("TTS"));
+    expect(resolveSetupCopy("ar", "setupEditor.prompt.voice.ttsProvider.body")).toBe(`اختر مزوّد ${isolateLtr("TTS")}:`);
+    expect(resolveSetupCopy("ar", "setupEditor.prompt.voice.ttsProvider.edge.description")).toContain(isolateLtr("Microsoft"));
+    expect(resolveSetupCopy("ar", "setupEditor.prompt.voice.ttsProvider.edge.description")).toContain(isolateLtr("API"));
+    expect(resolveSetupCopy("ar", "setupEditor.prompt.voice.ttsProvider.mistral.description")).toContain(isolateLtr("TTS"));
+    expect(resolveSetupCopy("ar", "setupEditor.prompt.voice.sttProvider.body")).toBe(`اختر مزوّد ${isolateLtr("STT")}:`);
     expect(resolveSetupCopy("ar", "setupEditor.prompt.voice.summary")).toContain(isolateLtr("faster-whisper"));
     expect(resolveSetupCopy("ar", "setupEditor.prompt.voice.summary")).toContain(isolateLtr("pythonBinary"));
     expect(resolveSetupCopy("ar", "setupEditor.prompt.voice.summary")).toContain(isolateLtr("~/.estacoda/python-env"));
@@ -731,8 +755,12 @@ describe("setup copy", () => {
   });
 
   it("resolves sparse model description overrides by provider and model id", () => {
-    expect(modelDescriptionOverride("en", "openai", "gpt-5-mini")).toBe("Cost-conscious choice for auxiliary tasks.");
-    expect(modelDescriptionOverride("ar", "openai", "gpt-5-mini")).toBe("خيار منخفض التكلفة للمهام المساعدة.");
+    expect(modelDescriptionOverride("en", "openai", "gpt-5-mini")).toBe("Recommended auxiliary model.");
+    expect(modelDescriptionOverride("ar", "openai", "gpt-5-mini")).toBe("نموذج مساعد موصى به.");
+    expect(modelDescriptionOverride("en", "deepseek", "deepseek-v4-flash")).toBe("Recommended auxiliary model.");
+    expect(modelDescriptionOverride("ar", "deepseek", "deepseek-v4-flash")).toBe("نموذج مساعد موصى به.");
+    expect(modelDescriptionOverride("en", "google", "gemini-3-flash-preview")).toBe("Recommended auxiliary model.");
+    expect(modelDescriptionOverride("ar", "google", "gemini-3-flash-preview")).toBe("نموذج مساعد موصى به.");
     expect(modelDescriptionOverride("en", "google", "gpt-5-mini")).toBeUndefined();
     expect(modelDescriptionOverride("en", "openai", "unknown-model")).toBeUndefined();
   });
@@ -968,6 +996,8 @@ describe("setup copy", () => {
     expect(rawSetupCopy("en", "setupEditor.prompt.webSearch.provider.brave.description")).toBe("Use the Brave Search API with an API key");
     expect(rawSetupCopy("en", "setupEditor.prompt.webSearch.provider.ddgs.description")).toBe("Use DuckDuckGo (free). Setup requires installing the registered DDGS capability via Python review.");
     expect(rawSetupCopy("en", "setupEditor.prompt.webSearch.brave.secretValue")).toBe("Enter Brave Search API key:");
+    expect(rawSetupCopy("en", "setupEditor.prompt.voice.ttsSecretValue")).toBe("Enter TTS provider API key for {envVar}:");
+    expect(rawSetupCopy("en", "setupEditor.prompt.voice.sttSecretValue")).toBe("Enter STT provider API key for {envVar}:");
 
     expect(rawSetupCopy("ar", "setupEditor.shell.title")).toBe("محرّر الإعدادات");
     expect(rawSetupCopy("ar", "setupEditor.prompt.action.body")).toBe("اختار اللي تحب تضبطه:");
@@ -976,6 +1006,8 @@ describe("setup copy", () => {
     expect(rawSetupCopy("ar", "setupEditor.prompt.webSearch.provider.brave.description")).toBe("استخدم Brave Search API مع مفتاح API.");
     expect(rawSetupCopy("ar", "setupEditor.prompt.webSearch.provider.ddgs.description")).toBe("استخدم DuckDuckGo مجانًا. يتطلب الإعداد تثبيت قدرة DDGS المسجلة عبر مراجعة Python.");
     expect(rawSetupCopy("ar", "setupEditor.prompt.webSearch.brave.secretValue")).toBe("أدخل مفتاح API لـ Brave Search:");
+    expect(rawSetupCopy("ar", "setupEditor.prompt.voice.ttsSecretValue")).toBe("أدخل مفتاح API لمزوّد TTS لـ {envVar}:");
+    expect(rawSetupCopy("ar", "setupEditor.prompt.voice.sttSecretValue")).toBe("أدخل مفتاح API لمزوّد STT لـ {envVar}:");
     expect(rawSetupCopy("ar", "setupEditor.actions.editPrimaryModelRoute")).toBe("النموذج الأساسي");
     expect(rawSetupCopy("ar", "setupEditor.actions.editPrimaryModelRoute.description")).toBe("النموذج الافتراضي الذي يستخدمه الوكيل.");
     expect(rawSetupCopy("ar", "setupEditor.actions.editFallbackModelRoute")).toBe("النماذج الاحتياطية");
@@ -1010,6 +1042,8 @@ describe("setup copy", () => {
     expect(resolveSetupCopy("ar", "setupEditor.prompt.webSearch.provider.ddgs.description")).toContain(isolateLtr("DDGS"));
     expect(resolveSetupCopy("ar", "setupEditor.prompt.webSearch.provider.ddgs.description")).toContain(isolateLtr("Python"));
     expect(resolveSetupCopy("ar", "setupEditor.prompt.webSearch.brave.secretValue")).toContain(isolateLtr("Brave Search"));
+    expect(resolveSetupCopy("ar", "setupEditor.prompt.voice.ttsSecretValue")).toContain(isolateLtr("{envVar}"));
+    expect(resolveSetupCopy("ar", "setupEditor.prompt.voice.sttSecretValue")).toContain(isolateLtr("{envVar}"));
     expect(rawSetupCopy("ar", "setupEditor.prompt.auxiliaryRoute.assessor.description")).toContain("assessor");
     expect(rawSetupCopy("ar", "setupEditor.prompt.auxiliaryRoute.compression.description")).toContain("compression");
     expect(rawSetupCopy("ar", "setupEditor.prompt.auxiliaryRoute.sessionSearch.description")).toContain("session_search");

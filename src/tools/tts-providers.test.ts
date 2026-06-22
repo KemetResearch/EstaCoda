@@ -1,7 +1,9 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import type { VoiceFetchLike } from "./voice-tools.js";
 import {
+  edgeRateForSpeed,
   fetchVoiceProviderWithRetry,
+  getTtsTextCap,
   synthesizeSpeech
 } from "./tts-providers.js";
 
@@ -67,6 +69,11 @@ function captureFetch(result: Awaited<ReturnType<VoiceFetchLike>>): { fetch: Voi
     }
   };
 }
+
+afterEach(() => {
+  vi.doUnmock("@bestcodes/edge-tts");
+  vi.clearAllMocks();
+});
 
 describe("hosted TTS provider dispatch", () => {
   it("resolves OpenAI audio keys from configured env before voice and OpenAI fallbacks", async () => {
@@ -284,6 +291,82 @@ describe("hosted TTS provider dispatch", () => {
     });
   });
 
+  it("dispatches Edge synthesis through the lazy-loaded edge package", async () => {
+    const generateSpeech = vi.fn(async () => Buffer.from("edge-audio"));
+    vi.doMock("@bestcodes/edge-tts", () => ({ generateSpeech }));
+
+    const result = await synthesizeSpeech({
+      text: "hello",
+      tts: {
+        provider: "edge",
+        enabled: true,
+        speed: 1.25,
+        edge: { voice: "en-US-AriaNeural" }
+      }
+    });
+
+    expect(result.ok).toBe(true);
+    expect(result.ok && result.bytes.toString()).toBe("edge-audio");
+    expect(result.ok && result.mimeType).toBe("audio/mpeg");
+    expect(result.ok && result.model).toBe("edge");
+    expect(result.ok && result.voice).toBe("en-US-AriaNeural");
+    expect(generateSpeech).toHaveBeenCalledWith({
+      text: "hello",
+      voice: "en-US-AriaNeural",
+      rate: "+25%"
+    });
+  });
+
+  it("returns structured Edge synthesis failures", async () => {
+    vi.doMock("@bestcodes/edge-tts", () => ({
+      generateSpeech: vi.fn(async () => {
+        throw new Error("service unavailable");
+      })
+    }));
+
+    const result = await synthesizeSpeech({
+      text: "hello",
+      tts: {
+        provider: "edge",
+        enabled: true,
+        speed: 1,
+        edge: { voice: "en-US-AriaNeural" }
+      }
+    });
+
+    expect(result).toMatchObject({
+      ok: false,
+      content: "Edge TTS synthesis failed: service unavailable",
+      metadata: { provider: "edge", reason: "synthesis-error" }
+    });
+  });
+
+  it("returns a structured failure when the Edge package cannot be loaded", async () => {
+    vi.doMock("@bestcodes/edge-tts", () => {
+      throw new Error("mock import failure");
+    });
+
+    const result = await synthesizeSpeech({
+      text: "hello",
+      tts: {
+        provider: "edge",
+        enabled: true,
+        speed: 1,
+        edge: { voice: "en-US-AriaNeural" }
+      }
+    });
+
+    expect(result).toMatchObject({
+      ok: false,
+      content: "Edge TTS library not available. Install dependencies and retry.",
+      metadata: { provider: "edge", reason: "missing-dependency" }
+    });
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(String(result.metadata?.error)).toContain("mock");
+    }
+  });
+
   it("fails structurally when a TTS provider returns empty audio", async () => {
     await withEnv({ VOICE_TOOLS_OPENAI_KEY: "openai-key", OPENAI_API_KEY: undefined }, async () => {
       const result = await synthesizeSpeech({
@@ -343,6 +426,21 @@ describe("hosted TTS provider dispatch", () => {
         expect(result.content.length).toBeLessThan(340);
       }
     });
+  });
+});
+
+describe("Edge TTS helpers", () => {
+  it("formats Edge rate strings with explicit signs", () => {
+    expect(edgeRateForSpeed(1)).toBe("+0%");
+    expect(edgeRateForSpeed(1.25)).toBe("+25%");
+    expect(edgeRateForSpeed(0.8)).toBe("-20%");
+  });
+
+  it("uses a 5000 character text cap for Edge", () => {
+    expect(getTtsTextCap({
+      provider: "edge",
+      tts: { provider: "edge", enabled: true, speed: 1 }
+    })).toBe(5000);
   });
 });
 

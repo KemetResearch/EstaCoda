@@ -77,6 +77,8 @@ describe("runConfigEditor", () => {
     delete process.env.BROWSERBASE_API_KEY;
     delete process.env.BROWSERBASE_PROJECT_ID;
     delete process.env.BRAVE_SEARCH_API_KEY;
+    delete process.env.VOICE_TOOLS_OPENAI_KEY;
+    delete process.env.OPENAI_API_KEY;
     await chmod(join(tempDir, ".estacoda"), 0o700).catch(() => undefined);
     await rm(tempDir, { recursive: true, force: true });
   });
@@ -259,10 +261,7 @@ describe("runConfigEditor", () => {
         "compression",
         "tts",
         "openai",
-        "",
-        "",
         "local",
-        "small",
         "fal",
         "",
         "",
@@ -315,7 +314,6 @@ describe("runConfigEditor", () => {
     expect(voiceMode).toBe("tts");
     expect(tts.ttsProvider).toBe("openai");
     expect(stt.sttProvider).toBe("local");
-    expect(stt.sttModel).toBe("small");
     expect(vision.provider).toBe("fal");
     expect(vision.useGateway).toBe(false);
     expect(browser.backend).toBe("unconfigured");
@@ -334,7 +332,6 @@ describe("runConfigEditor", () => {
       "Configure voice",
       "Voice",
       "Voice",
-      "Configure STT",
       "Vision and Image Generation",
       "Browser configuration",
       "Voice",
@@ -560,13 +557,9 @@ describe("runConfigEditor", () => {
     });
     await promptTtsCapability(prompt, {
       ttsProvider: "openai",
-      ttsModel: "gpt-4o-mini-tts",
-      ttsApiKeyEnv: "SHOULD_NOT_APPEAR",
     });
     await promptSttCapability(prompt, {
       sttProvider: "local",
-      sttModel: "small",
-      sttApiKeyEnv: "SHOULD_NOT_APPEAR",
     });
     await promptVisionCapability(prompt, {
       provider: "byteplus",
@@ -583,7 +576,6 @@ describe("runConfigEditor", () => {
 
     const searchInput = selectInputs.find((input) => input.title === "Search provider");
     const voiceInputs = selectInputs.filter((input) => input.title === "Voice");
-    const localSttInput = selectInputs.find((input) => input.title === "Configure STT");
     const visionInput = selectInputs.find((input) => input.title === "Vision and Image Generation");
     const browserInput = selectInputs.find((input) => input.title === "Browser configuration");
     const allStatusText = selectInputs.flatMap((input) => input.statusLines ?? []).map((line) => line.text).join("\n");
@@ -591,13 +583,10 @@ describe("runConfigEditor", () => {
     expect(searchInput?.statusLines).toEqual([{ text: "Current: Brave Search", tone: "active", direction: "ltr" }]);
     expect(searchInput?.defaultIndex).toBe(0);
     expect(searchInput?.options.find((option) => option.id === "web-search-brave")?.current).toBe(true);
-    expect(voiceInputs[0]?.statusLines).toEqual([{ text: "Current: openai/gpt-4o-mini-tts", tone: "active", direction: "ltr" }]);
+    expect(voiceInputs[0]?.statusLines).toEqual([{ text: "Current: openai", tone: "active", direction: "ltr" }]);
     expect(voiceInputs[0]?.options.find((option) => option.id === "tts-openai")?.current).toBe(true);
-    expect(voiceInputs[1]?.statusLines).toEqual([{ text: "Current: local/small", tone: "active", direction: "ltr" }]);
+    expect(voiceInputs[1]?.statusLines).toEqual([{ text: "Current: local", tone: "active", direction: "ltr" }]);
     expect(voiceInputs[1]?.options.find((option) => option.id === "stt-local")?.current).toBe(true);
-    expect(localSttInput?.statusLines).toEqual([{ text: "Current: Small", tone: "active", direction: "ltr" }]);
-    expect(localSttInput?.defaultIndex).toBe(1);
-    expect(localSttInput?.options.find((option) => option.id === "local-stt-model-small")?.current).toBe(true);
     expect(visionInput?.statusLines).toEqual([{ text: "Current: byteplus/seedream-4", tone: "active", direction: "ltr" }]);
     expect(visionInput?.options.find((option) => option.id === "byteplus")?.current).toBe(true);
     expect(browserInput?.statusLines).toEqual([{ text: "Current: Recommended browser setup", tone: "active", direction: "ltr" }]);
@@ -1243,7 +1232,7 @@ describe("runConfigEditor", () => {
     ]);
   });
 
-  it("returns from local STT model Back to STT provider and then voice mode", async () => {
+  it("returns from STT provider Back to voice mode", async () => {
     await writeUserConfig(tempDir, localReadyConfig());
     await trustWorkspace(tempDir, workspaceRoot);
     const promptTitles: string[] = [];
@@ -1251,8 +1240,6 @@ describe("runConfigEditor", () => {
       values: [
         "Speech to Text (STT)",
         "Configure",
-        "Local (via faster-whisper)",
-        "Back",
         "Back",
         "Back",
         "exit",
@@ -1280,8 +1267,6 @@ describe("runConfigEditor", () => {
     expect(promptTitles).toEqual([
       "Configure voice",
       "Voice",
-      "Voice",
-      "Configure STT",
       "Voice",
       "Configure voice",
       "Setup editor",
@@ -3132,7 +3117,8 @@ describe("runConfigEditor", () => {
       },
       {
         actionId: "configure-voice" as const,
-        values: ["stt", "enable", "openai", "gpt-4o-mini-transcribe", "VOICE_STT_KEY", true],
+        values: ["stt", "enable", "openai", true],
+        secret: "voice-stt-secret",
       },
       {
         actionId: "configure-browser" as const,
@@ -3302,28 +3288,48 @@ describe("runConfigEditor", () => {
     await writeUserConfig(tempDir, {
       ...localReadyConfig(),
       stt: {
-        provider: "local",
-        local: {
-          engine: "command",
-          command: "existing-stt-command",
+        provider: "openai",
+        openai: {
+          apiKeyEnv: "VOICE_TOOLS_OPENAI_KEY",
         },
       },
     });
     await trustWorkspace(tempDir, workspaceRoot);
+    const selectCalls: Array<{
+      title: string;
+      body: string;
+      columns?: unknown;
+      labels: string[];
+      descriptions: Array<string | undefined>;
+      values: unknown[];
+    }> = [];
+    const prompt = fakePrompt({
+      values: [
+        "tts",
+        "enable",
+        "openai",
+        true,
+        "exit",
+      ],
+      secret: "voice-tts-secret",
+    });
+    const baseSelect = prompt.select!;
+    prompt.select = async (input) => {
+      selectCalls.push({
+        title: input.title,
+        body: input.body ?? "",
+        columns: input.columns,
+        labels: input.options.map((option) => option.label),
+        descriptions: input.options.map((option) => option.description),
+        values: input.options.map((option) => option.value),
+      });
+      return baseSelect(input);
+    };
 
     const result = await runConfigEditor({
       homeDir: tempDir,
       workspaceRoot,
-      prompt: fakePrompt({
-        values: [
-          "tts",
-          "enable",
-          "openai",
-          "gpt-4o-mini-tts",
-          "VOICE_TTS_KEY",
-          true,
-        ],
-      }),
+      prompt,
       defaultActionId: "configure-voice",
       applyExecutor: createReviewedSetupApplyExecutor({
         homeDir: tempDir,
@@ -3338,33 +3344,80 @@ describe("runConfigEditor", () => {
       imageGen?: unknown;
       browser?: unknown;
     };
+    const ttsProviderPrompt = selectCalls.find((call) => call.body.includes("Choose your TTS provider:"));
+    const voiceCredentialLine = result.reviewManifest?.sections["secret-refs-to-store"]
+      .find((line) => line.sourceDraftIds.includes("setup-module.voice.voice-tts-credential"));
 
     expect(result.completed).toBe(true);
     expect(result.selectedActionId).toBe("configure-voice");
     expect(result.reviewManifest?.sections["enabled-optional-capabilities"][0]?.review.values).toMatchObject({
       ttsProvider: "openai",
-      ttsModel: "gpt-4o-mini-tts",
-      ttsApiKeyEnv: "VOICE_TTS_KEY",
+      ttsApiKeyEnv: "VOICE_TOOLS_OPENAI_KEY",
       secretValuesIncluded: false,
     });
     expect(result.reviewManifest?.sections["enabled-optional-capabilities"][0]?.review.values).not.toHaveProperty("sttProvider");
     expect(result.reviewManifest?.sections["enabled-optional-capabilities"].map((line) => line.sourceDraftIds[0])).toEqual([
       "setup-module.voice.capability",
     ]);
+    expect(voiceCredentialLine?.review.values).toMatchObject({
+      credentialSurface: "voice-tts",
+      envVars: ["VOICE_TOOLS_OPENAI_KEY"],
+      credentialValuesIncluded: false,
+    });
     expect(config.tts?.provider).toBe("openai");
-    expect(config.tts?.openai?.apiKeyEnv).toBe("VOICE_TTS_KEY");
+    expect(config.tts?.openai?.apiKeyEnv).toBe("VOICE_TOOLS_OPENAI_KEY");
     expect(config.stt).toEqual({
-      provider: "local",
-      local: {
-        engine: "command",
-        command: "existing-stt-command",
+      provider: "openai",
+      openai: {
+        apiKeyEnv: "VOICE_TOOLS_OPENAI_KEY",
       },
     });
     expect(config.channels).toBeUndefined();
     expect(config.imageGen).toBeUndefined();
     expect(config.browser).toBeUndefined();
+    expect(ttsProviderPrompt?.body).toBe("Choose your TTS provider:");
+    expect(ttsProviderPrompt?.columns).toEqual([
+      { key: "name", header: "Name", align: "left" },
+      { key: "description", header: "Details", align: "left" },
+    ]);
+    expect(ttsProviderPrompt?.labels).toEqual([
+      "Edge",
+      "ElevenLabs",
+      "OpenAI",
+      "Minimax",
+      "Mistral",
+      "Gemini",
+      "Xai",
+      "Neutts",
+      "Kittentts",
+      "Back",
+    ]);
+    expect(ttsProviderPrompt?.descriptions).toEqual([
+      "via Microsoft. No API key required. Recommended.",
+      "ElevenLabs voice synthesis. Requires API key.",
+      "OpenAI speech models. Requires API key.",
+      "Minimax speech synthesis. Requires API key.",
+      "Mistral Voxtral TTS. Not enabled yet.",
+      "Gemini speech synthesis. Requires API key.",
+      "xAI speech synthesis. Requires API key.",
+      "Local NeuTTS. No API key required. Not enabled yet.",
+      "Local KittenTTS. No API key required. Not enabled yet.",
+      "Return to the previous step.",
+    ]);
+    expect(ttsProviderPrompt?.values.slice(0, 9)).toEqual([
+      "edge",
+      "elevenlabs",
+      "openai",
+      "minimax",
+      "mistral",
+      "gemini",
+      "xai",
+      "neutts",
+      "kittentts",
+    ]);
     expect(rawConfig).not.toContain("sk-");
     expect(JSON.stringify(result)).not.toContain("sk-");
+    await expect(readFile(profileEnvPath(tempDir), "utf8")).resolves.toContain("VOICE_TOOLS_OPENAI_KEY");
   });
 
   it("configures STT voice without drafting or writing TTS", async () => {
@@ -3379,10 +3432,9 @@ describe("runConfigEditor", () => {
           "stt",
           "enable",
           "openai",
-          "gpt-4o-mini-transcribe",
-          "VOICE_STT_KEY",
           true,
         ],
+        secret: "voice-stt-secret",
       }),
       defaultActionId: "configure-voice",
       applyExecutor: createReviewedSetupApplyExecutor({
@@ -3400,25 +3452,26 @@ describe("runConfigEditor", () => {
     expect(result.selectedActionId).toBe("configure-voice");
     expect(result.reviewManifest?.sections["enabled-optional-capabilities"][0]?.review.values).toMatchObject({
       sttProvider: "openai",
-      sttModel: "gpt-4o-mini-transcribe",
-      sttApiKeyEnv: "VOICE_STT_KEY",
+      sttApiKeyEnv: "VOICE_TOOLS_OPENAI_KEY",
       secretValuesIncluded: false,
     });
     expect(result.reviewManifest?.sections["enabled-optional-capabilities"][0]?.review.values).not.toHaveProperty("ttsProvider");
     expect(config.tts).toBeUndefined();
     expect(config.stt?.provider).toBe("openai");
-    expect(config.stt?.openai?.apiKeyEnv).toBe("VOICE_STT_KEY");
+    expect(config.stt?.openai?.apiKeyEnv).toBe("VOICE_TOOLS_OPENAI_KEY");
     expect(rawConfig).not.toContain("sk-");
     expect(JSON.stringify(result)).not.toContain("sk-");
+    await expect(readFile(profileEnvPath(tempDir), "utf8")).resolves.toContain("VOICE_TOOLS_OPENAI_KEY");
   });
 
-  it("configures local faster-whisper STT with prompt-card model choices", async () => {
+  it("configures local faster-whisper STT with runtime default model", async () => {
     await writeUserConfig(tempDir, localReadyConfig());
     await trustWorkspace(tempDir, workspaceRoot);
     mockManagedPythonEnvironment(tempDir);
     const selectCalls: Array<{
       title: string;
       body: string;
+      columns?: unknown;
       labels: string[];
       descriptions: Array<string | undefined>;
       values: unknown[];
@@ -3428,7 +3481,6 @@ describe("runConfigEditor", () => {
         "stt",
         "enable",
         "local",
-        "base",
         true,
       ],
     });
@@ -3437,6 +3489,7 @@ describe("runConfigEditor", () => {
       selectCalls.push({
         title: input.title,
         body: input.body ?? "",
+        columns: input.columns,
         labels: input.options.map((option) => option.label),
         descriptions: input.options.map((option) => option.description),
         values: input.options.map((option) => option.value),
@@ -3470,14 +3523,13 @@ describe("runConfigEditor", () => {
         };
       };
     };
-    const sttProviderPrompt = selectCalls.find((call) => call.body.includes("STT provider"));
+    const sttProviderPrompt = selectCalls.find((call) => call.body.includes("Choose your STT provider:"));
     const localModelPrompt = selectCalls.find((call) => call.body.includes("Pick the faster-whisper STT model"));
 
     expect(result.completed).toBe(true);
     expect(result.selectedActionId).toBe("configure-voice");
     expect(result.reviewManifest?.sections["enabled-optional-capabilities"][0]?.review.values).toMatchObject({
       sttProvider: "local",
-      sttModel: "base",
       secretValuesIncluded: false,
     });
     expect(result.reviewManifest?.sections["enabled-optional-capabilities"][0]?.review.values).not.toHaveProperty("ttsProvider");
@@ -3496,76 +3548,23 @@ describe("runConfigEditor", () => {
     });
     expect(sttProviderPrompt?.labels).toContain("Local (via faster-whisper)");
     expect(sttProviderPrompt?.values).toContain("local");
-    expect(localModelPrompt?.title).toBe("Configure STT");
-    expect(localModelPrompt?.labels).toEqual([
-      "Base (recommended for everyday use)",
-      "Small",
-      "Medium",
-      "Back",
+    expect(sttProviderPrompt?.body).toBe("Choose your STT provider:");
+    expect(sttProviderPrompt?.columns).toEqual([
+      { key: "name", header: "Name", align: "left" },
+      { key: "description", header: "Details", align: "left" },
     ]);
-    expect(localModelPrompt?.descriptions).toEqual([
-      "Balanced speed and accuracy for most voice notes.",
-      "Better accuracy than Base, with higher CPU and memory use.",
-      "Higher accuracy for difficult audio, but slower and heavier.",
+    expect(sttProviderPrompt?.descriptions).toEqual([
+      "Managed via faster-whisper in EstaCoda's Python environment. No API key required. Recommended.",
+      "Groq-hosted Whisper transcription. Requires API key.",
+      "OpenAI transcription models. Requires API key.",
+      "Mistral Voxtral transcription. Requires API key.",
+      "xAI transcription. Requires API key.",
       "Return to the previous step.",
     ]);
-    expect(localModelPrompt?.values.slice(0, 3)).toEqual(["base", "small", "medium"]);
-    expect(typeof localModelPrompt?.values[3]).toBe("symbol");
+    expect(localModelPrompt).toBeUndefined();
     expect(rawConfig).not.toContain("sk-");
     expect(JSON.stringify(result)).not.toContain("sk-");
   });
-
-  for (const model of ["small", "medium"] as const) {
-    it(`configures local faster-whisper STT model ${model}`, async () => {
-      await writeUserConfig(tempDir, localReadyConfig());
-      await trustWorkspace(tempDir, workspaceRoot);
-      mockManagedPythonEnvironment(tempDir);
-
-      const result = await runConfigEditor({
-        homeDir: tempDir,
-        workspaceRoot,
-        prompt: fakePrompt({
-          values: [
-            "stt",
-            "enable",
-            "local",
-            model,
-            true,
-          ],
-        }),
-        defaultActionId: "configure-voice",
-        applyExecutor: createReviewedSetupApplyExecutor({
-          homeDir: tempDir,
-          workspaceRoot,
-        }),
-      });
-      const rawConfig = await readFile(profileConfigPath(tempDir), "utf8");
-      const config = JSON.parse(rawConfig) as {
-        stt?: {
-          provider?: string;
-          local?: {
-            model?: string;
-            engine?: string;
-            fasterWhisper?: { enabled?: boolean; model?: string; allowModelDownload?: boolean };
-          };
-        };
-      };
-
-      expect(result.completed).toBe(true);
-      expect(config.stt).toEqual({
-        provider: "local",
-        local: {
-          model,
-          engine: "faster-whisper",
-          fasterWhisper: {
-            enabled: true,
-            model,
-            allowModelDownload: true,
-          },
-        },
-      });
-    });
-  }
 
   it("configures image generation without drafting other optional capabilities", async () => {
     await writeUserConfig(tempDir, localReadyConfig());

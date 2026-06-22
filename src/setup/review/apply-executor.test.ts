@@ -710,6 +710,73 @@ describe("reviewed setup apply executor", () => {
     await expect(readFile(profileEnvPath(tempDir), "utf8")).resolves.not.toContain("bb-unreviewed-secret");
   });
 
+  it("allows reviewed Voice deferred secret writes through voice credential references", async () => {
+    const plan: SetupApplyPlan = {
+      kind: "setup-save-apply-plan",
+      manifestSourceBundleIds: ["voice-credential-test"],
+      operations: [{
+        id: "voice-tts-credential",
+        kind: "credential-reference",
+        sourceLineIds: ["voice-credential-line"],
+        review: {
+          copyKey: "setupDrafts.review",
+          summaryKey: "setupModules.credentials.draft",
+          redacted: true,
+          values: {
+            credentialSurface: "voice-tts",
+            envVars: ["VOICE_TOOLS_OPENAI_KEY"],
+            credentialValuesIncluded: false,
+          },
+        },
+        writesConfig: false,
+        writesTrustStore: false,
+        dryRunOnly: true,
+      }],
+      eligibility: {
+        eligible: true,
+        blockers: [],
+        repairIntents: [],
+      },
+      preservesUnrelatedConfig: true,
+      writesConfig: false,
+      writesTrustStore: false,
+      dryRunOnly: true,
+      metadata: {
+        operationCount: 1,
+        configOperationCount: 0,
+        trustOperationCount: 0,
+        credentialOperationCount: 1,
+      },
+    };
+    const executor = createReviewedSetupApplyExecutor({
+      homeDir: tempDir,
+      workspaceRoot,
+    });
+
+    const applyResult = await executor.apply(plan);
+    const secretResult = await executor.applyDeferredSecrets!(plan, [{
+      envVarName: "VOICE_TOOLS_OPENAI_KEY",
+      value: "voice-reviewed-secret",
+    }]);
+    const unreviewedResult = await executor.applyDeferredSecrets!(plan, [{
+      envVarName: "VOICE_UNREVIEWED_KEY",
+      value: "voice-unreviewed-secret",
+    }]);
+
+    expect(applyResult.ok).toBe(true);
+    expect(secretResult).toEqual({
+      ok: true,
+      appliedSecretCount: 1,
+    });
+    expect(unreviewedResult.ok).toBe(false);
+    expect(unreviewedResult.appliedSecretCount).toBe(0);
+    expect(unreviewedResult.error).toContain("VOICE_UNREVIEWED_KEY");
+    await expect(readFile(profileEnvPath(tempDir), "utf8")).resolves.toContain(
+      'VOICE_TOOLS_OPENAI_KEY="voice-reviewed-secret"'
+    );
+    await expect(readFile(profileEnvPath(tempDir), "utf8")).resolves.not.toContain("voice-unreviewed-secret");
+  });
+
   it("applies custom provider baseUrl and contextWindowTokens from review values", async () => {
     const plan = onboardingPlan({
       homeDir: tempDir,

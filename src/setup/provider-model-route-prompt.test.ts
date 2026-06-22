@@ -566,7 +566,7 @@ describe("selectProviderModelRoute", () => {
         supportsReasoning: true,
         supportsStructuredOutput: true,
       },
-    })).toBe("400K context | Tools | Vision | Reasoning | Cost-conscious choice for auxiliary tasks");
+    })).toBe("400K context | Tools | Vision | Reasoning | Recommended auxiliary model");
   });
 
   it("uses curated model notes without metadata and avoids provider/model key collisions", () => {
@@ -581,7 +581,46 @@ describe("selectProviderModelRoute", () => {
         supportsStructuredOutput: false,
       },
       supportsVision: false,
-    })).toBe("Cost-conscious choice for auxiliary tasks");
+    })).toBe("Recommended auxiliary model");
+
+    expect(modelCandidateDescription("en", {
+      ...modelCandidate("deepseek", "deepseek-v4-flash"),
+      profile: {
+        ...modelCandidate("deepseek", "deepseek-v4-flash").profile,
+        contextWindowTokens: 0,
+        supportsTools: false,
+        supportsVision: false,
+        supportsReasoning: false,
+        supportsStructuredOutput: false,
+      },
+      supportsVision: false,
+    })).toBe("Recommended auxiliary model");
+
+    expect(modelCandidateDescription("en", {
+      ...modelCandidate("google", "gemini-3-flash-preview"),
+      profile: {
+        ...modelCandidate("google", "gemini-3-flash-preview").profile,
+        contextWindowTokens: 0,
+        supportsTools: false,
+        supportsVision: false,
+        supportsReasoning: false,
+        supportsStructuredOutput: false,
+      },
+      supportsVision: false,
+    })).toBe("Recommended auxiliary model");
+
+    expect(modelCandidateDescription("ar", {
+      ...modelCandidate("openai", "gpt-5-mini"),
+      profile: {
+        ...modelCandidate("openai", "gpt-5-mini").profile,
+        contextWindowTokens: 0,
+        supportsTools: false,
+        supportsVision: false,
+        supportsReasoning: false,
+        supportsStructuredOutput: false,
+      },
+      supportsVision: false,
+    })).toBe("نموذج مساعد موصى به");
 
     expect(modelCandidateDescription("en", {
       ...modelCandidate("google", "gpt-5-mini"),

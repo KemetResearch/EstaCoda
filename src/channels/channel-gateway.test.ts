@@ -305,13 +305,19 @@ function providerToken(text: string): RuntimeEvent {
   };
 }
 
-function providerResult(input: { ok: boolean; willFallback: boolean }): RuntimeEvent {
+function providerResult(input: {
+  ok: boolean;
+  willFallback: boolean;
+  fallback?: boolean;
+  provider?: string;
+  model?: string;
+}): RuntimeEvent {
   return {
     kind: "provider-result",
-    provider: "test",
-    model: "m",
+    provider: input.provider ?? "test",
+    model: input.model ?? "m",
     ok: input.ok,
-    fallback: false,
+    fallback: input.fallback ?? false,
     willFallback: input.willFallback
   };
 }
@@ -440,6 +446,86 @@ describe("ChannelGateway Telegram streaming", () => {
       provider: "test",
       model: "m"
     }]);
+  });
+
+  it("does not emit visible provider progress for repeated primary success", async () => {
+    const { adapter, handle, gateway } = createStreamingGatewayHarness({
+      events: [
+        providerResult({ ok: true, willFallback: false, fallback: false, model: "primary-model" }),
+        providerResult({ ok: true, willFallback: false, fallback: false, model: "primary-model" })
+      ]
+    });
+
+    const result = await gateway.receive(makeMessage("hello"));
+
+    expect(handle.providerResults).toHaveLength(2);
+    expect(adapter.records.filter((record) => record.kind === "progress")).toHaveLength(0);
+    expect(result.progressCount).toBe(0);
+  });
+
+  it("emits one fallback serving transition for repeated fallback success", async () => {
+    const { adapter, gateway } = createStreamingGatewayHarness({
+      events: [
+        providerResult({ ok: true, willFallback: false, fallback: true, model: "fallback-model" }),
+        providerResult({ ok: true, willFallback: false, fallback: true, model: "fallback-model" })
+      ]
+    });
+
+    const result = await gateway.receive(makeMessage("hello"));
+    const progress = adapter.records.filter((record) => record.kind === "progress");
+
+    expect(progress.map((record) => record.event)).toEqual([
+      {
+        kind: "provider-serving-transition",
+        transition: "fallback-active",
+        provider: "test",
+        model: "fallback-model"
+      }
+    ]);
+    expect(result.progressCount).toBe(1);
+  });
+
+  it("emits fallback once and primary recovery once", async () => {
+    const { adapter, gateway } = createStreamingGatewayHarness({
+      events: [
+        providerResult({ ok: true, willFallback: false, fallback: true, model: "fallback-model" }),
+        providerResult({ ok: true, willFallback: false, fallback: false, model: "primary-model" }),
+        providerResult({ ok: true, willFallback: false, fallback: false, model: "primary-model" })
+      ]
+    });
+
+    const result = await gateway.receive(makeMessage("hello"));
+    const progress = adapter.records.filter((record) => record.kind === "progress");
+
+    expect(progress.map((record) => record.event)).toEqual([
+      {
+        kind: "provider-serving-transition",
+        transition: "fallback-active",
+        provider: "test",
+        model: "fallback-model"
+      },
+      {
+        kind: "provider-serving-transition",
+        transition: "primary-recovered",
+        provider: "test",
+        model: "primary-model"
+      }
+    ]);
+    expect(result.progressCount).toBe(2);
+  });
+
+  it("does not announce failed primary attempts while fallback will be tried", async () => {
+    const { adapter, gateway } = createStreamingGatewayHarness({
+      events: [
+        providerResult({ ok: false, willFallback: true, fallback: false, model: "primary-model" })
+      ],
+      handle: createStreamingHandleSpy({ finishResult: { delivered: false, fallbackRequired: true } })
+    });
+
+    const result = await gateway.receive(makeMessage("hello"));
+
+    expect(adapter.records.filter((record) => record.kind === "progress")).toHaveLength(0);
+    expect(result.progressCount).toBe(0);
   });
 
   it("segments at provider tool-call before delivering tool progress and appends continuation tokens", async () => {

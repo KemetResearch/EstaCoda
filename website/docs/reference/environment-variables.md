@@ -53,7 +53,9 @@ Codex authentication stores tokens in `~/.estacoda/auth.json` after OAuth device
 | `HF_HOME` | Optional faster-whisper / Hugging Face model cache root |
 | `TRANSFORMERS_CACHE` | Optional Hugging Face cache env respected by the worker environment |
 
-Voice credentials are direct environment-variable references only. There are no voice credential pools, gateway brokers, managed fallbacks, or non-env sources.
+Voice config stores environment-variable references only. Setup Editor and Onboarding Wizard collect hosted Voice provider API keys through masked input and write real key values to the selected profile `.env` only after reviewed apply. Raw Voice API keys are not stored in config, shown in review manifests, or inserted into prompt context. Runtime config defaults provide Voice models, voices, and provider settings, so interactive setup does not ask for model strings or env-var reference names.
+
+No-key Voice providers are STT `local` and TTS `edge`. Edge does not require an API key, but it is networked: synthesis text is sent to Microsoft's Edge speech service and is not local/offline. Hosted key-required providers are STT `openai`, `groq`, and `xai`; and TTS `openai`, `elevenlabs`, `minimax`, `gemini`, and `xai`. STT `mistral` and TTS `mistral`, `neutts`, and `kittentts` are deferred/stub providers. Existing credentials can be reused through env-var references such as `VOICE_TOOLS_OPENAI_KEY`, `OPENAI_API_KEY`, `GEMINI_API_KEY`, `GROQ_API_KEY`, and `XAI_API_KEY`, and through existing compatible provider config/routes where supported. There are no voice credential pools, gateway brokers, managed fallbacks, or non-env sources.
 
 Managed local STT defaults to `~/.estacoda/cache/huggingface` for faster-whisper model cache when `hfHome` is not configured. If `TRANSFORMERS_CACHE` is already set in the process environment, runtime preserves it. The managed Python venv remains separate at `~/.estacoda/python-env`.
 

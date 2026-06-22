@@ -54,6 +54,7 @@ export type OnboardingOptionalCapabilityDraftId = OnboardingSupportedOptionalCap
 export type OnboardingOptionalCapabilitySummaries = {
   readonly channels?: {
     readonly telegram?: OnboardingOptionalCapabilitySummaryStatus;
+    readonly discord?: OnboardingOptionalCapabilitySummaryStatus;
     readonly whatsapp?: OnboardingOptionalCapabilitySummaryStatus;
   };
   readonly voice?: {

@@ -230,6 +230,18 @@ type WhatsAppTextDebounceBuffer = {
   timer: ReturnType<typeof setTimeout> | undefined;
 };
 
+type ProviderServingState =
+  | {
+      status: "primary" | "fallback";
+      provider: string;
+      model: string;
+    }
+  | {
+      status: "failed";
+      provider: string;
+      model: string;
+    };
+
 type PendingApprovalContinuation = {
   approvalId?: string;
   toolName: string;
@@ -376,6 +388,7 @@ export class ChannelGateway {
   readonly #whatsappTextDebounce: WhatsAppTextDebounceConfig | undefined;
   readonly #whatsappTextDebounceBuffers = new Map<string, WhatsAppTextDebounceBuffer>();
   readonly #telegramStreaming: (ChannelStreamingTextOptions & { enabled?: boolean }) | undefined;
+  readonly #providerServingStateBySessionKey = new Map<string, ProviderServingState>();
 
   constructor(options: ChannelGatewayOptions) {
     this.#runtimeForSession = options.runtimeForSession;
@@ -461,6 +474,69 @@ export class ChannelGateway {
     } else {
       await adapter.delivery?.sendProgress?.(sessionKey, event);
     }
+  }
+
+  #providerServingTransitionEvent(
+    sessionKey: ChannelSessionKey,
+    event: RuntimeEvent
+  ): RuntimeEvent | undefined {
+    if (event.kind !== "provider-result") {
+      return undefined;
+    }
+
+    const key = stableSessionKey(sessionKey, this.#sessionPolicy);
+    const previous = this.#providerServingStateBySessionKey.get(key);
+
+    if (!event.ok) {
+      if (!event.willFallback) {
+        this.#providerServingStateBySessionKey.set(key, {
+          status: "failed",
+          provider: event.provider,
+          model: event.model
+        });
+      }
+      return undefined;
+    }
+
+    if (event.fallback) {
+      this.#providerServingStateBySessionKey.set(key, {
+        status: "fallback",
+        provider: event.provider,
+        model: event.model
+      });
+
+      if (
+        previous?.status === "fallback" &&
+        previous.provider === event.provider &&
+        previous.model === event.model
+      ) {
+        return undefined;
+      }
+
+      return {
+        kind: "provider-serving-transition",
+        transition: "fallback-active",
+        provider: event.provider,
+        model: event.model
+      };
+    }
+
+    this.#providerServingStateBySessionKey.set(key, {
+      status: "primary",
+      provider: event.provider,
+      model: event.model
+    });
+
+    if (previous?.status === "fallback" || previous?.status === "failed") {
+      return {
+        kind: "provider-serving-transition",
+        transition: "primary-recovered",
+        provider: event.provider,
+        model: event.model
+      };
+    }
+
+    return undefined;
   }
 
   async #deliverArtifact(
@@ -1220,6 +1296,15 @@ export class ChannelGateway {
             deltasViaCallbacks: streamCallbacksWired,
             segmentBreaksViaCallbacks: streamCallbacksWired
           })) {
+            return;
+          }
+          const providerServingTransition = this.#providerServingTransitionEvent(normalizedSessionKey, event);
+          if (providerServingTransition !== undefined) {
+            progressCount += 1;
+            await this.#deliverProgress(adapter, normalizedSessionKey, providerServingTransition);
+            return;
+          }
+          if (event.kind === "provider-result") {
             return;
           }
           progressCount += 1;
