@@ -582,15 +582,33 @@ function hasStructuredPromptRows(vm: OnboardingPromptCardViewModel): boolean {
   return (vm.columns?.length ?? 0) > 0;
 }
 
+type PlainStructuredTableLayout = {
+  readonly widths: readonly number[];
+  readonly lineWidth: number;
+};
+
 function renderPlainStructuredOnboardingOptions(vm: OnboardingPromptCardViewModel, locale: UiLocale): string[] {
   const columns = vm.columns ?? [];
   const tableDirection = vm.tableDirection ?? "ltr";
-  const widths = plainStructuredColumnWidths(columns, vm.options);
+  const layout = plainStructuredTableLayout(columns, vm.options, {
+    showColumnHeaders: vm.showColumnHeaders !== false,
+    tableWidth: vm.tableWidth ?? "full",
+    tableMaxWidth: vm.tableMaxWidth,
+    showCurrentBadge: vm.showCurrentBadge,
+  });
   const lines: string[] = vm.showColumnHeaders === false
     ? []
     : [tableDirection === "rtl"
-      ? `  ${plainStructuredRow(columns, Object.fromEntries(columns.map((column) => [column.key, column.header])), [], widths, locale)}  `
-      : `  ${plainStructuredRow(columns, Object.fromEntries(columns.map((column) => [column.key, column.header])), [], widths, locale)}`];
+      ? plainAlignStructuredLine(
+        `  ${plainStructuredRow(columns, Object.fromEntries(columns.map((column) => [column.key, column.header])), [], layout.widths, locale)}  `,
+        layout.lineWidth,
+        vm.tableAlign
+      )
+      : plainAlignStructuredLine(
+        `  ${plainStructuredRow(columns, Object.fromEntries(columns.map((column) => [column.key, column.header])), [], layout.widths, locale)}`,
+        layout.lineWidth,
+        vm.tableAlign
+      )];
 
   let renderedNavigationSeparator = false;
   for (let i = 0; i < vm.options.length; i++) {
@@ -606,21 +624,33 @@ function renderPlainStructuredOnboardingOptions(vm: OnboardingPromptCardViewMode
       columns,
       plainStructuredOptionCells(option, columns),
       plainOptionBadges(option, vm.showCurrentBadge),
-      widths,
+      layout.widths,
       locale
     );
-    lines.push(tableDirection === "rtl" ? `${row} ${marker}` : `${marker} ${row}`);
+    const line = tableDirection === "rtl" ? `${row} ${marker}` : `${marker} ${row}`;
+    lines.push(plainAlignStructuredLine(line, layout.lineWidth, vm.tableAlign));
   }
 
   return lines;
 }
 
-function plainStructuredColumnWidths(
+function plainStructuredTableLayout(
   columns: readonly OnboardingPromptColumn[],
-  options: readonly OnboardingPromptOption[]
-): number[] {
-  if (columns.length === 0) return [];
-  if (columns.length === 1) return [PLAIN_ONBOARDING_DESCRIPTION_WIDTH];
+  options: readonly OnboardingPromptOption[],
+  layoutOptions: {
+    readonly showColumnHeaders: boolean;
+    readonly tableWidth: NonNullable<OnboardingPromptCardViewModel["tableWidth"]>;
+    readonly tableMaxWidth?: number;
+    readonly showCurrentBadge?: boolean;
+  }
+): PlainStructuredTableLayout {
+  if (columns.length === 0) return { widths: [], lineWidth: 0 };
+  if (columns.length === 1) {
+    const width = layoutOptions.tableWidth === "content"
+      ? Math.min(PLAIN_ONBOARDING_DESCRIPTION_WIDTH, plainStructuredNaturalColumnWidth(columns[0]!, 0, columns, options, layoutOptions.showColumnHeaders, layoutOptions.showCurrentBadge))
+      : PLAIN_ONBOARDING_DESCRIPTION_WIDTH;
+    return { widths: [Math.max(1, width)], lineWidth: Math.max(1, width) + 2 };
+  }
 
   const primaryIndex = plainStructuredPrimaryColumnIndex(columns);
   const primary = columns[primaryIndex]!;
@@ -639,7 +669,81 @@ function plainStructuredColumnWidths(
       ? remaining
       : Math.max(8, Math.floor(remaining / nonPrimaryIndices.length));
   }
-  return widths;
+  if (layoutOptions.tableWidth !== "content") {
+    return { widths, lineWidth: PLAIN_ONBOARDING_DESCRIPTION_WIDTH };
+  }
+
+  const compactWidths = columns.map((column, index) => Math.max(
+    1,
+    Math.min(widths[index] ?? 1, plainStructuredNaturalColumnWidth(column, index, columns, options, layoutOptions.showColumnHeaders, layoutOptions.showCurrentBadge))
+  ));
+  const markerSlotWidth = 2;
+  const gapWidth = 2 * (columns.length - 1);
+  const maxLineWidth = Math.max(
+    columns.length + markerSlotWidth,
+    Math.min(PLAIN_ONBOARDING_DESCRIPTION_WIDTH, layoutOptions.tableMaxWidth ?? PLAIN_ONBOARDING_DESCRIPTION_WIDTH)
+  );
+  plainShrinkStructuredWidthsToLineWidth(compactWidths, primaryIndex, gapWidth, markerSlotWidth, maxLineWidth);
+  const compactDataWidth = compactWidths.reduce((sum, width) => sum + width, 0) + gapWidth;
+  return {
+    widths: compactWidths,
+    lineWidth: Math.min(PLAIN_ONBOARDING_DESCRIPTION_WIDTH, compactDataWidth + markerSlotWidth),
+  };
+}
+
+function plainStructuredNaturalColumnWidth(
+  column: OnboardingPromptColumn,
+  columnIndex: number,
+  columns: readonly OnboardingPromptColumn[],
+  options: readonly OnboardingPromptOption[],
+  showColumnHeaders: boolean,
+  showCurrentBadge?: boolean
+): number {
+  const values = options.map((option) => {
+    const cells = plainStructuredOptionCells(option, columns);
+    const value = cells[column.key] ?? "";
+    const badges = columnIndex === columns.length - 1
+      ? plainOptionBadges(option, showCurrentBadge)
+      : [];
+    if (badges.length === 0) return measureVisibleWidth(value);
+    return measureVisibleWidth(value) + 2 + measureVisibleWidth(badges.join("  "));
+  });
+  return Math.max(
+    1,
+    ...(showColumnHeaders ? [measureVisibleWidth(column.header)] : []),
+    ...values
+  );
+}
+
+function plainShrinkStructuredWidthsToLineWidth(
+  widths: number[],
+  primaryIndex: number,
+  gapWidth: number,
+  markerSlotWidth: number,
+  maxLineWidth: number
+): void {
+  const minWidth = 1;
+  const lineWidth = () => widths.reduce((sum, width) => sum + width, 0) + gapWidth + markerSlotWidth;
+  const shrinkOrder = [
+    ...widths.map((_, index) => index).filter((index) => index !== primaryIndex),
+    primaryIndex,
+  ];
+  for (const index of shrinkOrder) {
+    while (lineWidth() > maxLineWidth && (widths[index] ?? 0) > minWidth) {
+      widths[index] = (widths[index] ?? minWidth) - 1;
+    }
+  }
+}
+
+function plainAlignStructuredLine(
+  line: string,
+  lineWidth: number,
+  align: OnboardingPromptCardViewModel["tableAlign"]
+): string {
+  if (lineWidth >= PLAIN_ONBOARDING_DESCRIPTION_WIDTH) return line;
+  const padWidth = Math.max(0, PLAIN_ONBOARDING_DESCRIPTION_WIDTH - lineWidth);
+  const padding = " ".repeat(align === "center" ? Math.floor(padWidth / 2) : align === "right" ? padWidth : 0);
+  return `${padding}${line}`;
 }
 
 function plainStructuredOptionCells(

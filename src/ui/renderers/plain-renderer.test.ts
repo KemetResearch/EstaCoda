@@ -356,6 +356,85 @@ describe("PlainRenderer — renderOnboardingPromptCard", () => {
     assertNoAnsi(out);
   });
 
+  it("renders compact structured prompt-card tables as content-width blocks", () => {
+    const out = renderOnboardingPromptCard(buildOnboardingPromptCardViewModel({
+      title: "Choose mode",
+      bodyLines: [],
+      showColumnHeaders: false,
+      tableWidth: "content",
+      columns: [
+        { key: "name", header: "Name" },
+        { key: "description", header: "Description" },
+      ],
+      options: [
+        { id: "alpha", label: "Alpha", description: "First option", current: true },
+      ],
+      selectedOptionIndex: 0,
+    }));
+
+    const selectedLine = out.split("\n").find((line) => line.includes("Alpha"));
+    expect(selectedLine).toBeDefined();
+    expect(measureVisibleWidth(selectedLine!.trimStart())).toBeLessThan(40);
+    expect(selectedLine!.startsWith("> Alpha")).toBe(true);
+    expect(selectedLine).toContain("Current");
+  });
+
+  it("caps compact structured plain prompt-card tables with tableMaxWidth", () => {
+    const out = renderOnboardingPromptCard(buildOnboardingPromptCardViewModel({
+      title: "Choose mode",
+      bodyLines: [],
+      showColumnHeaders: false,
+      tableWidth: "content",
+      tableMaxWidth: 36,
+      columns: [
+        { key: "name", header: "Name" },
+        { key: "description", header: "Description" },
+      ],
+      options: [
+        {
+          id: "alpha",
+          label: "Alpha",
+          description: "This long description should be capped by compact table max width.",
+        },
+      ],
+      selectedOptionIndex: 0,
+    }));
+
+    const selectedLine = out.split("\n").find((line) => line.includes("Alpha"));
+    expect(selectedLine).toBeDefined();
+    expect(measureVisibleWidth(selectedLine!.trimStart())).toBeLessThanOrEqual(36);
+    expect(selectedLine).toContain("...");
+  });
+
+  it("physically aligns compact structured plain prompt-card tables", () => {
+    const base = {
+      title: "Choose mode",
+      bodyLines: [],
+      showColumnHeaders: false,
+      tableWidth: "content" as const,
+      tableMaxWidth: 36,
+      columns: [
+        { key: "name", header: "Name" },
+        { key: "description", header: "Description" },
+      ],
+      options: [
+        { id: "alpha", label: "Alpha", description: "First option" },
+      ],
+      selectedOptionIndex: 0,
+    };
+    const lineFor = (tableAlign: "left" | "center" | "right") => {
+      const out = renderOnboardingPromptCard(buildOnboardingPromptCardViewModel({ ...base, tableAlign }));
+      return out.split("\n").find((line) => line.includes("Alpha")) ?? "";
+    };
+
+    const left = lineFor("left");
+    const center = lineFor("center");
+    const right = lineFor("right");
+    expect(left.indexOf(">")).toBe(0);
+    expect(center.indexOf(">")).toBeGreaterThan(left.indexOf(">"));
+    expect(right.indexOf(">")).toBeGreaterThan(center.indexOf(">"));
+  });
+
   it("truncates long structured plain rows readably", () => {
     const out = renderOnboardingPromptCard(buildOnboardingPromptCardViewModel({
       title: "Choose mode",

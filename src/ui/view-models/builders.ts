@@ -266,6 +266,9 @@ export interface BuildOnboardingPromptCardInput {
   readonly showCurrentBadge?: boolean;
   readonly showColumnHeaders?: boolean;
   readonly tableDirection?: OnboardingPromptCardViewModel["tableDirection"];
+  readonly tableWidth?: OnboardingPromptCardViewModel["tableWidth"];
+  readonly tableMaxWidth?: OnboardingPromptCardViewModel["tableMaxWidth"];
+  readonly tableAlign?: OnboardingPromptCardViewModel["tableAlign"];
   readonly locale?: "en" | "ar";
   readonly direction?: "ltr" | "rtl";
 }
@@ -287,6 +290,9 @@ export function buildOnboardingPromptCardViewModel(
     showCurrentBadge: input.showCurrentBadge,
     showColumnHeaders: input.showColumnHeaders,
     tableDirection: input.tableDirection,
+    tableWidth: input.tableWidth,
+    tableMaxWidth: input.tableMaxWidth,
+    tableAlign: input.tableAlign,
     locale: input.locale,
     direction: input.direction,
   };

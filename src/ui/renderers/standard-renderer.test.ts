@@ -742,6 +742,109 @@ describe("StandardRenderer — dark theme", () => {
     expect(plain).not.toContain("▸");
   });
 
+  it("keeps structured prompt-card tables full-width by default", () => {
+    const r = renderer("dark", noColorCaps());
+    const plain = stripAnsi(r.renderOnboardingPromptCard(buildOnboardingPromptCardViewModel({
+      title: "Choose mode",
+      bodyLines: [],
+      showColumnHeaders: false,
+      columns: [
+        { key: "name", header: "Name" },
+        { key: "description", header: "Description" },
+      ],
+      options: [
+        { id: "alpha", label: "Alpha", description: "First option" },
+      ],
+      selectedOptionIndex: 0,
+    })));
+
+    const selectedLine = plain.split("\n").find((line) => line.includes("Alpha"));
+    expect(selectedLine).toBeDefined();
+    expect(measureVisibleWidth(selectedLine!)).toBe(noColorCaps().terminalWidth - 2);
+  });
+
+  it("renders compact structured prompt-card tables as content-width blocks", () => {
+    const r = renderer("dark", noColorCaps());
+    const plain = stripAnsi(r.renderOnboardingPromptCard(buildOnboardingPromptCardViewModel({
+      title: "Choose mode",
+      bodyLines: [],
+      showColumnHeaders: false,
+      tableWidth: "content",
+      columns: [
+        { key: "name", header: "Name" },
+        { key: "description", header: "Description" },
+      ],
+      options: [
+        { id: "alpha", label: "Alpha", description: "First option", current: true },
+      ],
+      selectedOptionIndex: 0,
+    })));
+
+    const selectedLine = plain.split("\n").find((line) => line.includes("Alpha"));
+    expect(selectedLine).toBeDefined();
+    expect(measureVisibleWidth(selectedLine!.trimStart())).toBeLessThan(40);
+    expect(selectedLine!.startsWith("  ▸ Alpha")).toBe(true);
+    expect(selectedLine).toContain("Current");
+  });
+
+  it("caps compact structured prompt-card tables with tableMaxWidth", () => {
+    const r = renderer("dark", noColorCaps());
+    const plain = stripAnsi(r.renderOnboardingPromptCard(buildOnboardingPromptCardViewModel({
+      title: "Choose mode",
+      bodyLines: [],
+      showColumnHeaders: false,
+      tableWidth: "content",
+      tableMaxWidth: 36,
+      columns: [
+        { key: "name", header: "Name" },
+        { key: "description", header: "Description" },
+      ],
+      options: [
+        {
+          id: "alpha",
+          label: "Alpha",
+          description: "This long description should be capped by compact table max width.",
+        },
+      ],
+      selectedOptionIndex: 0,
+    })));
+
+    const selectedLine = plain.split("\n").find((line) => line.includes("Alpha"));
+    expect(selectedLine).toBeDefined();
+    expect(measureVisibleWidth(selectedLine!.trimStart())).toBeLessThanOrEqual(36);
+    expect(selectedLine).toContain("...");
+  });
+
+  it("physically aligns compact structured prompt-card tables", () => {
+    const r = renderer("dark", noColorCaps());
+    const base = {
+      title: "Choose mode",
+      bodyLines: [],
+      showColumnHeaders: false,
+      tableWidth: "content" as const,
+      tableMaxWidth: 36,
+      columns: [
+        { key: "name", header: "Name" },
+        { key: "description", header: "Description" },
+      ],
+      options: [
+        { id: "alpha", label: "Alpha", description: "First option" },
+      ],
+      selectedOptionIndex: 0,
+    };
+    const lineFor = (tableAlign: "left" | "center" | "right") => {
+      const plain = stripAnsi(r.renderOnboardingPromptCard(buildOnboardingPromptCardViewModel({ ...base, tableAlign })));
+      return plain.split("\n").find((line) => line.includes("Alpha")) ?? "";
+    };
+
+    const left = lineFor("left");
+    const center = lineFor("center");
+    const right = lineFor("right");
+    expect(left.indexOf("▸")).toBe(2);
+    expect(center.indexOf("▸")).toBeGreaterThan(left.indexOf("▸"));
+    expect(right.indexOf("▸")).toBeGreaterThan(center.indexOf("▸"));
+  });
+
   it("renders explicit RTL structured prompt-card rows in declared physical column order", () => {
     const r = renderer("dark", noColorCaps());
     const plain = stripAnsi(r.renderOnboardingPromptCard(buildOnboardingPromptCardViewModel({

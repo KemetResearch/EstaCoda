@@ -191,6 +191,8 @@ export interface OnboardingPromptOption {
 }
 
 export type PromptCardTableDirection = "ltr" | "rtl";
+export type PromptCardTableWidth = "full" | "content";
+export type PromptCardTableAlign = "left" | "center" | "right";
 
 export interface OnboardingPromptColumn {
   readonly key: string;
@@ -222,6 +224,9 @@ export interface OnboardingPromptCardViewModel {
   readonly showCurrentBadge?: boolean;
   readonly showColumnHeaders?: boolean;
   readonly tableDirection?: PromptCardTableDirection;
+  readonly tableWidth?: PromptCardTableWidth;
+  readonly tableMaxWidth?: number;
+  readonly tableAlign?: PromptCardTableAlign;
   readonly locale?: "en" | "ar";
   readonly direction?: "ltr" | "rtl";
 }

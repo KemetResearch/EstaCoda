@@ -40,6 +40,9 @@ export type SelectPromptInput<T> = {
   showCurrentBadge?: boolean;
   showColumnHeaders?: boolean;
   tableDirection?: "ltr" | "rtl";
+  tableWidth?: "full" | "content";
+  tableMaxWidth?: number;
+  tableAlign?: "left" | "center" | "right";
 };
 
 export async function selectOption<T>(input: Readable, output: Writable, selection: SelectPromptInput<T>): Promise<T> {
@@ -165,6 +168,9 @@ function buildSelectionViewModel<T>(selection: SelectPromptInput<T>, selectedInd
       showCurrentBadge: selection.showCurrentBadge,
       showColumnHeaders: selection.showColumnHeaders,
       tableDirection: selection.tableDirection,
+      tableWidth: selection.tableWidth,
+      tableMaxWidth: selection.tableMaxWidth,
+      tableAlign: selection.tableAlign,
       locale: selection.locale,
       direction: selection.direction,
     });

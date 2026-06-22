@@ -781,8 +781,14 @@ export class StandardRenderer {
     if (columns.length === 0) return [];
 
     const tableDirection = vm.tableDirection ?? "ltr";
-    const dataWidth = Math.max(8, contentWidth - optionMarkerSlotWidth);
-    const layout = this.#structuredPromptColumnLayout(columns, vm.options, dataWidth);
+    const layout = this.#structuredPromptTableLayout(columns, vm.options, {
+      contentWidth,
+      markerSlotWidth: optionMarkerSlotWidth,
+      showColumnHeaders: vm.showColumnHeaders !== false,
+      tableWidth: vm.tableWidth ?? "full",
+      tableMaxWidth: vm.tableMaxWidth,
+      showCurrentBadge: vm.showCurrentBadge,
+    });
     const tableSelectedMarker = tableDirection === "rtl"
       ? (this.#useUnicode ? "◂" : "<")
       : selectedMarker;
@@ -793,14 +799,15 @@ export class StandardRenderer {
         columns,
         Object.fromEntries(columns.map((column) => [column.key, column.header])),
         [],
-        layout,
+        layout.widths,
         locale,
         "ltr",
         "header"
       );
-      lines.push(tableDirection === "rtl"
+      const line = tableDirection === "rtl"
         ? `  ${header}${" ".repeat(optionMarkerSlotWidth)}`
-        : `  ${" ".repeat(optionMarkerSlotWidth)}${header}`);
+        : `  ${" ".repeat(optionMarkerSlotWidth)}${header}`;
+      lines.push(this.#alignStructuredPromptTableLine(line, contentWidth, layout.lineWidth, vm.tableAlign));
     }
 
     let renderedNavigationSeparator = false;
@@ -816,25 +823,39 @@ export class StandardRenderer {
         columns,
         this.#structuredPromptOptionCells(option, columns),
         this.#onboardingOptionBadges(option, vm.showCurrentBadge),
-        layout,
+        layout.widths,
         locale,
         "ltr",
         "option"
       );
-      lines.push(tableDirection === "rtl"
+      const line = tableDirection === "rtl"
         ? `  ${row}${optionMarkerGap}${marker}`
-        : `  ${marker}${optionMarkerGap}${row}`);
+        : `  ${marker}${optionMarkerGap}${row}`;
+      lines.push(this.#alignStructuredPromptTableLine(line, contentWidth, layout.lineWidth, vm.tableAlign));
     }
 
     return lines;
   }
 
-  #structuredPromptColumnLayout(
+  #structuredPromptTableLayout(
     columns: readonly OnboardingPromptColumn[],
     options: readonly OnboardingPromptOption[],
-    dataWidth: number
-  ): number[] {
-    if (columns.length === 1) return [dataWidth];
+    options_: {
+      readonly contentWidth: number;
+      readonly markerSlotWidth: number;
+      readonly showColumnHeaders: boolean;
+      readonly tableWidth: NonNullable<OnboardingPromptCardViewModel["tableWidth"]>;
+      readonly tableMaxWidth?: number;
+      readonly showCurrentBadge?: boolean;
+    }
+  ): StructuredPromptTableLayout {
+    const dataWidth = Math.max(1, options_.contentWidth - options_.markerSlotWidth);
+    if (columns.length === 1) {
+      const width = options_.tableWidth === "content"
+        ? Math.min(dataWidth, this.#structuredPromptNaturalColumnWidth(columns[0]!, 0, columns, options, options_.showColumnHeaders, options_.showCurrentBadge))
+        : dataWidth;
+      return { widths: [Math.max(1, width)], lineWidth: Math.min(options_.contentWidth, Math.max(1, width) + options_.markerSlotWidth) };
+    }
 
     const gapWidth = 2 * (columns.length - 1);
     const available = Math.max(columns.length, dataWidth - gapWidth);
@@ -862,7 +883,92 @@ export class StandardRenderer {
       widths[index] = width;
       assigned += width;
     }
-    return widths;
+    if (options_.tableWidth !== "content") {
+      return { widths, lineWidth: options_.contentWidth };
+    }
+
+    const contentWidths = columns.map((column, index) => this.#structuredPromptNaturalColumnWidth(
+      column,
+      index,
+      columns,
+      options,
+      options_.showColumnHeaders,
+      options_.showCurrentBadge
+    ));
+    const compactWidths = columns.map((_, index) => {
+      const fullWidth = widths[index] ?? 1;
+      const naturalWidth = contentWidths[index] ?? 1;
+      return Math.max(1, Math.min(fullWidth, naturalWidth));
+    });
+    const maxLineWidth = Math.max(
+      columns.length + options_.markerSlotWidth,
+      Math.min(
+        options_.contentWidth,
+        options_.tableMaxWidth ?? options_.contentWidth
+      )
+    );
+    this.#shrinkStructuredPromptWidthsToLineWidth(compactWidths, primaryIndex, gapWidth, options_.markerSlotWidth, maxLineWidth);
+    const compactDataWidth = compactWidths.reduce((sum, width) => sum + width, 0) + gapWidth;
+    return {
+      widths: compactWidths,
+      lineWidth: Math.min(options_.contentWidth, compactDataWidth + options_.markerSlotWidth),
+    };
+  }
+
+  #structuredPromptNaturalColumnWidth(
+    column: OnboardingPromptColumn,
+    columnIndex: number,
+    columns: readonly OnboardingPromptColumn[],
+    options: readonly OnboardingPromptOption[],
+    showColumnHeaders: boolean,
+    showCurrentBadge?: boolean
+  ): number {
+    const values = options.map((option) => {
+      const cells = this.#structuredPromptOptionCells(option, columns);
+      const value = cells[column.key] ?? "";
+      const badges = columnIndex === columns.length - 1
+        ? this.#onboardingOptionBadges(option, showCurrentBadge)
+        : [];
+      if (badges.length === 0) return measureVisibleWidth(value);
+      return measureVisibleWidth(value) + 2 + measureVisibleWidth(badges.join("  "));
+    });
+    const widths = [
+      ...(showColumnHeaders ? [measureVisibleWidth(column.header)] : []),
+      ...values,
+    ];
+    return Math.max(1, ...widths);
+  }
+
+  #shrinkStructuredPromptWidthsToLineWidth(
+    widths: number[],
+    primaryIndex: number,
+    gapWidth: number,
+    markerSlotWidth: number,
+    maxLineWidth: number
+  ): void {
+    const minWidth = 1;
+    const currentLineWidth = () => widths.reduce((sum, width) => sum + width, 0) + gapWidth + markerSlotWidth;
+    const shrinkOrder = [
+      ...widths.map((_, index) => index).filter((index) => index !== primaryIndex),
+      primaryIndex,
+    ];
+    for (const index of shrinkOrder) {
+      while (currentLineWidth() > maxLineWidth && (widths[index] ?? 0) > minWidth) {
+        widths[index] = (widths[index] ?? minWidth) - 1;
+      }
+    }
+  }
+
+  #alignStructuredPromptTableLine(
+    line: string,
+    contentWidth: number,
+    lineWidth: number,
+    align: OnboardingPromptCardViewModel["tableAlign"]
+  ): string {
+    if (lineWidth >= contentWidth) return line;
+    const padWidth = Math.max(0, contentWidth - lineWidth);
+    const padding = " ".repeat(align === "center" ? Math.floor(padWidth / 2) : align === "right" ? padWidth : 0);
+    return padding.length === 0 ? line : `  ${padding}${line.slice(2)}`;
   }
 
   #structuredPromptOptionCells(
@@ -2151,6 +2257,11 @@ function visibleBreakIndex(value: string, maxWidth: number): number {
 type RtlNumberedBodyLine = {
   readonly marker: string;
   readonly text: string;
+};
+
+type StructuredPromptTableLayout = {
+  readonly widths: readonly number[];
+  readonly lineWidth: number;
 };
 
 function splitNumberedRtlLine(line: string): RtlNumberedBodyLine | undefined {

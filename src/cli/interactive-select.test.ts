@@ -224,6 +224,9 @@ describe("interactive-select prompt card surface", () => {
         { key: "name", header: "الاسم", align: "right" },
       ],
       tableDirection: "rtl",
+      tableWidth: "content",
+      tableMaxWidth: 44,
+      tableAlign: "right",
       locale: "ar",
       direction: "rtl",
       options: [
@@ -241,6 +244,7 @@ describe("interactive-select prompt card surface", () => {
     expect(selectedLine).toBeDefined();
     expect(selectedLine).toContain("خيار عام");
     expect(selectedLine!.trimEnd().endsWith("<")).toBe(true);
+    expect(selectedLine!.startsWith(" ".repeat(20))).toBe(true);
   });
 
   it("localizes and bolds Arabic selected output", async () => {

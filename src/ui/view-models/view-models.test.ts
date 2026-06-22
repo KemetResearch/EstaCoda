@@ -292,6 +292,9 @@ describe("ViewModel builders", () => {
       showCurrentBadge: false,
       showColumnHeaders: false,
       tableDirection: "rtl",
+      tableWidth: "content",
+      tableMaxWidth: 88,
+      tableAlign: "right",
       locale: "en",
       direction: "ltr",
     });
@@ -327,6 +330,9 @@ describe("ViewModel builders", () => {
     expect(vm.showCurrentBadge).toBe(false);
     expect(vm.showColumnHeaders).toBe(false);
     expect(vm.tableDirection).toBe("rtl");
+    expect(vm.tableWidth).toBe("content");
+    expect(vm.tableMaxWidth).toBe(88);
+    expect(vm.tableAlign).toBe("right");
     expect(vm.locale).toBe("en");
     expect(vm.direction).toBe("ltr");
     expect(Object.getPrototypeOf(vm)).toBe(Object.prototype);
