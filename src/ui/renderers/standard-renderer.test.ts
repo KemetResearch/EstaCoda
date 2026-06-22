@@ -113,6 +113,16 @@ function expectBalancedBidiIsolates(text: string): void {
   expect(depth).toBe(0);
 }
 
+function stripTrailingBidiControls(text: string): string {
+  return text.replace(/[\u2066\u2067\u2069]+$/gu, "");
+}
+
+function visibleMarkerColumn(line: string, marker: string): number {
+  const markerIndex = line.indexOf(marker);
+  expect(markerIndex).toBeGreaterThanOrEqual(0);
+  return measureVisibleWidth(line.slice(0, markerIndex));
+}
+
 function hasAnsi(text: string): boolean {
   return /\x1b\[/.test(text);
 }
@@ -881,7 +891,7 @@ describe("StandardRenderer — dark theme", () => {
     expect(selectedLine).toBeDefined();
     expect(selectedLine!.indexOf("خيار عام")).toBeLessThan(selectedLine!.indexOf("ألفا"));
     expect(selectedLine!.indexOf("ألفا")).toBeLessThan(selectedLine!.indexOf("◂"));
-    expect(selectedLine!.trimEnd().endsWith("◂")).toBe(true);
+    expect(stripTrailingBidiControls(selectedLine!.trimEnd()).endsWith("◂")).toBe(true);
     expect(plain).toContain(isolateLtr("CLI"));
     expect(plain).toContain(isolateLtr("↑↓ navigate   ENTER select   CTRL+C exit"));
     const lines = plain.split("\n");
@@ -923,7 +933,7 @@ describe("StandardRenderer — dark theme", () => {
     const markerIndex = selectedLine!.indexOf("◂");
     expect(markerIndex).toBeGreaterThan(labelIndex);
     expect(markerIndex - labelIndex).toBeLessThan(12);
-    expect(selectedLine!.trimEnd().endsWith("◂")).toBe(true);
+    expect(stripTrailingBidiControls(selectedLine!.trimEnd()).endsWith("◂")).toBe(true);
   });
 
   it("keeps Arabic descriptions with technical tokens in the RTL description column", () => {
@@ -955,7 +965,54 @@ describe("StandardRenderer — dark theme", () => {
     expect(selectedLine).toContain(isolateRtl(closeOpenBidiIsolates(description)));
     expect(selectedLine).not.toContain(isolateLtr(description));
     expect(selectedLine!.indexOf("اضبط كيف")).toBeLessThan(selectedLine!.indexOf("البحث"));
-    expect(selectedLine!.trimEnd().endsWith("◂")).toBe(true);
+    expect(stripTrailingBidiControls(selectedLine!.trimEnd()).endsWith("◂")).toBe(true);
+  });
+
+  it("keeps RTL structured prompt-card markers in one fixed visible column", () => {
+    const r = renderer("dark", noColorCaps());
+    const base = {
+      title: "محرر الإعدادات",
+      bodyLines: [],
+      showColumnHeaders: false,
+      tableDirection: "rtl" as const,
+      tableWidth: "content" as const,
+      tableMaxWidth: 88,
+      tableAlign: "right" as const,
+      columns: [
+        { key: "description", header: "التفاصيل", align: "right" as const },
+        { key: "name", header: "الاسم", align: "right" as const },
+      ],
+      options: [
+        {
+          id: "primary",
+          label: "النموذج الأساسي",
+          description: "النموذج الافتراضي الذي يستخدمه الوكيل.",
+        },
+        {
+          id: "security",
+          label: "وضع الأمان",
+          description: "سياسة المراجعة للإجراءات عالية المخاطر.",
+        },
+        {
+          id: "diagnostics",
+          label: "التشخيصات",
+          description: "اعرض العوائق، والتحذيرات، والحالة المكتشفة.",
+        },
+      ],
+      locale: "ar" as const,
+      direction: "rtl" as const,
+    };
+    const markerLineFor = (selectedOptionIndex: number) => {
+      const plain = stripAnsi(r.renderOnboardingPromptCard(buildOnboardingPromptCardViewModel({
+        ...base,
+        selectedOptionIndex,
+      })));
+      return plain.split("\n").find((line) => line.includes("◂")) ?? "";
+    };
+
+    const firstMarkerColumn = visibleMarkerColumn(markerLineFor(0), "◂");
+    const lastMarkerColumn = visibleMarkerColumn(markerLineFor(2), "◂");
+    expect(lastMarkerColumn).toBe(firstMarkerColumn);
   });
 
   it("keeps explicit RTL structured prompt-card rows bounded with no Unicode fallback", () => {
@@ -985,7 +1042,7 @@ describe("StandardRenderer — dark theme", () => {
 
     const selectedLine = plain.split("\n").find((line) => line.includes("ألفا"));
     expect(selectedLine).toBeDefined();
-    expect(selectedLine!.trimEnd().endsWith("<")).toBe(true);
+    expect(stripTrailingBidiControls(selectedLine!.trimEnd()).endsWith("<")).toBe(true);
     expect(plain).not.toContain("▸");
     for (const line of plain.split("\n")) {
       expect(measureVisibleWidth(line)).toBeLessThanOrEqual(narrowCaps().terminalWidth);

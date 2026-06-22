@@ -2,7 +2,7 @@ import { describe, expect, it, vi, afterEach } from "vitest";
 import { PassThrough, Readable, Writable } from "node:stream";
 import { selectOption, type SelectPromptInput } from "./interactive-select.js";
 import { stripAnsi } from "../ui/renderers/layout.js";
-import { isolateLtr, isolateRtl } from "../ui/bidi.js";
+import { isolateLtr, isolateRtl, LRI, PDI, RLI } from "../ui/bidi.js";
 
 type TtyInput = PassThrough & {
   isTTY: true;
@@ -32,6 +32,10 @@ afterEach(() => {
   }
   vi.restoreAllMocks();
 });
+
+function stripTrailingBidiControls(text: string): string {
+  return text.replace(new RegExp(`[${LRI}${RLI}${PDI}]+$`, "gu"), "");
+}
 
 describe("interactive-select prompt card surface", () => {
   it("renders prompt cards while preserving arrow navigation and Enter confirmation", async () => {
@@ -243,7 +247,7 @@ describe("interactive-select prompt card surface", () => {
     const selectedLine = rendered.split("\n").find((line) => line.includes("ألفا"));
     expect(selectedLine).toBeDefined();
     expect(selectedLine).toContain("خيار عام");
-    expect(selectedLine!.trimEnd().endsWith("<")).toBe(true);
+    expect(stripTrailingBidiControls(selectedLine!.trimEnd()).endsWith("<")).toBe(true);
     expect(selectedLine!.startsWith(" ".repeat(20))).toBe(true);
   });
 

@@ -57,7 +57,7 @@ import {
   renderActiveTurnSpinner,
   renderFileChangePreview,
 } from "./plain-renderer.js";
-import { closeOpenBidiIsolates, isolateLtr, isolateRtl, RLI } from "../bidi.js";
+import { closeOpenBidiIsolates, isolateLtr, isolateRtl, LRI, PDI, RLI } from "../bidi.js";
 import { measureVisibleWidth } from "./layout.js";
 
 function assertNoAnsi(text: string): void {
@@ -68,6 +68,16 @@ function assertAsciiSafe(text: string): void {
   for (const ch of text) {
     expect(ch.charCodeAt(0)).toBeLessThan(128);
   }
+}
+
+function stripTrailingBidiControls(text: string): string {
+  return text.replace(new RegExp(`[${LRI}${RLI}${PDI}]+$`, "gu"), "");
+}
+
+function visibleMarkerColumn(line: string, marker: string): number {
+  const markerIndex = line.indexOf(marker);
+  expect(markerIndex).toBeGreaterThanOrEqual(0);
+  return measureVisibleWidth(line.slice(0, markerIndex));
 }
 
 function onboardingTrustCard(overrides: Partial<Parameters<typeof buildOnboardingPromptCardViewModel>[0]> = {}) {
@@ -609,7 +619,7 @@ describe("PlainRenderer — renderOnboardingPromptCard", () => {
     expect(selectedLine).toBeDefined();
     expect(selectedLine!.indexOf("خيار عام")).toBeLessThan(selectedLine!.indexOf("ألفا"));
     expect(selectedLine!.indexOf("ألفا")).toBeLessThan(selectedLine!.indexOf("<"));
-    expect(selectedLine!.trimEnd().endsWith("<")).toBe(true);
+    expect(stripTrailingBidiControls(selectedLine!.trimEnd()).endsWith("<")).toBe(true);
     expect(out).toContain(isolateLtr("CLI"));
     const lines = out.split("\n");
     const backIndex = lines.findIndex((line) => line.includes("رجوع"));
@@ -649,7 +659,7 @@ describe("PlainRenderer — renderOnboardingPromptCard", () => {
     const markerIndex = selectedLine!.indexOf("<");
     expect(markerIndex).toBeGreaterThan(labelIndex);
     expect(markerIndex - labelIndex).toBeLessThan(12);
-    expect(selectedLine!.trimEnd().endsWith("<")).toBe(true);
+    expect(stripTrailingBidiControls(selectedLine!.trimEnd()).endsWith("<")).toBe(true);
   });
 
   it("keeps Arabic descriptions with technical tokens in the RTL description column", () => {
@@ -680,7 +690,53 @@ describe("PlainRenderer — renderOnboardingPromptCard", () => {
     expect(selectedLine).toContain(isolateRtl(closeOpenBidiIsolates(description)));
     expect(selectedLine).not.toContain(isolateLtr(description));
     expect(selectedLine!.indexOf("اضبط كيف")).toBeLessThan(selectedLine!.indexOf("البحث"));
-    expect(selectedLine!.trimEnd().endsWith("<")).toBe(true);
+    expect(stripTrailingBidiControls(selectedLine!.trimEnd()).endsWith("<")).toBe(true);
+  });
+
+  it("keeps RTL structured prompt-card markers in one fixed visible column", () => {
+    const base = {
+      title: "محرر الإعدادات",
+      bodyLines: [],
+      showColumnHeaders: false,
+      tableDirection: "rtl" as const,
+      tableWidth: "content" as const,
+      tableMaxWidth: 88,
+      tableAlign: "right" as const,
+      columns: [
+        { key: "description", header: "التفاصيل", align: "right" as const },
+        { key: "name", header: "الاسم", align: "right" as const },
+      ],
+      options: [
+        {
+          id: "primary",
+          label: "النموذج الأساسي",
+          description: "النموذج الافتراضي الذي يستخدمه الوكيل.",
+        },
+        {
+          id: "security",
+          label: "وضع الأمان",
+          description: "سياسة المراجعة للإجراءات عالية المخاطر.",
+        },
+        {
+          id: "diagnostics",
+          label: "التشخيصات",
+          description: "اعرض العوائق، والتحذيرات، والحالة المكتشفة.",
+        },
+      ],
+      locale: "ar" as const,
+      direction: "rtl" as const,
+    };
+    const markerLineFor = (selectedOptionIndex: number) => {
+      const out = renderOnboardingPromptCard(buildOnboardingPromptCardViewModel({
+        ...base,
+        selectedOptionIndex,
+      }), "ar");
+      return out.split("\n").find((line) => line.includes("<")) ?? "";
+    };
+
+    const firstMarkerColumn = visibleMarkerColumn(markerLineFor(0), "<");
+    const lastMarkerColumn = visibleMarkerColumn(markerLineFor(2), "<");
+    expect(lastMarkerColumn).toBe(firstMarkerColumn);
   });
 
   it("renders Arabic prompt-card hints as LTR technical text", () => {

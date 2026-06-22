@@ -805,7 +805,7 @@ export class StandardRenderer {
         "header"
       );
       const line = tableDirection === "rtl"
-        ? `  ${header}${" ".repeat(optionMarkerSlotWidth)}`
+        ? `  ${isolateLtr(`${header}${" ".repeat(optionMarkerSlotWidth)}`)}`
         : `  ${" ".repeat(optionMarkerSlotWidth)}${header}`;
       lines.push(this.#alignStructuredPromptTableLine(line, contentWidth, layout.lineWidth, vm.tableAlign));
     }
@@ -829,7 +829,7 @@ export class StandardRenderer {
         "option"
       );
       const line = tableDirection === "rtl"
-        ? `  ${row}${optionMarkerGap}${marker}`
+        ? `  ${isolateLtr(`${row}${optionMarkerGap}${marker}`)}`
         : `  ${marker}${optionMarkerGap}${row}`;
       lines.push(this.#alignStructuredPromptTableLine(line, contentWidth, layout.lineWidth, vm.tableAlign));
     }
