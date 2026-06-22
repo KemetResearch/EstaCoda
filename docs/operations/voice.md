@@ -12,7 +12,7 @@ Voice is optional. Core CLI and gateway text operation should continue to work w
 | Command | Purpose |
 |---------|---------|
 | `estacoda voice status` | Show configured TTS/STT providers and readiness reasons. |
-| `estacoda voice setup ...` | Configure TTS/STT provider references and safe env-var names in the selected profile. |
+| `estacoda voice setup ...` | Direct operator setup for TTS/STT provider references, model overrides, and API-key inputs in the selected profile. |
 | `estacoda voice mode on` | Enable CLI push-to-talk input. |
 | `estacoda voice mode off` | Disable CLI push-to-talk input. |
 | `estacoda voice mode tts` | Enable CLI push-to-talk input with best-effort local playback of TTS replies. |
@@ -87,6 +87,10 @@ For an incoming Telegram voice message with `/voice on`, the path is: Telegram v
 
 ## Provider Setup
 
+The Setup Editor and Onboarding Wizard ask users to choose an STT/TTS provider. They no longer ask for model strings or API env-var reference names; runtime config defaults provide models, voices, and provider settings. For hosted Voice providers, setup collects the real API key through masked input, then review/apply stores only env-var references in config and writes profile-local secret values to the selected profile `.env` after the reviewed apply step. Raw API keys are not stored in config, shown in review manifests, inserted into prompt context, logged, or returned in errors.
+
+Existing credentials can be reused through env-var references such as `VOICE_TOOLS_OPENAI_KEY`, `OPENAI_API_KEY`, `GEMINI_API_KEY`, `GROQ_API_KEY`, and `XAI_API_KEY`, and through existing compatible provider config/routes where supported. Direct CLI flags such as `--tts-model`, `--stt-model`, `--tts-api-key-env`, `--stt-api-key-env`, `--tts-api-key`, and `--stt-api-key` remain available for explicit scripted setup.
+
 Implemented hosted TTS providers:
 
 - OpenAI
@@ -94,7 +98,10 @@ Implemented hosted TTS providers:
 - MiniMax
 - Gemini
 - xAI
-- Edge
+
+Implemented no-key TTS provider:
+
+- Edge, which is networked and sends synthesis text to Microsoft's Edge speech service
 
 Implemented hosted STT providers:
 
@@ -112,7 +119,7 @@ Deferred in v0.1.0:
 - local TTS providers `neutts` and `kittentts`
 - Mistral TTS/STT
 
-Voice credentials are direct environment variables only for providers that require keys. Put real keys in the selected profile `.env` or an environment source for the service process. Do not put raw keys in `config.json`. Edge TTS does not require an API key, but it is not local/offline: synthesis text is sent over the network to Microsoft's Edge speech service and must be treated as an external side effect.
+Voice config stores direct environment-variable references only for providers that require keys. Put real keys in the selected profile `.env` or an environment source for the service process. Do not put raw keys in `config.json`. Edge TTS does not require an API key, but it is not local/offline: synthesis text is sent over the network to Microsoft's Edge speech service and must be treated as an external side effect.
 
 OpenAI audio credential lookup:
 

@@ -312,6 +312,8 @@ Text-to-speech provider and voice settings.
 
 Implemented TTS: OpenAI, ElevenLabs, MiniMax, Gemini, xAI, and Edge. Edge requires no API key, but it is networked: synthesis text is sent to Microsoft's Edge speech service, and output is MP3 (`audio/mpeg`). Local/offline TTS providers `neutts` and `kittentts`, and Mistral TTS, are deferred.
 
+Interactive setup asks for the TTS provider only. It uses runtime defaults for models, voices, and provider settings, and collects hosted provider API keys through masked input. Config stores env-var references such as `apiKeyEnv`, while profile-local secret values are written to `.env` only after reviewed apply. Direct operator CLI flags such as `estacoda voice setup --tts-model`, `--tts-api-key-env`, and `--tts-api-key` remain available for scripted setup.
+
 ### stt
 
 Speech-to-text provider and model.
@@ -330,6 +332,8 @@ Speech-to-text provider and model.
 ```
 
 Stable hosted STT: OpenAI, Groq, xAI. Local STT supports `command` and `faster-whisper`. Mistral STT is deferred.
+
+Interactive setup asks for the STT provider only. It uses runtime defaults for models and provider settings, and collects hosted provider API keys through masked input. Config stores env-var references such as `apiKeyEnv`, while profile-local secret values are written to `.env` only after reviewed apply. Direct operator CLI flags such as `estacoda voice setup --stt-model`, `--stt-api-key-env`, and `--stt-api-key` remain available for scripted setup.
 
 In v0.1.0, `stt.provider: "local"` defaults to managed faster-whisper:
 
@@ -522,6 +526,7 @@ Telegram streaming runs before normal final-text routing. If streaming cannot de
 ## Secret handling
 
 - Provider setup writes raw API keys only to the selected profile `.env`, never to `config.json`.
+- Voice setup review manifests show env-var references only. Raw Voice API keys are not stored in config, shown in review manifests, or inserted into prompt context.
 - Profile `.env` is chmodded to `0600` when written by the env secret store.
 - Runtime config loads the selected profile `.env` before execution.
 - Do not paste real secrets into config snippets.

@@ -25,12 +25,12 @@ If voice providers, local audio tooling, or live credentials are absent, core CL
 
 | Provider | Notes |
 |----------|-------|
-| OpenAI | Default. Uses shared OpenAI audio credential resolver. |
+| OpenAI | Hosted API-key TTS provider. Uses shared OpenAI audio credential resolver. |
 | ElevenLabs | Uses `xi-api-key` and provider text limits. |
 | MiniMax | Decodes base64 JSON audio responses. |
 | Gemini | Sends `speechConfig.voiceConfig.prebuiltVoiceConfig.voiceName`. |
 | xAI | Uses native `{baseUrl}/tts`; not OpenAI-compatible. |
-| Edge | No API key required. Uses Microsoft's online Edge speech service, so synthesis text is sent over the network and this is not local/offline TTS. Returns MP3 (`audio/mpeg`). |
+| Edge | Recommended/default guided setup option. No API key required; synthesis text is sent to Microsoft's Edge speech service, so this is networked and not local/offline TTS. Returns MP3 (`audio/mpeg`). |
 
 ### Hosted STT — stable
 
@@ -103,9 +103,19 @@ Core fields:
 | `voice.autoTtsMaxCharsPerReply` | Optional per-reply cap checked before synthesis. |
 | `voice.autoTtsMaxCharsPerHourPerChat` | Optional hourly cap tracked per platform/chat. |
 
+### Guided setup
+
+The Setup Editor and Onboarding Wizard ask you to choose STT and TTS providers. They do not ask for model names or env-var reference names; runtime config defaults provide models, voices, and provider settings.
+
+For hosted Voice providers, setup collects the real API key through masked input. The review/apply step stores only env-var references in config and writes profile-local secret values to the selected profile `.env` after you confirm. Raw API keys are not stored in config, shown in review manifests, inserted into prompt context, logged, or returned in errors.
+
+No-key providers are STT `local` and TTS `edge`. Edge does not require an API key, but it still performs a network request to Microsoft's Edge speech service and sends the synthesis text to that service. Hosted key-required providers are STT `openai`, `groq`, and `xai`; and TTS `openai`, `elevenlabs`, `minimax`, `gemini`, and `xai`. Deferred providers are STT `mistral`; and TTS `mistral`, `neutts`, and `kittentts`.
+
+Setup can reuse existing credentials through env-var references such as `VOICE_TOOLS_OPENAI_KEY`, `OPENAI_API_KEY`, `GEMINI_API_KEY`, `GROQ_API_KEY`, and `XAI_API_KEY`, and through existing compatible provider config/routes where supported. Direct operator CLI flags such as `estacoda voice setup --tts-model`, `--stt-model`, `--tts-api-key-env`, `--stt-api-key-env`, `--tts-api-key`, and `--stt-api-key` remain available for explicit scripted setup.
+
 ### Credentials
 
-Voice credentials are direct environment variables only. There are no voice credential pools, gateway brokers, managed fallbacks, or non-env sources.
+Voice config stores direct environment-variable references only. There are no voice credential pools, gateway brokers, managed fallbacks, or non-env sources.
 
 Edge TTS does not use an API key. It still performs a network request to Microsoft's Edge speech service and sends the synthesis text to that service.
 

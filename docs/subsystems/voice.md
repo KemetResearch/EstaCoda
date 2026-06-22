@@ -11,12 +11,12 @@ Voice is an optional media capability. It is separate from the primary LLM provi
 
 | Capability | Provider | Status | Notes |
 |------------|----------|--------|-------|
-| Hosted TTS | OpenAI | Implemented | Default TTS provider. Uses the shared OpenAI audio credential resolver. |
+| Hosted TTS | OpenAI | Implemented | Hosted API-key TTS provider. Uses the shared OpenAI audio credential resolver. |
 | Hosted TTS | ElevenLabs | Implemented | Uses `xi-api-key` and provider text limits. |
 | Hosted TTS | MiniMax | Implemented | Decodes base64 JSON audio responses. |
 | Hosted TTS | Gemini | Implemented | Uses `speechConfig.voiceConfig.prebuiltVoiceConfig.voiceName`. |
 | Hosted TTS | xAI | Implemented | Uses native `{baseUrl}/tts`, not an OpenAI-compatible shape. |
-| Hosted TTS | Edge | Implemented | Uses Microsoft Edge's online speech service through `@bestcodes/edge-tts`. No API key is required, but synthesis text is sent over the network to Microsoft's Edge speech service and this is not local/offline TTS. |
+| Hosted TTS | Edge | Implemented | Recommended/default guided setup option. No API key is required, but synthesis text is sent over the network to Microsoft's Edge speech service and this is not local/offline TTS. |
 | Hosted STT | OpenAI | Implemented | Uses the shared OpenAI audio credential resolver. |
 | Hosted STT | Groq | Implemented | Direct environment key lookup. |
 | Hosted STT | xAI | Implemented | Uses native `{baseUrl}/stt`, not an OpenAI-compatible shape. |
@@ -56,6 +56,15 @@ Voice config lives in the selected profile config at `~/.estacoda/profiles/<prof
 }
 ```
 
+Interactive setup behavior:
+
+- The Setup Editor and Onboarding Wizard ask users to choose STT and TTS providers.
+- Interactive setup no longer asks for model names. Runtime config defaults provide models, voices, and provider settings.
+- Interactive setup no longer asks users to type env-var reference names. Hosted providers collect the real API key through masked input, or offer to reuse an existing compatible credential reference where available.
+- Review/apply stores env-var references in config and writes profile-local secret values to the selected profile `.env` only after the reviewed apply step.
+- Raw API keys are not stored in config, shown in review manifests, inserted into prompt context, logged, or returned in provider errors.
+- Direct operator CLI flags such as `estacoda voice setup --tts-model`, `--stt-model`, `--tts-api-key-env`, `--stt-api-key-env`, `--tts-api-key`, and `--stt-api-key` remain available for explicit scripted setup.
+
 Core fields:
 
 | Field | Meaning |
@@ -70,8 +79,12 @@ Core fields:
 
 Credential rules:
 
-- Voice credentials are direct environment variables only.
+- Voice config stores direct environment-variable references only.
 - There are no voice credential pools, gateway brokers, managed fallbacks, `useGateway`, or non-env credential sources.
+- No-key providers are STT `local` and TTS `edge`. Edge TTS still sends synthesis text to Microsoft's Edge speech service and is not local/offline.
+- Hosted key-required providers are STT `openai`, `groq`, and `xai`; and TTS `openai`, `elevenlabs`, `minimax`, `gemini`, and `xai`.
+- Deferred providers are STT `mistral`; and TTS `mistral`, `neutts`, and `kittentts`.
+- Setup can reuse existing credentials through env-var references such as `VOICE_TOOLS_OPENAI_KEY`, `OPENAI_API_KEY`, `GEMINI_API_KEY`, `GROQ_API_KEY`, and `XAI_API_KEY`, and through existing compatible provider config/routes where supported.
 - OpenAI audio credentials resolve in this order:
   1. `config.openai.apiKeyEnv`
   2. `VOICE_TOOLS_OPENAI_KEY`

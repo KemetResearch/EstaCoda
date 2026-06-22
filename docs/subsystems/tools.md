@@ -125,7 +125,7 @@ Implemented voice providers and security boundaries are documented in [Voice](./
 - Local STT: managed faster-whisper by default for `stt.provider: "local"`; command mode only with explicit `stt.local.engine: "command"`.
 - Deferred: local TTS providers `neutts` and `kittentts`, and Mistral TTS/STT.
 
-Voice credentials are direct environment-variable lookups only. Tool errors use stable provider/reason metadata and bounded sanitized snippets.
+Voice config stores env-var references only. Guided setup collects hosted provider API keys through masked input, writes profile-local `.env` secrets only after reviewed apply, and keeps raw keys out of config, review manifests, prompt context, logs, and tool errors. Tool errors use stable provider/reason metadata and bounded sanitized snippets.
 
 ## Memory Retrieval Tools
 
