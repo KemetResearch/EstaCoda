@@ -1,25 +1,16 @@
 import { existsSync } from "node:fs";
-import { dirname, isAbsolute } from "node:path";
+import { isAbsolute } from "node:path";
 import type { ChannelAttachment, ChannelKind } from "../contracts/channel.js";
 import type { IntentRoute } from "../contracts/intent.js";
 import type { ModelProfile } from "../contracts/provider.js";
 import type { LoadedSkill, SelectedSkillPromptContent, SkillDefinition } from "../contracts/skill.js";
-import { resolveOsHomeDir } from "../config/home-dir.js";
 import { selectSkillPromptContent } from "../skills/skill-contract.js";
+import {
+  resolveSkillSetupContext,
+  type SkillSetupContext
+} from "../skills/skill-readiness.js";
 import type { IntentRouter } from "./intent-router.js";
-
-export type SkillSetupContext = {
-  skillDirectory?: string;
-  requiredEnvironmentVariables: Array<{ name: string; present: boolean }>;
-  requiredCredentialFiles: Array<{ path: string; present: boolean; resolvedPath?: string }>;
-  configFields: Array<{
-    key: string;
-    description?: string;
-    required?: boolean;
-    value?: unknown;
-    source: "config" | "default" | "missing";
-  }>;
-};
+export type { SkillSetupContext } from "../skills/skill-readiness.js";
 
 export type RuntimeRouteResult = {
   intent: IntentRoute;
@@ -90,7 +81,7 @@ export class RuntimeRouter {
     const selectedSkillSetup =
       selectedSkill === undefined
         ? undefined
-        : resolveSkillSetup(selectedSkill, this.#skillConfig[selectedSkill.name]);
+        : resolveSkillSetupContext(selectedSkill, this.#skillConfig[selectedSkill.name]);
 
     return {
       intent,
@@ -228,91 +219,4 @@ function directAttachmentFailureIntent(): IntentRoute {
     ],
     rationale: "EstaCoda handled a channel attachment failure before provider/tool execution."
   };
-}
-
-function resolveSkillSetup(
-  skill: LoadedSkill | SkillDefinition,
-  configuredValues: Record<string, unknown> | undefined
-): SkillSetupContext {
-  return {
-    skillDirectory: isLoadedSkill(skill) ? dirname(skill.sourcePath) : undefined,
-    requiredEnvironmentVariables: (skill.requiredEnvironmentVariables ?? []).map((name) => ({
-      name,
-      present: typeof process.env[name] === "string" && process.env[name]!.length > 0
-    })),
-    requiredCredentialFiles: (skill.requiredCredentialFiles ?? []).map((path) => ({
-      path,
-      present: credentialFileExists(path),
-      resolvedPath: expandUserEnvPath(path)
-    })),
-    configFields: (skill.configFields ?? []).map((field) => {
-      const configuredValue = resolveConfiguredSkillValue(configuredValues, field.key);
-      if (configuredValue !== undefined) {
-        return {
-          key: field.key,
-          description: field.description,
-          required: field.required,
-          value: configuredValue,
-          source: "config" as const
-        };
-      }
-
-      if (field.defaultValue !== undefined) {
-        return {
-          key: field.key,
-          description: field.description,
-          required: field.required,
-          value: field.defaultValue,
-          source: "default" as const
-        };
-      }
-
-      return {
-        key: field.key,
-        description: field.description,
-        required: field.required,
-        source: "missing" as const
-      };
-    })
-  };
-}
-
-function credentialFileExists(path: string): boolean {
-  const resolved = expandUserEnvPath(path);
-  return existsSync(resolved);
-}
-
-function expandUserEnvPath(path: string): string {
-  const withHome = path.startsWith("~/")
-    ? `${resolveOsHomeDir()}/${path.slice(2)}`
-    : path;
-
-  return withHome.replace(/\$\{([^}]+)\}/g, (_, name: string) => process.env[name] ?? "");
-}
-
-function resolveConfiguredSkillValue(
-  configuredValues: Record<string, unknown> | undefined,
-  key: string
-): unknown {
-  if (configuredValues === undefined) {
-    return undefined;
-  }
-
-  const variants = new Set<string>([key, toSnakeCase(key), toCamelCase(key)]);
-
-  for (const variant of variants) {
-    if (configuredValues[variant] !== undefined) {
-      return configuredValues[variant];
-    }
-  }
-
-  return undefined;
-}
-
-function toSnakeCase(value: string): string {
-  return value.replace(/([a-z0-9])([A-Z])/g, "$1_$2").toLowerCase();
-}
-
-function toCamelCase(value: string): string {
-  return value.replace(/_([a-z])/g, (_, char: string) => char.toUpperCase());
 }

@@ -1462,6 +1462,7 @@ function isHousekeepingToolName(name: string | undefined): boolean {
     name === "knowledge.memory.inspect" ||
     name === "skill.observe" ||
     name === "skill.list" ||
+    name === "skill.read" ||
     name === "skill.view" ||
     name === "skill.inspect" ||
     name === "skill.usage" ||
