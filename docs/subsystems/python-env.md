@@ -181,6 +181,8 @@ estacoda python-env setup edge-tts --yes
 estacoda python-env verify edge-tts
 ```
 
+Edge can also be selected through the Setup Editor or first-run Onboarding Wizard. That selection is a reviewed setup action; after the user confirms apply, EstaCoda may install the global managed Python `edge-tts` capability without a second package-install prompt. Setup Editor mode is strict and fails the Edge TTS apply if setup fails. First-run onboarding is tolerant and warns while skipping only the Edge TTS portion if setup fails.
+
 The environment lives under the global managed Python root:
 
 ```text
@@ -195,6 +197,7 @@ Runtime voice synthesis and gateway auto-TTS resolve this capability in non-inst
 
 ```bash
 estacoda python-env setup edge-tts --yes
+estacoda python-env verify edge-tts
 ```
 
 Remote Telegram and gateway messages must not trigger hidden package installation.

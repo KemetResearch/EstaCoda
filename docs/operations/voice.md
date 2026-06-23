@@ -32,7 +32,7 @@ estacoda voice mode status
 
 `estacoda voice setup --tts-provider openai` is TTS-only. It does not mutate STT config and does not touch the managed Python environment.
 
-`estacoda voice setup --tts-provider edge --tts-voice en-US-AriaNeural` selects Edge TTS in profile config. It does not install the Python `edge-tts` package. Install the managed capability separately:
+`estacoda voice setup --tts-provider edge --tts-voice en-US-AriaNeural` selects Edge TTS in profile config. In interactive/local use, it may offer to install the managed Python `edge-tts` capability after explicit confirmation. In non-interactive use, it does not install packages silently; it prints the setup/verify repair commands:
 
 ```bash
 estacoda python-env setup edge-tts --yes
@@ -145,12 +145,17 @@ estacoda python-env setup edge-tts --yes
 estacoda python-env verify edge-tts
 ```
 
-Setup is the consent boundary for package installation. Runtime voice synthesis, CLI TTS playback, Telegram auto-TTS, and gateway auto-TTS do not auto-install `edge-tts`, do not run pip, and do not repair the capability implicitly.
+Setup is the consent boundary for package installation. Choosing Edge TTS in the Setup Editor or first-run Onboarding Wizard is an explicit setup choice. After the user reviews and confirms the setup plan, apply may install `edge-tts` in the global managed Python capability root without a second package-install prompt. Setup Editor mode is strict: if `edge-tts` setup fails, Edge TTS apply fails. First-run onboarding is tolerant: if setup fails, onboarding warns and skips only the Edge TTS portion.
 
-If the capability is missing, the repair command is:
+Direct CLI setup follows the same boundary but splits by mode: interactive/local `estacoda voice setup --tts-provider edge` may offer to install after explicit confirmation; non-interactive setup writes config and prints the repair commands instead of installing silently.
+
+Runtime voice synthesis, CLI TTS playback, Telegram auto-TTS, and gateway auto-TTS do not auto-install `edge-tts`, do not run pip, and do not repair the capability implicitly.
+
+If the capability is missing at runtime, the repair path is:
 
 ```bash
 estacoda python-env setup edge-tts --yes
+estacoda python-env verify edge-tts
 ```
 
 Gateway auto-TTS logs the repair path, preserves the text reply, and does not record auto-TTS character usage for failed synthesis. Remote Telegram or gateway messages must not trigger hidden package installation.
