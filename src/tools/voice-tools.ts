@@ -5,6 +5,8 @@ import type { ArtifactStore } from "../artifacts/artifact-store.js";
 import type { ArtifactRecord } from "../contracts/artifact.js";
 import type { LoadedRuntimeConfig, SttProvider, TtsProvider } from "../config/runtime-config.js";
 import type { RegisteredTool, SessionToolProvider } from "../contracts/tool.js";
+import { EDGE_TTS_CAPABILITY_ID } from "../python-env/capability-registry.js";
+import { resolveCapabilityPythonEnv } from "../python-env/capability-resolver.js";
 import type { FasterWhisperWorker } from "./stt-local-whisper.js";
 import {
   checkSttProviderStatus as checkSttProviderStatusFromDispatch,
@@ -87,11 +89,46 @@ export function checkTtsProviderStatus(
   return { ready: false, reason: `${provider} TTS is not implemented in v0.1.0 Stage 1` };
 }
 
+export async function checkTtsProviderStatusWithCapabilities(
+  provider: TtsProvider,
+  config: LoadedRuntimeConfig["tts"],
+  options: { pythonStateRoot?: string } = {}
+): Promise<VoiceProviderStatus> {
+  const baseStatus = checkTtsProviderStatus(provider, config);
+  if (!baseStatus.ready || provider !== "edge") {
+    return baseStatus;
+  }
+  if (options.pythonStateRoot === undefined) {
+    return edgeCapabilityNotReady("Managed Python state root is unavailable.");
+  }
+
+  const capability = await resolveCapabilityPythonEnv(EDGE_TTS_CAPABILITY_ID, {
+    stateRoot: options.pythonStateRoot
+  });
+  if (capability.ok) {
+    return { ready: true };
+  }
+
+  return edgeCapabilityNotReady(capability.message);
+}
+
 export function checkSttProviderStatus(
   provider: SttProvider,
   config: LoadedRuntimeConfig["stt"]
 ): VoiceProviderStatus {
   return checkSttProviderStatusFromDispatch(provider, config);
+}
+
+function edgeCapabilityNotReady(detail: string): VoiceProviderStatus {
+  return {
+    ready: false,
+    reason: [
+      "Edge TTS managed Python capability is not ready.",
+      detail,
+      "Run: estacoda python-env setup edge-tts --yes",
+      "Then: estacoda python-env verify edge-tts"
+    ].join(" ")
+  };
 }
 
 export async function synthesizeSpeechToEphemeralArtifact(input: {

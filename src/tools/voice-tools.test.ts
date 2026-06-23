@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { tmpdir } from "node:os";
 import { ArtifactStore } from "../artifacts/artifact-store.js";
@@ -12,6 +12,7 @@ import type { EdgeTtsRunInput } from "./tts-providers.js";
 import {
   checkSttProviderStatus,
   checkTtsProviderStatus,
+  checkTtsProviderStatusWithCapabilities,
   createVoiceTools,
   synthesizeSpeechToEphemeralArtifact,
   type VoiceFetchLike
@@ -124,6 +125,49 @@ describe("voice tool readiness", () => {
     const speak = tools.find((tool) => tool.name === "voice.speak");
     expect(speak?.isAvailable()).toBe(true);
     expect(checkTtsProviderStatus("edge", tts)).toEqual({ ready: true });
+  });
+
+  it("reports Edge TTS as not ready when its managed Python capability is missing", async () => {
+    const stateRoot = await createTempDir("estacoda-voice-edge-missing-status-");
+    const tts: LoadedRuntimeConfig["tts"] = { provider: "edge", speed: 1, enabled: true };
+    const paths = resolveManagedPythonCapabilityPaths({
+      stateRoot,
+      capabilityId: EDGE_TTS_CAPABILITY_ID
+    });
+
+    const status = await checkTtsProviderStatusWithCapabilities("edge", tts, { pythonStateRoot: stateRoot });
+
+    expect(status.ready).toBe(false);
+    if (!status.ready) {
+      expect(status.reason).toContain("Edge TTS managed Python capability is not ready.");
+      expect(status.reason).toContain("estacoda python-env setup edge-tts --yes");
+      expect(status.reason).toContain("estacoda python-env verify edge-tts");
+    }
+    await expect(stat(paths.envPath)).rejects.toThrow();
+  });
+
+  it("reports Edge TTS as ready when its managed Python capability is verified", async () => {
+    const edgeState = await createVerifiedEdgeCapabilityState();
+    const tts: LoadedRuntimeConfig["tts"] = { provider: "edge", speed: 1, enabled: true };
+
+    await expect(checkTtsProviderStatusWithCapabilities("edge", tts, {
+      pythonStateRoot: edgeState.stateRoot
+    })).resolves.toEqual({ ready: true });
+  });
+
+  it("keeps non-Edge TTS readiness behavior independent from managed Python capability checks", async () => {
+    const tts: LoadedRuntimeConfig["tts"] = {
+      provider: "openai",
+      speed: 1,
+      enabled: true,
+      openai: { apiKeyEnv: "VOICE_TOOLS_OPENAI_KEY" }
+    };
+
+    await withEnv({ VOICE_TOOLS_OPENAI_KEY: "present" }, async () => {
+      await expect(checkTtsProviderStatusWithCapabilities("openai", tts, {
+        pythonStateRoot: "/missing"
+      })).resolves.toEqual({ ready: true });
+    });
   });
 
   it("classifies edge TTS as an external side effect", async () => {

@@ -46,7 +46,7 @@ import { collectSetupEntryState } from "../setup/setup-entry-state.js";
 import { collectSetupRoute } from "../setup/setup-router.js";
 import { renderSetupRouteSummary } from "../setup/setup-state-renderer.js";
 import { runSetupVerification } from "../setup/verification.js";
-import { checkSttProviderStatus, checkTtsProviderStatus } from "../tools/voice-tools.js";
+import { checkSttProviderStatus, checkTtsProviderStatusWithCapabilities, type VoiceProviderStatus } from "../tools/voice-tools.js";
 import type { ToolDefinition } from "../contracts/tool.js";
 import type { FetchLike as ProviderFetchLike } from "../providers/openai-compatible-provider.js";
 import type { ImageGenerationFetchLike } from "../tools/image-generation-tools.js";
@@ -707,7 +707,7 @@ async function settings(options: CliOptions, args: string[]): Promise<CliCommand
     return {
       handled: true,
       exitCode: 0,
-      output: renderVoiceStatus(config)
+      output: await renderVoiceStatus(config, { homeDir: options.homeDir })
     };
   }
 
@@ -2242,7 +2242,7 @@ async function voice(options: CliOptions, args: string[]): Promise<CliCommandRes
       output: [
         ...setupOutput.lines,
         "Configured EstaCoda voice.",
-        renderVoiceStatus(loaded),
+        await renderVoiceStatus(loaded, { homeDir: options.homeDir }),
         `Config: ${result.path}`,
         result.secretPaths.length === 0 ? undefined : `Secret store: ${result.secretPaths.join(", ")}`,
         "Next: voice.speak and voice.transcribe will use this config in runtime sessions."
@@ -2254,7 +2254,7 @@ async function voice(options: CliOptions, args: string[]): Promise<CliCommandRes
   return {
     handled: true,
     exitCode: 0,
-    output: renderVoiceStatus(config)
+    output: await renderVoiceStatus(config, { homeDir: options.homeDir })
   };
 }
 
@@ -2413,10 +2413,15 @@ function imageApiKeyEnv(provider: ImageGenerationProvider, config: Awaited<Retur
     : config.imageGen.fal?.apiKeyEnv ?? defaultImageApiKeyEnv("fal");
 }
 
-function renderVoiceStatus(config: Awaited<ReturnType<typeof loadRuntimeConfig>>): string {
+async function renderVoiceStatus(
+  config: Awaited<ReturnType<typeof loadRuntimeConfig>>,
+  options: { homeDir?: string } = {}
+): Promise<string> {
   const ttsKey = ttsApiKeyEnv(config.tts.provider, config);
   const sttKey = sttApiKeyEnv(config.stt.provider, config);
-  const ttsStatus = checkTtsProviderStatus(config.tts.provider, config.tts);
+  const ttsStatus = await checkTtsProviderStatusWithCapabilities(config.tts.provider, config.tts, {
+    pythonStateRoot: resolveGlobalStateHome({ homeDir: options.homeDir }).stateRoot
+  });
   const sttStatus = checkSttProviderStatus(config.stt.provider, config.stt);
   const sttPython = sttPythonSource(config);
 
@@ -2463,7 +2468,7 @@ function sttPythonSource(config: Awaited<ReturnType<typeof loadRuntimeConfig>>):
     : `custom: ${pythonBinary}`;
 }
 
-function formatVoiceReadiness(status: ReturnType<typeof checkTtsProviderStatus> | ReturnType<typeof checkSttProviderStatus>): string {
+function formatVoiceReadiness(status: VoiceProviderStatus): string {
   return status.ready ? "ready" : `not ready (${status.reason})`;
 }
 
