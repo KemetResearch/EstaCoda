@@ -762,6 +762,7 @@ export const SETUP_COPY_ENTRIES = [
   copy("setupReview.sections.warnings", "Warnings to review before apply.", "تحذيرات يجب مراجعتها قبل التطبيق.", [], "varies"),
   copy("setupDrafts.review", "Review setup draft.", "راجع مسودة الإعداد.", [], "varies"),
   copy("setupDrafts.providerModelRoute.summary", "Update provider/model to {providerId} / {modelId}.", "حدّث المزوّد/النموذج إلى {providerId} / {modelId}.", ["{providerId}", "{modelId}"], "provider-selection"),
+  copy("setupDrafts.providerModelEndpointRoute.summary", "Update provider/model to {providerId} / {modelId} at {baseUrl}.", "حدّث المزوّد/النموذج إلى {providerId} / {modelId} عند {baseUrl}.", ["{providerId}", "{modelId}", "{baseUrl}"], "provider-selection"),
   copy("setupDrafts.fallbackModelRoute.add.summary", "Add fallback model {providerId} / {modelId}.", "أضف نموذجًا احتياطيًا {providerId} / {modelId}.", ["{providerId}", "{modelId}"], "provider-selection"),
   copy("setupDrafts.fallbackModelRoute.replace.summary", "Replace fallback model {previousProviderId} / {previousModelId} with {providerId} / {modelId}.", "استبدل النموذج الاحتياطي {previousProviderId} / {previousModelId} بـ {providerId} / {modelId}.", ["{previousProviderId}", "{previousModelId}", "{providerId}", "{modelId}"], "provider-selection"),
   copy("setupDrafts.auxiliaryModelRoute.summary", "Set auxiliary {auxiliaryTask} model to {providerId} / {modelId}.", "اضبط نموذج {auxiliaryTask} المساعد إلى {providerId} / {modelId}.", ["{auxiliaryTask}", "{providerId}", "{modelId}"], "provider-selection"),

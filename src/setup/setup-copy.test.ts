@@ -491,6 +491,7 @@ const REVIEW_MANIFEST_KEYS = [
   "setupReview.sections.warnings",
   "setupDrafts.review",
   "setupDrafts.providerModelRoute.summary",
+  "setupDrafts.providerModelEndpointRoute.summary",
   "setupDrafts.fallbackModelRoute.add.summary",
   "setupDrafts.fallbackModelRoute.replace.summary",
   "setupDrafts.auxiliaryModelRoute.summary",
@@ -979,6 +980,12 @@ describe("setup copy", () => {
     expect(rawSetupCopy("en", "setupEditor.actions.exitWithoutChanges")).toBe("Exit without changes");
     expect(rawSetupCopy("en", "setupEditor.actions.exitWithoutChanges.description")).toBe("Leave setup without modifying config.");
     expect(rawSetupCopy("en", "setupEditor.actions.storeProviderCredentialReference")).toBe("Store provider credential reference.");
+    expect(getSetupCopyEntry("setupDrafts.providerModelEndpointRoute.summary")?.placeholders).toEqual(["{providerId}", "{modelId}", "{baseUrl}"]);
+    expect(rawSetupCopy("en", "setupDrafts.providerModelEndpointRoute.summary")).toBe("Update provider/model to {providerId} / {modelId} at {baseUrl}.");
+    expect(rawSetupCopy("ar", "setupDrafts.providerModelEndpointRoute.summary")).toContain("{baseUrl}");
+    expect(resolveSetupCopy("ar", "setupDrafts.providerModelEndpointRoute.summary")).toContain(isolateLtr("{providerId}"));
+    expect(resolveSetupCopy("ar", "setupDrafts.providerModelEndpointRoute.summary")).toContain(isolateLtr("{modelId}"));
+    expect(resolveSetupCopy("ar", "setupDrafts.providerModelEndpointRoute.summary")).toContain(isolateLtr("{baseUrl}"));
     expect(rawSetupCopy("en", "setupDrafts.fallbackModelRoute.add.summary")).toBe("Add fallback model {providerId} / {modelId}.");
     expect(rawSetupCopy("en", "setupDrafts.fallbackModelRoute.replace.summary")).toBe("Replace fallback model {previousProviderId} / {previousModelId} with {providerId} / {modelId}.");
     expect(rawSetupCopy("en", "setupDrafts.auxiliaryModelRoute.summary")).toBe("Set auxiliary {auxiliaryTask} model to {providerId} / {modelId}.");
