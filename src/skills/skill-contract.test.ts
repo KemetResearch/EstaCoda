@@ -30,8 +30,10 @@ describe("buildSkillContract", () => {
     expect(first).toEqual(second);
     expect(first?.summary).toContain("Skill contract: large-skill");
     expect(first?.summary).toContain("Description: A large test skill.");
+    expect(first?.summary).toContain(`Original root instruction chars: ${skill.instructions.length}`);
     expect(first?.summary).toContain(`Inline prompt cap: ${SKILL_ROOT_INLINE_MAX_CHARS}`);
     expect(first?.summary).toContain("skill.read({ \"name\": \"large-skill\", \"mode\": \"full\" })");
+    expect(first?.summary).toContain("Reference/resource contents are not included in this contract.");
     expect(first?.summary.length).toBeLessThanOrEqual(SKILL_CONTRACT_MAX_CHARS);
     expect(first?.originalChars).toBe(skill.instructions.length);
   });
