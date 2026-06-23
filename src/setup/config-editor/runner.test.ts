@@ -8,7 +8,7 @@ import { WorkspaceTrustStore } from "../../security/workspace-trust-store.js";
 import type { ProviderId, ProviderApiMode, ProviderAuthMethod } from "../../contracts/provider.js";
 import type { FlowEngine } from "../../providers/provider-model-selection-flow.js";
 import { createReviewedSetupApplyExecutor } from "../review/apply-executor.js";
-import { __decideConfigEditorLoopForTest, runConfigEditor } from "./runner.js";
+import { __decideConfigEditorLoopForTest, __reviewAndApplyResolvedRouteForTest, runConfigEditor } from "./runner.js";
 import {
   promptAuxiliaryModelTask,
   promptBrowserCapability,
@@ -41,6 +41,7 @@ import {
   type GatewayActivationServiceActions,
 } from "../gateway-service-activation.js";
 import { resolveSetupCopy } from "../setup-copy.js";
+import type { SetupEditorActionDraft } from "../setup-editor-actions.js";
 import type { SetupApplyMode, SetupDeferredSecretWrite } from "../setup-apply-plan.js";
 import type { WhatsAppPairDeviceOptions, WhatsAppSetupDependencies } from "../whatsapp-setup-flow.js";
 import * as pythonEnvManager from "../../python-env/manager.js";
@@ -1583,6 +1584,247 @@ describe("runConfigEditor", () => {
     expect(envFile).toContain("PR8_OPENAI_KEY=");
     expect(rawConfig).not.toContain("sk-pr8-provider-route");
     expect(JSON.stringify(result)).not.toContain("sk-pr8-provider-route");
+  });
+
+  it("prompts for local endpoint and uses the default base URL when blank with no API key", async () => {
+    await writeUserConfig(tempDir, localReadyConfig());
+    await trustWorkspace(tempDir, workspaceRoot);
+    const basePrompt = fakePrompt({ values: ["Local", "local-test-model", "", true] });
+    const questions: string[] = [];
+    const prompt = ((question: string, options?: { secret?: boolean }) => {
+      questions.push(question);
+      return basePrompt(question, options);
+    }) as Prompt;
+    prompt.select = basePrompt.select;
+    prompt.onboardingCard = basePrompt.onboardingCard;
+    prompt.close = basePrompt.close;
+
+    const result = await runConfigEditor({
+      homeDir: tempDir,
+      workspaceRoot,
+      prompt,
+      defaultActionId: "edit-primary-model-route",
+      flowEngine: flowEngine({ credentialAction: "endpoint", envVarName: "OPENAI_COMPATIBLE_API_KEY", providers: ["local"] }),
+      applyExecutor: createReviewedSetupApplyExecutor({
+        homeDir: tempDir,
+        workspaceRoot,
+      }),
+    });
+    const rawConfig = await readFile(profileConfigPath(tempDir), "utf8");
+    const config = JSON.parse(rawConfig) as {
+      providers?: Record<string, { baseUrl?: string; apiKeyEnv?: string }>;
+    };
+
+    expect(result.completed).toBe(true);
+    expect(questions).toEqual([
+      "Local endpoint base URL [http://localhost:11434/v1]:",
+      "Optional API key for OPENAI_COMPATIBLE_API_KEY. Leave blank for no local auth:",
+    ]);
+    expect(result.reviewManifest?.sections["provider-model-network"][0]?.review.values).toEqual(expect.objectContaining({
+      provider: "local",
+      model: "local-test-model",
+      baseUrl: "http://localhost:11434/v1",
+    }));
+    expect(result.reviewManifest?.sections["provider-model-network"][0]?.review.summaryKey).toBe("setupDrafts.providerModelEndpointRoute.summary");
+    expect(result.reviewManifest?.sections["secret-refs-to-store"]).toHaveLength(0);
+    expect(config.providers?.local?.baseUrl).toBeUndefined();
+    expect(config.providers?.local?.apiKeyEnv).toBeUndefined();
+    await expect(readFile(profileEnvPath(tempDir), "utf8")).rejects.toThrow();
+  });
+
+  it("retries invalid local endpoint URLs before review and writes no secret for a blank API key", async () => {
+    await writeUserConfig(tempDir, localReadyConfig());
+    await trustWorkspace(tempDir, workspaceRoot);
+    const basePrompt = fakePrompt({ values: ["Local", "local-test-model", "not a url", "http://127.0.0.1:9999/v1", true] });
+    const questions: string[] = [];
+    const prompt = ((question: string, options?: { secret?: boolean }) => {
+      questions.push(question);
+      return basePrompt(question, options);
+    }) as Prompt;
+    prompt.select = basePrompt.select;
+    prompt.onboardingCard = basePrompt.onboardingCard;
+    prompt.close = basePrompt.close;
+
+    const result = await runConfigEditor({
+      homeDir: tempDir,
+      workspaceRoot,
+      prompt,
+      defaultActionId: "edit-primary-model-route",
+      flowEngine: flowEngine({ credentialAction: "endpoint", providers: ["local"] }),
+      applyExecutor: createReviewedSetupApplyExecutor({
+        homeDir: tempDir,
+        workspaceRoot,
+      }),
+    });
+    const rawConfig = await readFile(profileConfigPath(tempDir), "utf8");
+    const config = JSON.parse(rawConfig) as {
+      providers?: Record<string, { baseUrl?: string; apiKeyEnv?: string }>;
+    };
+
+    expect(result.completed).toBe(true);
+    expect(questions[1]).toContain("Invalid endpoint URL.");
+    expect(questions[1]).toContain("Local endpoint base URL [http://localhost:11434/v1]:");
+    expect(config.providers?.local?.baseUrl).toBe("http://127.0.0.1:9999/v1");
+    expect(config.providers?.local?.apiKeyEnv).toBeUndefined();
+    await expect(readFile(profileEnvPath(tempDir), "utf8")).rejects.toThrow();
+  });
+
+  it("defers exactly one optional local endpoint API key write after review", async () => {
+    await writeUserConfig(tempDir, localReadyConfig());
+    await trustWorkspace(tempDir, workspaceRoot);
+    const reviewedExecutor = createReviewedSetupApplyExecutor({
+      homeDir: tempDir,
+      workspaceRoot,
+    });
+    const deferredWrites: SetupDeferredSecretWrite[][] = [];
+
+    const result = await runConfigEditor({
+      homeDir: tempDir,
+      workspaceRoot,
+      prompt: fakePrompt({
+        values: ["Local", "local-test-model", "https://private.local/v1", true],
+        secret: "sk-local-endpoint",
+      }),
+      defaultActionId: "edit-primary-model-route",
+      flowEngine: flowEngine({ credentialAction: "endpoint", envVarName: "OPENAI_COMPATIBLE_API_KEY", providers: ["local"] }),
+      applyExecutor: {
+        ...reviewedExecutor,
+        applyDeferredSecrets: async (plan, writes) => {
+          deferredWrites.push([...writes]);
+          return reviewedExecutor.applyDeferredSecrets!(plan, writes);
+        },
+      },
+    });
+    const rawConfig = await readFile(profileConfigPath(tempDir), "utf8");
+    const config = JSON.parse(rawConfig) as {
+      providers?: Record<string, { baseUrl?: string; apiKeyEnv?: string }>;
+    };
+    const envFile = await readFile(profileEnvPath(tempDir), "utf8");
+
+    expect(result.completed).toBe(true);
+    expect(deferredWrites).toEqual([[{ envVarName: "OPENAI_COMPATIBLE_API_KEY", value: "sk-local-endpoint" }]]);
+    expect(result.reviewManifest?.sections["provider-model-network"][0]?.review.values).toEqual(expect.objectContaining({
+      baseUrl: "https://private.local/v1",
+      apiKeyEnv: "OPENAI_COMPATIBLE_API_KEY",
+    }));
+    expect(result.reviewManifest?.sections["secret-refs-to-store"]).toHaveLength(1);
+    expect(config.providers?.local?.baseUrl).toBe("https://private.local/v1");
+    expect(config.providers?.local?.apiKeyEnv).toBe("OPENAI_COMPATIBLE_API_KEY");
+    expect(envFile).toContain("OPENAI_COMPATIBLE_API_KEY=");
+    expect(rawConfig).not.toContain("sk-local-endpoint");
+    expect(JSON.stringify(result)).not.toContain("sk-local-endpoint");
+  });
+
+  it("routes credential-only endpoint repair through provider-route review without a credential-only endpoint apply", async () => {
+    delete process.env.OPENAI_COMPATIBLE_API_KEY;
+    await writeUserConfig(tempDir, {
+      ...localReadyConfig(),
+      providers: {
+        local: {
+          kind: "openai-compatible",
+          baseUrl: "http://localhost:11434/v1",
+          apiKeyEnv: "OPENAI_COMPATIBLE_API_KEY",
+          models: ["local-test-model"],
+          enableNetwork: true,
+        },
+      },
+    });
+    await trustWorkspace(tempDir, workspaceRoot);
+    const editorAction: SetupEditorActionDraft = {
+      kind: "setup-editor-action-draft",
+      id: "repair-missing-credential",
+      copyKey: "setupEditor.actions.repairMissingCredential",
+      sectionId: "credentials",
+      effect: "draft-config-patch",
+      readOnly: false,
+      mutatesConfig: false,
+      requiresExplicitApply: true,
+      preservesUnrelatedConfig: true,
+      patch: {
+        kind: "scoped-config-patch-intent",
+        fields: ["provider.credentialReference"],
+        preserveUnrelatedConfig: true,
+      },
+      credentialRefs: [{ kind: "env", name: "OPENAI_COMPATIBLE_API_KEY", value: "not-included" }],
+    };
+    const session: NonNullable<SetupRouteDecision["setupEditorPlanSession"]> = {
+      kind: "guided-setup-editor-session",
+      plan: {
+        kind: "guided-setup-editor-plan",
+        name: "Guided Setup Editor Architecture",
+        mode: "repair-first",
+        sourceState: "missing-secret",
+        preservesUnrelatedConfig: true,
+        configSummary: {},
+        sections: [],
+        actions: [editorAction],
+        blockers: [],
+        warnings: [],
+        safeForNormalConfigEditing: true,
+      } as unknown as NonNullable<SetupRouteDecision["setupEditorPlanSession"]>["plan"],
+      activeSections: [],
+      metadata: {
+        source: "setup-router",
+        planKind: "guided-setup-editor-plan",
+        mode: "repair-first",
+        sourceState: "missing-secret",
+        sectionCount: 0,
+        actionCount: 1,
+      },
+    };
+    const initialDecision = {
+      kind: "repair-first-menu",
+      title: "Setup editor",
+      summary: "Repair",
+      state: {
+        kind: "missing-secret",
+        model: { provider: "local", id: "local-test-model" },
+      },
+      actions: [],
+      warnings: [],
+      blockers: [],
+      readOnly: false,
+      setupEditorPlanSession: session,
+    } as unknown as SetupRouteDecision;
+    const resolution = await flowEngine({ credentialAction: "endpoint", providers: ["local"] }).resolveSelection("local", "local-test-model");
+    if (resolution.kind !== "selected") {
+      throw new Error("Expected local endpoint selection to resolve.");
+    }
+
+    const result = await __reviewAndApplyResolvedRouteForTest({
+      options: {
+        homeDir: tempDir,
+        workspaceRoot,
+        prompt: fakePrompt({ values: ["https://private.local/v1", true] }),
+        applyExecutor: createReviewedSetupApplyExecutor({
+          homeDir: tempDir,
+          workspaceRoot,
+        }),
+      },
+      initialDecision,
+      session,
+      editorAction,
+      resolution,
+      behavior: { credentialOnly: true },
+    });
+    const rawConfig = await readFile(profileConfigPath(tempDir), "utf8");
+    const config = JSON.parse(rawConfig) as {
+      providers?: Record<string, { baseUrl?: string; apiKeyEnv?: string }>;
+    };
+
+    expect(result.completed).toBe(true);
+    expect(result.selectedActionId).toBe("repair-missing-credential");
+    expect(result.reviewManifest?.sections["provider-model-network"]).toHaveLength(1);
+    expect(result.reviewManifest?.sections["provider-model-network"][0]?.review.values.baseUrl).toBe("https://private.local/v1");
+    expect(result.reviewManifest?.sections["files-to-write-update"][0]?.target).toEqual(expect.objectContaining({
+      kind: "config-scope",
+      scope: ["model.provider", "model.id", "provider.route"],
+    }));
+    expect(result.reviewManifest?.sections["secret-refs-to-store"]).toHaveLength(0);
+    expect(JSON.stringify(result.reviewManifest)).not.toContain("setupDrafts.credentialReference.summary");
+    expect(result.reviewManifest?.sections["provider-model-network"][0]?.review.values.apiKeyEnv).toBeUndefined();
+    expect(config.providers?.local?.baseUrl).toBe("https://private.local/v1");
+    expect(config.providers?.local?.apiKeyEnv).toBe("OPENAI_COMPATIBLE_API_KEY");
   });
 
   it("returns to setup actions when provider-card Back is selected", async () => {
@@ -4486,7 +4728,7 @@ function blockedVerification(configPath: string) {
 }
 
 function flowEngine(options: {
-  readonly credentialAction?: "none" | "reuse" | "collect";
+  readonly credentialAction?: "none" | "reuse" | "collect" | "endpoint";
   readonly envVarName?: string;
   readonly diagnostic?: string;
   readonly providers?: readonly ProviderId[];
@@ -4526,7 +4768,9 @@ function flowEngine(options: {
           ? { kind: "none" as const }
           : action === "reuse"
             ? { kind: "reuse" as const, reference: `env:${envVarName}` as `env:${string}` }
-            : { kind: "collect" as const, envVarName },
+            : action === "endpoint"
+              ? { kind: "endpoint" as const, baseUrl: baseUrlForProvider(providerId), apiKeyEnv: envVarName }
+              : { kind: "collect" as const, envVarName },
         profile: {
           id: modelId,
           provider: providerId,
@@ -4543,10 +4787,12 @@ function flowEngine(options: {
 }
 
 function displayNameForProvider(providerId: ProviderId): string {
+  if (providerId === "local") return "Local";
   return providerId === "anthropic" ? "Anthropic" : providerId === "kimi" ? "Kimi" : "OpenAI";
 }
 
 function baseUrlForProvider(providerId: ProviderId): string {
+  if (providerId === "local") return "http://localhost:11434/v1";
   if (providerId === "anthropic") return "https://api.anthropic.com/v1";
   if (providerId === "kimi") return "https://api.moonshot.ai/v1";
   return "https://api.openai.com/v1";
@@ -4557,7 +4803,9 @@ function modelCandidateForProvider(providerId: ProviderId) {
     ? "claude-sonnet-4-5"
     : providerId === "kimi"
       ? "kimi-k2"
-      : "gpt-5.5";
+      : providerId === "local"
+        ? "local-test-model"
+        : "gpt-5.5";
   return {
     id,
     provider: providerId,

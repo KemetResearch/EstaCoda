@@ -250,6 +250,9 @@ const SETUP_EDITOR_KEYS = [
   "setupEditor.prompt.credentialReuse.existing.description",
   "setupEditor.prompt.credentialReuse.new",
   "setupEditor.prompt.credentialReuse.new.description",
+  "setupEditor.prompt.localEndpoint.baseUrl",
+  "setupEditor.prompt.localEndpoint.apiKeyOptional",
+  "setupEditor.result.localEndpointInvalid",
   "setupEditor.prompt.fallbackRoute.title",
   "setupEditor.prompt.fallbackRoute.body",
   "setupEditor.prompt.fallbackRoute.edit",
@@ -1068,6 +1071,21 @@ describe("setup copy", () => {
     expect(rawSetupCopy("ar", "setupEditor.prompt.credentialReuse.new")).toContain("API");
     expect(rawSetupCopy("ar", "setupEditor.prompt.credentialReuse.existing").length).toBeGreaterThan(0);
     expect(rawSetupCopy("ar", "setupEditor.prompt.credentialReuse.new.description").length).toBeGreaterThan(0);
+  });
+
+  it("contains setup editor local endpoint prompt copy", () => {
+    expect(getSetupCopyEntry("setupEditor.prompt.localEndpoint.baseUrl")?.placeholders).toEqual(["{baseUrl}", "URL"]);
+    expect(getSetupCopyEntry("setupEditor.prompt.localEndpoint.apiKeyOptional")?.placeholders).toEqual(["API", "{envVar}"]);
+    expect(getSetupCopyEntry("setupEditor.result.localEndpointInvalid")?.placeholders).toEqual(["URL", "{baseUrl}"]);
+    expect(rawSetupCopy("en", "setupEditor.prompt.localEndpoint.baseUrl")).toBe("Local endpoint base URL [{baseUrl}]:");
+    expect(rawSetupCopy("en", "setupEditor.prompt.localEndpoint.apiKeyOptional")).toBe("Optional API key for {envVar}. Leave blank for no local auth:");
+    expect(rawSetupCopy("en", "setupEditor.result.localEndpointInvalid")).toBe("Invalid endpoint URL. Enter an absolute URL such as {baseUrl}.");
+    expect(resolveSetupCopy("ar", "setupEditor.prompt.localEndpoint.baseUrl")).toContain(isolateLtr("{baseUrl}"));
+    expect(resolveSetupCopy("ar", "setupEditor.prompt.localEndpoint.baseUrl")).toContain(isolateLtr("URL"));
+    expect(resolveSetupCopy("ar", "setupEditor.prompt.localEndpoint.apiKeyOptional")).toContain(isolateLtr("API"));
+    expect(resolveSetupCopy("ar", "setupEditor.prompt.localEndpoint.apiKeyOptional")).toContain(isolateLtr("{envVar}"));
+    expect(resolveSetupCopy("ar", "setupEditor.result.localEndpointInvalid")).toContain(isolateLtr("URL"));
+    expect(resolveSetupCopy("ar", "setupEditor.result.localEndpointInvalid")).toContain(isolateLtr("{baseUrl}"));
   });
 
   it("contains review manifest copy keys", () => {

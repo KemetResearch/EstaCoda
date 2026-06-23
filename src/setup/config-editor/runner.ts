@@ -1230,7 +1230,7 @@ async function reviewAndApplyResolvedRoute(
     ...editorAction.reviewValues,
     provider: resolution.provider,
     model: resolution.model,
-    baseUrl: resolution.baseUrl,
+    baseUrl: credentialResult.baseUrl ?? resolution.baseUrl,
     apiKeyEnv: credentialResult.envVarName,
     contextWindowTokens: resolution.profile.contextWindowTokens,
     apiMode: resolution.apiMode,
@@ -1241,9 +1241,17 @@ async function reviewAndApplyResolvedRoute(
     reviewValues,
   };
   const verificationAction = session.plan.actions.find((candidate) => candidate.id === "run-readonly-verification");
+  const routeOrSelectedAction = behavior.credentialOnly === true && credentialResult.routeAction !== undefined
+    ? {
+        ...credentialResult.routeAction,
+        reviewValues,
+      }
+    : selectedAction;
+  const includeCredentialAction = credentialResult.credentialAction !== undefined &&
+    (behavior.credentialOnly !== true || credentialResult.routeAction !== undefined);
   const draftActions = [
-    selectedAction,
-    ...(behavior.credentialOnly === true ? [] : credentialResult.credentialAction === undefined ? [] : [credentialResult.credentialAction]),
+    routeOrSelectedAction,
+    ...(includeCredentialAction ? [credentialResult.credentialAction] : []),
     ...(verificationAction === undefined ? [] : [verificationAction]),
   ];
   const stateHome = resolveStateHome({ homeDir: options.homeDir });
@@ -1357,7 +1365,9 @@ async function resolveCredentialForReview(
   | {
       readonly kind: "ready";
       readonly envVarName?: string;
+      readonly baseUrl?: string;
       readonly credentialAction?: SetupEditorActionDraft;
+      readonly routeAction?: SetupEditorActionDraft;
       readonly pendingCredentialWrite?: PendingCredentialWrite;
     }
   | { readonly kind: "diagnostic"; readonly output: string }
@@ -1432,11 +1442,108 @@ async function resolveCredentialForReview(
       };
     }
     case "endpoint":
-      return {
-        kind: "diagnostic",
-        output: "Endpoint credential setup is not supported in the setup editor yet.",
-      };
+      return resolveEndpointCredentialForReview(options, resolution);
   }
+}
+
+async function resolveEndpointCredentialForReview(
+  options: LocalizedConfigEditorRunnerOptions,
+  resolution: ProviderModelSelectionResult
+): Promise<{
+  readonly kind: "ready";
+  readonly envVarName?: string;
+  readonly baseUrl: string;
+  readonly credentialAction?: SetupEditorActionDraft;
+  readonly routeAction: SetupEditorActionDraft;
+  readonly pendingCredentialWrite?: PendingCredentialWrite;
+}> {
+  if (resolution.credentialAction.kind !== "endpoint") {
+    throw new Error("Endpoint credential review requires an endpoint action.");
+  }
+  const defaultBaseUrl = resolution.credentialAction.baseUrl ?? resolution.baseUrl ?? "";
+  const baseUrl = await promptLocalEndpointBaseUrl(options, defaultBaseUrl);
+  const envVarName = resolution.credentialAction.apiKeyEnv;
+  const promptResult = await promptForApiKeyInput({
+    prompt: options.prompt,
+    providerId: resolution.provider,
+    envVarName,
+    question: formatSetupCopy(options.locale, "setupEditor.prompt.localEndpoint.apiKeyOptional", {
+      envVar: envVarName,
+    }),
+  });
+
+  return {
+    kind: "ready",
+    baseUrl,
+    envVarName: promptResult.kind === "entered" ? envVarName : undefined,
+    routeAction: endpointProviderRouteAction(resolution, baseUrl),
+    credentialAction: promptResult.kind === "entered"
+      ? credentialReferenceAction(resolution, envVarName)
+      : undefined,
+    pendingCredentialWrite: promptResult.kind === "entered"
+      ? { envVarName: promptResult.envVarName, value: promptResult.value }
+      : undefined,
+  };
+}
+
+async function promptLocalEndpointBaseUrl(
+  options: LocalizedConfigEditorRunnerOptions,
+  defaultBaseUrl: string
+): Promise<string> {
+  let question = formatSetupCopy(options.locale, "setupEditor.prompt.localEndpoint.baseUrl", {
+    baseUrl: defaultBaseUrl,
+  });
+  for (;;) {
+    const raw = (await options.prompt(question)).trim();
+    const baseUrl = raw.length > 0 ? raw : defaultBaseUrl;
+    if (isValidEndpointBaseUrl(baseUrl)) {
+      return baseUrl;
+    }
+    question = `${formatSetupCopy(options.locale, "setupEditor.result.localEndpointInvalid", {
+      baseUrl: defaultBaseUrl,
+    })}\n${formatSetupCopy(options.locale, "setupEditor.prompt.localEndpoint.baseUrl", {
+      baseUrl: defaultBaseUrl,
+    })}`;
+  }
+}
+
+function isValidEndpointBaseUrl(value: string): boolean {
+  try {
+    new URL(value);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function endpointProviderRouteAction(
+  resolution: ProviderModelSelectionResult,
+  baseUrl: string
+): SetupEditorActionDraft {
+  return {
+    kind: "setup-editor-action-draft",
+    id: "repair-primary-provider",
+    copyKey: "setupEditor.actions.repairPrimaryProvider",
+    sectionId: "model-route",
+    effect: "draft-config-patch",
+    readOnly: false,
+    mutatesConfig: false,
+    requiresExplicitApply: true,
+    preservesUnrelatedConfig: true,
+    patch: {
+      kind: "scoped-config-patch-intent",
+      fields: ["model.provider", "model.id", "provider.route"],
+      preserveUnrelatedConfig: true,
+    },
+    reviewValues: {
+      provider: resolution.provider,
+      model: resolution.model,
+      baseUrl,
+      contextWindowTokens: resolution.profile.contextWindowTokens,
+      apiMode: resolution.apiMode,
+      authMethod: resolution.authMethod,
+    },
+  };
 }
 
 function credentialProviderDisplayName(providerId: ProviderId): string {
@@ -1574,3 +1681,21 @@ function skillAutonomyValue(value: unknown): SkillAutonomy {
 }
 
 export const runConfigEditorSetup = runConfigEditor;
+
+export async function __reviewAndApplyResolvedRouteForTest(input: {
+  readonly options: ConfigEditorRunnerOptions;
+  readonly initialDecision: SetupRouteDecision;
+  readonly session: NonNullable<SetupRouteDecision["setupEditorPlanSession"]>;
+  readonly editorAction: SetupEditorActionDraft;
+  readonly resolution: ProviderModelSelectionResult;
+  readonly behavior?: {
+    readonly credentialOnly?: boolean;
+  };
+}): Promise<ConfigEditorRunnerResult> {
+  const locale = await resolveConfigEditorLocale(input.options);
+  return reviewAndApplyResolvedRoute({
+    ...input.options,
+    locale,
+    prompt: withPromptUiContext(input.options.prompt, promptUiContextForLocale(locale)),
+  }, input.initialDecision, input.session, input.editorAction, input.resolution, input.behavior);
+}

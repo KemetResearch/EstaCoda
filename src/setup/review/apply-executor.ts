@@ -236,6 +236,7 @@ async function applyConfigPatch(
 ): Promise<readonly OptionalCapabilityApplyWarning[]> {
   switch (operation.review.summaryKey) {
     case "setupDrafts.providerModelRoute.summary":
+    case "setupDrafts.providerModelEndpointRoute.summary":
     case "setupModules.provider.draft":
       await applyProviderRoute(operation, context, options);
       return [];
