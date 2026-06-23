@@ -4,6 +4,7 @@ import { access, mkdir, readFile, rename, rm, writeFile } from "node:fs/promises
 import { delimiter, join, resolve } from "node:path";
 import type { LoadedRuntimeConfig } from "../config/runtime-config.js";
 import type { ProfileStatePaths } from "../config/profile-home.js";
+import type { EdgeTtsRunner } from "../tools/tts-providers.js";
 import {
   checkSttProviderStatus,
   checkTtsProviderStatus,
@@ -230,6 +231,8 @@ export async function playCliTtsResponse(input: {
   config: LoadedRuntimeConfig;
   profilePaths: ProfileStatePaths;
   fetch?: VoiceFetchLike;
+  pythonStateRoot?: string;
+  edgeTtsRunner?: EdgeTtsRunner;
   commandExists?: (command: string) => Promise<boolean>;
   playCommand?: (command: string, args: readonly string[], signal?: AbortSignal) => Promise<{ ok: true } | { ok: false; content: string }>;
   signal?: AbortSignal;
@@ -252,7 +255,9 @@ export async function playCliTtsResponse(input: {
     text,
     tts: input.config.tts,
     tempRoot: join(input.profilePaths.tempPath, "audio"),
+    pythonStateRoot: input.pythonStateRoot,
     fetch: input.fetch,
+    edgeTtsRunner: input.edgeTtsRunner,
     id: input.id,
     signal: input.signal
   });

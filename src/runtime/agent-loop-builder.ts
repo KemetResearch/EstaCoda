@@ -148,8 +148,10 @@ export type AgentLoopRuntimeSubstrate = {
   setAvailableToolsets?: (toolsets: string[]) => void;
   contextReferenceExpander: ContextReferenceExpander;
   projectContext: ProjectContextSnapshot;
+  pythonStateRoot?: string;
   channelMediaRoot?: string;
   audioCacheRoot?: string;
+  audioTempRoot?: string;
   imageCacheRoot?: string;
   workspaceFsAdapter?: WorkspaceFsAdapter;
   webFetch?: WebFetchLike;
@@ -287,8 +289,10 @@ export class AgentLoopBuilder {
         childSessionId: input.parentSessionId === undefined ? undefined : input.sessionId,
         currentSessionId: () => sessionRuntimeContext.currentSessionId(),
         homeDir: substrate.homeDir,
+        pythonStateRoot: substrate.pythonStateRoot,
         channelMediaRoot: substrate.channelMediaRoot,
         audioCacheRoot: substrate.audioCacheRoot,
+        audioTempRoot: substrate.audioTempRoot,
         imageCacheRoot: substrate.imageCacheRoot,
         browserBackend: substrate.browserBackend,
         browserConfig: substrate.browserConfig,
@@ -653,8 +657,10 @@ function buildPreSkillVisibilityToolContext(input: SessionToolContext): SessionT
     childSessionId: input.childSessionId,
     currentSessionId: input.currentSessionId,
     homeDir: input.homeDir,
+    pythonStateRoot: input.pythonStateRoot,
     channelMediaRoot: input.channelMediaRoot,
     audioCacheRoot: input.audioCacheRoot,
+    audioTempRoot: input.audioTempRoot,
     imageCacheRoot: input.imageCacheRoot,
     browserBackend: input.browserBackend,
     browserConfig: input.browserConfig,

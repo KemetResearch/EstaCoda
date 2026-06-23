@@ -77,7 +77,7 @@ import {
   synthesizeSpeechToEphemeralArtifact,
   type VoiceFetchLike
 } from "../tools/voice-tools.js";
-import { getTtsTextCap } from "../tools/tts-providers.js";
+import { getTtsTextCap, type EdgeTtsRunner } from "../tools/tts-providers.js";
 import {
   normalizeWhatsAppAllowlist,
   normalizeWhatsAppGroupAllowlist,
@@ -206,6 +206,8 @@ export type ChannelGatewayOptions = {
   voiceAutoTtsDefault?: boolean;
   autoTtsConfig?: () => Promise<Pick<LoadedRuntimeConfig, "tts" | "voice">> | Pick<LoadedRuntimeConfig, "tts" | "voice">;
   autoTtsTempRoot?: string;
+  autoTtsPythonStateRoot?: string;
+  autoTtsEdgeTtsRunner?: EdgeTtsRunner;
   autoTtsFetch?: VoiceFetchLike;
   autoTtsNow?: () => number;
   autoTtsId?: () => string;
@@ -381,6 +383,8 @@ export class ChannelGateway {
   readonly #voiceAutoTtsDefault: boolean;
   readonly #autoTtsConfig: ChannelGatewayOptions["autoTtsConfig"];
   readonly #autoTtsTempRoot: string | undefined;
+  readonly #autoTtsPythonStateRoot: string | undefined;
+  readonly #autoTtsEdgeTtsRunner: EdgeTtsRunner | undefined;
   readonly #autoTtsFetch: VoiceFetchLike | undefined;
   readonly #autoTtsNow: () => number;
   readonly #autoTtsId: (() => string) | undefined;
@@ -429,6 +433,8 @@ export class ChannelGateway {
     this.#voiceAutoTtsDefault = options.voiceAutoTtsDefault ?? false;
     this.#autoTtsConfig = options.autoTtsConfig;
     this.#autoTtsTempRoot = options.autoTtsTempRoot;
+    this.#autoTtsPythonStateRoot = options.autoTtsPythonStateRoot;
+    this.#autoTtsEdgeTtsRunner = options.autoTtsEdgeTtsRunner;
     this.#autoTtsFetch = options.autoTtsFetch;
     this.#autoTtsNow = options.autoTtsNow ?? Date.now;
     this.#autoTtsId = options.autoTtsId;
@@ -701,7 +707,9 @@ export class ChannelGateway {
       text,
       tts: config.tts,
       tempRoot: this.#autoTtsTempRoot,
+      pythonStateRoot: this.#autoTtsPythonStateRoot,
       fetch: this.#autoTtsFetch,
+      edgeTtsRunner: this.#autoTtsEdgeTtsRunner,
       id: this.#autoTtsId,
       signal: input.signal
     });

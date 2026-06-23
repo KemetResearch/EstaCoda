@@ -47,6 +47,11 @@ import {
 } from "./model-picker-actions.js";
 import { VoiceStateManager } from "../gateway/voice-state.js";
 import { AdapterResilienceSupervisor } from "../gateway/adapter-resilience.js";
+import { EDGE_TTS_CAPABILITY_ID, requireRegisteredPythonCapabilitySpec } from "../python-env/capability-registry.js";
+import { resolveManagedPythonCapabilityPaths } from "../python-env/capability-paths.js";
+import { writeManagedPythonCapabilityManifest } from "../python-env/manifest.js";
+import { fingerprintManagedPythonCapabilitySpec } from "../python-env/spec-hash.js";
+import type { EdgeTtsRunInput, EdgeTtsRunner } from "../tools/tts-providers.js";
 
 type FakeTelegramAdapter = ReturnType<typeof createFakeTelegramAdapter> & { records: FakeDeliveryRecord[]; clearRecords(): void };
 
@@ -973,6 +978,26 @@ function openAiAutoTtsConfig(overrides: {
   };
 }
 
+function edgeAutoTtsConfig(overrides: {
+  autoTts?: boolean;
+  autoTtsMaxCharsPerReply?: number;
+  autoTtsMaxCharsPerHourPerChat?: number;
+} = {}) {
+  return {
+    tts: {
+      provider: "edge" as const,
+      speed: 1.25,
+      enabled: true,
+      edge: { voice: "en-US-AriaNeural" }
+    },
+    voice: {
+      autoTts: overrides.autoTts ?? true,
+      autoTtsMaxCharsPerReply: overrides.autoTtsMaxCharsPerReply,
+      autoTtsMaxCharsPerHourPerChat: overrides.autoTtsMaxCharsPerHourPerChat
+    }
+  };
+}
+
 function okTtsFetch() {
   return vi.fn(async () => ({
     ok: true,
@@ -1443,8 +1468,45 @@ describe("ChannelGateway commands", () => {
   });
 
   describe("auto-TTS replies", () => {
-    afterEach(() => {
+    const edgeTempDirs: string[] = [];
+
+    async function createEdgeTempDir(prefix: string): Promise<string> {
+      const dir = await mkdtemp(join(tmpdir(), prefix));
+      edgeTempDirs.push(dir);
+      return dir;
+    }
+
+    async function createVerifiedEdgeCapabilityState(): Promise<string> {
+      const stateRoot = await createEdgeTempDir("estacoda-gateway-edge-state-");
+      const paths = resolveManagedPythonCapabilityPaths({
+        stateRoot,
+        capabilityId: EDGE_TTS_CAPABILITY_ID
+      });
+      await mkdir(dirname(paths.pythonPath), { recursive: true });
+      await writeFile(paths.pythonPath, "", "utf8");
+      const spec = requireRegisteredPythonCapabilitySpec(EDGE_TTS_CAPABILITY_ID);
+      await writeManagedPythonCapabilityManifest({
+        stateRoot,
+        capabilityId: EDGE_TTS_CAPABILITY_ID
+      }, {
+        id: EDGE_TTS_CAPABILITY_ID,
+        version: spec.version,
+        specHash: fingerprintManagedPythonCapabilitySpec(spec),
+        installedPackages: [...spec.packages],
+        installedGroups: [],
+        pythonPath: paths.pythonPath,
+        envPath: paths.envPath,
+        createdAt: "2026-06-23T00:00:00.000Z",
+        updatedAt: "2026-06-23T00:00:00.000Z",
+        verifiedAt: "2026-06-23T00:00:01.000Z",
+        status: "verified"
+      });
+      return stateRoot;
+    }
+
+    afterEach(async () => {
       delete process.env.ESTACODA_TEST_TTS_KEY;
+      await Promise.all(edgeTempDirs.splice(0).map((path) => rm(path, { recursive: true, force: true })));
     });
 
     async function createAutoTtsGateway(input: {
@@ -1453,8 +1515,11 @@ describe("ChannelGateway commands", () => {
       responseText?: string;
       artifacts?: Awaited<ReturnType<Runtime["handle"]>>["artifacts"];
       toolExecutions?: Awaited<ReturnType<Runtime["handle"]>>["toolExecutions"];
-      config?: ReturnType<typeof openAiAutoTtsConfig>;
+      config?: ReturnType<typeof openAiAutoTtsConfig> | ReturnType<typeof edgeAutoTtsConfig>;
       fetch?: ReturnType<typeof okTtsFetch>;
+      edgeTtsRunner?: EdgeTtsRunner;
+      autoTtsPythonStateRoot?: string;
+      logWarning?: (message: string) => void;
       now?: () => number;
     } = {}) {
       process.env.ESTACODA_TEST_TTS_KEY = "test-key";
@@ -1483,8 +1548,11 @@ describe("ChannelGateway commands", () => {
         autoTtsConfig: () => input.config ?? openAiAutoTtsConfig(),
         autoTtsTempRoot: tempRoot,
         autoTtsFetch: fetch,
+        autoTtsPythonStateRoot: input.autoTtsPythonStateRoot,
+        autoTtsEdgeTtsRunner: input.edgeTtsRunner,
         autoTtsId: () => "auto-1",
-        autoTtsNow: input.now
+        autoTtsNow: input.now,
+        logWarning: input.logWarning
       });
       return { adapter, gateway, fetch, tempRoot };
     }
@@ -1615,6 +1683,81 @@ describe("ChannelGateway commands", () => {
       expect(result.replyText).toBe("Here is the answer.");
       expect(failing.adapter.records.find((record) => record.kind === "text")?.text).toBe("Here is the answer.");
       expect(failing.adapter.records.filter((record) => record.kind === "artifact")).toHaveLength(0);
+    });
+
+    it("passes explicit managed Python state into Edge auto-TTS synthesis", async () => {
+      const pythonStateRoot = await createVerifiedEdgeCapabilityState();
+      const runner = vi.fn(async (input: EdgeTtsRunInput) => {
+        await writeFile(input.outputPath, Buffer.from("edge-audio"));
+        return { ok: true as const, outputPath: input.outputPath, mimeType: "audio/mpeg" };
+      });
+      const { adapter, gateway, tempRoot } = await createAutoTtsGateway({
+        mode: "all",
+        config: edgeAutoTtsConfig(),
+        autoTtsPythonStateRoot: pythonStateRoot,
+        edgeTtsRunner: runner
+      });
+
+      await gateway.receive(makeMessage("hello"));
+
+      expect(runner).toHaveBeenCalledWith(expect.objectContaining({
+        text: "Here is the answer.",
+        voice: "en-US-AriaNeural",
+        rate: "+25%",
+        outputPath: expect.stringContaining(join(tempRoot, "edge-tts-"))
+      }));
+      expect(adapter.records.filter((record) => record.kind === "artifact")).toHaveLength(1);
+      const artifactRecord = adapter.records.find((record) => record.kind === "artifact");
+      if (artifactRecord?.kind !== "artifact" || artifactRecord.artifact === undefined) {
+        throw new Error("Expected Edge auto-TTS artifact delivery.");
+      }
+      expect(artifactRecord.artifact.metadata).toMatchObject({
+        provider: "edge",
+        format: "audio/mpeg"
+      });
+    });
+
+    it("preserves text delivery when Edge capability is missing", async () => {
+      const warnings: string[] = [];
+      const missingStateRoot = await createEdgeTempDir("estacoda-gateway-edge-missing-");
+      const { adapter, gateway } = await createAutoTtsGateway({
+        mode: "all",
+        responseText: "hello",
+        config: edgeAutoTtsConfig(),
+        autoTtsPythonStateRoot: missingStateRoot,
+        logWarning: (message) => warnings.push(message)
+      });
+
+      const result = await gateway.receive(makeMessage("hello"));
+
+      expect(result.replyText).toBe("hello");
+      expect(adapter.records.find((record) => record.kind === "text")?.text).toBe("hello");
+      expect(adapter.records.filter((record) => record.kind === "artifact")).toHaveLength(0);
+      expect(warnings.join("\n")).toContain("estacoda python-env setup edge-tts --yes");
+    });
+
+    it("does not count failed Edge auto-TTS synthesis usage", async () => {
+      const pythonStateRoot = await createVerifiedEdgeCapabilityState();
+      const runner = vi.fn(async (_input: EdgeTtsRunInput) => ({
+        ok: false as const,
+        content: "Edge TTS synthesis failed.",
+        metadata: { reason: "synthesis-error" }
+      }));
+      const { adapter, gateway } = await createAutoTtsGateway({
+        mode: "all",
+        responseText: "hello",
+        config: edgeAutoTtsConfig({ autoTtsMaxCharsPerHourPerChat: 6 }),
+        autoTtsPythonStateRoot: pythonStateRoot,
+        edgeTtsRunner: runner,
+        now: () => 1_000
+      });
+
+      await gateway.receive(makeMessage("first"));
+      await gateway.receive(makeMessage("second"));
+
+      expect(runner).toHaveBeenCalledTimes(2);
+      expect(adapter.records.filter((record) => record.kind === "text").map((record) => record.text)).toEqual(["hello", "hello"]);
+      expect(adapter.records.filter((record) => record.kind === "artifact")).toHaveLength(0);
     });
   });
 

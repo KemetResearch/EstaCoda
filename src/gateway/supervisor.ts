@@ -3,7 +3,7 @@ import { createHash } from "node:crypto";
 import { dirname, join } from "node:path";
 import { resolveHomeDir } from "../config/home-dir.js";
 import { addWhatsAppAllowedUser, loadRuntimeConfig, consumeTelegramPairingCode } from "../config/runtime-config.js";
-import { defaultProfileId, readActiveProfile, resolveProfileStateHome } from "../config/profile-home.js";
+import { defaultProfileId, readActiveProfile, resolveGlobalStateHome, resolveProfileStateHome } from "../config/profile-home.js";
 import type { ProfileStatePaths } from "../config/profile-home.js";
 import { WorkspaceTrustStore } from "../security/workspace-trust-store.js";
 import { WorkspaceApprovalController } from "../security/workspace-approval-controller.js";
@@ -537,8 +537,9 @@ export async function runGatewaySupervisor(options: GatewaySupervisorOptions): P
   const startedAt = new Date().toISOString();
   const homeDir = resolveHomeDir(options.homeDir);
   const profileId = options.profileId ?? readActiveProfile({ homeDir })?.profileId ?? defaultProfileId();
+  const globalPaths = resolveGlobalStateHome({ homeDir });
   const profilePaths = resolveProfileStateHome({ homeDir, profileId });
-  const globalStateRoot = join(homeDir, ".estacoda");
+  const globalStateRoot = globalPaths.stateRoot;
   const fasterWhisperDefaultHfHome = join(globalStateRoot, "cache", "huggingface");
   const trustStorePath = join(homeDir, ".estacoda", "trust.json");
 
@@ -1329,6 +1330,7 @@ export async function runGatewaySupervisor(options: GatewaySupervisorOptions): P
             return { tts: latestConfig.tts, voice: latestConfig.voice };
           },
           autoTtsTempRoot: join(profilePaths.tempPath, "audio"),
+          autoTtsPythonStateRoot: globalPaths.stateRoot,
         })
       : new ChannelGateway({
           adapters: wrappers,
@@ -1401,6 +1403,7 @@ export async function runGatewaySupervisor(options: GatewaySupervisorOptions): P
             return { tts: latestConfig.tts, voice: latestConfig.voice };
           },
           autoTtsTempRoot: join(profilePaths.tempPath, "audio"),
+          autoTtsPythonStateRoot: globalPaths.stateRoot,
         });
 
     state.channelGateway = gateway;
