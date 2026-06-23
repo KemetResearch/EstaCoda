@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   DDGS_CAPABILITY_ID,
+  EDGE_TTS_CAPABILITY_ID,
   FASTER_WHISPER_CAPABILITY_ID,
   PDF_EDITOR_CAPABILITY_ID,
   PDF_EXTRACTION_CAPABILITY_ID,
@@ -94,6 +95,13 @@ describe("managed Python capability substrate", () => {
         packages: ["ddgs==9.14.4"],
         verifyImports: ["ddgs"],
         estimatedInstallSizeMb: 25
+      },
+      {
+        id: "edge-tts",
+        version: "7.2.8",
+        packages: ["edge-tts==7.2.8"],
+        verifyImports: ["edge_tts"],
+        estimatedInstallSizeMb: 25
       }
     ]);
   });
@@ -140,6 +148,22 @@ describe("managed Python capability substrate", () => {
     expect(getRegisteredPythonCapabilitySpec(DDGS_CAPABILITY_ID)?.verifyImports).toEqual(["ddgs"]);
     expect(isRegisteredPythonCapabilityId("ddgs")).toBe(true);
     expect(isRegisteredPythonCapabilityId("ddgs==9.14.4")).toBe(false);
+    expect(isRegisteredPythonCapabilityId("arbitrary-package")).toBe(false);
+  });
+
+  it("registers Edge TTS as a pinned managed Python capability", () => {
+    expect(EDGE_TTS_CAPABILITY_ID).toBe("edge-tts");
+    expect(getRegisteredPythonCapabilitySpec(EDGE_TTS_CAPABILITY_ID)).toEqual({
+      id: "edge-tts",
+      version: "7.2.8",
+      packages: ["edge-tts==7.2.8"],
+      verifyImports: ["edge_tts"],
+      estimatedInstallSizeMb: 25
+    });
+    expect(getRegisteredPythonCapabilitySpec(EDGE_TTS_CAPABILITY_ID)?.packages).toEqual(["edge-tts==7.2.8"]);
+    expect(getRegisteredPythonCapabilitySpec(EDGE_TTS_CAPABILITY_ID)?.verifyImports).toEqual(["edge_tts"]);
+    expect(isRegisteredPythonCapabilityId("edge-tts")).toBe(true);
+    expect(isRegisteredPythonCapabilityId("edge-tts==7.2.8")).toBe(false);
     expect(isRegisteredPythonCapabilityId("arbitrary-package")).toBe(false);
   });
 
