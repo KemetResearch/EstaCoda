@@ -44,7 +44,7 @@ import {
 } from "../../config/runtime-config.js";
 import { defaultProfileId, readActiveProfile, resolveGlobalStateHome, resolveProfileStateHome } from "../../config/profile-home.js";
 import { createManagedEnvironment } from "../../python-env/manager.js";
-import { DDGS_CAPABILITY_ID } from "../../python-env/capability-registry.js";
+import { DDGS_CAPABILITY_ID, EDGE_TTS_CAPABILITY_ID } from "../../python-env/capability-registry.js";
 import {
   checkManagedPythonCapabilityStatus,
   installManagedPythonCapabilityEnvironment,
@@ -628,6 +628,15 @@ async function applyVoiceCapability(
     sttApiKeyEnv: stringValue(operation.review.values.sttApiKeyEnv),
   };
   const warnings: OptionalCapabilityApplyWarning[] = [];
+  if (input.ttsProvider === "edge") {
+    const warning = await ensureReviewedEdgeTtsCapability(operation, options);
+    if (warning !== undefined) {
+      delete input.ttsProvider;
+      delete input.ttsModel;
+      delete input.ttsApiKeyEnv;
+      warnings.push(warning);
+    }
+  }
   if (sttProvider === "local") {
     const globalPaths = resolveGlobalStateHome({ homeDir: options.homeDir });
     const envResult = await createManagedEnvironment({ stateRoot: globalPaths.stateRoot });
@@ -662,7 +671,57 @@ async function applyVoiceCapability(
   return warnings;
 }
 
+async function ensureReviewedEdgeTtsCapability(
+  operation: SetupApplyOperation,
+  options: ReviewedSetupApplyExecutorOptions
+): Promise<OptionalCapabilityApplyWarning | undefined> {
+  const capabilityId = stringValue(operation.review.values.edgeTtsCapabilityId);
+  if (capabilityId !== undefined && capabilityId !== EDGE_TTS_CAPABILITY_ID) {
+    throw new Error("Edge TTS setup apply only supports the registered edge-tts managed Python capability.");
+  }
+  const stateRoot = resolveGlobalStateHome({ homeDir: options.homeDir }).stateRoot;
+  const status = await checkManagedPythonCapabilityStatus({
+    stateRoot,
+    capabilityId: EDGE_TTS_CAPABILITY_ID,
+  });
+  if (status.ok) return undefined;
+
+  if (operation.review.values.edgeTtsSetupConfirmed !== true) {
+    throw new Error("Edge TTS setup requires explicit managed Python capability setup confirmation.");
+  }
+
+  const install = await installManagedPythonCapabilityEnvironment({
+    stateRoot,
+    capabilityId: EDGE_TTS_CAPABILITY_ID,
+  });
+  if (!install.ok) {
+    if (isVoiceTolerantOperation(operation, options)) {
+      return {
+        operationId: operation.id,
+        capability: "voice",
+        subCapability: "tts",
+        code: "managed_python_setup_failed",
+        message: resolveSetupCopy("en", "onboarding.optionalCapabilities.voice.edgeTtsSkipped"),
+        cause: install.message,
+      };
+    }
+    throw new Error([
+      resolveSetupCopy("en", "setupEditor.apply.voice.edgeTts.failed"),
+      install.message,
+      install.diagnostic,
+    ].filter((line): line is string => line !== undefined && line.trim().length > 0).join("\n"));
+  }
+  return undefined;
+}
+
 function isLocalSttTolerantVoiceOperation(
+  operation: SetupApplyOperation,
+  options: ReviewedSetupApplyExecutorOptions
+): boolean {
+  return isVoiceTolerantOperation(operation, options);
+}
+
+function isVoiceTolerantOperation(
   operation: SetupApplyOperation,
   options: ReviewedSetupApplyExecutorOptions
 ): boolean {

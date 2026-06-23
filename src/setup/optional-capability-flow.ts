@@ -9,7 +9,7 @@ import type {
 } from "../config/runtime-config.js";
 import { hasSavedEnvSecret } from "../config/env-secret-store.js";
 import { defaultProfileId, readActiveProfile, resolveGlobalStateHome, resolveProfileStateHome } from "../config/profile-home.js";
-import { DDGS_CAPABILITY_ID } from "../python-env/capability-registry.js";
+import { DDGS_CAPABILITY_ID, EDGE_TTS_CAPABILITY_ID } from "../python-env/capability-registry.js";
 import { checkManagedPythonCapabilityStatus } from "../python-env/capability-manager.js";
 import type { Prompt } from "../cli/readline-prompt.js";
 import type { SecurityApprovalMode } from "../contracts/security.js";
@@ -419,6 +419,9 @@ export async function collectOptionalCapabilityContext(
       if (isOptionalCapabilityBack(values)) {
         return values;
       }
+      const edgeTtsCapabilityStatus = values.ttsProvider === "edge"
+        ? await detectEdgeTtsCapabilityStatus(options)
+        : undefined;
       const credential = await collectTtsCredentialSelection(options, baseContext, values.ttsProvider);
       if (credential.kind === "stub") {
         return { kind: "skip" };
@@ -429,6 +432,11 @@ export async function collectOptionalCapabilityContext(
           ...baseContext,
           voice: {
             ttsProvider: values.ttsProvider,
+            ...(values.ttsProvider === "edge" ? {
+              edgeTtsCapabilityId: EDGE_TTS_CAPABILITY_ID,
+              edgeTtsCapabilityStatus,
+              edgeTtsSetupConfirmed: edgeTtsCapabilityStatus !== "ready",
+            } : {}),
             ...(credential.kind === "api-key" ? {
               ttsApiKeyEnv: credential.apiKeyEnv,
               credentialSurface: "voice-tts" as const,
@@ -860,6 +868,20 @@ async function detectDdgsCapabilityStatus(options: Pick<OptionalCapabilityContex
     const status = await checkManagedPythonCapabilityStatus({
       stateRoot,
       capabilityId: DDGS_CAPABILITY_ID,
+    });
+    if (status.ok) return "ready";
+    return status.reason === "install_required" || status.reason === "upgrade_required" ? "missing" : "failed";
+  } catch {
+    return "unknown";
+  }
+}
+
+async function detectEdgeTtsCapabilityStatus(options: Pick<OptionalCapabilityContextOptions, "homeDir">): Promise<NonNullable<SetupModuleContext["voice"]>["edgeTtsCapabilityStatus"]> {
+  const stateRoot = resolveGlobalStateHome({ homeDir: options.homeDir }).stateRoot;
+  try {
+    const status = await checkManagedPythonCapabilityStatus({
+      stateRoot,
+      capabilityId: EDGE_TTS_CAPABILITY_ID,
     });
     if (status.ok) return "ready";
     return status.reason === "install_required" || status.reason === "upgrade_required" ? "missing" : "failed";

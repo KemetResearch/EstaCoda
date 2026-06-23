@@ -15,7 +15,7 @@ import {
 import { resolveGlobalStateHome, resolveProfileStateHome } from "../../config/profile-home.js";
 import * as pythonEnvManager from "../../python-env/manager.js";
 import * as capabilityManager from "../../python-env/capability-manager.js";
-import { DDGS_CAPABILITY_ID } from "../../python-env/capability-registry.js";
+import { DDGS_CAPABILITY_ID, EDGE_TTS_CAPABILITY_ID } from "../../python-env/capability-registry.js";
 
 type ReviewValues = Record<string, string | readonly string[] | boolean | number | undefined>;
 
@@ -426,6 +426,50 @@ function readyDdgsStatus(homeDir: string): Awaited<ReturnType<typeof capabilityM
 
 function readyDdgsInstallResult(homeDir: string): Awaited<ReturnType<typeof capabilityManager.installManagedPythonCapabilityEnvironment>> {
   const status = readyDdgsStatus(homeDir);
+  if (!status.ok) throw new Error("expected ready status");
+  return {
+    ok: true,
+    capabilityId: status.capabilityId,
+    version: status.version,
+    specHash: status.specHash,
+    installedGroups: status.installedGroups,
+    installedPackages: status.installedPackages,
+    pythonPath: status.pythonPath,
+    envPath: status.envPath,
+    manifest: status.manifest,
+  };
+}
+
+function readyEdgeTtsStatus(homeDir: string): Awaited<ReturnType<typeof capabilityManager.checkManagedPythonCapabilityStatus>> {
+  const stateRoot = resolveGlobalStateHome({ homeDir }).stateRoot;
+  return {
+    ok: true,
+    status: "verified",
+    capabilityId: EDGE_TTS_CAPABILITY_ID,
+    version: "7.2.8",
+    specHash: "edge-hash",
+    installedGroups: [],
+    installedPackages: ["edge-tts==7.2.8"],
+    pythonPath: join(stateRoot, "python-capabilities", EDGE_TTS_CAPABILITY_ID, "bin", "python"),
+    envPath: join(stateRoot, "python-capabilities", EDGE_TTS_CAPABILITY_ID),
+    manifest: {
+      id: EDGE_TTS_CAPABILITY_ID,
+      version: "7.2.8",
+      specHash: "edge-hash",
+      installedPackages: ["edge-tts==7.2.8"],
+      installedGroups: [],
+      pythonPath: join(stateRoot, "python-capabilities", EDGE_TTS_CAPABILITY_ID, "bin", "python"),
+      envPath: join(stateRoot, "python-capabilities", EDGE_TTS_CAPABILITY_ID),
+      createdAt: "2026-06-23T00:00:00.000Z",
+      updatedAt: "2026-06-23T00:00:00.000Z",
+      verifiedAt: "2026-06-23T00:00:01.000Z",
+      status: "verified",
+    },
+  };
+}
+
+function readyEdgeTtsInstallResult(homeDir: string): Awaited<ReturnType<typeof capabilityManager.installManagedPythonCapabilityEnvironment>> {
+  const status = readyEdgeTtsStatus(homeDir);
   if (!status.ok) throw new Error("expected ready status");
   return {
     ok: true,
@@ -1394,6 +1438,138 @@ describe("reviewed setup apply executor", () => {
     })]);
     expect(JSON.stringify(result.warnings)).not.toContain("Traceback");
     expect(config.web).toBeUndefined();
+  });
+
+  it("installs the registered Edge TTS capability before applying reviewed Edge voice setup", async () => {
+    const stateRoot = resolveGlobalStateHome({ homeDir: tempDir }).stateRoot;
+    vi.spyOn(capabilityManager, "checkManagedPythonCapabilityStatus").mockResolvedValue({
+      ok: false,
+      capabilityId: EDGE_TTS_CAPABILITY_ID,
+      reason: "install_required",
+      message: "Managed Python capability environment has not been installed.",
+    });
+    const installSpy = vi.spyOn(capabilityManager, "installManagedPythonCapabilityEnvironment").mockResolvedValue(readyEdgeTtsInstallResult(tempDir));
+    const plan = voiceCapabilityPlan({
+      ttsProvider: "edge",
+      edgeTtsCapabilityId: EDGE_TTS_CAPABILITY_ID,
+      edgeTtsCapabilityStatus: "missing",
+      edgeTtsSetupConfirmed: true,
+      secretValuesIncluded: false,
+    }, { homeDir: tempDir });
+
+    const result = await applyReviewedSetupPlanOperations(plan, {
+      homeDir: tempDir,
+      workspaceRoot,
+    });
+    const config = JSON.parse(await readFile(profileConfigPath(tempDir), "utf8")) as {
+      tts?: { provider?: string };
+    };
+
+    expect(result.ok).toBe(true);
+    expect(installSpy).toHaveBeenCalledWith({
+      stateRoot,
+      capabilityId: EDGE_TTS_CAPABILITY_ID,
+    });
+    expect(config.tts?.provider).toBe("edge");
+  });
+
+  it("does not write Edge TTS config when strict reviewed capability setup fails", async () => {
+    await mkdir(dirname(profileConfigPath(tempDir)), { recursive: true });
+    const initialConfig = {
+      model: { provider: "local", id: "local-test-model" },
+      tts: {
+        provider: "openai",
+        speed: 1,
+        openai: { model: "gpt-4o-mini-tts", apiKeyEnv: "OPENAI_API_KEY" },
+      },
+    };
+    await writeFile(profileConfigPath(tempDir), JSON.stringify(initialConfig, null, 2), "utf8");
+    vi.spyOn(capabilityManager, "checkManagedPythonCapabilityStatus").mockResolvedValue({
+      ok: false,
+      capabilityId: EDGE_TTS_CAPABILITY_ID,
+      reason: "install_required",
+      message: "Managed Python capability environment has not been installed.",
+    });
+    vi.spyOn(capabilityManager, "installManagedPythonCapabilityEnvironment").mockResolvedValue({
+      ok: false,
+      capabilityId: EDGE_TTS_CAPABILITY_ID,
+      reason: "pip_install_failed",
+      message: "Could not install edge-tts.",
+      diagnostic: "pip failed",
+    });
+    const plan = voiceCapabilityPlan({
+      ttsProvider: "edge",
+      edgeTtsCapabilityId: EDGE_TTS_CAPABILITY_ID,
+      edgeTtsCapabilityStatus: "missing",
+      edgeTtsSetupConfirmed: true,
+      secretValuesIncluded: false,
+    }, { homeDir: tempDir });
+
+    const result = await applyReviewedSetupPlanOperations(plan, {
+      homeDir: tempDir,
+      workspaceRoot,
+    });
+    const config = JSON.parse(await readFile(profileConfigPath(tempDir), "utf8"));
+
+    expect(result.ok).toBe(false);
+    expect(result.error).toContain("Edge TTS managed Python capability setup failed");
+    expect(result.error).toContain("Could not install edge-tts.");
+    expect(config).toEqual(initialConfig);
+  });
+
+  it("warns and skips Edge TTS when first-run managed capability setup fails", async () => {
+    vi.spyOn(capabilityManager, "checkManagedPythonCapabilityStatus").mockResolvedValue({
+      ok: false,
+      capabilityId: EDGE_TTS_CAPABILITY_ID,
+      reason: "install_required",
+      message: "Managed Python capability environment has not been installed.",
+    });
+    vi.spyOn(capabilityManager, "installManagedPythonCapabilityEnvironment").mockResolvedValue({
+      ok: false,
+      capabilityId: EDGE_TTS_CAPABILITY_ID,
+      reason: "pip_install_failed",
+      message: "Could not install edge-tts.",
+      diagnostic: "Traceback: hidden details",
+    });
+    const plan = firstRunVoiceOptionalCapabilityPlan({
+      ttsProvider: "edge",
+      edgeTtsCapabilityId: EDGE_TTS_CAPABILITY_ID,
+      edgeTtsCapabilityStatus: "missing",
+      edgeTtsSetupConfirmed: true,
+      sttProvider: "openai",
+      sttModel: "gpt-4o-mini-transcribe",
+      sttApiKeyEnv: "OPENAI_API_KEY",
+      secretValuesIncluded: false,
+    }, { homeDir: tempDir });
+
+    const result = await applyReviewedSetupPlanOperations(plan, {
+      homeDir: tempDir,
+      workspaceRoot,
+      mode: "firstRunTolerant",
+    });
+    const config = JSON.parse(await readFile(profileConfigPath(tempDir), "utf8")) as {
+      tts?: unknown;
+      stt?: { provider?: string; openai?: { model?: string; apiKeyEnv?: string } };
+    };
+
+    expect(result.ok).toBe(true);
+    expect(result.warnings).toEqual([expect.objectContaining({
+      operationId: "test-first-run-voice",
+      capability: "voice",
+      subCapability: "tts",
+      code: "managed_python_setup_failed",
+      message: resolveSetupCopy("en", "onboarding.optionalCapabilities.voice.edgeTtsSkipped"),
+      cause: "Could not install edge-tts.",
+    })]);
+    expect(JSON.stringify(result.warnings)).not.toContain("Traceback");
+    expect(config.tts).toBeUndefined();
+    expect(config.stt).toEqual({
+      provider: "openai",
+      openai: {
+        model: "gpt-4o-mini-transcribe",
+        apiKeyEnv: "OPENAI_API_KEY",
+      },
+    });
   });
 
   it("creates the managed Python environment before applying reviewed local STT", async () => {

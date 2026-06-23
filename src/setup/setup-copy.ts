@@ -275,6 +275,13 @@ export const SETUP_COPY_ENTRIES = [
     ["STT", "faster-whisper", "EstaCoda", "Python", "venv"],
     "optional-capability"
   ),
+  copy(
+    "onboarding.optionalCapabilities.voice.edgeTtsSkipped",
+    "Setup completed, but Edge TTS was skipped because EstaCoda could not install its managed Python capability. Reconfigure Edge TTS from setup after fixing the managed Python environment.",
+    "اكتمل الإعداد، لكن تم تخطي Edge TTS لأن EstaCoda لم تتمكن من تثبيت قدرة Python المُدارة الخاصة به. أعد ضبط Edge TTS من الإعداد بعد إصلاح بيئة Python المُدارة.",
+    ["Edge TTS", "EstaCoda", "Python"],
+    "optional-capability"
+  ),
   copy("onboarding.optionalCapabilities.webSearch", "Search", "بحث الويب", [], "optional-capability"),
   copy("onboarding.optionalCapabilities.webSearch.description", "Configure web.search with Brave Search or DDGS.", "اضبط web.search باستخدام Brave Search أو DDGS.", [], "optional-capability"),
   copy(
@@ -602,10 +609,10 @@ export const SETUP_COPY_ENTRIES = [
   copy("setupEditor.prompt.voice.mode.stt.description", "Convert spoken audio into text.", "تحويل الصوت المنطوق إلى نص.", [], "optional-capability"),
   copy("setupEditor.prompt.voice.mode.tts", "Text to Speech (TTS)", "Text to Speech (TTS)", ["TTS"], "optional-capability"),
   copy("setupEditor.prompt.voice.mode.tts.description", "Convert text into spoken audio.", "تحويل النص إلى صوت منطوق.", [], "optional-capability"),
-  copy("setupEditor.prompt.voice.summary", "Configure optional voice settings. Local STT uses managed faster-whisper by default: EstaCoda creates its Python environment at ~/.estacoda/python-env and stores model cache under ~/.estacoda/cache/huggingface. Onboarding does not ask for pythonBinary; command engines and custom Python stay outside the normal onboarding path.", "اضبط إعدادات الصوت الاختيارية. يستخدم STT المحلي faster-whisper المدار افتراضيًا: تنشئ EstaCoda بيئة Python الخاصة بها في ~/.estacoda/python-env وتخزن ذاكرة النماذج المؤقتة في ~/.estacoda/cache/huggingface. لا يطلب الإعداد pythonBinary؛ محركات الأوامر وPython المخصص خارج مسار الإعداد العادي.", [], "optional-capability"),
+  copy("setupEditor.prompt.voice.summary", "Configure optional voice settings. Local STT uses managed faster-whisper by default: EstaCoda creates its Python environment at ~/.estacoda/python-env and stores model cache under ~/.estacoda/cache/huggingface. Edge TTS uses EstaCoda's managed Python edge-tts capability and sends synthesis text to Microsoft's Edge speech service. Onboarding does not ask for pythonBinary; command engines and custom Python stay outside the normal onboarding path.", "اضبط إعدادات الصوت الاختيارية. يستخدم STT المحلي faster-whisper المدار افتراضيًا: تنشئ EstaCoda بيئة Python الخاصة بها في ~/.estacoda/python-env وتخزن ذاكرة النماذج المؤقتة في ~/.estacoda/cache/huggingface. يستخدم Edge TTS قدرة edge-tts عبر Python المُدارة من EstaCoda ويرسل نص التوليد إلى خدمة الكلام Edge من Microsoft. لا يطلب الإعداد pythonBinary؛ محركات الأوامر وPython المخصص خارج مسار الإعداد العادي.", [], "optional-capability"),
   copy("setupEditor.prompt.voice.ttsProvider", "TTS provider", "مزوّد TTS", [], "optional-capability"),
   copy("setupEditor.prompt.voice.ttsProvider.body", "Choose your TTS provider:", "اختر مزوّد TTS:", ["TTS"], "optional-capability"),
-  copy("setupEditor.prompt.voice.ttsProvider.edge.description", "via Microsoft. No API key required. Recommended.", "عبر Microsoft. لا يحتاج مفتاح API. موصى به.", ["Microsoft", "API"], "optional-capability"),
+  copy("setupEditor.prompt.voice.ttsProvider.edge.description", "Managed Python edge-tts via Microsoft Edge speech service. No API key required. Recommended.", "edge-tts عبر Python المُدارة وخدمة الكلام Edge من Microsoft. لا يحتاج مفتاح API. موصى به.", ["edge-tts", "Microsoft", "API"], "optional-capability"),
   copy("setupEditor.prompt.voice.ttsProvider.elevenlabs.description", "ElevenLabs voice synthesis. Requires API key.", "توليد صوت عبر ElevenLabs. يتطلب مفتاح API.", ["ElevenLabs", "API"], "optional-capability"),
   copy("setupEditor.prompt.voice.ttsProvider.openai.description", "OpenAI speech models. Requires API key.", "نماذج كلام OpenAI. تتطلب مفتاح API.", ["OpenAI", "API"], "optional-capability"),
   copy("setupEditor.prompt.voice.ttsProvider.minimax.description", "Minimax speech synthesis. Requires API key.", "توليد صوت عبر Minimax. يتطلب مفتاح API.", ["Minimax", "API"], "optional-capability"),
@@ -637,6 +644,7 @@ export const SETUP_COPY_ENTRIES = [
   copy("setupEditor.prompt.voice.sttApiKeyEnv", "STT API key environment variable", "متغير بيئة مفتاح STT API", [], "optional-capability"),
   copy("setupEditor.prompt.voice.sttSecretValue", "Enter STT provider API key for {envVar}:", "أدخل مفتاح API لمزوّد STT لـ {envVar}:", ["STT", "API", "envVar"], "credential-reference"),
   copy("setupEditor.apply.voice.localStt.failed", "Local faster-whisper STT setup failed. EstaCoda can still run, but local transcription will be unavailable until the Python environment is fixed. On Debian/Ubuntu, install the matching python3-venv package shown in the error, then reconfigure local STT in setup.", "فشل إعداد STT المحلي عبر faster-whisper. يمكن لـ EstaCoda الاستمرار في العمل، لكن النسخ الصوتي المحلي لن يكون متاحًا حتى يتم إصلاح بيئة Python. على Debian/Ubuntu، ثبّت حزمة python3-venv المطابقة المذكورة في الخطأ، ثم أعد ضبط STT المحلي من الإعداد.", ["STT", "faster-whisper", "EstaCoda", "Python", "Debian/Ubuntu", "python3-venv"], "optional-capability"),
+  copy("setupEditor.apply.voice.edgeTts.failed", "Edge TTS managed Python capability setup failed. Edge synthesis will be unavailable until the capability is installed. Run estacoda python-env setup edge-tts --yes after fixing the managed Python environment.", "فشل إعداد قدرة Python المُدارة لـ Edge TTS. لن يكون توليد الصوت عبر Edge متاحًا حتى تثبيت القدرة. شغّل estacoda python-env setup edge-tts --yes بعد إصلاح بيئة Python المُدارة.", ["Edge TTS", "Python", "estacoda python-env setup edge-tts --yes"], "optional-capability"),
   copy("setupEditor.prompt.vision.summary", "Configure optional image-generation settings. This does not change the primary model.", "اضبط إعدادات توليد الصور الاختيارية. هذا لا يغيّر النموذج الأساسي.", [], "optional-capability"),
   copy("setupEditor.prompt.vision.provider", "Image-generation provider", "مزوّد توليد الصور", [], "optional-capability"),
   copy("setupEditor.prompt.vision.model", "Image-generation model", "نموذج توليد الصور", [], "optional-capability"),

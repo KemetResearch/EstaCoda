@@ -4,7 +4,8 @@ import { tmpdir } from "node:os";
 import { mkdtemp } from "node:fs/promises";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { resolveProfileStateHome } from "../config/profile-home.js";
+import { resolveGlobalStateHome, resolveProfileStateHome } from "../config/profile-home.js";
+import { EDGE_TTS_CAPABILITY_ID } from "../python-env/capability-registry.js";
 import { runCliCommand, type CliOptions } from "./cli.js";
 
 const pythonEnvMock = vi.hoisted(() => ({
@@ -12,13 +13,60 @@ const pythonEnvMock = vi.hoisted(() => ({
   createManagedEnvironment: vi.fn()
 }));
 
+const capabilityManagerMock = vi.hoisted(() => ({
+  checkManagedPythonCapabilityStatus: vi.fn(),
+  installManagedPythonCapabilityEnvironment: vi.fn()
+}));
+
 vi.mock("../python-env/manager.js", () => ({
   checkManagedEnvironment: pythonEnvMock.checkManagedEnvironment,
   createManagedEnvironment: pythonEnvMock.createManagedEnvironment
 }));
 
+vi.mock("../python-env/capability-manager.js", () => ({
+  checkManagedPythonCapabilityStatus: capabilityManagerMock.checkManagedPythonCapabilityStatus,
+  installManagedPythonCapabilityEnvironment: capabilityManagerMock.installManagedPythonCapabilityEnvironment
+}));
+
 function profileConfigPath(homeDir: string): string {
   return resolveProfileStateHome({ homeDir, profileId: "default" }).configPath;
+}
+
+function readyEdgeStatus(homeDir: string) {
+  const stateRoot = resolveGlobalStateHome({ homeDir }).stateRoot;
+  return {
+    ok: true,
+    status: "verified",
+    capabilityId: EDGE_TTS_CAPABILITY_ID,
+    version: "7.2.8",
+    specHash: "edge-hash",
+    installedGroups: [],
+    installedPackages: ["edge-tts==7.2.8"],
+    pythonPath: join(stateRoot, "python-envs", EDGE_TTS_CAPABILITY_ID, "bin", "python"),
+    envPath: join(stateRoot, "python-envs", EDGE_TTS_CAPABILITY_ID),
+    manifest: {
+      id: EDGE_TTS_CAPABILITY_ID,
+      version: "7.2.8",
+      specHash: "edge-hash",
+      installedPackages: ["edge-tts==7.2.8"],
+      installedGroups: [],
+      pythonPath: join(stateRoot, "python-envs", EDGE_TTS_CAPABILITY_ID, "bin", "python"),
+      envPath: join(stateRoot, "python-envs", EDGE_TTS_CAPABILITY_ID),
+      createdAt: "2026-06-23T00:00:00.000Z",
+      updatedAt: "2026-06-23T00:00:00.000Z",
+      verifiedAt: "2026-06-23T00:00:01.000Z",
+      status: "verified",
+    },
+  };
+}
+
+function missingEdgeStatus() {
+  return {
+    ok: false,
+    capabilityId: EDGE_TTS_CAPABILITY_ID,
+    reason: "install_required",
+    message: "Managed Python capability environment has not been installed.",
+  };
 }
 
 async function writeProfileConfig(homeDir: string, config: unknown): Promise<void> {
@@ -49,6 +97,9 @@ describe("voice setup managed local STT", () => {
     await mkdir(join(homeDir, ".estacoda"), { recursive: true });
     pythonEnvMock.checkManagedEnvironment.mockReset();
     pythonEnvMock.createManagedEnvironment.mockReset();
+    capabilityManagerMock.checkManagedPythonCapabilityStatus.mockReset();
+    capabilityManagerMock.installManagedPythonCapabilityEnvironment.mockReset();
+    capabilityManagerMock.checkManagedPythonCapabilityStatus.mockResolvedValue(readyEdgeStatus(homeDir));
   });
 
   afterEach(async () => {
@@ -60,7 +111,7 @@ describe("voice setup managed local STT", () => {
     await expect(runVoiceSetup(homeDir, ["--stt-provider", "--tts-provider", "openai"])).rejects.toThrow("Missing value for --stt-provider");
   });
 
-  it("keeps TTS-only setup from patching STT or touching the managed environment", async () => {
+  it("keeps TTS-only setup from patching STT or touching the STT managed environment", async () => {
     await writeProfileConfig(homeDir, {
       stt: {
         provider: "local",
@@ -83,6 +134,44 @@ describe("voice setup managed local STT", () => {
         command: "existing-stt-command"
       }
     });
+  });
+
+  it("prints the Edge TTS repair command without installing in non-interactive setup", async () => {
+    capabilityManagerMock.checkManagedPythonCapabilityStatus.mockResolvedValue(missingEdgeStatus());
+
+    const result = await runVoiceSetup(homeDir, ["--tts-provider", "edge"]);
+
+    expect(result.exitCode).toBe(0);
+    expect(result.output).toContain("Edge TTS setup uses EstaCoda's managed Python capability");
+    expect(result.output).toContain("estacoda python-env setup edge-tts --yes");
+    expect(result.output).toContain("estacoda python-env verify edge-tts");
+    expect(capabilityManagerMock.installManagedPythonCapabilityEnvironment).not.toHaveBeenCalled();
+    expect((await readProfileConfig(homeDir)).tts.provider).toBe("edge");
+  });
+
+  it("installs the Edge TTS capability after interactive confirmation without prompting for an API key", async () => {
+    const stateRoot = resolveGlobalStateHome({ homeDir }).stateRoot;
+    capabilityManagerMock.checkManagedPythonCapabilityStatus
+      .mockResolvedValueOnce(missingEdgeStatus())
+      .mockResolvedValueOnce(readyEdgeStatus(homeDir));
+    capabilityManagerMock.installManagedPythonCapabilityEnvironment.mockResolvedValue(readyEdgeStatus(homeDir));
+    const prompt = vi.fn(async (_question: string) => "");
+
+    const result = await runVoiceSetup(homeDir, ["--tts-provider", "edge"], {
+      interactive: true,
+      prompt: Object.assign(prompt, { close: vi.fn() })
+    });
+
+    expect(result.exitCode).toBe(0);
+    expect(prompt).toHaveBeenCalledWith(expect.stringContaining("Install edge-tts now? [Y/n] "));
+    expect(prompt.mock.calls.map((call) => call[0]).join("\n")).not.toContain("API key");
+    expect(capabilityManagerMock.installManagedPythonCapabilityEnvironment).toHaveBeenCalledWith({
+      stateRoot,
+      capabilityId: EDGE_TTS_CAPABILITY_ID,
+      onProgress: expect.any(Function)
+    });
+    expect(result.output).toContain("TTS readiness: ready");
+    expect((await readProfileConfig(homeDir)).tts.provider).toBe("edge");
   });
 
   it("uses an already-ready managed Python environment without storing it as a custom override", async () => {
