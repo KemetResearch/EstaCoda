@@ -1118,12 +1118,19 @@ describe("ProviderTurnLoop semantic session compression", () => {
       expect.objectContaining({
         kind: "structured-tool-history-selected",
         nativePairs: 1,
-        routeRole: "primary"
+        routeRole: "primary",
+        preservedEchoMessages: 0,
+        placeholderEchoMessages: 0,
+        strippedEchoMessages: 0,
+        historicalNativeReplay: true
       }),
       expect.objectContaining({
         kind: "structured-tool-history-serialized",
         nativePairs: 1,
-        routeRole: "primary"
+        routeRole: "primary",
+        preservedEchoMessages: 0,
+        placeholderEchoMessages: 0,
+        strippedEchoMessages: 0
       })
     ]));
     const serializedEvents = JSON.stringify(events.filter((event) =>
@@ -1406,11 +1413,17 @@ describe("ProviderTurnLoop post-tool empty response recovery", () => {
     expect(events).toEqual(expect.arrayContaining([
       expect.objectContaining({
         kind: "structured-tool-history-selected",
-        nativePairs: 1
+        nativePairs: 1,
+        preservedEchoMessages: 0,
+        placeholderEchoMessages: 0,
+        strippedEchoMessages: 0
       }),
       expect.objectContaining({
         kind: "structured-tool-history-serialized",
-        nativePairs: 1
+        nativePairs: 1,
+        preservedEchoMessages: 0,
+        placeholderEchoMessages: 0,
+        strippedEchoMessages: 0
       })
     ]));
   });

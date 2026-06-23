@@ -1258,7 +1258,11 @@ describe("assembleProviderContinuationPrompt", () => {
     expect(prompt.nativeHistoryDiagnostics).toEqual(expect.arrayContaining([
       expect.objectContaining({
         kind: "structured-tool-history-selected",
-        echoMessages: 1
+        echoMessages: 1,
+        preservedEchoMessages: 0,
+        placeholderEchoMessages: 1,
+        strippedEchoMessages: 1,
+        historicalNativeReplay: true
       })
     ]));
     expect(JSON.stringify(prompt.nativeHistoryDiagnostics)).not.toContain(echoValue);
@@ -1296,6 +1300,15 @@ describe("assembleProviderContinuationPrompt", () => {
     }));
     expect(assistant).not.toHaveProperty("providerReplayEcho");
     expect(JSON.stringify(prompt.messages)).not.toContain(echoValue);
+    expect(prompt.nativeHistoryDiagnostics).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        kind: "structured-tool-history-selected",
+        preservedEchoMessages: 0,
+        placeholderEchoMessages: 0,
+        strippedEchoMessages: 1,
+        historicalNativeReplay: true
+      })
+    ]));
   });
 
   it("placeholders older groups while preserving exact active continuation echo", () => {
@@ -1361,6 +1374,15 @@ describe("assembleProviderContinuationPrompt", () => {
     expect(assistants[1]?.providerReplayEcho?.value).toBe(activeEcho);
     expect(JSON.stringify(prompt.messages)).not.toContain(staleEcho);
     expect(renderMessages(prompt.messages)).not.toContain(activeEcho);
+    expect(prompt.nativeHistoryDiagnostics).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        kind: "structured-tool-history-selected",
+        preservedEchoMessages: 1,
+        placeholderEchoMessages: 1,
+        strippedEchoMessages: 1,
+        historicalNativeReplay: true
+      })
+    ]));
   });
 
   it("does not preserve raw echo for partial active continuation id matches", () => {

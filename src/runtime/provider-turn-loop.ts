@@ -1233,6 +1233,17 @@ function nativeHistorySerializedDiagnostic(
     message.providerReplayEcho.providerFamily === metadata.reasoningEchoProviderFamily &&
     message.providerReplayEcho.apiMode === "openai_chat_completions"
   ).length;
+  const preservedEchoMessages = assistantToolMessages.filter((message) =>
+    message.providerReplayEcho !== undefined &&
+    message.providerReplayEcho.provenance !== "protocol-placeholder" &&
+    message.providerReplayEcho.providerFamily === metadata.reasoningEchoProviderFamily &&
+    message.providerReplayEcho.apiMode === "openai_chat_completions"
+  ).length;
+  const placeholderEchoMessages = assistantToolMessages.filter((message) =>
+    message.providerReplayEcho?.provenance === "protocol-placeholder" &&
+    message.providerReplayEcho.providerFamily === metadata.reasoningEchoProviderFamily &&
+    message.providerReplayEcho.apiMode === "openai_chat_completions"
+  ).length;
   const echoMissing = requiresEcho ? assistantToolMessages.length - echoMessages : 0;
 
   if (echoMissing > 0) {
@@ -1249,7 +1260,10 @@ function nativeHistorySerializedDiagnostic(
     kind: "structured-tool-history-serialized",
     ...base,
     nativePairs: assistantToolMessages.length,
-    echoMessages
+    echoMessages,
+    preservedEchoMessages,
+    placeholderEchoMessages,
+    strippedEchoMessages: 0
   };
 }
 

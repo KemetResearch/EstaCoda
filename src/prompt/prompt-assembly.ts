@@ -803,13 +803,14 @@ function buildNativePromptHistory(
   }
 
   const route = input.nativeHistoryRoute!;
+  const replayEchoContext = nativeReplayEchoContext(input);
   const built = buildNativeHistoryMessages(selectedMessages, {
     targetProviderFamily: route.reasoningEchoProviderFamily,
     targetApiMode: route.apiMode === "openai_chat_completions" ? route.apiMode : undefined,
     mergeAdjacentUsers: true,
-    replayEchoContext: nativeReplayEchoContext(input)
+    replayEchoContext
   });
-  const diagnostics = nativeHistoryBuilderDiagnostics(input, built.stats);
+  const diagnostics = nativeHistoryBuilderDiagnostics(input, built.stats, built.messages, replayEchoContext);
   if (built.stats.nativeToolTurns === 0) {
     return {
       messages: [],
@@ -847,6 +848,8 @@ function buildNativePromptHistory(
         skippedMalformedToolCalls: built.stats.skippedMalformedTurns,
         skippedUnsafeTurns: built.stats.skippedUnsafeTurns,
         echoMessages: built.messages.filter((message) => message.role === "assistant" && message.providerReplayEcho !== undefined).length,
+        ...nativeHistoryEchoDiagnosticFields(built.stats),
+        ...nativeHistoryHistoricalReplayDiagnosticField(built.messages, replayEchoContext),
         nativeReplayUnsafeTurns: built.stats.skippedUnsafeTurns,
         historicalToolResultsLabeled: built.stats.historicalToolResultsLabeled,
         mutableStateToolResultsLabeled: built.stats.mutableStateToolResultsLabeled
@@ -899,7 +902,9 @@ function activeContinuationToolCallIds(input: ProviderContinuationPromptInput): 
 
 function nativeHistoryBuilderDiagnostics(
   input: ProviderPromptInput,
-  stats: ReturnType<typeof buildNativeHistoryMessages>["stats"]
+  stats: ReturnType<typeof buildNativeHistoryMessages>["stats"],
+  messages: ProviderMessage[],
+  replayEchoContext: ProviderReplayEchoContext
 ): StructuredToolHistoryDiagnosticEvent[] {
   if (
     stats.droppedToolMessages === 0 &&
@@ -918,10 +923,52 @@ function nativeHistoryBuilderDiagnostics(
     mergedUsers: stats.mergedUserMessages,
     skippedMalformedToolCalls: stats.skippedMalformedTurns,
     skippedUnsafeTurns: stats.skippedUnsafeTurns,
+    ...nativeHistoryEchoDiagnosticFields(stats),
+    ...nativeHistoryHistoricalReplayDiagnosticField(messages, replayEchoContext),
     nativeReplayUnsafeTurns: stats.skippedUnsafeTurns,
     historicalToolResultsLabeled: stats.historicalToolResultsLabeled,
     mutableStateToolResultsLabeled: stats.mutableStateToolResultsLabeled
   }];
+}
+
+function nativeHistoryEchoDiagnosticFields(
+  stats: ReturnType<typeof buildNativeHistoryMessages>["stats"]
+): Pick<StructuredToolHistoryDiagnosticEvent, "preservedEchoMessages" | "placeholderEchoMessages" | "strippedEchoMessages"> {
+  return {
+    preservedEchoMessages: stats.preservedProviderReplayEcho,
+    placeholderEchoMessages: stats.placeholderProviderReplayEcho,
+    strippedEchoMessages: stats.strippedProviderReplayEcho
+  };
+}
+
+function nativeHistoryHistoricalReplayDiagnosticField(
+  messages: ProviderMessage[],
+  replayEchoContext: ProviderReplayEchoContext
+): Pick<StructuredToolHistoryDiagnosticEvent, "historicalNativeReplay"> {
+  return nativeHistoryIncludesHistoricalReplay(messages, replayEchoContext)
+    ? { historicalNativeReplay: true }
+    : {};
+}
+
+function nativeHistoryIncludesHistoricalReplay(
+  messages: ProviderMessage[],
+  replayEchoContext: ProviderReplayEchoContext
+): boolean {
+  const assistantToolMessages = messages.filter((message) =>
+    message.role === "assistant" &&
+    Array.isArray(message.toolCalls) &&
+    message.toolCalls.length > 0
+  );
+  if (assistantToolMessages.length === 0) {
+    return false;
+  }
+  if (replayEchoContext.kind !== "active-continuation") {
+    return true;
+  }
+  return assistantToolMessages.some((message) =>
+    message.toolCalls!.length !== replayEchoContext.activeToolCallIds.size ||
+    message.toolCalls!.some((toolCall) => !replayEchoContext.activeToolCallIds.has(toolCall.id))
+  );
 }
 
 function nativeHistoryDiagnosticBase(input: ProviderPromptInput): Pick<StructuredToolHistoryDiagnosticEvent, "provider" | "model" | "routeRole"> {

@@ -193,9 +193,13 @@ export type StructuredToolHistoryDiagnosticEvent = {
   skippedMalformedToolCalls?: number;
   skippedUnsafeTurns?: number;
   echoMessages?: number;
+  preservedEchoMessages?: number;
+  placeholderEchoMessages?: number;
+  strippedEchoMessages?: number;
   echoMissing?: number;
   echoOversized?: number;
   nativeReplayUnsafeTurns?: number;
+  historicalNativeReplay?: true;
   historicalToolResultsLabeled?: number;
   mutableStateToolResultsLabeled?: number;
   reason?: StructuredToolHistoryDiagnosticReason;

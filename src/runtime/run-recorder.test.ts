@@ -288,12 +288,24 @@ describe("RunRecorder", () => {
         injectedStubs: 0,
         mergedUsers: 1,
         echoMessages: 1,
+        preservedEchoMessages: 1,
+        placeholderEchoMessages: 2,
+        strippedEchoMessages: 3,
+        historicalNativeReplay: true,
         historicalToolResultsLabeled: 2.9,
         mutableStateToolResultsLabeled: Number.POSITIVE_INFINITY,
         reason: "missing_echo",
         rawArgs: "sk-secret",
         toolResult: "private result",
         echoValue: "private provider reasoning"
+      } as never);
+      await runRecorder.recordStructuredToolHistoryDiagnostic({
+        kind: "structured-tool-history-repaired",
+        provider: "test-provider",
+        preservedEchoMessages: -1,
+        placeholderEchoMessages: Number.NaN,
+        strippedEchoMessages: "3",
+        historicalNativeReplay: false
       } as never);
 
       const events = await db.listEvents(session.id);
@@ -307,9 +319,17 @@ describe("RunRecorder", () => {
         injectedStubs: 0,
         mergedUsers: 1,
         echoMessages: 1,
+        preservedEchoMessages: 1,
+        placeholderEchoMessages: 2,
+        strippedEchoMessages: 3,
+        historicalNativeReplay: true,
         historicalToolResultsLabeled: 2,
         mutableStateToolResultsLabeled: 0,
         reason: "missing_echo"
+      });
+      expect(events).toContainEqual({
+        kind: "structured-tool-history-repaired",
+        provider: "test-provider"
       });
       const serialized = JSON.stringify(events);
       expect(serialized).not.toContain("sk-secret");

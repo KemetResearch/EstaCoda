@@ -723,9 +723,13 @@ function sanitizeStructuredToolHistoryDiagnostic(
     ...(input.skippedMalformedToolCalls === undefined ? {} : { skippedMalformedToolCalls: nonNegativeInteger(input.skippedMalformedToolCalls) }),
     ...(input.skippedUnsafeTurns === undefined ? {} : { skippedUnsafeTurns: nonNegativeInteger(input.skippedUnsafeTurns) }),
     ...(input.echoMessages === undefined ? {} : { echoMessages: nonNegativeInteger(input.echoMessages) }),
+    ...optionalNonNegativeIntegerField("preservedEchoMessages", input.preservedEchoMessages),
+    ...optionalNonNegativeIntegerField("placeholderEchoMessages", input.placeholderEchoMessages),
+    ...optionalNonNegativeIntegerField("strippedEchoMessages", input.strippedEchoMessages),
     ...(input.echoMissing === undefined ? {} : { echoMissing: nonNegativeInteger(input.echoMissing) }),
     ...(input.echoOversized === undefined ? {} : { echoOversized: nonNegativeInteger(input.echoOversized) }),
     ...(input.nativeReplayUnsafeTurns === undefined ? {} : { nativeReplayUnsafeTurns: nonNegativeInteger(input.nativeReplayUnsafeTurns) }),
+    ...(input.historicalNativeReplay === true ? { historicalNativeReplay: true as const } : {}),
     ...(input.historicalToolResultsLabeled === undefined ? {} : { historicalToolResultsLabeled: nonNegativeInteger(input.historicalToolResultsLabeled) }),
     ...(input.mutableStateToolResultsLabeled === undefined ? {} : { mutableStateToolResultsLabeled: nonNegativeInteger(input.mutableStateToolResultsLabeled) }),
     ...(input.reason === undefined ? {} : { reason: input.reason })
@@ -734,6 +738,13 @@ function sanitizeStructuredToolHistoryDiagnostic(
 
 function nonNegativeInteger(value: number): number {
   return Math.max(0, Math.floor(Number.isFinite(value) ? value : 0));
+}
+
+function optionalNonNegativeIntegerField<K extends string>(key: K, value: unknown): Record<K, number> | {} {
+  if (typeof value !== "number" || !Number.isFinite(value) || value < 0) {
+    return {};
+  }
+  return { [key]: Math.floor(value) } as Record<K, number>;
 }
 
 function summarizeSkillOutcome(
