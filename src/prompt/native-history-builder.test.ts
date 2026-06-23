@@ -404,6 +404,93 @@ describe("buildNativeHistoryMessages", () => {
     expect(result.stats.strippedProviderReplayEcho).toBe(1);
   });
 
+  it("requires matching route identity before preserving active provider echo for colliding ids", () => {
+    const oldEcho = "old colliding provider reasoning";
+    const currentEcho = "current colliding provider reasoning";
+    const result = buildNativeHistoryMessages([
+      providerToolTurn("older-call", "", {
+        provider: "kimi",
+        model: "kimi-old-model",
+        routeRole: "primary",
+        attemptedRouteIndex: 0,
+        providerToolCalls: [
+          { id: "call_collision_1", name: "files.read", argumentsText: "{\"path\":\"old\"}" }
+        ],
+        providerReplayEcho: replayEcho(oldEcho, "kimi", "provider")
+      }),
+      toolResult("older-tool", "call_collision_1"),
+      providerToolTurn("active-call", "", {
+        provider: "kimi",
+        model: "kimi-current-model",
+        routeRole: "primary",
+        attemptedRouteIndex: 0,
+        providerToolCalls: [
+          { id: "call_collision_1", name: "files.read", argumentsText: "{\"path\":\"current\"}" }
+        ],
+        providerReplayEcho: replayEcho(currentEcho, "kimi", "provider")
+      }),
+      toolResult("active-tool", "call_collision_1")
+    ], {
+      targetProviderFamily: "kimi",
+      targetApiMode: "openai_chat_completions",
+      activeRouteIdentity: {
+        provider: "kimi",
+        model: "kimi-current-model",
+        routeRole: "primary",
+        attemptedRouteIndex: 0
+      },
+      replayEchoContext: {
+        kind: "active-continuation",
+        activeToolCallIds: new Set(["call_collision_1"]),
+        requiresReasoningEcho: true
+      }
+    });
+
+    const assistantMessages = result.messages.filter((providerMessage) => providerMessage.role === "assistant");
+    expect(assistantMessages[0]?.providerReplayEcho).toEqual({
+      field: "reasoning_content",
+      value: " ",
+      providerFamily: "kimi",
+      apiMode: "openai_chat_completions",
+      chars: 1,
+      provenance: "protocol-placeholder"
+    });
+    expect(assistantMessages[1]?.providerReplayEcho?.value).toBe(currentEcho);
+    expect(result.messages.map((providerMessage) => providerMessage.content).join("\n")).not.toContain(currentEcho);
+    expect(JSON.stringify(result.messages)).not.toContain(oldEcho);
+    expect(result.stats.preservedProviderReplayEcho).toBe(1);
+    expect(result.stats.placeholderProviderReplayEcho).toBe(1);
+    expect(result.stats.strippedProviderReplayEcho).toBe(1);
+  });
+
+  it("preserves active provider echo for legacy records without route identity", () => {
+    const result = buildNativeHistoryMessages([
+      providerToolTurn("agent-call", "", {
+        providerReplayEcho: replayEcho("legacy active provider reasoning", "kimi", "provider")
+      }),
+      toolResult("tool-1", "call-1")
+    ], {
+      targetProviderFamily: "kimi",
+      targetApiMode: "openai_chat_completions",
+      activeRouteIdentity: {
+        provider: "kimi",
+        model: "kimi-current-model",
+        routeRole: "primary",
+        attemptedRouteIndex: 0
+      },
+      replayEchoContext: {
+        kind: "active-continuation",
+        activeToolCallIds: new Set(["call-1"]),
+        requiresReasoningEcho: true
+      }
+    });
+
+    expect(result.messages[0]?.providerReplayEcho?.value).toBe("legacy active provider reasoning");
+    expect(result.stats.preservedProviderReplayEcho).toBe(1);
+    expect(result.stats.placeholderProviderReplayEcho).toBe(0);
+    expect(result.stats.strippedProviderReplayEcho).toBe(0);
+  });
+
   it("does not treat stored placeholder echo as preserved active provider echo", () => {
     const result = buildNativeHistoryMessages([
       providerToolTurn("agent-call", "", {

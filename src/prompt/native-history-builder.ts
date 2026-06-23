@@ -6,6 +6,10 @@ type ProviderToolCallTurnMetadata = {
   nativeReplaySafe: boolean;
   providerToolCalls: unknown;
   providerReplayEcho?: unknown;
+  provider?: unknown;
+  model?: unknown;
+  routeRole?: unknown;
+  attemptedRouteIndex?: unknown;
 };
 
 export type NativeHistoryBuilderOptions = {
@@ -13,6 +17,14 @@ export type NativeHistoryBuilderOptions = {
   targetApiMode?: ProviderReplayEcho["apiMode"];
   mergeAdjacentUsers?: boolean;
   replayEchoContext?: ProviderReplayEchoContext;
+  activeRouteIdentity?: ProviderReplayEchoRouteIdentity;
+};
+
+export type ProviderReplayEchoRouteIdentity = {
+  provider?: string;
+  model?: string;
+  routeRole?: string;
+  attemptedRouteIndex?: number;
 };
 
 export type ProviderReplayEchoContext =
@@ -291,7 +303,11 @@ function providerToolCallTurnMetadata(metadata: SessionMessage["metadata"]): Pro
     kind: "provider-tool-call-turn",
     nativeReplaySafe: metadata.nativeReplaySafe === true,
     providerToolCalls: metadata.providerToolCalls,
-    providerReplayEcho: metadata.providerReplayEcho
+    providerReplayEcho: metadata.providerReplayEcho,
+    provider: metadata.provider,
+    model: metadata.model,
+    routeRole: metadata.routeRole,
+    attemptedRouteIndex: metadata.attemptedRouteIndex
   };
 }
 
@@ -386,6 +402,7 @@ function applyProviderReplayEcho(
     echo !== undefined &&
     isProviderOriginatedEcho(echo) &&
     echoMatchesTarget(echo, options) &&
+    routeIdentityMatchesTarget(metadata, options.activeRouteIdentity) &&
     missingIds.length === 0 &&
     toolCallIdsExactlyMatch(toolCalls, context.activeToolCallIds)
   ) {
@@ -409,6 +426,27 @@ function applyProviderReplayEcho(
 
 function isProviderOriginatedEcho(echo: ProviderReplayEcho): boolean {
   return echo.provenance === undefined || echo.provenance === "provider";
+}
+
+function routeIdentityMatchesTarget(
+  metadata: ProviderToolCallTurnMetadata,
+  activeRouteIdentity: ProviderReplayEchoRouteIdentity | undefined
+): boolean {
+  if (activeRouteIdentity === undefined) {
+    return true;
+  }
+
+  return identityFieldMatches(metadata.provider, activeRouteIdentity.provider) &&
+    identityFieldMatches(metadata.model, activeRouteIdentity.model) &&
+    identityFieldMatches(metadata.routeRole, activeRouteIdentity.routeRole) &&
+    identityFieldMatches(metadata.attemptedRouteIndex, activeRouteIdentity.attemptedRouteIndex);
+}
+
+function identityFieldMatches(persisted: unknown, active: string | number | undefined): boolean {
+  if (persisted === undefined || active === undefined) {
+    return true;
+  }
+  return persisted === active;
 }
 
 function providerReplayEchoPlaceholder(options: NativeHistoryBuilderOptions): ProviderReplayEcho | undefined {

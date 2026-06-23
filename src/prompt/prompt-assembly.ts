@@ -21,7 +21,7 @@ import { redactSensitiveText } from "../utils/redaction.js";
 import type { PromptCache } from "./prompt-cache.js";
 import { countImageLikeMetadata, estimateTextTokensRough, IMAGE_TOKEN_ESTIMATE } from "./token-estimator.js";
 import type { AgentProfileMode, AgentResponseLanguage, UiFlavor, UiLanguage } from "../config/runtime-config.js";
-import { buildNativeHistoryMessages, type ProviderReplayEchoContext } from "./native-history-builder.js";
+import { buildNativeHistoryMessages, type ProviderReplayEchoContext, type ProviderReplayEchoRouteIdentity } from "./native-history-builder.js";
 import { selectNativeHistoryWindow, type NativeHistoryUnit } from "./native-history-selector.js";
 import {
   isAcknowledgementContinuation,
@@ -808,7 +808,8 @@ function buildNativePromptHistory(
     targetProviderFamily: route.reasoningEchoProviderFamily,
     targetApiMode: route.apiMode === "openai_chat_completions" ? route.apiMode : undefined,
     mergeAdjacentUsers: true,
-    replayEchoContext
+    replayEchoContext,
+    activeRouteIdentity: nativeReplayEchoActiveRouteIdentity(input)
   });
   const diagnostics = nativeHistoryBuilderDiagnostics(input, built.stats, built.messages, replayEchoContext);
   if (built.stats.nativeToolTurns === 0) {
@@ -900,6 +901,39 @@ function activeContinuationToolCallIds(input: ProviderContinuationPromptInput): 
   );
 }
 
+function nativeReplayEchoActiveRouteIdentity(
+  input: ProviderPromptInput | ProviderContinuationPromptInput
+): ProviderReplayEchoRouteIdentity | undefined {
+  if (!("providerExecution" in input)) {
+    return undefined;
+  }
+
+  const providerExecution = input.providerExecution;
+  if (providerExecution === undefined) {
+    return undefined;
+  }
+
+  const provider = providerExecution.route?.provider ?? providerExecution.response?.provider ?? input.nativeHistoryRoute?.provider;
+  const model = providerExecution.route?.id ?? providerExecution.response?.model ?? input.nativeHistoryRoute?.id;
+  const routeRole = providerExecution.routeRole ?? input.nativeHistoryRouteRole;
+  const attemptedRouteIndex = providerExecution.attemptedRouteIndex;
+  if (
+    provider === undefined &&
+    model === undefined &&
+    routeRole === undefined &&
+    attemptedRouteIndex === undefined
+  ) {
+    return undefined;
+  }
+
+  return {
+    ...(provider === undefined ? {} : { provider }),
+    ...(model === undefined ? {} : { model }),
+    ...(routeRole === undefined ? {} : { routeRole }),
+    ...(attemptedRouteIndex === undefined ? {} : { attemptedRouteIndex })
+  };
+}
+
 function nativeHistoryBuilderDiagnostics(
   input: ProviderPromptInput,
   stats: ReturnType<typeof buildNativeHistoryMessages>["stats"],
@@ -966,6 +1000,7 @@ function nativeHistoryIncludesHistoricalReplay(
     return true;
   }
   return assistantToolMessages.some((message) =>
+    message.providerReplayEcho?.provenance === "protocol-placeholder" ||
     message.toolCalls!.length !== replayEchoContext.activeToolCallIds.size ||
     message.toolCalls!.some((toolCall) => !replayEchoContext.activeToolCallIds.has(toolCall.id))
   );

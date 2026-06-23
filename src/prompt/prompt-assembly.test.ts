@@ -1385,6 +1385,122 @@ describe("assembleProviderContinuationPrompt", () => {
     ]));
   });
 
+  it("uses route identity to avoid preserving stale echo with colliding active ids", () => {
+    const staleEcho = "stale colliding provider reasoning";
+    const activeEcho = "current colliding provider reasoning";
+    const currentRoute = {
+      ...echoRequiredNativeRoute,
+      id: "kimi-current-model"
+    };
+    const activeExecution = providerExecution("", [
+      { id: "call-collision", name: "files.read", argumentsText: "{\"path\":\"current\"}" }
+    ])!;
+    const prompt = assembleProviderContinuationPrompt(baseContinuationInput({
+      model: toolModel,
+      rawSessionHistory: [
+        providerToolTurn("older-turn", {
+          provider: "kimi",
+          model: "kimi-old-model",
+          routeRole: "primary",
+          attemptedRouteIndex: 0,
+          providerToolCalls: [
+            {
+              id: "call-collision",
+              name: "files.read",
+              argumentsText: "{\"path\":\"old\"}"
+            }
+          ],
+          providerReplayEcho: {
+            field: "reasoning_content",
+            value: staleEcho,
+            providerFamily: "kimi",
+            apiMode: "openai_chat_completions",
+            chars: staleEcho.length,
+            provenance: "provider"
+          }
+        }),
+        sessionMessage("older-tool", "tool", "older native tool result", { tool_call_id: "call-collision" }),
+        providerToolTurn("active-turn", {
+          provider: "kimi",
+          model: "kimi-current-model",
+          routeRole: "primary",
+          attemptedRouteIndex: 0,
+          providerToolCalls: [
+            {
+              id: "call-collision",
+              name: "files.read",
+              argumentsText: "{\"path\":\"current\"}"
+            }
+          ],
+          providerReplayEcho: {
+            field: "reasoning_content",
+            value: activeEcho,
+            providerFamily: "kimi",
+            apiMode: "openai_chat_completions",
+            chars: activeEcho.length,
+            provenance: "provider"
+          }
+        }),
+        sessionMessage("active-tool", "tool", "active native tool result", { tool_call_id: "call-collision" })
+      ],
+      providerExecution: {
+        ...activeExecution,
+        response: {
+          ...activeExecution.response!,
+          provider: "kimi",
+          model: "kimi-current-model"
+        },
+        attempts: [
+          {
+            provider: "kimi",
+            model: "kimi-current-model",
+            ok: true,
+            content: ""
+          }
+        ],
+        route: currentRoute,
+        routeRole: "primary",
+        attemptedRouteIndex: 0
+      },
+      toolPlans: [
+        {
+          id: "call-collision",
+          tool: "files.read",
+          input: { path: "current" },
+          source: "provider-tool-call",
+          status: "executed",
+          result: {
+            ok: true,
+            content: "active native tool result"
+          }
+        }
+      ],
+      nativeHistoryRoute: currentRoute
+    }));
+
+    const assistants = prompt.messages.filter((message) => message.role === "assistant" && message.toolCalls !== undefined);
+    expect(assistants[0]?.providerReplayEcho).toEqual({
+      field: "reasoning_content",
+      value: " ",
+      providerFamily: "kimi",
+      apiMode: "openai_chat_completions",
+      chars: 1,
+      provenance: "protocol-placeholder"
+    });
+    expect(assistants[1]?.providerReplayEcho?.value).toBe(activeEcho);
+    expect(JSON.stringify(prompt.messages)).not.toContain(staleEcho);
+    expect(renderMessages(prompt.messages)).not.toContain(activeEcho);
+    expect(prompt.nativeHistoryDiagnostics).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        kind: "structured-tool-history-selected",
+        preservedEchoMessages: 1,
+        placeholderEchoMessages: 1,
+        strippedEchoMessages: 1,
+        historicalNativeReplay: true
+      })
+    ]));
+  });
+
   it("does not preserve raw echo for partial active continuation id matches", () => {
     const echoValue = "partial match provider reasoning";
     const prompt = assembleProviderContinuationPrompt(baseContinuationInput({
