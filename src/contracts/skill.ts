@@ -103,6 +103,42 @@ export type SkillResourceEntry = {
   declared?: boolean;
 };
 
+export type SkillPromptContentMode = "full" | "contract";
+
+export type SkillContract = {
+  summary: string;
+  sectionIndex: SkillSectionIndexEntry[];
+  referenceIndex: SkillReferenceIndexEntry[];
+  scriptIndex: SkillReferenceIndexEntry[];
+  originalChars: number;
+};
+
+export type SkillSectionIndexEntry = {
+  heading: string;
+  level: number;
+  charOffset: number;
+  charLength?: number;
+};
+
+export type SkillReferenceIndexEntry = {
+  path: string;
+  kind: SkillResourceKind;
+  chars?: number;
+  description?: string;
+};
+
+export type SelectedSkillPromptContent = {
+  name: string;
+  description: string;
+  content: string;
+  contentMode: SkillPromptContentMode;
+  originalChars?: number;
+  truncated: boolean;
+  referencePaths: string[];
+  scriptPaths: string[];
+  loadInstruction?: string;
+};
+
 export type SkillConfigField = {
   key: string;
   description?: string;
@@ -253,6 +289,7 @@ export type LoadedSkill = SkillDefinition & {
     truncated: boolean;
     originalChars: number;
   };
+  contract?: SkillContract;
 };
 
 export type SkillCatalogEntry = {

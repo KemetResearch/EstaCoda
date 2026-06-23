@@ -16,7 +16,7 @@ import type {
 import type { RuntimeEvent, RuntimeEventSink } from "../contracts/runtime-event.js";
 import type { SecurityDecision } from "../contracts/security.js";
 import type { ReplacementSessionMessage, SessionDB, SessionMessage, StructuredToolHistoryDiagnosticEvent } from "../contracts/session.js";
-import type { LoadedSkill, SkillDefinition, SkillCatalogEntry } from "../contracts/skill.js";
+import type { LoadedSkill, SelectedSkillPromptContent, SkillDefinition, SkillCatalogEntry } from "../contracts/skill.js";
 import type { ToolCallPlan } from "../contracts/tool-plan.js";
 import type { ToolRiskClass } from "../contracts/tool.js";
 import type { AgentProfileMode, AgentResponseLanguage, UiFlavor, UiLanguage } from "../config/runtime-config.js";
@@ -132,6 +132,7 @@ export class ProviderTurnLoop {
     userText: string;
     routedText: string;
     selectedSkill: LoadedSkill | SkillDefinition | undefined;
+    selectedSkillPromptContent?: SelectedSkillPromptContent;
     selectedSkillInstructions: string | undefined;
     selectedSkillResources: LoadedSkill["resources"] | undefined;
     selectedSkillSetup: SkillSetupContext | undefined;
@@ -508,6 +509,7 @@ export class ProviderTurnLoop {
     userText: string;
     routedText: string;
     selectedSkill: LoadedSkill | SkillDefinition | undefined;
+    selectedSkillPromptContent?: SelectedSkillPromptContent;
     selectedSkillInstructions: string | undefined;
     selectedSkillResources: LoadedSkill["resources"] | undefined;
     selectedSkillSetup: SkillSetupContext | undefined;
@@ -631,6 +633,7 @@ export class ProviderTurnLoop {
     userText: string;
     routedText: string;
     selectedSkill: LoadedSkill | SkillDefinition | undefined;
+    selectedSkillPromptContent?: SelectedSkillPromptContent;
     selectedSkillInstructions: string | undefined;
     selectedSkillResources: LoadedSkill["resources"] | undefined;
     selectedSkillSetup: SkillSetupContext | undefined;
@@ -1459,6 +1462,8 @@ function isHousekeepingToolName(name: string | undefined): boolean {
     name === "knowledge.memory.inspect" ||
     name === "skill.observe" ||
     name === "skill.list" ||
+    name === "skill.read" ||
+    name === "skill.search" ||
     name === "skill.view" ||
     name === "skill.inspect" ||
     name === "skill.usage" ||

@@ -358,6 +358,7 @@ export class AgentLoopBuilder {
         currentSessionId: () => sessionRuntimeContext.currentSessionId(),
         skillRegistry: substrate.skillRegistry,
         sessionSkillRegistry,
+        skillConfig: input.skillConfig,
         localSkillsRoot: substrate.localSkillsRoot,
         bundledSkillsRoot: substrate.bundledSkillsRoot,
         skillEvolutionStore: substrate.skillEvolutionStore,

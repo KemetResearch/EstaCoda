@@ -13,6 +13,8 @@ The skill system is the most mature subsystem in EstaCoda. It provides procedura
 |------|------|
 | `src/skills/skill-loader.ts` | Load and validate skill directories |
 | `src/skills/skill-registry.ts` | Hold loaded skills, resolve source conflicts, and expose catalogs |
+| `src/skills/skill-contract.ts` | Build deterministic prompt contracts for oversized selected skills |
+| `src/skills/skill-readiness.ts` | Resolve setup/readiness metadata shared by routing and skill tools |
 | `src/tools/skill-tools.ts` | Agent-facing `skill.*` tools for inspection, mutation, proposals, eval gates, rollback, import, and export |
 | `src/skills/skill-evolution.ts` | Store observations, candidates, proposals, experiments, evals, promotions, snapshots, and rollback metadata |
 | `src/skills/skill-learning.ts` | Observe completed turns and emit evidence/candidates; not mutation authority |
@@ -43,6 +45,38 @@ The runtime does not currently load `<workspace>/.estacoda/skills/` as a project
 **Playbook planning:** `src/skills/skill-playbook-planner.ts` compiles declared playbook steps for deterministic planning and inspection surfaces.
 
 **Resources:** `references/`, `templates/`, `scripts/`, and compatible `assets/` are indexed and loaded on demand by the skill loader.
+
+## Indexed Loading and Retrieval
+
+Selected skills are loaded through an indexed prompt model:
+
+- Skills at or below the root inline cap are injected into the prompt with their full root `SKILL.md` instructions.
+- Oversized selected skills are represented in the prompt as deterministic contracts instead of silently truncated root bodies.
+- Contract prompt content includes the skill name, description, original root character count, heading index, linked resource/script index, and an explicit note that referenced resource contents are not included.
+- Full oversized root content can be recovered on demand with:
+
+```ts
+skill.read({ "name": "<skill>", "mode": "full" })
+```
+
+Reference, template, script, and asset files are lazy. Their paths are indexed, but their contents are not injected into prompts or contracts by default.
+
+`skill.read` is the canonical model-visible read/retrieval tool:
+
+- `skill.read({ "name": "<skill>" })` returns full root instructions for small loaded skills and contract content for oversized loaded skills.
+- `skill.read({ "name": "<skill>", "mode": "full" })` returns the loaded root body capped by the read limit, with metadata such as `originalChars` and `truncated`.
+- `skill.read({ "name": "<skill>", "path": "references/example.md" })` reads one skill-local resource through path containment and size checks.
+- Read metadata preserves the skill metadata payload and adds linked files plus setup/readiness fields.
+
+`skill.view` remains registered as a deprecated compatibility alias for `skill.read`. New prompt copy, docs, and tools should prefer `skill.read`.
+
+`skill.search` is a named-skill-only retrieval tool:
+
+- `skill.search({ "name": "<skill>", "query": "<text>", "maxResults": 5 })` searches only that named skill's loaded `SKILL.md` root instructions and indexed resources.
+- It returns bounded deterministic excerpts with paths, match counts, optional line/heading context, and truncation metadata.
+- It does not perform global skill search, nearby skill routing, candidate discovery, usage telemetry, or Agent Evolution/AHE evidence collection.
+
+Nearby candidates, routing self-correction, usage telemetry for retrieval tools, and AHE/Skill Evolution curator behavior are outside the indexed-loading PR 1 scope.
 
 ## Python Capabilities
 
@@ -85,7 +119,7 @@ The agent-facing surface is the `skill` toolset implemented in `src/tools/skill-
 
 | Area | Tools |
 |------|-------|
-| Read/inspect | `skill.list`, `skill.view`, `skill.inspect`, `skill.eval`, `skill.usage` |
+| Read/retrieve/inspect | `skill.list`, `skill.read`, `skill.search`, `skill.view` (deprecated alias), `skill.inspect`, `skill.eval`, `skill.usage` |
 | Learning and proposals | `skill.observe`, `skill.propose_patch`, `skill.list_proposals`, `skill.review_proposals`, `skill.review_proposal`, `skill.approve_patch`, `skill.reject_patch`, `skill.promote_patch` |
 | Mutation | `skill.create`, `skill.patch`, `skill.edit`, `skill.delete`, `skill.rollback`, `skill.reset`, `skill.write_file`, `skill.remove_file` |
 | Portability | `skill.import`, `skill.export` |

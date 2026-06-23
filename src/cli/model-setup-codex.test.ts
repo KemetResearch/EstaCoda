@@ -73,16 +73,16 @@ function joinedOutput(chunks: string[]): string {
 }
 
 function createMockFetch(scenarios: {
-  authorize?: () => { ok: boolean; status: number; statusText: string; json: unknown };
-  tokenPolls?: Array<() => { ok: boolean; status: number; statusText: string; json: unknown }>;
+  usercode?: () => { ok: boolean; status: number; statusText: string; json: unknown };
+  authorizationPolls?: Array<() => { ok: boolean; status: number; statusText: string; json: unknown }>;
+  tokenExchange?: () => { ok: boolean; status: number; statusText: string; json: unknown };
 }): FetchLike {
-  let authorizeCalled = false;
   let pollIndex = 0;
+  let pendingTokenExchange: { ok: boolean; status: number; statusText: string; json: unknown } | undefined;
 
   return async (url: string, _init: { method: string; headers: Record<string, string>; body: string }) => {
-    if (url.includes("/authorize")) {
-      authorizeCalled = true;
-      const result = scenarios.authorize?.() ?? { ok: true, status: 200, statusText: "OK", json: {} };
+    if (url.endsWith("/api/accounts/deviceauth/usercode")) {
+      const result = scenarios.usercode?.() ?? { ok: true, status: 200, statusText: "OK", json: {} };
       return {
         ok: result.ok,
         status: result.status,
@@ -93,10 +93,40 @@ function createMockFetch(scenarios: {
       };
     }
 
-    if (url.includes("/token")) {
-      const polls = scenarios.tokenPolls ?? [];
+    if (url.endsWith("/api/accounts/deviceauth/token")) {
+      const polls = scenarios.authorizationPolls ?? [];
       const result = polls[pollIndex]?.() ?? { ok: false, status: 404, statusText: "Not Found", json: {} };
       pollIndex++;
+      const json = result.json as Record<string, unknown>;
+      if (result.ok && typeof json?.access_token === "string") {
+        pendingTokenExchange = result;
+        return {
+          ok: true,
+          status: 200,
+          statusText: "OK",
+          json: async () => ({
+            authorization_code: "authorization-code-secret",
+            code_verifier: "code-verifier-secret"
+          }),
+          text: async () => JSON.stringify({
+            authorization_code: "authorization-code-secret",
+            code_verifier: "code-verifier-secret"
+          }),
+          body: null
+        };
+      }
+      return {
+        ok: result.ok,
+        status: result.status,
+        statusText: result.statusText,
+        json: async () => result.json,
+        text: async () => JSON.stringify(result.json),
+        body: null
+      };
+    }
+
+    if (url.endsWith("/oauth/token")) {
+      const result = scenarios.tokenExchange?.() ?? pendingTokenExchange ?? { ok: true, status: 200, statusText: "OK", json: { access_token: "eyJfake.codex.token.12345" } };
       return {
         ok: result.ok,
         status: result.status,
@@ -150,20 +180,18 @@ describe("model setup codex", () => {
     it("completes device flow and writes auth.json + config.json", async () => {
       const capture = createOutputCapture();
       const fetchLike = createMockFetch({
-        authorize: () => ({
+        usercode: () => ({
           ok: true,
           status: 200,
           statusText: "OK",
           json: {
-            device_code: "dev-123",
             user_code: "ABC-DEF",
-            verification_uri: "https://auth.openai.com/verify",
-            verification_uri_complete: "https://auth.openai.com/verify?user_code=ABC-DEF",
+            device_auth_id: "device-auth-secret",
             expires_in: 60,
             interval: 1
           }
         }),
-        tokenPolls: [
+        authorizationPolls: [
           () => ({ ok: false, status: 403, statusText: "Forbidden", json: {} }),
           () => ({
             ok: true,
@@ -186,7 +214,7 @@ describe("model setup codex", () => {
 
       const streamed = joinedOutput(capture.chunks);
       expect(streamed).toContain("Codex OAuth device authorization");
-      expect(streamed).toContain("Open: https://auth.openai.com/verify?user_code=ABC-DEF");
+      expect(streamed).toContain("Open: https://auth.openai.com/codex/device");
       expect(streamed).toContain("Code: ABC-DEF");
       expect(streamed).toContain("Waiting for authorization. This may take up to 15 minutes.");
       expect(result.handled).toBe(true);
@@ -209,19 +237,18 @@ describe("model setup codex", () => {
 
     it("cancellation prints exactly the required message and exit code 0", async () => {
       const fetchLike = createMockFetch({
-        authorize: () => ({
+        usercode: () => ({
           ok: true,
           status: 200,
           statusText: "OK",
           json: {
-            device_code: "dev-123",
             user_code: "ABC-DEF",
-            verification_uri: "https://auth.openai.com/verify",
+            device_auth_id: "device-auth-secret",
             expires_in: 60,
             interval: 1
           }
         }),
-        tokenPolls: [
+        authorizationPolls: [
           () => ({ ok: false, status: 403, statusText: "Forbidden", json: {} })
         ]
       });
@@ -271,14 +298,13 @@ describe("model setup codex", () => {
     it("timeout after device-code emission reports that authorization was pending", async () => {
       const capture = createOutputCapture();
       const fetchLike = createMockFetch({
-        authorize: () => ({
+        usercode: () => ({
           ok: true,
           status: 200,
           statusText: "OK",
           json: {
-            device_code: "dev-123",
             user_code: "ABC-DEF",
-            verification_uri: "https://auth.openai.com/verify",
+            device_auth_id: "device-auth-secret",
             expires_in: 0, // immediate timeout
             interval: 0
           }
@@ -293,7 +319,7 @@ describe("model setup codex", () => {
       }));
 
       const streamed = joinedOutput(capture.chunks);
-      expect(streamed).toContain("Open: https://auth.openai.com/verify");
+      expect(streamed).toContain("Open: https://auth.openai.com/codex/device");
       expect(streamed).toContain("Code: ABC-DEF");
       expect(result.handled).toBe(true);
       expect(result.exitCode).toBe(1);
@@ -303,19 +329,18 @@ describe("model setup codex", () => {
     it("error after device-code emission reports that authorization was pending", async () => {
       const capture = createOutputCapture();
       const fetchLike = createMockFetch({
-        authorize: () => ({
+        usercode: () => ({
           ok: true,
           status: 200,
           statusText: "OK",
           json: {
-            device_code: "dev-123",
             user_code: "ABC-DEF",
-            verification_uri: "https://auth.openai.com/verify",
+            device_auth_id: "device-auth-secret",
             expires_in: 60,
             interval: 0
           }
         }),
-        tokenPolls: [
+        authorizationPolls: [
           () => ({ ok: false, status: 500, statusText: "Server Error", json: { error_description: "server unavailable" } })
         ]
       });
@@ -331,24 +356,23 @@ describe("model setup codex", () => {
       expect(result.handled).toBe(true);
       expect(result.exitCode).toBe(1);
       expect(result.output).toContain("Authentication failed while waiting for authorization");
-      expect(result.output).toContain("Token poll failed");
+      expect(result.output).toContain("Authorization poll failed");
     });
 
     it("writes auth.json with 0600 permissions through existing store behavior", async () => {
       const fetchLike = createMockFetch({
-        authorize: () => ({
+        usercode: () => ({
           ok: true,
           status: 200,
           statusText: "OK",
           json: {
-            device_code: "dev-123",
             user_code: "ABC-DEF",
-            verification_uri: "https://auth.openai.com/verify",
+            device_auth_id: "device-auth-secret",
             expires_in: 60,
             interval: 1
           }
         }),
-        tokenPolls: [
+        authorizationPolls: [
           () => ({
             ok: true,
             status: 200,
@@ -387,19 +411,18 @@ describe("model setup codex", () => {
       });
 
       const fetchLike = createMockFetch({
-        authorize: () => ({
+        usercode: () => ({
           ok: true,
           status: 200,
           statusText: "OK",
           json: {
-            device_code: "dev-123",
             user_code: "ABC-DEF",
-            verification_uri: "https://auth.openai.com/verify",
+            device_auth_id: "device-auth-secret",
             expires_in: 60,
             interval: 1
           }
         }),
-        tokenPolls: [
+        authorizationPolls: [
           () => ({
             ok: true,
             status: 200,
@@ -483,20 +506,18 @@ describe("model setup codex", () => {
       });
 
       const fetchLike = createMockFetch({
-        authorize: () => ({
+        usercode: () => ({
           ok: true,
           status: 200,
           statusText: "OK",
           json: {
-            device_code: "dev-123",
             user_code: "ABC-DEF",
-            verification_uri: "https://auth.openai.com/verify",
-            verification_uri_complete: "https://auth.openai.com/verify?user_code=ABC-DEF",
+            device_auth_id: "device-auth-secret",
             expires_in: 60,
             interval: 1
           }
         }),
-        tokenPolls: [
+        authorizationPolls: [
           () => ({
             ok: true,
             status: 200,
@@ -517,7 +538,7 @@ describe("model setup codex", () => {
 
       const streamed = joinedOutput(capture.chunks);
       expect(streamed).toContain("Codex OAuth device authorization");
-      expect(streamed).toContain("Open: https://auth.openai.com/verify?user_code=ABC-DEF");
+      expect(streamed).toContain("Open: https://auth.openai.com/codex/device");
       expect(streamed).toContain("Code: ABC-DEF");
       expect(streamed).toContain("Waiting for authorization. This may take up to 15 minutes.");
       expect(result.handled).toBe(true);
@@ -563,19 +584,18 @@ describe("model setup codex", () => {
       await mkdir(configDir, { recursive: true });
 
       const fetchLike = createMockFetch({
-        authorize: () => ({
+        usercode: () => ({
           ok: true,
           status: 200,
           statusText: "OK",
           json: {
-            device_code: "dev-123",
             user_code: "ABC-DEF",
-            verification_uri: "https://auth.openai.com/verify",
+            device_auth_id: "device-auth-secret",
             expires_in: 60,
             interval: 1
           }
         }),
-        tokenPolls: [
+        authorizationPolls: [
           () => ({
             ok: true,
             status: 200,
@@ -609,19 +629,18 @@ describe("model setup codex", () => {
       await mkdir(configDir, { recursive: true });
 
       const fetchLike = createMockFetch({
-        authorize: () => ({
+        usercode: () => ({
           ok: true,
           status: 200,
           statusText: "OK",
           json: {
-            device_code: "dev-123",
             user_code: "ABC-DEF",
-            verification_uri: "https://auth.openai.com/verify",
+            device_auth_id: "device-auth-secret",
             expires_in: 60,
             interval: 1
           }
         }),
-        tokenPolls: [
+        authorizationPolls: [
           () => ({
             ok: true,
             status: 200,
@@ -663,19 +682,18 @@ describe("model setup codex", () => {
     it("CLI output never contains raw token values", async () => {
       const capture = createOutputCapture();
       const fetchLike = createMockFetch({
-        authorize: () => ({
+        usercode: () => ({
           ok: true,
           status: 200,
           statusText: "OK",
           json: {
-            device_code: "dev-123",
             user_code: "ABC-DEF",
-            verification_uri: "https://auth.openai.com/verify",
+            device_auth_id: "device-auth-secret",
             expires_in: 60,
             interval: 1
           }
         }),
-        tokenPolls: [
+        authorizationPolls: [
           () => ({
             ok: true,
             status: 200,
@@ -714,19 +732,18 @@ describe("model setup codex", () => {
 
     it("config.json never contains token values", async () => {
       const fetchLike = createMockFetch({
-        authorize: () => ({
+        usercode: () => ({
           ok: true,
           status: 200,
           statusText: "OK",
           json: {
-            device_code: "dev-123",
             user_code: "ABC-DEF",
-            verification_uri: "https://auth.openai.com/verify",
+            device_auth_id: "device-auth-secret",
             expires_in: 60,
             interval: 1
           }
         }),
-        tokenPolls: [
+        authorizationPolls: [
           () => ({
             ok: true,
             status: 200,
@@ -754,19 +771,18 @@ describe("model setup codex", () => {
 
     it("diagnostics and error output never contain token substrings", async () => {
       const fetchLike = createMockFetch({
-        authorize: () => ({
+        usercode: () => ({
           ok: true,
           status: 200,
           statusText: "OK",
           json: {
-            device_code: "dev-123",
             user_code: "ABC-DEF",
-            verification_uri: "https://auth.openai.com/verify",
+            device_auth_id: "device-auth-secret",
             expires_in: 60,
             interval: 1
           }
         }),
-        tokenPolls: [
+        authorizationPolls: [
           () => ({
             ok: true,
             status: 200,
@@ -812,19 +828,18 @@ describe("model setup codex", () => {
       });
 
       const fetchLike = createMockFetch({
-        authorize: () => ({
+        usercode: () => ({
           ok: true,
           status: 200,
           statusText: "OK",
           json: {
-            device_code: "dev-123",
             user_code: "ABC-DEF",
-            verification_uri: "https://auth.openai.com/verify",
+            device_auth_id: "device-auth-secret",
             expires_in: 60,
             interval: 1
           }
         }),
-        tokenPolls: [
+        authorizationPolls: [
           () => ({
             ok: true,
             status: 200,

@@ -5,7 +5,7 @@ import { describe, expect, it } from "vitest";
 import type { IntentRoute } from "../contracts/intent.js";
 import type { ModelProfile, ProviderMessage, ResolvedModelRoute } from "../contracts/provider.js";
 import type { SessionMessage } from "../contracts/session.js";
-import type { SkillDefinition } from "../contracts/skill.js";
+import type { SelectedSkillPromptContent, SkillDefinition } from "../contracts/skill.js";
 import { SESSION_RECALL_UNTRUSTED_NOTICE } from "../session/session-recall-service.js";
 import type { ToolExecutionRecord } from "../tools/tool-executor.js";
 import { assembleProviderContinuationPrompt, assembleProviderPrompt } from "./prompt-assembly.js";
@@ -173,6 +173,84 @@ describe("assembleProviderPrompt", () => {
       typeof message.content === "string" &&
       message.content.includes("Mutable-state grounding:")
     )).toBe(false);
+  });
+
+  it("renders normalized full selected skill content before legacy instruction strings", () => {
+    const prompt = assembleProviderPrompt(basePromptInput({
+      selectedSkill: selectedTestSkill(),
+      selectedSkillPromptContent: selectedPromptContent({
+        content: "Use the normalized selected workflow."
+      }),
+      selectedSkillInstructions: "legacy selected instructions should not render"
+    }));
+    const rendered = renderMessages(prompt.messages);
+
+    expect(rendered).toContain("Selected skill: state-review");
+    expect(rendered).toContain("Skill content mode: full");
+    expect(rendered).toContain("Skill instructions:\nUse the normalized selected workflow.");
+    expect(rendered).toContain("Skill playbook plan:");
+    expect(rendered).not.toContain("legacy selected instructions should not render");
+  });
+
+  it("injects full selected skill content between 4K and the inline cap", () => {
+    const tailMarker = "FULL_MODE_TAIL_MARKER";
+    const fullContent = `${"A".repeat(5_000)}${tailMarker}`;
+    const prompt = assembleProviderPrompt(basePromptInput({
+      selectedSkill: selectedTestSkill(),
+      selectedSkillPromptContent: selectedPromptContent({
+        content: fullContent,
+        originalChars: fullContent.length
+      }),
+      selectedSkillInstructions: fullContent
+    }));
+    const rendered = renderMessages(prompt.messages);
+    const skillLayer = prompt.budget.layers.find((layer) => layer.name === "skill");
+
+    expect(rendered).toContain(tailMarker);
+    expect(rendered).toContain(fullContent);
+    expect(skillLayer?.truncated).toBe(false);
+  });
+
+  it("renders contract selected skill content with the full-load instruction", () => {
+    const prompt = assembleProviderPrompt(basePromptInput({
+      selectedSkill: selectedTestSkill(),
+      selectedSkillPromptContent: selectedPromptContent({
+        content: "Contract summary marker without reference bodies.",
+        contentMode: "contract",
+        originalChars: 12_345,
+        truncated: true,
+        loadInstruction: "skill.read({ \"name\": \"state-review\", \"mode\": \"full\" })"
+      }),
+      selectedSkillInstructions: "raw oversized instructions should not render"
+    }));
+    const rendered = renderMessages(prompt.messages);
+    const skillLayer = prompt.budget.layers.find((layer) => layer.name === "skill");
+
+    expect(rendered).toContain("Selected skill: state-review");
+    expect(rendered).toContain("Skill content mode: contract");
+    expect(rendered).toContain("Original skill chars: 12345");
+    expect(rendered).toContain("Contract summary marker without reference bodies.");
+    expect(rendered).toContain("Full content is available with:");
+    expect(rendered).toContain("skill.read({ \"name\": \"state-review\", \"mode\": \"full\" })");
+    expect(rendered).not.toContain("raw oversized instructions should not render");
+    expect(skillLayer?.truncated).toBe(true);
+  });
+
+  it("prefers skill.read in selected skill resource handling copy", () => {
+    const prompt = assembleProviderPrompt(basePromptInput({
+      selectedSkill: selectedTestSkill(),
+      selectedSkillPromptContent: selectedPromptContent(),
+      selectedSkillResources: [
+        { kind: "reference", path: "references/guide.md" },
+        { kind: "script", path: "scripts/run.sh" }
+      ]
+    }));
+    const rendered = renderMessages(prompt.messages);
+
+    expect(rendered).toContain("load targeted background files with skill.read");
+    expect(rendered).toContain("inspect the script with skill.read");
+    expect(rendered).toContain("Load only the file you need with the skill.read tool");
+    expect(rendered).not.toContain("skill.view");
   });
 
   it("renders canonical memory blocks exactly once before project context and session history", () => {
@@ -1615,6 +1693,23 @@ function selectedTestSkill(): SkillDefinition {
     permissionExpectations: ["auto-read"],
     examples: [],
     evaluations: []
+  };
+}
+
+function selectedPromptContent(
+  overrides: Partial<SelectedSkillPromptContent> = {}
+): SelectedSkillPromptContent {
+  const content = "Use the selected state-review workflow.";
+  return {
+    name: "state-review",
+    description: "Inspect mutable project state.",
+    content,
+    contentMode: "full",
+    originalChars: content.length,
+    truncated: false,
+    referencePaths: [],
+    scriptPaths: [],
+    ...overrides
   };
 }
 

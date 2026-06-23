@@ -1,23 +1,30 @@
 /**
  * Codex OAuth device flow against auth.openai.com.
  *
- * This module initiates the device-code authorization flow, polls for
- * the user to complete authorization, and exchanges the device code
- * for access/refresh tokens.
+ * Codex uses OpenAI's device auth endpoints rather than the standard
+ * RFC 8628 device-code grant. The flow is:
+ * request user code -> poll for authorization code -> exchange for tokens.
  */
 
 const CODEX_CLIENT_ID = "app_EMoamEEZ73f0CkXaXp7hrann";
-const DEVICE_AUTH_URL = "https://auth.openai.com/api/accounts/deviceauth/authorize";
+const DEVICE_USER_CODE_URL = "https://auth.openai.com/api/accounts/deviceauth/usercode";
 const DEVICE_TOKEN_URL = "https://auth.openai.com/api/accounts/deviceauth/token";
+const OAUTH_TOKEN_URL = "https://auth.openai.com/oauth/token";
+const CODEX_DEVICE_VERIFICATION_URL = "https://auth.openai.com/codex/device";
+const CODEX_REDIRECT_URI = "https://auth.openai.com/deviceauth/callback";
+const DEFAULT_POLL_INTERVAL_SECONDS = 5;
 const POLL_TIMEOUT_MS = 15 * 60 * 1000; // 15 minutes
 
 export type CodexDeviceCodeResponse = {
-  device_code: string;
   user_code: string;
-  verification_uri: string;
-  verification_uri_complete?: string;
-  expires_in: number;
+  device_auth_id: string;
   interval: number;
+  expires_in?: number;
+};
+
+export type CodexAuthorizationCodeResponse = {
+  authorization_code: string;
+  code_verifier: string;
 };
 
 export type CodexTokenResponse = {
@@ -68,21 +75,19 @@ function defaultFetch(): FetchLike {
   };
 }
 
+export function codexDeviceVerificationUrl(): string {
+  return CODEX_DEVICE_VERIFICATION_URL;
+}
+
 export async function requestCodexDeviceCode(
   fetchLike?: FetchLike
 ): Promise<CodexDeviceCodeResponse> {
   const fetchFn = fetchLike ?? defaultFetch();
 
-  const body = new URLSearchParams({
-    client_id: CODEX_CLIENT_ID,
-    grant_type: "urn:ietf:params:oauth:grant-type:device_code",
-    scope: ""
-  });
-
-  const response = await fetchFn(DEVICE_AUTH_URL, {
+  const response = await fetchFn(DEVICE_USER_CODE_URL, {
     method: "POST",
-    headers: { "Content-Type": "application/x-www-form-urlencoded" },
-    body: body.toString()
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ client_id: CODEX_CLIENT_ID })
   });
 
   const data = await response.json();
@@ -102,18 +107,19 @@ export async function requestCodexDeviceCode(
   return parsed;
 }
 
-export async function pollCodexToken(
-  deviceCode: string,
+export async function pollCodexAuthorizationCode(
+  deviceAuthId: string,
+  userCode: string,
   options: {
     intervalSeconds: number;
-    expiresInSeconds: number;
     signal?: AbortSignal;
     fetchLike?: FetchLike;
+    timeoutMs?: number;
   }
-): Promise<CodexTokenBundle> {
+): Promise<CodexAuthorizationCodeResponse> {
   const fetchFn = options.fetchLike ?? defaultFetch();
-  const intervalMs = options.intervalSeconds * 1000;
-  const deadline = Date.now() + Math.min(options.expiresInSeconds * 1000, POLL_TIMEOUT_MS);
+  const intervalMs = Math.max(options.intervalSeconds, 0) * 1000;
+  const deadline = Date.now() + Math.min(options.timeoutMs ?? POLL_TIMEOUT_MS, POLL_TIMEOUT_MS);
 
   while (Date.now() < deadline) {
     if (options.signal?.aborted) {
@@ -126,39 +132,74 @@ export async function pollCodexToken(
       throw new CodexOAuthCancellation();
     }
 
-    const body = new URLSearchParams({
-      client_id: CODEX_CLIENT_ID,
-      device_code: deviceCode,
-      grant_type: "urn:ietf:params:oauth:grant-type:device_code"
-    });
-
     const response = await fetchFn(DEVICE_TOKEN_URL, {
       method: "POST",
-      headers: { "Content-Type": "application/x-www-form-urlencoded" },
-      body: body.toString()
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        device_auth_id: deviceAuthId,
+        user_code: userCode
+      })
     });
 
     const data = await response.json();
 
     if (response.ok) {
-      const parsed = parseTokenResponse(data);
+      const parsed = parseAuthorizationCodeResponse(data);
       if (!parsed) {
-        throw new CodexOAuthError("Token response missing access_token.");
+        throw new CodexOAuthError("Authorization response missing required fields.");
       }
       return parsed;
     }
 
-    // Continue polling on 403/404; stop on other errors
+    // Continue polling while the user has not approved the device code.
     if (response.status !== 403 && response.status !== 404) {
-      const errorDesc = extractErrorDescription(data) || response.statusText;
       throw new CodexOAuthError(
-        `Token poll failed: ${response.status} ${errorDesc}`,
+        `Authorization poll failed: ${response.status} ${response.statusText}`,
         { status: response.status }
       );
     }
   }
 
   throw new CodexOAuthTimeout("Authorization timed out after 15 minutes.");
+}
+
+export async function exchangeCodexAuthorizationCode(
+  authorizationCode: string,
+  codeVerifier: string,
+  options?: {
+    fetchLike?: FetchLike;
+  }
+): Promise<CodexTokenBundle> {
+  const fetchFn = options?.fetchLike ?? defaultFetch();
+  const body = new URLSearchParams({
+    client_id: CODEX_CLIENT_ID,
+    grant_type: "authorization_code",
+    code: authorizationCode,
+    code_verifier: codeVerifier,
+    redirect_uri: CODEX_REDIRECT_URI
+  });
+
+  const response = await fetchFn(OAUTH_TOKEN_URL, {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: body.toString()
+  });
+
+  const data = await response.json();
+
+  if (!response.ok) {
+    throw new CodexOAuthError(
+      `Token exchange failed: ${response.status} ${response.statusText}`,
+      { status: response.status }
+    );
+  }
+
+  const parsed = parseTokenResponse(data);
+  if (!parsed) {
+    throw new CodexOAuthError("Token response missing access_token.");
+  }
+
+  return parsed;
 }
 
 export async function runCodexOAuthFlow(
@@ -168,7 +209,6 @@ export async function runCodexOAuthFlow(
     onDeviceCode?: (info: {
       userCode: string;
       verificationUri: string;
-      verificationUriComplete?: string;
     }) => void;
   }
 ): Promise<CodexOAuthFlowResult> {
@@ -181,16 +221,27 @@ export async function runCodexOAuthFlow(
 
     options?.onDeviceCode?.({
       userCode: deviceCode.user_code,
-      verificationUri: deviceCode.verification_uri,
-      verificationUriComplete: deviceCode.verification_uri_complete
+      verificationUri: CODEX_DEVICE_VERIFICATION_URL
     });
 
-    const tokens = await pollCodexToken(deviceCode.device_code, {
-      intervalSeconds: deviceCode.interval,
-      expiresInSeconds: deviceCode.expires_in,
-      signal: options?.signal,
-      fetchLike: options?.fetchLike
-    });
+    const authorization = await pollCodexAuthorizationCode(
+      deviceCode.device_auth_id,
+      deviceCode.user_code,
+      {
+        intervalSeconds: deviceCode.interval,
+        signal: options?.signal,
+        fetchLike: options?.fetchLike,
+        timeoutMs: typeof deviceCode.expires_in === "number"
+          ? deviceCode.expires_in * 1000
+          : undefined
+      }
+    );
+
+    const tokens = await exchangeCodexAuthorizationCode(
+      authorization.authorization_code,
+      authorization.code_verifier,
+      { fetchLike: options?.fetchLike }
+    );
 
     return { kind: "success", tokens };
   } catch (error) {
@@ -204,7 +255,7 @@ export async function runCodexOAuthFlow(
       return { kind: "error", reason: error.message };
     }
     if (error instanceof Error) {
-      return { kind: "error", reason: error.message };
+      return { kind: "error", reason: "Unexpected error during Codex OAuth flow." };
     }
     return { kind: "error", reason: "Unknown error during Codex OAuth flow." };
   }
@@ -215,7 +266,7 @@ export function isCodexTokenExpired(record: { expiresAt?: string }): boolean {
   return new Date(record.expiresAt) <= new Date();
 }
 
-// ── Error types ──────────────────────────────────────────────────────────────
+// -- Error types --------------------------------------------------------------
 
 export class CodexOAuthError extends Error {
   status?: number;
@@ -241,27 +292,38 @@ export class CodexOAuthTimeout extends Error {
   }
 }
 
-// ── Response parsers ─────────────────────────────────────────────────────────
+// -- Response parsers ---------------------------------------------------------
 
 function parseDeviceCodeResponse(data: unknown): CodexDeviceCodeResponse | null {
   if (typeof data !== "object" || data === null) return null;
   const obj = data as Record<string, unknown>;
 
-  if (typeof obj.device_code !== "string") return null;
-  if (typeof obj.user_code !== "string") return null;
-  if (typeof obj.verification_uri !== "string") return null;
-  if (typeof obj.expires_in !== "number") return null;
-  if (typeof obj.interval !== "number") return null;
+  if (typeof obj.user_code !== "string" || obj.user_code.length === 0) return null;
+  if (typeof obj.device_auth_id !== "string" || obj.device_auth_id.length === 0) return null;
+  if (obj.interval !== undefined && typeof obj.interval !== "number") return null;
+  if (obj.expires_in !== undefined && typeof obj.expires_in !== "number") return null;
+
+  const response: CodexDeviceCodeResponse = {
+    user_code: obj.user_code,
+    device_auth_id: obj.device_auth_id,
+    interval: typeof obj.interval === "number" ? obj.interval : DEFAULT_POLL_INTERVAL_SECONDS
+  };
+  if (typeof obj.expires_in === "number") {
+    response.expires_in = obj.expires_in;
+  }
+  return response;
+}
+
+function parseAuthorizationCodeResponse(data: unknown): CodexAuthorizationCodeResponse | null {
+  if (typeof data !== "object" || data === null) return null;
+  const obj = data as Record<string, unknown>;
+
+  if (typeof obj.authorization_code !== "string" || obj.authorization_code.length === 0) return null;
+  if (typeof obj.code_verifier !== "string" || obj.code_verifier.length === 0) return null;
 
   return {
-    device_code: obj.device_code,
-    user_code: obj.user_code,
-    verification_uri: obj.verification_uri,
-    verification_uri_complete: typeof obj.verification_uri_complete === "string"
-      ? obj.verification_uri_complete
-      : undefined,
-    expires_in: obj.expires_in,
-    interval: obj.interval
+    authorization_code: obj.authorization_code,
+    code_verifier: obj.code_verifier
   };
 }
 
@@ -290,14 +352,6 @@ function parseTokenResponse(data: unknown): CodexTokenBundle | null {
   }
 
   return bundle;
-}
-
-function extractErrorDescription(data: unknown): string | undefined {
-  if (typeof data !== "object" || data === null) return undefined;
-  const obj = data as Record<string, unknown>;
-  if (typeof obj.error_description === "string") return obj.error_description;
-  if (typeof obj.error === "string") return obj.error;
-  return undefined;
 }
 
 function sleep(ms: number, signal?: AbortSignal): Promise<void> {

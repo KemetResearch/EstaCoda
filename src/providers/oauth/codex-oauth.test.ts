@@ -1,7 +1,8 @@
-import { describe, expect, it, beforeEach, afterEach } from "vitest";
+import { describe, expect, it } from "vitest";
 import {
   requestCodexDeviceCode,
-  pollCodexToken,
+  pollCodexAuthorizationCode,
+  exchangeCodexAuthorizationCode,
   runCodexOAuthFlow,
   isCodexTokenExpired,
   CodexOAuthError,
@@ -10,95 +11,142 @@ import {
   type FetchLike
 } from "./codex-oauth.js";
 
+const CODEX_CLIENT_ID = "app_EMoamEEZ73f0CkXaXp7hrann";
+
+type MockResponse = {
+  ok: boolean;
+  status: number;
+  statusText: string;
+  json: unknown;
+};
+
+type FetchCall = {
+  url: string;
+  init: {
+    method: string;
+    headers: Record<string, string>;
+    body: string;
+  };
+};
+
+function response(json: unknown, overrides?: Partial<Omit<MockResponse, "json">>): MockResponse {
+  return {
+    ok: overrides?.ok ?? true,
+    status: overrides?.status ?? 200,
+    statusText: overrides?.statusText ?? "OK",
+    json
+  };
+}
+
 function createMockFetch(scenarios: {
-  authorize?: () => { ok: boolean; status: number; statusText: string; json: unknown };
-  tokenPolls?: Array<() => { ok: boolean; status: number; statusText: string; json: unknown }>;
-}): FetchLike {
-  let authorizeCalled = false;
+  usercode?: () => MockResponse;
+  authorizationPolls?: Array<() => MockResponse>;
+  tokenExchange?: () => MockResponse;
+}): { fetchLike: FetchLike; calls: FetchCall[] } {
   let pollIndex = 0;
+  const calls: FetchCall[] = [];
 
-  return async (url: string, _init: { method: string; headers: Record<string, string>; body: string }) => {
-    if (url.includes("/authorize")) {
-      authorizeCalled = true;
-      const result = scenarios.authorize?.() ?? { ok: true, status: 200, statusText: "OK", json: {} };
-      return {
-        ok: result.ok,
-        status: result.status,
-        statusText: result.statusText,
-        json: async () => result.json
-      };
+  const fetchLike: FetchLike = async (url, init) => {
+    calls.push({ url, init });
+
+    if (url.endsWith("/api/accounts/deviceauth/usercode")) {
+      const result = scenarios.usercode?.() ?? response({});
+      return toFetchResponse(result);
     }
 
-    if (url.includes("/token")) {
-      const polls = scenarios.tokenPolls ?? [];
-      const result = polls[pollIndex]?.() ?? { ok: false, status: 404, statusText: "Not Found", json: {} };
+    if (url.endsWith("/api/accounts/deviceauth/token")) {
+      const polls = scenarios.authorizationPolls ?? [];
+      const result = polls[pollIndex]?.() ?? response({}, {
+        ok: false,
+        status: 404,
+        statusText: "Not Found"
+      });
       pollIndex++;
-      return {
-        ok: result.ok,
-        status: result.status,
-        statusText: result.statusText,
-        json: async () => result.json
-      };
+      return toFetchResponse(result);
     }
 
-    return {
+    if (url.endsWith("/oauth/token")) {
+      const result = scenarios.tokenExchange?.() ?? response({});
+      return toFetchResponse(result);
+    }
+
+    return toFetchResponse(response({}, {
       ok: false,
       status: 404,
-      statusText: "Not Found",
-      json: async () => ({})
-    };
+      statusText: "Not Found"
+    }));
+  };
+
+  return { fetchLike, calls };
+}
+
+function toFetchResponse(result: MockResponse): Awaited<ReturnType<FetchLike>> {
+  return {
+    ok: result.ok,
+    status: result.status,
+    statusText: result.statusText,
+    json: async () => result.json
   };
 }
 
 describe("requestCodexDeviceCode", () => {
-  it("returns device code response on success", async () => {
-    const fetchLike = createMockFetch({
-      authorize: () => ({
-        ok: true,
-        status: 200,
-        statusText: "OK",
-        json: {
-          device_code: "dev-123",
-          user_code: "USER-CODE",
-          verification_uri: "https://auth.openai.com/verify",
-          verification_uri_complete: "https://auth.openai.com/verify?code=USER-CODE",
-          expires_in: 900,
-          interval: 5
-        }
+  it("posts JSON to the Codex usercode endpoint and parses the response", async () => {
+    const { fetchLike, calls } = createMockFetch({
+      usercode: () => response({
+        user_code: "ABC-DEF",
+        device_auth_id: "device-auth-secret",
+        interval: 7
       })
     });
 
     const result = await requestCodexDeviceCode(fetchLike);
-    expect(result.device_code).toBe("dev-123");
-    expect(result.user_code).toBe("USER-CODE");
-    expect(result.verification_uri).toBe("https://auth.openai.com/verify");
-    expect(result.verification_uri_complete).toBe("https://auth.openai.com/verify?code=USER-CODE");
-    expect(result.expires_in).toBe(900);
+
+    expect(result).toEqual({
+      user_code: "ABC-DEF",
+      device_auth_id: "device-auth-secret",
+      interval: 7
+    });
+    expect(calls).toHaveLength(1);
+    expect(calls[0]?.url).toBe("https://auth.openai.com/api/accounts/deviceauth/usercode");
+    expect(calls[0]?.init.method).toBe("POST");
+    expect(calls[0]?.init.headers["Content-Type"]).toBe("application/json");
+    expect(calls[0]?.init.body).toBe(JSON.stringify({ client_id: CODEX_CLIENT_ID }));
+  });
+
+  it("defaults the poll interval when the server omits it", async () => {
+    const { fetchLike } = createMockFetch({
+      usercode: () => response({
+        user_code: "ABC-DEF",
+        device_auth_id: "device-auth-secret"
+      })
+    });
+
+    const result = await requestCodexDeviceCode(fetchLike);
+
     expect(result.interval).toBe(5);
   });
 
-  it("throws CodexOAuthError on HTTP failure", async () => {
-    const fetchLike = createMockFetch({
-      authorize: () => ({
-        ok: false,
-        status: 500,
-        statusText: "Internal Server Error",
-        json: { error: "server_error" }
-      })
+  it("throws CodexOAuthError on HTTP failure without exposing response body fields", async () => {
+    const { fetchLike } = createMockFetch({
+      usercode: () => response(
+        {
+          error: "server_error",
+          device_auth_id: "device-auth-secret",
+          authorization_code: "authorization-code-secret"
+        },
+        { ok: false, status: 500, statusText: "Internal Server Error" }
+      )
     });
 
     await expect(requestCodexDeviceCode(fetchLike)).rejects.toThrow(CodexOAuthError);
     await expect(requestCodexDeviceCode(fetchLike)).rejects.toThrow("Device code request failed");
+    await expect(requestCodexDeviceCode(fetchLike)).rejects.not.toThrow("device-auth-secret");
+    await expect(requestCodexDeviceCode(fetchLike)).rejects.not.toThrow("authorization-code-secret");
   });
 
   it("throws CodexOAuthError when response lacks required fields", async () => {
-    const fetchLike = createMockFetch({
-      authorize: () => ({
-        ok: true,
-        status: 200,
-        statusText: "OK",
-        json: { device_code: "dev-123" } // missing user_code, verification_uri, etc.
-      })
+    const { fetchLike } = createMockFetch({
+      usercode: () => response({ user_code: "ABC-DEF" })
     });
 
     await expect(requestCodexDeviceCode(fetchLike)).rejects.toThrow(CodexOAuthError);
@@ -106,86 +154,79 @@ describe("requestCodexDeviceCode", () => {
   });
 });
 
-describe("pollCodexToken", () => {
-  it("returns tokens after successful polling", async () => {
-    const fetchLike = createMockFetch({
-      tokenPolls: [
-        () => ({ ok: false, status: 403, statusText: "Forbidden", json: {} }),
-        () => ({
-          ok: true,
-          status: 200,
-          statusText: "OK",
-          json: {
-            access_token: "eyJfake.codex.token.12345",
-            refresh_token: "def502.fake.refresh.token.67890",
-            expires_in: 3600,
-            token_type: "Bearer",
-            scope: "read write"
-          }
+describe("pollCodexAuthorizationCode", () => {
+  it("posts JSON with device auth id and user code, then parses authorization fields", async () => {
+    const { fetchLike, calls } = createMockFetch({
+      authorizationPolls: [
+        () => response({
+          authorization_code: "authorization-code-secret",
+          code_verifier: "code-verifier-secret"
         })
       ]
     });
 
-    const result = await pollCodexToken("dev-123", {
-      intervalSeconds: 0.01, // 10ms for fast tests
-      expiresInSeconds: 60,
+    const result = await pollCodexAuthorizationCode("device-auth-secret", "ABC-DEF", {
+      intervalSeconds: 0,
+      timeoutMs: 1000,
       fetchLike
     });
 
-    expect(result.accessToken).toBe("eyJfake.codex.token.12345");
-    expect(result.refreshToken).toBe("def502.fake.refresh.token.67890");
-    expect(result.scopes).toEqual(["read", "write"]);
-    expect(result.expiresAt).toBeDefined();
+    expect(result).toEqual({
+      authorization_code: "authorization-code-secret",
+      code_verifier: "code-verifier-secret"
+    });
+    expect(calls).toHaveLength(1);
+    expect(calls[0]?.url).toBe("https://auth.openai.com/api/accounts/deviceauth/token");
+    expect(calls[0]?.init.method).toBe("POST");
+    expect(calls[0]?.init.headers["Content-Type"]).toBe("application/json");
+    expect(calls[0]?.init.body).toBe(JSON.stringify({
+      device_auth_id: "device-auth-secret",
+      user_code: "ABC-DEF"
+    }));
   });
 
-  it("continues polling through 403/404 responses until 200", async () => {
-    const fetchLike = createMockFetch({
-      tokenPolls: [
-        () => ({ ok: false, status: 403, statusText: "Forbidden", json: {} }),
-        () => ({ ok: false, status: 404, statusText: "Not Found", json: {} }),
-        () => ({ ok: false, status: 403, statusText: "Forbidden", json: {} }),
-        () => ({
-          ok: true,
-          status: 200,
-          statusText: "OK",
-          json: {
-            access_token: "eyJfake.codex.token.12345",
-            expires_in: 3600
-          }
+  it("continues polling through 403/404 responses until authorized", async () => {
+    const { fetchLike, calls } = createMockFetch({
+      authorizationPolls: [
+        () => response({}, { ok: false, status: 403, statusText: "Forbidden" }),
+        () => response({}, { ok: false, status: 404, statusText: "Not Found" }),
+        () => response({
+          authorization_code: "authorization-code-secret",
+          code_verifier: "code-verifier-secret"
         })
       ]
     });
 
-    const result = await pollCodexToken("dev-123", {
-      intervalSeconds: 0.01,
-      expiresInSeconds: 60,
+    const result = await pollCodexAuthorizationCode("device-auth-secret", "ABC-DEF", {
+      intervalSeconds: 0,
+      timeoutMs: 1000,
       fetchLike
     });
 
-    expect(result.accessToken).toBe("eyJfake.codex.token.12345");
+    expect(result.authorization_code).toBe("authorization-code-secret");
+    expect(calls).toHaveLength(3);
   });
 
   it("throws CodexOAuthTimeout when deadline expires", async () => {
-    const fetchLike = createMockFetch({
-      tokenPolls: [
-        () => ({ ok: false, status: 403, statusText: "Forbidden", json: {} }),
-        () => ({ ok: false, status: 403, statusText: "Forbidden", json: {} })
+    const { fetchLike } = createMockFetch({
+      authorizationPolls: [
+        () => response({}, { ok: false, status: 403, statusText: "Forbidden" })
       ]
     });
 
     await expect(
-      pollCodexToken("dev-123", {
-        intervalSeconds: 0.05,
-        expiresInSeconds: 1, // 1 second total
+      pollCodexAuthorizationCode("device-auth-secret", "ABC-DEF", {
+        intervalSeconds: 0,
+        timeoutMs: 0,
         fetchLike
       })
     ).rejects.toThrow(CodexOAuthTimeout);
   });
 
   it("throws CodexOAuthCancellation when signal is aborted", async () => {
-    const fetchLike = createMockFetch({
-      tokenPolls: [
-        () => ({ ok: false, status: 403, statusText: "Forbidden", json: {} })
+    const { fetchLike } = createMockFetch({
+      authorizationPolls: [
+        () => response({}, { ok: false, status: 403, statusText: "Forbidden" })
       ]
     });
 
@@ -193,81 +234,160 @@ describe("pollCodexToken", () => {
     controller.abort();
 
     await expect(
-      pollCodexToken("dev-123", {
-        intervalSeconds: 0.01,
-        expiresInSeconds: 60,
+      pollCodexAuthorizationCode("device-auth-secret", "ABC-DEF", {
+        intervalSeconds: 0,
+        timeoutMs: 1000,
         signal: controller.signal,
         fetchLike
       })
     ).rejects.toThrow(CodexOAuthCancellation);
   });
 
-  it("throws on non-403/404 error responses", async () => {
-    const fetchLike = createMockFetch({
-      tokenPolls: [
-        () => ({ ok: false, status: 400, statusText: "Bad Request", json: { error: "invalid_request" } })
+  it("throws on unexpected non-pending responses without exposing sensitive body fields", async () => {
+    const { fetchLike } = createMockFetch({
+      authorizationPolls: [
+        () => response(
+          {
+            error: "invalid_request",
+            device_auth_id: "device-auth-secret",
+            authorization_code: "authorization-code-secret",
+            code_verifier: "code-verifier-secret"
+          },
+          { ok: false, status: 400, statusText: "Bad Request" }
+        )
+      ]
+    });
+
+    let caught: unknown;
+    try {
+      await pollCodexAuthorizationCode("device-auth-secret", "ABC-DEF", {
+        intervalSeconds: 0,
+        timeoutMs: 1000,
+        fetchLike
+      });
+    } catch (error) {
+      caught = error;
+    }
+
+    expect(caught).toBeInstanceOf(CodexOAuthError);
+    expect(caught).toBeInstanceOf(Error);
+    if (caught instanceof Error) {
+      expect(caught.message).not.toContain("authorization-code-secret");
+      expect(caught.message).not.toContain("code-verifier-secret");
+    }
+  });
+
+  it("validates authorization_code and code_verifier presence", async () => {
+    const { fetchLike } = createMockFetch({
+      authorizationPolls: [
+        () => response({ authorization_code: "authorization-code-secret" })
       ]
     });
 
     await expect(
-      pollCodexToken("dev-123", {
-        intervalSeconds: 0.01,
-        expiresInSeconds: 60,
+      pollCodexAuthorizationCode("device-auth-secret", "ABC-DEF", {
+        intervalSeconds: 0,
+        timeoutMs: 1000,
         fetchLike
       })
-    ).rejects.toThrow(CodexOAuthError);
+    ).rejects.toThrow("Authorization response missing required fields");
+  });
+});
+
+describe("exchangeCodexAuthorizationCode", () => {
+  it("posts form-encoded authorization code exchange and parses tokens", async () => {
+    const { fetchLike, calls } = createMockFetch({
+      tokenExchange: () => response({
+        access_token: "eyJfake.codex.token.12345",
+        refresh_token: "def502.fake.refresh.token.67890",
+        expires_in: 3600,
+        token_type: "Bearer",
+        scope: "read write"
+      })
+    });
+
+    const result = await exchangeCodexAuthorizationCode(
+      "authorization-code-secret",
+      "code-verifier-secret",
+      { fetchLike }
+    );
+
+    expect(result.accessToken).toBe("eyJfake.codex.token.12345");
+    expect(result.refreshToken).toBe("def502.fake.refresh.token.67890");
+    expect(result.scopes).toEqual(["read", "write"]);
+    expect(result.expiresAt).toBeDefined();
+    expect(calls).toHaveLength(1);
+    expect(calls[0]?.url).toBe("https://auth.openai.com/oauth/token");
+    expect(calls[0]?.init.method).toBe("POST");
+    expect(calls[0]?.init.headers["Content-Type"]).toBe("application/x-www-form-urlencoded");
+
+    const body = new URLSearchParams(calls[0]?.init.body);
+    expect(body.get("client_id")).toBe(CODEX_CLIENT_ID);
+    expect(body.get("grant_type")).toBe("authorization_code");
+    expect(body.get("code")).toBe("authorization-code-secret");
+    expect(body.get("code_verifier")).toBe("code-verifier-secret");
+    expect(body.get("redirect_uri")).toBe("https://auth.openai.com/deviceauth/callback");
+  });
+
+  it("throws on exchange failure without exposing sensitive response body fields", async () => {
+    const { fetchLike } = createMockFetch({
+      tokenExchange: () => response(
+        {
+          error: "invalid_grant",
+          access_token: "eyJfake.codex.token.12345",
+          refresh_token: "def502.fake.refresh.token.67890"
+        },
+        { ok: false, status: 400, statusText: "Bad Request" }
+      )
+    });
+
+    let caught: unknown;
+    try {
+      await exchangeCodexAuthorizationCode("authorization-code-secret", "code-verifier-secret", { fetchLike });
+    } catch (error) {
+      caught = error;
+    }
+
+    expect(caught).toBeInstanceOf(Error);
+    if (caught instanceof Error) {
+      expect(caught.message).toContain("Token exchange failed");
+      expect(caught.message).not.toContain("eyJfake.codex.token.12345");
+      expect(caught.message).not.toContain("def502.fake.refresh.token.67890");
+    }
   });
 
   it("validates access_token presence in successful response", async () => {
-    const fetchLike = createMockFetch({
-      tokenPolls: [
-        () => ({
-          ok: true,
-          status: 200,
-          statusText: "OK",
-          json: { token_type: "Bearer" } // missing access_token
-        })
-      ]
+    const { fetchLike } = createMockFetch({
+      tokenExchange: () => response({ token_type: "Bearer" })
     });
 
     await expect(
-      pollCodexToken("dev-123", {
-        intervalSeconds: 0.01,
-        expiresInSeconds: 60,
-        fetchLike
-      })
+      exchangeCodexAuthorizationCode("authorization-code-secret", "code-verifier-secret", { fetchLike })
     ).rejects.toThrow("missing access_token");
   });
 });
 
 describe("runCodexOAuthFlow", () => {
-  it("returns success with tokens after full flow", async () => {
-    const fetchLike = createMockFetch({
-      authorize: () => ({
-        ok: true,
-        status: 200,
-        statusText: "OK",
-        json: {
-          device_code: "dev-123",
-          user_code: "ABC-DEF",
-          verification_uri: "https://auth.openai.com/verify",
-          expires_in: 60,
-          interval: 1
-        }
+  it("returns success with tokens after the full Codex auth flow", async () => {
+    const { fetchLike } = createMockFetch({
+      usercode: () => response({
+        user_code: "ABC-DEF",
+        device_auth_id: "device-auth-secret",
+        interval: 0,
+        expires_in: 60
       }),
-      tokenPolls: [
-        () => ({ ok: false, status: 403, statusText: "Forbidden", json: {} }),
-        () => ({
-          ok: true,
-          status: 200,
-          statusText: "OK",
-          json: {
-            access_token: "eyJfake.codex.token.12345",
-            refresh_token: "def502.fake.refresh.token.67890",
-            expires_in: 3600
-          }
+      authorizationPolls: [
+        () => response({}, { ok: false, status: 403, statusText: "Forbidden" }),
+        () => response({
+          authorization_code: "authorization-code-secret",
+          code_verifier: "code-verifier-secret"
         })
-      ]
+      ],
+      tokenExchange: () => response({
+        access_token: "eyJfake.codex.token.12345",
+        refresh_token: "def502.fake.refresh.token.67890",
+        expires_in: 3600
+      })
     });
 
     let deviceCodeInfo: { userCode: string; verificationUri: string } | undefined;
@@ -286,32 +406,23 @@ describe("runCodexOAuthFlow", () => {
     }
     expect(deviceCodeInfo).toEqual({
       userCode: "ABC-DEF",
-      verificationUri: "https://auth.openai.com/verify"
+      verificationUri: "https://auth.openai.com/codex/device"
     });
   });
 
   it("returns cancelled when signal is aborted during polling", async () => {
-    const fetchLike = createMockFetch({
-      authorize: () => ({
-        ok: true,
-        status: 200,
-        statusText: "OK",
-        json: {
-          device_code: "dev-123",
-          user_code: "ABC-DEF",
-          verification_uri: "https://auth.openai.com/verify",
-          expires_in: 60,
-          interval: 1
-        }
+    const { fetchLike } = createMockFetch({
+      usercode: () => response({
+        user_code: "ABC-DEF",
+        device_auth_id: "device-auth-secret",
+        interval: 1
       }),
-      tokenPolls: [
-        () => ({ ok: false, status: 403, statusText: "Forbidden", json: {} })
+      authorizationPolls: [
+        () => response({}, { ok: false, status: 403, statusText: "Forbidden" })
       ]
     });
 
     const controller = new AbortController();
-
-    // Abort after a short delay
     setTimeout(() => controller.abort(), 50);
 
     const result = await runCodexOAuthFlow({
@@ -323,21 +434,15 @@ describe("runCodexOAuthFlow", () => {
   });
 
   it("returns timeout when polling exceeds deadline", async () => {
-    const fetchLike = createMockFetch({
-      authorize: () => ({
-        ok: true,
-        status: 200,
-        statusText: "OK",
-        json: {
-          device_code: "dev-123",
-          user_code: "ABC-DEF",
-          verification_uri: "https://auth.openai.com/verify",
-          expires_in: 2,
-          interval: 1
-        }
+    const { fetchLike } = createMockFetch({
+      usercode: () => response({
+        user_code: "ABC-DEF",
+        device_auth_id: "device-auth-secret",
+        interval: 0,
+        expires_in: 0
       }),
-      tokenPolls: [
-        () => ({ ok: false, status: 403, statusText: "Forbidden", json: {} })
+      authorizationPolls: [
+        () => response({}, { ok: false, status: 403, statusText: "Forbidden" })
       ]
     });
 
@@ -350,13 +455,11 @@ describe("runCodexOAuthFlow", () => {
   });
 
   it("returns error on device code request failure", async () => {
-    const fetchLike = createMockFetch({
-      authorize: () => ({
-        ok: false,
-        status: 500,
-        statusText: "Internal Server Error",
-        json: { error: "server_error" }
-      })
+    const { fetchLike } = createMockFetch({
+      usercode: () => response(
+        { error: "server_error" },
+        { ok: false, status: 500, statusText: "Internal Server Error" }
+      )
     });
 
     const result = await runCodexOAuthFlow({ fetchLike });
@@ -386,12 +489,9 @@ describe("isCodexTokenExpired", () => {
 
 describe("redaction assertions", () => {
   it("mock fetch responses use fixed fake tokens, never real-looking values", () => {
-    // This test documents the invariant that all tests in this file use
-    // the fixed fake token value for assertions.
     const fakeAccess = "eyJfake.codex.token.12345";
     const fakeRefresh = "def502.fake.refresh.token.67890";
 
-    // Verify these are the exact strings used in tests above
     expect(fakeAccess).toContain("eyJ");
     expect(fakeAccess).toContain("fake");
     expect(fakeRefresh).toContain("def502");

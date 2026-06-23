@@ -1,5 +1,5 @@
 import type { ProviderAuthMethod } from "../../contracts/provider.js";
-import { runCodexOAuthFlow, type CodexTokenBundle, type FetchLike } from "./codex-oauth.js";
+import { codexDeviceVerificationUrl, runCodexOAuthFlow, type CodexTokenBundle, type FetchLike } from "./codex-oauth.js";
 import { isCodexTokenExpired } from "./codex-oauth.js";
 import { loadOAuthStore } from "./oauth-store.js";
 import type { OAuthAuthStore, OAuthTokenRecord } from "./oauth-types.js";
@@ -75,12 +75,10 @@ export async function runCodexOAuthFlowWithDeviceCodeNotice(options: {
 
 export function renderCodexDeviceCodeNotice(info: {
   readonly userCode: string;
-  readonly verificationUri: string;
-  readonly verificationUriComplete?: string;
 }): string {
   return [
     "Codex OAuth device authorization",
-    `Open: ${info.verificationUriComplete ?? info.verificationUri}`,
+    `Open: ${codexDeviceVerificationUrl()}`,
     `Code: ${info.userCode}`,
     "Waiting for authorization. This may take up to 15 minutes.",
     "",

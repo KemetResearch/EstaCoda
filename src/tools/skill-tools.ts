@@ -4,10 +4,22 @@ import type { LoadedSkill, SkillDefinition, SkillEvaluation } from "../contracts
 import type { RegisteredTool, SessionToolProvider, ToolResult } from "../contracts/tool.js";
 import { SkillEvolutionStore, type SkillEvalRunRecord, type SkillObservationRecord, type SkillPatchOperation, type SkillPatchProposal, type SkillPatchRiskLevel, type SkillSourceTrust } from "../skills/skill-evolution.js";
 import { resetBundledSkill } from "../skills/skill-bundled-sync.js";
-import { MAX_SKILL_RESOURCE_BYTES, MAX_SKILL_RESOURCE_CHARS } from "../skills/skill-limits.js";
+import {
+  MAX_SKILL_RESOURCE_BYTES,
+  MAX_SKILL_RESOURCE_CHARS,
+  SKILL_READ_MAX_CHARS,
+  SKILL_SEARCH_DEFAULT_RESULTS,
+  SKILL_SEARCH_EXCERPT_MAX_CHARS,
+  SKILL_SEARCH_MAX_RESULTS
+} from "../skills/skill-limits.js";
 import { hydrateSkillResources, loadSkillsFromDirectory, parseSkillFile, truncateContextDocument } from "../skills/skill-loader.js";
 import { assertSkillContentMutationAllowed, assertSkillMutable } from "../skills/skill-mutation-policy.js";
 import { ensureContainedDirectory, isSafeRelativeSkillPath } from "../skills/skill-path-safety.js";
+import { selectSkillPromptContent } from "../skills/skill-contract.js";
+import {
+  buildSkillReadinessMetadata,
+  resolveSkillSetupContext
+} from "../skills/skill-readiness.js";
 import type { SkillRegistry } from "../skills/skill-registry.js";
 import { ChangeManifestStore } from "../skills/change-manifest-store.js";
 import {
@@ -31,6 +43,7 @@ export type SkillToolsOptions = {
   visibleRegistry?: SkillRegistry;
   localSkillsRoot: string;
   bundledSkillsRoot?: string;
+  skillConfig?: Record<string, Record<string, unknown>>;
   skillEvolutionStore?: SkillEvolutionStore;
   changeManifestStore?: ChangeManifestStore;
 };
@@ -44,6 +57,59 @@ export function createSkillTools(options: SkillToolsOptions): readonly Registere
         changeManifestStore: options.changeManifestStore
       })
     : undefined;
+  const runSkillRead = async (input: SkillReadInput): Promise<ToolResult> => {
+    const skill = getSkill(options.registry, input.name);
+    if (!skill.ok) {
+      return skill;
+    }
+    const foundSkill = skill.skill;
+    return readSkillContent(foundSkill, input, options.skillConfig?.[foundSkill.name]);
+  };
+  const runSkillView = async (input: SkillReadInput): Promise<ToolResult> => {
+    const skill = getSkill(options.registry, input.name);
+    if (!skill.ok) {
+      return skill;
+    }
+    const foundSkill = skill.skill;
+    // skill.read intentionally avoids retrieval usage recording in PR 1;
+    // retrieval traces belong with PR 2 routing evidence. Preserve the
+    // legacy viewed counter for the deprecated skill.view compatibility alias.
+    await options.skillEvolutionStore?.recordSkillViewed({
+      skillName: foundSkill.name,
+      source: isLoadedSkill(foundSkill) ? foundSkill.sourceKind : undefined,
+      provenanceKind: "provenance" in foundSkill ? foundSkill.provenance?.kind : undefined
+    });
+
+    return readSkillContent(foundSkill, input, options.skillConfig?.[foundSkill.name]);
+  };
+  const runSkillSearch = async (input: SkillSearchInput): Promise<ToolResult> => {
+    if (!isNonEmptyString(input.query)) {
+      return {
+        ok: false,
+        content: "skill.search requires a non-empty query.",
+        metadata: {
+          code: "skill-search-query-required"
+        }
+      };
+    }
+
+    const skill = getSkill(options.registry, input.name);
+    if (!skill.ok) {
+      return skill;
+    }
+    if (!isLoadedSkill(skill.skill)) {
+      return {
+        ok: false,
+        content: "skill.search requires a loaded file-backed skill.",
+        metadata: {
+          code: "skill-search-unloaded-skill",
+          name: skill.skill.name
+        }
+      };
+    }
+
+    return searchSkillContent(skill.skill, input);
+  };
 
   return [
     {
@@ -79,45 +145,61 @@ export function createSkillTools(options: SkillToolsOptions): readonly Registere
       }
     },
     {
-      name: "skill.view",
-      description: "View full instructions for a loaded skill.",
+      name: "skill.read",
+      description: "Read selected skill instructions, contracts, metadata, or a skill-local resource. Prefer this over skill.view.",
       inputSchema: {
         type: "object",
         properties: {
           name: { type: "string" },
-          path: { type: "string" }
+          path: { type: "string" },
+          mode: { type: "string", enum: ["contract", "full"] }
         },
         required: ["name"]
       },
       riskClass: "read-only-local",
       toolsets: ["core", "research"],
-      progressLabel: "viewing skill",
+      progressLabel: "reading skill",
       maxResultSizeChars: 24_000,
       isAvailable: () => true,
-      run: async (input: { name?: string; path?: string }) => {
-        const skill = getSkill(options.registry, input.name);
-        if (!skill.ok) {
-          return skill;
-        }
-        const foundSkill = skill.skill;
-        await options.skillEvolutionStore?.recordSkillViewed({
-          skillName: foundSkill.name,
-          source: isLoadedSkill(foundSkill) ? foundSkill.sourceKind : undefined,
-          provenanceKind: "provenance" in foundSkill ? foundSkill.provenance?.kind : undefined
-        });
-
-        if (isLoadedSkill(foundSkill) && isNonEmptyString(input.path)) {
-          return readSkillReference(foundSkill, input.path);
-        }
-
-        return {
-          ok: true,
-          content: "instructions" in foundSkill
-            ? `# ${foundSkill.name}\n\n${foundSkill.instructions}`
-            : `# ${foundSkill.name}\n\n${foundSkill.description}`,
-          metadata: toSkillMetadata(foundSkill)
-        };
-      }
+      run: runSkillRead
+    },
+    {
+      name: "skill.search",
+      description: "Search within one named loaded skill's root instructions and indexed resources. Requires an explicit skill name.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          name: { type: "string" },
+          query: { type: "string" },
+          maxResults: { type: "number" }
+        },
+        required: ["name", "query"]
+      },
+      riskClass: "read-only-local",
+      toolsets: ["core", "research"],
+      progressLabel: "searching skill",
+      maxResultSizeChars: 16_000,
+      isAvailable: () => true,
+      run: runSkillSearch
+    },
+    {
+      name: "skill.view",
+      description: "Deprecated alias for skill.read. Use skill.read for skill instructions, contracts, metadata, and resources.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          name: { type: "string" },
+          path: { type: "string" },
+          mode: { type: "string", enum: ["contract", "full"] }
+        },
+        required: ["name"]
+      },
+      riskClass: "read-only-local",
+      toolsets: ["core", "research"],
+      progressLabel: "reading skill",
+      maxResultSizeChars: 24_000,
+      isAvailable: () => true,
+      run: runSkillView
     },
     {
       name: "skill.inspect",
@@ -1191,6 +1273,7 @@ export const skillToolProvider: SessionToolProvider = {
       visibleRegistry: ctx.sessionSkillRegistry,
       localSkillsRoot: requireProviderDependency("skill", "localSkillsRoot", ctx.localSkillsRoot),
       bundledSkillsRoot: ctx.bundledSkillsRoot,
+      skillConfig: ctx.skillConfig,
       skillEvolutionStore: ctx.skillEvolutionStore,
       changeManifestStore: ctx.changeManifestStore
     });
@@ -1207,6 +1290,36 @@ function requireProviderDependency<T>(provider: string, dependency: string, valu
 type GetSkillResult =
   | { ok: true; content: ""; skill: LoadedSkill | SkillDefinition }
   | { ok: false; content: string };
+
+type SkillReadInput = {
+  name?: string;
+  path?: string;
+  mode?: "contract" | "full";
+};
+
+type SkillSearchInput = {
+  name?: string;
+  query?: string;
+  maxResults?: number;
+};
+
+type SkillSearchResult = {
+  path: string;
+  excerpt: string;
+  heading?: string;
+  line?: number;
+  truncated?: boolean;
+};
+
+type SkillSearchResponse = {
+  name: string;
+  query: string;
+  maxResults: number;
+  results: SkillSearchResult[];
+  matchCount: number;
+  truncated: boolean;
+  skippedResources?: Array<{ path: string; reason: string }>;
+};
 
 function getSkill(registry: SkillRegistry, name: string | undefined): GetSkillResult {
   if (!isNonEmptyString(name)) {
@@ -1254,6 +1367,329 @@ function toSkillMetadata(skill: LoadedSkill | SkillDefinition): Record<string, u
     sourceKind: "sourceKind" in skill ? skill.sourceKind : undefined,
     sourceRoot: "sourceRoot" in skill ? skill.sourceRoot : undefined
   };
+}
+
+async function searchSkillContent(
+  skill: LoadedSkill,
+  input: SkillSearchInput
+): Promise<ToolResult> {
+  const query = input.query?.trim() ?? "";
+  const maxResults = clampSearchMaxResults(input.maxResults);
+  const response: SkillSearchResponse = {
+    name: skill.name,
+    query,
+    maxResults,
+    results: [],
+    matchCount: 0,
+    truncated: false
+  };
+  const lowerQuery = query.toLowerCase();
+
+  addSearchMatches({
+    path: "SKILL.md",
+    content: skill.instructions,
+    lowerQuery,
+    response,
+    maxResults
+  });
+
+  const resourcePaths = [...new Set((skill.resources ?? []).map((resource) => resource.path))]
+    .sort((left, right) => left.localeCompare(right));
+  for (const resourcePath of resourcePaths) {
+    const resource = await readSkillResourceTextForSearch(skill, resourcePath);
+    if (!resource.ok) {
+      response.skippedResources = [
+        ...(response.skippedResources ?? []),
+        { path: resourcePath, reason: resource.reason }
+      ];
+      continue;
+    }
+
+    addSearchMatches({
+      path: resource.path,
+      content: resource.content,
+      lowerQuery,
+      response,
+      maxResults
+    });
+  }
+
+  response.truncated = response.truncated || response.matchCount > response.results.length;
+
+  return {
+    ok: true,
+    content: JSON.stringify(response, null, 2),
+    metadata: response
+  };
+}
+
+function clampSearchMaxResults(value: number | undefined): number {
+  if (value === undefined || !Number.isFinite(value)) {
+    return SKILL_SEARCH_DEFAULT_RESULTS;
+  }
+
+  return Math.min(SKILL_SEARCH_MAX_RESULTS, Math.max(1, Math.trunc(value)));
+}
+
+function addSearchMatches(input: {
+  path: string;
+  content: string;
+  lowerQuery: string;
+  response: SkillSearchResponse;
+  maxResults: number;
+}): void {
+  const lines = input.content.split(/\r?\n/u);
+  let heading: string | undefined;
+  for (let index = 0; index < lines.length; index += 1) {
+    const line = lines[index] ?? "";
+    const parsedHeading = /^ {0,3}#{1,6}\s+(.+?)\s*#*\s*$/u.exec(line);
+    if (parsedHeading !== null) {
+      heading = parsedHeading[1]?.trim();
+    }
+    if (!line.toLowerCase().includes(input.lowerQuery)) {
+      continue;
+    }
+
+    input.response.matchCount += 1;
+    if (input.response.results.length >= input.maxResults) {
+      input.response.truncated = true;
+      continue;
+    }
+
+    input.response.results.push({
+      path: input.path,
+      ...buildSearchExcerpt(lines, index, heading)
+    });
+  }
+}
+
+function buildSearchExcerpt(
+  lines: string[],
+  matchIndex: number,
+  heading: string | undefined
+): Omit<SkillSearchResult, "path"> {
+  const start = Math.max(0, matchIndex - 1);
+  const end = Math.min(lines.length, matchIndex + 2);
+  const rawExcerpt = lines
+    .slice(start, end)
+    .map((line, offset) => `${start + offset + 1}: ${line}`)
+    .join("\n");
+  const truncated = truncateContextDocument(rawExcerpt, SKILL_SEARCH_EXCERPT_MAX_CHARS);
+
+  return {
+    excerpt: truncated.content,
+    heading,
+    line: matchIndex + 1,
+    truncated: truncated.truncated
+  };
+}
+
+async function readSkillResourceTextForSearch(
+  skill: LoadedSkill,
+  path: string
+): Promise<{ ok: true; path: string; content: string } | { ok: false; reason: string }> {
+  const skillRoot = await realpath(dirname(skill.sourcePath));
+  const candidate = resolve(skillRoot, path);
+  const canonical = await realpath(candidate).catch(() => undefined);
+
+  if (canonical === undefined) {
+    return { ok: false, reason: "not-found" };
+  }
+
+  const relativePath = relative(skillRoot, canonical);
+  if (relativePath.startsWith("..") || relativePath.startsWith("/")) {
+    return { ok: false, reason: "outside-skill-directory" };
+  }
+
+  const metadata = await stat(canonical).catch(() => undefined);
+  if (metadata === undefined || !metadata.isFile()) {
+    return { ok: false, reason: "not-file" };
+  }
+  if (metadata.size > MAX_SKILL_RESOURCE_BYTES) {
+    return { ok: false, reason: "oversized" };
+  }
+
+  const content = await readFile(canonical);
+  if (!isProbablyText(content)) {
+    return { ok: false, reason: "binary" };
+  }
+
+  const decoded = content.toString("utf8");
+  const truncated = truncateContextDocument(decoded, MAX_SKILL_RESOURCE_CHARS);
+  return {
+    ok: true,
+    path: relativePath,
+    content: truncated.content
+  };
+}
+
+async function readSkillContent(
+  skill: LoadedSkill | SkillDefinition,
+  input: SkillReadInput,
+  configuredValues: Record<string, unknown> | undefined
+): Promise<ToolResult> {
+  if (isNonEmptyString(input.path)) {
+    if (input.mode !== undefined) {
+      return {
+        ok: false,
+        content: "skill.read path reads cannot be combined with root mode.",
+        metadata: {
+          code: "skill-read-incompatible-path-mode",
+          name: skill.name,
+          path: input.path,
+          mode: input.mode
+        }
+      };
+    }
+
+    if (!isLoadedSkill(skill)) {
+      return {
+        ok: false,
+        content: "Skill resources are only available for loaded file-backed skills.",
+        metadata: {
+          code: "skill-read-unloaded-path",
+          ...richSkillMetadata(skill, "metadata-only", configuredValues)
+        }
+      };
+    }
+
+    const result = await readSkillReference(skill, input.path);
+    return {
+      ...result,
+      metadata: {
+        ...result.metadata,
+        ...richSkillMetadata(skill, "reference", configuredValues)
+      }
+    };
+  }
+
+  if (!isLoadedSkill(skill)) {
+    return {
+      ok: true,
+      content: `# ${skill.name}\n\n${skill.description}`,
+      metadata: richSkillMetadata(skill, "metadata-only", configuredValues)
+    };
+  }
+
+  if (input.mode === "full") {
+    const truncated = truncateContextDocument(skill.instructions, SKILL_READ_MAX_CHARS);
+    return {
+      ok: true,
+      content: `# ${skill.name}\n\n${truncated.content}`,
+      metadata: richSkillMetadata(skill, "full", configuredValues, {
+        originalChars: truncated.originalChars,
+        truncated: truncated.truncated
+      })
+    };
+  }
+
+  const selected = selectSkillPromptContent(skill);
+  if (input.mode === "contract") {
+    if (selected.contentMode === "contract") {
+      return {
+        ok: true,
+        content: selected.content,
+        metadata: richSkillMetadata(skill, "contract", configuredValues, {
+          originalChars: selected.originalChars,
+          truncated: selected.truncated
+        })
+      };
+    }
+
+    return {
+      ok: true,
+      content: renderSmallSkillContract(skill),
+      metadata: richSkillMetadata(skill, "contract", configuredValues, {
+        originalChars: skill.instructions.length,
+        truncated: false
+      })
+    };
+  }
+
+  if (selected.contentMode === "contract") {
+    return {
+      ok: true,
+      content: selected.content,
+      metadata: richSkillMetadata(skill, "contract", configuredValues, {
+        originalChars: selected.originalChars,
+        truncated: selected.truncated
+      })
+    };
+  }
+
+  return {
+    ok: true,
+    content: `# ${skill.name}\n\n${skill.instructions}`,
+    metadata: richSkillMetadata(skill, "complete", configuredValues, {
+      originalChars: skill.instructions.length,
+      truncated: false
+    })
+  };
+}
+
+function richSkillMetadata(
+  skill: LoadedSkill | SkillDefinition,
+  mode: "complete" | "contract" | "full" | "reference" | "metadata-only",
+  configuredValues: Record<string, unknown> | undefined,
+  extras: { originalChars?: number; truncated?: boolean } = {}
+): Record<string, unknown> {
+  const setup = resolveSkillSetupContext(skill, configuredValues);
+  return {
+    ...toSkillMetadata(skill),
+    mode,
+    ...extras,
+    linked_files: linkedSkillFiles(skill),
+    ...buildSkillReadinessMetadata(skill, setup)
+  };
+}
+
+function linkedSkillFiles(skill: LoadedSkill | SkillDefinition): {
+  references: LoadedSkill["resources"];
+  scripts: LoadedSkill["resources"];
+  templates: LoadedSkill["resources"];
+  assets: LoadedSkill["resources"];
+} {
+  const resources = isLoadedSkill(skill) ? skill.resources ?? [] : [];
+  return {
+    references: resources.filter((resource) => resource.kind === "reference"),
+    scripts: resources.filter((resource) => resource.kind === "script"),
+    templates: resources.filter((resource) => resource.kind === "template"),
+    assets: resources.filter((resource) => resource.kind === "asset")
+  };
+}
+
+function renderSmallSkillContract(skill: LoadedSkill): string {
+  return [
+    `Skill contract: ${skill.name}`,
+    `Description: ${skill.description}`,
+    `Original root instruction chars: ${skill.instructions.length}`,
+    "The root SKILL.md instructions fit within the inline prompt cap. This is a mechanical metadata and resource index, not a semantic summary.",
+    "",
+    "Required toolsets:",
+    ...(skill.requiredToolsets.length === 0 ? ["- none"] : skill.requiredToolsets.map((toolset) => `- ${toolset}`)),
+    "",
+    "Linked resources:",
+    ...formatSkillResourceLines(skill.resources)
+  ].join("\n");
+}
+
+function formatSkillResourceLines(resources: LoadedSkill["resources"] | undefined): string[] {
+  if (resources === undefined || resources.length === 0) {
+    return ["- none"];
+  }
+
+  return resources
+    .slice()
+    .sort((left, right) => left.kind.localeCompare(right.kind) || left.path.localeCompare(right.path))
+    .map((resource) => {
+      const labels = [
+        resource.path,
+        `kind=${resource.kind}`,
+        resource.bytes === undefined ? undefined : `bytes=${resource.bytes}`,
+        resource.declared === true ? "declared" : undefined
+      ].filter((label): label is string => label !== undefined);
+      return `- ${labels.join(" · ")}`;
+    });
 }
 
 function defaultSkillDefinition(input: {

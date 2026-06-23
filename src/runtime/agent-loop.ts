@@ -11,6 +11,7 @@ import { assessSecurityPolicy, capabilityFirstDefaults } from "../contracts/secu
 import type { SessionDB } from "../contracts/session.js";
 import type {
   LoadedSkill,
+  SelectedSkillPromptContent,
   SkillConfigField,
   SkillDefinition,
   SkillCatalogEntry,
@@ -450,6 +451,7 @@ export class AgentLoop {
 
     const intent = route.intent;
     const selectedSkill = route.selectedSkill;
+    const selectedSkillPromptContent = route.selectedSkillPromptContent;
     const selectedSkillInstructions = route.selectedSkillInstructions;
     const selectedSkillResources = route.selectedSkillResources;
     const selectedSkillSetup = route.selectedSkillSetup;
@@ -514,6 +516,7 @@ export class AgentLoop {
         attachments,
         memoryPromptContext: turnMemoryPromptContext,
         selectedSkillInstructions,
+        selectedSkillPromptContent,
         selectedSkillResources,
         selectedSkillSetup,
         stage: "skill"
@@ -580,6 +583,7 @@ export class AgentLoop {
       attachments,
       memoryPromptContext: turnMemoryPromptContext,
       selectedSkillInstructions,
+      selectedSkillPromptContent,
       selectedSkillResources,
       selectedSkillSetup,
       toolExecutions,
@@ -613,6 +617,7 @@ export class AgentLoop {
       attachments,
       memoryPromptContext: turnMemoryPromptContext,
       selectedSkillInstructions,
+      selectedSkillPromptContent,
       selectedSkillResources,
       selectedSkillSetup,
       toolExecutions,
@@ -624,6 +629,7 @@ export class AgentLoop {
       userText: effectiveText,
       routedText,
       selectedSkill,
+      selectedSkillPromptContent,
       selectedSkillInstructions,
       selectedSkillResources,
       selectedSkillSetup,
@@ -870,6 +876,7 @@ export class AgentLoop {
     attachments: ChannelAttachment[] | undefined;
     memoryPromptContext?: MemoryPromptContext;
     selectedSkillInstructions?: string;
+    selectedSkillPromptContent?: SelectedSkillPromptContent;
     selectedSkillResources?: LoadedSkill["resources"];
     selectedSkillSetup?: SkillSetupContext;
     toolExecutions?: ToolExecutionRecord[];
@@ -929,6 +936,7 @@ export class AgentLoop {
     attachments: ChannelAttachment[] | undefined;
     memoryPromptContext?: MemoryPromptContext;
     selectedSkillInstructions?: string;
+    selectedSkillPromptContent?: SelectedSkillPromptContent;
     selectedSkillResources?: LoadedSkill["resources"];
     selectedSkillSetup?: SkillSetupContext;
     toolExecutions?: ToolExecutionRecord[];
@@ -950,9 +958,7 @@ export class AgentLoop {
     tokens += estimateTextTokensRough(this.#soul ?? "");
     tokens += estimateContextReferenceTokens(input.context);
     tokens += estimateProjectContextTokens(input.projectContext);
-    tokens += estimateTextTokensRough(input.selectedSkillInstructions === undefined
-      ? ""
-      : truncate(input.selectedSkillInstructions, 4_000));
+    tokens += estimateTextTokensRough(input.selectedSkillPromptContent?.content ?? input.selectedSkillInstructions ?? "");
     tokens += estimateResourceIndexTokens(input.selectedSkillResources);
     tokens += estimateSkillSetupTokens(input.selectedSkillSetup);
     tokens += estimateMemoryPromptContextTokens(input.memoryPromptContext);

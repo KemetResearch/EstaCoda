@@ -49,6 +49,7 @@ export type SessionToolContext = {
   trajectoryRecorder?: import("../trajectory/trajectory-recorder.js").TrajectoryRecorder;
   skillRegistry?: import("../skills/skill-registry.js").SkillRegistry;
   sessionSkillRegistry?: import("../skills/skill-registry.js").SkillRegistry;
+  skillConfig?: Record<string, Record<string, unknown>>;
   processManager?: import("../process/process-manager.js").ProcessManager;
   artifactStore?: import("../artifacts/artifact-store.js").ArtifactStore;
   memoryFileCompactionService?: import("../memory/memory-file-compaction-service.js").MemoryFileCompactionService;

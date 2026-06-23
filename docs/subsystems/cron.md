@@ -131,9 +131,9 @@ Script output, upstream context, and skill text are redacted before prompt injec
 
 ## Skills
 
-Cron jobs can attach skills by name. Runtime-backed cron jobs load actual skill instruction bodies through `runtime.resolveSkill()`. Instruction selection follows runtime prompt behavior: `providerInstructions?.content ?? instructions`.
+Cron jobs can attach skills by name. Runtime-backed cron jobs load selected skill prompt content through `runtime.resolveSkill()`. Instruction selection follows runtime prompt behavior: `providerInstructions?.content ?? instructions`.
 
-Skill order is preserved. Missing skills add a prompt warning instead of crashing the run. Each skill's injected instruction text is redacted and capped at 4,000 characters, then the full assembled prompt goes through the assembled safety scanner.
+Skill order is preserved. Missing skills add a prompt warning instead of crashing the run. Selected skill prompt content is no longer chosen by silently truncating raw skill bodies to 4,000 characters: skills under the inline cap arrive as full root prompt content, and oversized skills arrive as indexed contract prompt content. Full oversized root content remains recoverable through `skill.read({ "name": "<skill>", "mode": "full" })` during runtime-backed work. Cron still redacts and bounds attached skill context as cron data before the full assembled prompt goes through the assembled safety scanner.
 
 ## Scripts And No-Agent Mode
 

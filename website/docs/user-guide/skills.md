@@ -129,11 +129,31 @@ Visibility is computed at session start and does not change until `/reset` or a 
 
 ## Execution Model
 
-**Provider-backed:** By default, skill instructions are injected into the system prompt and the provider executes the workflow.
+**Provider-backed:** By default, selected skill prompt content is injected into the system prompt and the provider executes the workflow. Skills under the inline cap are injected with their full root `SKILL.md` instructions. Oversized selected skills are represented as deterministic contracts instead of raw bodies silently truncated in the prompt.
 
 **Deterministic fallback:** If no provider is available, a deterministic path executes the workflow steps directly.
 
-**Resources:** `references/`, `templates/`, `scripts/`, and compatible `assets/` are indexed and loaded on demand.
+**Resources:** `references/`, `templates/`, `scripts/`, and compatible `assets/` are indexed and loaded on demand. Resource contents are lazy and are not injected into prompts by default.
+
+Full oversized root content can be recovered through the canonical skill retrieval tool:
+
+```ts
+skill.read({ "name": "<skill>", "mode": "full" })
+```
+
+A specific skill-local resource can be read by path:
+
+```ts
+skill.read({ "name": "<skill>", "path": "<relative-path>" })
+```
+
+`skill.search` is named-skill-only. It searches only the named skill's loaded `SKILL.md` instructions and indexed resources:
+
+```ts
+skill.search({ "name": "<skill>", "query": "<text>", "maxResults": 5 })
+```
+
+`skill.search` does not perform global skill search or nearby skill routing.
 
 ---
 
@@ -175,7 +195,9 @@ The agent can perform these operations via runtime tools:
 | Operation | Purpose |
 |---|---|
 | `list` | List visible skills |
-| `view` | View a skill's content |
+| `read` | Read skill instructions, contracts, metadata, or one skill-local resource. This is the canonical retrieval tool. |
+| `search` | Search one named skill's root instructions and indexed resources. |
+| `view` | Deprecated compatibility alias for `read` |
 | `inspect` | Inspect skill metadata |
 | `create` | Create a new skill |
 | `patch` | Patch a skill file |
