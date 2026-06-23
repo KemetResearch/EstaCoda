@@ -49,6 +49,8 @@ Skills may request a registered capability by ID, but skills cannot define packa
 
 Package installation is explicit through `estacoda python-env setup` or `estacoda python-env upgrade`. Normal skill execution and gateway-triggered execution do not auto-install dependencies.
 
+Edge TTS follows the same boundary. Selecting Edge as the TTS provider does not install its Python package; the local operator must run `estacoda python-env setup edge-tts --yes` and may verify it with `estacoda python-env verify edge-tts`. Runtime voice synthesis and gateway auto-TTS only resolve the already-installed global capability under `<stateRoot>/python-envs/edge-tts/`. If it is missing, they return or log the repair command instead of installing. Remote Telegram or gateway messages must not trigger hidden package installation.
+
 Diagnostics from Python environment setup and verification are bounded and redacted before they are printed.
 
 ## Hard Floor
@@ -225,7 +227,9 @@ Voice input is a remote-control surface when it arrives through a gateway. Gatew
 
 Voice STT preprocess audit events are emitted through `gateway:stt:preprocess` and written to `~/.estacoda/profiles/<profile-id>/gateway/logs/voice-stt-preprocess.jsonl`. Deny/fail warnings use `[voice-stt-preprocess]`. Audit records use path hashes and safe attachment metadata instead of full private paths.
 
-Voice config stores direct environment-variable references only. Guided setup collects hosted provider API keys through masked input, writes profile-local `.env` secrets only after reviewed apply, and does not store raw keys in config, review manifests, prompt context, logs, or errors. The OpenAI audio resolver uses configured `apiKeyEnv`, then `VOICE_TOOLS_OPENAI_KEY`, then `OPENAI_API_KEY` only for the default voice env case. There are no voice credential pools, gateway brokers, managed fallbacks, `useGateway`, or non-env credential sources. STT `local` and TTS `edge` are keyless; Edge remains networked because synthesis text is sent to Microsoft's Edge speech service.
+Voice config stores direct environment-variable references only. Guided setup collects key-required hosted provider API keys through masked input, writes profile-local `.env` secrets only after reviewed apply, and does not store raw keys in config, review manifests, prompt context, logs, or errors. The OpenAI audio resolver uses configured `apiKeyEnv`, then `VOICE_TOOLS_OPENAI_KEY`, then `OPENAI_API_KEY` only for the default voice env case. There are no voice credential pools, gateway brokers, managed fallbacks, `useGateway`, or non-env credential sources. STT `local` and TTS `edge` are keyless; Edge remains networked because synthesis text is sent to Microsoft's Edge speech service.
+
+Edge TTS package installation is a separate local operator consent boundary. `estacoda voice setup --tts-provider edge` selects the provider in config but does not install `edge-tts`; the operator installs the global managed Python capability with `estacoda python-env setup edge-tts --yes` and can verify it with `estacoda python-env verify edge-tts`. Runtime voice synthesis and gateway auto-TTS do not install packages, and remote gateway messages must only receive or log the repair path when the capability is missing.
 
 Local faster-whisper STT uses a managed Python environment at `~/.estacoda/python-env` and a separate model cache at `~/.estacoda/cache/huggingface` by default. `estacoda voice setup --stt-provider local` creates or repairs that venv and installs only the pinned `faster-whisper==1.2.1` package after explicit local STT setup. System Python and user-managed venvs are not modified. `--python-binary` and `stt.local.engine: "command"` are operator-owned escape hatches.
 

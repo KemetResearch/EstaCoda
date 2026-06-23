@@ -32,6 +32,13 @@ estacoda voice mode status
 
 `estacoda voice setup --tts-provider openai` is TTS-only. It does not mutate STT config and does not touch the managed Python environment.
 
+`estacoda voice setup --tts-provider edge --tts-voice en-US-AriaNeural` selects Edge TTS in profile config. It does not install the Python `edge-tts` package. Install the managed capability separately:
+
+```bash
+estacoda python-env setup edge-tts --yes
+estacoda python-env verify edge-tts
+```
+
 CLI voice mode state is profile-local at:
 
 ```text
@@ -87,7 +94,7 @@ For an incoming Telegram voice message with `/voice on`, the path is: Telegram v
 
 ## Provider Setup
 
-The Setup Editor and Onboarding Wizard ask users to choose an STT/TTS provider. They no longer ask for model strings or API env-var reference names; runtime config defaults provide models, voices, and provider settings. For hosted Voice providers, setup collects the real API key through masked input, then review/apply stores only env-var references in config and writes profile-local secret values to the selected profile `.env` after the reviewed apply step. Raw API keys are not stored in config, shown in review manifests, inserted into prompt context, logged, or returned in errors.
+The Setup Editor and Onboarding Wizard ask users to choose an STT/TTS provider. They no longer ask for model strings or API env-var reference names; runtime config defaults provide models, voices, and provider settings. For key-required hosted Voice providers, setup collects the real API key through masked input, then review/apply stores only env-var references in config and writes profile-local secret values to the selected profile `.env` after the reviewed apply step. Raw API keys are not stored in config, shown in review manifests, inserted into prompt context, logged, or returned in errors.
 
 Existing credentials can be reused through env-var references such as `VOICE_TOOLS_OPENAI_KEY`, `OPENAI_API_KEY`, `GEMINI_API_KEY`, `GROQ_API_KEY`, and `XAI_API_KEY`, and through existing compatible provider config/routes where supported. Direct CLI flags such as `--tts-model`, `--stt-model`, `--tts-api-key-env`, `--stt-api-key-env`, `--tts-api-key`, and `--stt-api-key` remain available for explicit scripted setup.
 
@@ -101,7 +108,7 @@ Implemented hosted TTS providers:
 
 Implemented no-key TTS provider:
 
-- Edge, which is networked and sends synthesis text to Microsoft's Edge speech service
+- Edge, which is networked and sends synthesis text to Microsoft's Edge speech service. It requires the global managed Python `edge-tts` capability.
 
 Implemented hosted STT providers:
 
@@ -120,6 +127,33 @@ Deferred in v0.1.0:
 - Mistral TTS/STT
 
 Voice config stores direct environment-variable references only for providers that require keys. Put real keys in the selected profile `.env` or an environment source for the service process. Do not put raw keys in `config.json`. Edge TTS does not require an API key, but it is not local/offline: synthesis text is sent over the network to Microsoft's Edge speech service and must be treated as an external side effect.
+
+### Edge TTS operations
+
+Edge TTS uses EstaCoda's generic managed Python capability environment:
+
+```text
+<stateRoot>/python-envs/edge-tts/
+```
+
+This is global capability state, not profile-local state.
+
+Operator setup:
+
+```bash
+estacoda python-env setup edge-tts --yes
+estacoda python-env verify edge-tts
+```
+
+Setup is the consent boundary for package installation. Runtime voice synthesis, CLI TTS playback, Telegram auto-TTS, and gateway auto-TTS do not auto-install `edge-tts`, do not run pip, and do not repair the capability implicitly.
+
+If the capability is missing, the repair command is:
+
+```bash
+estacoda python-env setup edge-tts --yes
+```
+
+Gateway auto-TTS logs the repair path, preserves the text reply, and does not record auto-TTS character usage for failed synthesis. Remote Telegram or gateway messages must not trigger hidden package installation.
 
 OpenAI audio credential lookup:
 
@@ -221,6 +255,7 @@ Common readiness cases:
 | `missing key` | Env var referenced by provider is absent. | Add it to selected profile `.env` or service environment. |
 | `disabled` | `tts.enabled` or `stt.enabled` is `false`. | Enable the provider if intended. |
 | `not implemented` | Deferred provider selected. | Select an implemented provider. |
+| `Edge capability missing` | Edge TTS is configured but the global managed Python `edge-tts` capability is not installed or verified. | Run `estacoda python-env setup edge-tts --yes`, then `estacoda python-env verify edge-tts`. |
 | `python package missing` | faster-whisper import fails. | Run `estacoda voice setup --stt-provider local`, or repair `~/.estacoda/python-env`. If using `--python-binary`, repair that operator-owned environment. |
 | `venv support missing` | Python reports missing `ensurepip` or venv support. | Install OS venv support, for example `sudo apt install python3.13-venv` or `sudo apt install python3-venv`, then retry local STT setup. |
 | `download required` | Selected model is not cached and downloads are disallowed. | Pre-cache the model or explicitly allow download. |

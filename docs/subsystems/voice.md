@@ -16,7 +16,7 @@ Voice is an optional media capability. It is separate from the primary LLM provi
 | Hosted TTS | MiniMax | Implemented | Decodes base64 JSON audio responses. |
 | Hosted TTS | Gemini | Implemented | Uses `speechConfig.voiceConfig.prebuiltVoiceConfig.voiceName`. |
 | Hosted TTS | xAI | Implemented | Uses native `{baseUrl}/tts`, not an OpenAI-compatible shape. |
-| Hosted TTS | Edge | Implemented | Recommended/default guided setup option. No API key is required, but synthesis text is sent over the network to Microsoft's Edge speech service and this is not local/offline TTS. |
+| Hosted TTS | Edge | Implemented | No API key is required, but synthesis text is sent over the network to Microsoft's Edge speech service and this is not local/offline TTS. Requires the managed Python `edge-tts` capability to be installed by the local operator. |
 | Hosted STT | OpenAI | Implemented | Uses the shared OpenAI audio credential resolver. |
 | Hosted STT | Groq | Implemented | Direct environment key lookup. |
 | Hosted STT | xAI | Implemented | Uses native `{baseUrl}/stt`, not an OpenAI-compatible shape. |
@@ -64,6 +64,7 @@ Interactive setup behavior:
 - Review/apply stores env-var references in config and writes profile-local secret values to the selected profile `.env` only after the reviewed apply step.
 - Raw API keys are not stored in config, shown in review manifests, inserted into prompt context, logged, or returned in provider errors.
 - Direct operator CLI flags such as `estacoda voice setup --tts-model`, `--stt-model`, `--tts-api-key-env`, `--stt-api-key-env`, `--tts-api-key`, and `--stt-api-key` remain available for explicit scripted setup.
+- Selecting `tts.provider: "edge"` through voice setup/config does not install the managed Python `edge-tts` package. Install that capability separately with `estacoda python-env setup edge-tts --yes`.
 
 Core fields:
 
@@ -98,6 +99,33 @@ Provider-specific notes:
 - xAI STT uses `baseUrl`/`base_url`, `apiKeyEnv`/`api_key_env`, optional `language`, `format`, `diarize`/`diarization`, `keyterms`/`key_terms`, `fillerWords`/`filler_words`, and raw-audio hints where needed. It does not use `stt.xai.model`.
 - Gemini TTS sends `speechConfig.voiceConfig.prebuiltVoiceConfig.voiceName`.
 - Edge TTS uses `tts.edge.voice`, optional `tts.edge.speed`, and provider-level `tts.speed` fallback. It does not use an API key. Edge synthesis is a networked external side effect because request text is sent to Microsoft's Edge speech service, and provider output is MP3 (`audio/mpeg`).
+
+### Edge TTS managed Python capability
+
+Edge TTS runs through EstaCoda's global managed Python capability system. The capability installs the pinned Python package `edge-tts` under the global Python environment root:
+
+```text
+<stateRoot>/python-envs/edge-tts/
+```
+
+This is global capability state, not a profile-local capability root.
+
+Install and verify it explicitly:
+
+```bash
+estacoda python-env setup edge-tts --yes
+estacoda python-env verify edge-tts
+```
+
+Setup is the consent boundary for package installation. Runtime `voice.speak`, CLI TTS playback, and gateway auto-TTS are not setup flows. They do not create virtualenvs, invoke pip, or auto-install `edge-tts`.
+
+If Edge TTS is configured but the capability is missing, runtime synthesis returns an actionable repair path:
+
+```bash
+estacoda python-env setup edge-tts --yes
+```
+
+Gateway auto-TTS logs the same repair path, preserves text delivery, and does not count failed TTS usage. Remote Telegram or gateway messages must not trigger hidden package installation.
 
 ## faster-whisper
 
@@ -279,6 +307,7 @@ Gateway auto-TTS is opt-in and text-first:
 - Telegram tries to deliver spoken replies as a native voice bubble. Edge returns MP3, so native voice bubbles usually require ffmpeg conversion to OGG/Opus; with ffmpeg, Telegram receives a native voice bubble, and without ffmpeg, Telegram receives a normal audio file instead.
 - Auto-TTS is best-effort and fail-open to text.
 - Provider and delivery failures log safe warnings/events and leave text intact.
+- Gateway auto-TTS never installs managed Python packages. If Edge TTS is selected and the `edge-tts` capability is missing, the gateway logs `estacoda python-env setup edge-tts --yes`, leaves text delivery intact, and skips failed TTS usage accounting.
 
 Auto-TTS skips:
 
