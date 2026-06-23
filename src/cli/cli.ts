@@ -1145,6 +1145,16 @@ async function persistModelSelection(
       }
       break;
     }
+    case "endpoint": {
+      break;
+    }
+    case "oauth": {
+      return {
+        handled: true,
+        exitCode: 1,
+        output: `OAuth setup for ${resolution.provider} is not wired into this model picker yet. Use estacoda model setup ${resolution.provider}.`
+      };
+    }
   }
 
   // ── Config mutation (pure, in-memory) ──

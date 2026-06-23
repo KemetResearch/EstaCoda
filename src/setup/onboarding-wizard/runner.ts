@@ -418,6 +418,11 @@ export async function runFirstRunSetup(
             }
             break;
           }
+          case "oauth": {
+            write(options, `OAuth setup for ${resolution.provider}/${resolution.model} is not available in onboarding. Run estacoda model setup ${resolution.provider}.\n`);
+            step = "primary-route";
+            continue;
+          }
         }
 
         step = "security";

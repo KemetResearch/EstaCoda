@@ -351,6 +351,16 @@ async function resolveExecutableRoute(
       `Run estacoda model setup ${resolution.provider} from a terminal to configure credentials.`
     );
   }
+  if (
+    resolution.credentialAction.kind === "oauth" &&
+    resolution.credentialAction.status !== "ready"
+  ) {
+    return reject(
+      "missing-credentials",
+      `OAuth credentials are not configured for ${resolution.provider}/${resolution.model}.`,
+      `Run estacoda model setup ${resolution.provider} from a terminal to authenticate.`
+    );
+  }
 
   const resolvedRoute = buildResolvedModelRoute({
     provider: resolution.provider,

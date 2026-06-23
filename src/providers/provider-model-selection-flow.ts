@@ -21,6 +21,8 @@ import {
 } from "./provider-metadata.js";
 import { inferModelProfile } from "./model-catalog.js";
 import { resolveRuntimeCredential } from "./runtime-credential-resolver.js";
+import { readCodexOAuthStatus, type CodexOAuthStatusValue } from "./oauth/codex-setup.js";
+import { isOAuthAuthMethod } from "./oauth/oauth-types.js";
 import type {
   ModelLifecycle,
   ModelUsageClass
@@ -70,7 +72,13 @@ export type CredentialAction =
   | { kind: "none" }
   | { kind: "reuse"; reference: `env:${string}` }
   | { kind: "collect"; envVarName: string }
-  | { kind: "endpoint"; baseUrl?: string; apiKeyEnv: string };
+  | { kind: "endpoint"; baseUrl?: string; apiKeyEnv: string }
+  | {
+      kind: "oauth";
+      providerId: ProviderId;
+      authMethod: ProviderAuthMethod;
+      status: CodexOAuthStatusValue;
+    };
 
 export type ProviderModelSelectionResult = {
   kind: "selected";
@@ -347,7 +355,7 @@ async function resolveSelectionImpl(
   const apiMode = providerConfig?.apiMode ?? meta.apiMode;
 
   // Check credential readiness without exposing secret values
-  const credentialAction = await determineCredentialAction(providerId, apiKeyEnv, meta);
+  const credentialAction = await determineCredentialAction(providerId, apiKeyEnv, meta, options.homeDir);
 
   return {
     kind: "selected",
@@ -371,8 +379,27 @@ async function resolveSelectionImpl(
 async function determineCredentialAction(
   providerId: ProviderId,
   apiKeyEnv: string | undefined,
-  meta: ProviderMetadata
+  meta: ProviderMetadata,
+  homeDir?: string
 ): Promise<CredentialAction> {
+  if (isOAuthAuthMethod(meta.defaultAuthMethod)) {
+    if (providerId === "codex") {
+      const status = await readCodexOAuthStatus({ homeDir });
+      return {
+        kind: "oauth",
+        providerId,
+        authMethod: status.authMethod,
+        status: status.status
+      };
+    }
+    return {
+      kind: "oauth",
+      providerId,
+      authMethod: meta.defaultAuthMethod,
+      status: "required"
+    };
+  }
+
   if (providerId === "local") {
     return {
       kind: "endpoint",

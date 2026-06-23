@@ -1443,6 +1443,11 @@ async function resolveCredentialForReview(
     }
     case "endpoint":
       return resolveEndpointCredentialForReview(options, resolution);
+    case "oauth":
+      return {
+        kind: "diagnostic",
+        output: `OAuth setup for ${resolution.provider}/${resolution.model} is not wired into the setup editor yet. Run estacoda model setup ${resolution.provider}.`,
+      };
   }
 }
 

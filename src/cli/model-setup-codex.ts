@@ -4,17 +4,19 @@ import {
   loadOAuthStore,
   writeOAuthStore
 } from "../providers/oauth/oauth-store.js";
-import { runCodexOAuthFlow, type FetchLike } from "../providers/oauth/codex-oauth.js";
-import { isCodexTokenExpired } from "../providers/oauth/codex-oauth.js";
+import type { FetchLike } from "../providers/oauth/codex-oauth.js";
+import {
+  buildCodexOAuthTokenRecord,
+  CODEX_DEFAULT_BASE_URL,
+  CODEX_DEFAULT_MODEL,
+  CODEX_OAUTH_AUTH_METHOD,
+  codexOAuthStatusFromStore,
+  formatCodexOAuthFailure,
+  runCodexOAuthFlowWithDeviceCodeNotice,
+  type OutputSink,
+} from "../providers/oauth/codex-setup.js";
 import type { Prompt } from "./readline-prompt.js";
 import type { CliOptions, CliCommandResult } from "./cli.js";
-
-const CODEX_DEFAULT_MODEL = "o3";
-const CODEX_DEFAULT_BASE_URL = "https://chatgpt.com/backend-api/codex";
-
-type OutputSink = {
-  write(chunk: string): void;
-};
 
 export type ModelSetupCodexOptions = {
   homeDir?: string;
@@ -34,13 +36,9 @@ export async function runModelSetupCodex(
 
   // Read existing auth state
   const oauthResult = await loadOAuthStore({ homeDir });
-  const existingRecord = oauthResult.store.providers.codex;
-  const hasValidCreds =
-    existingRecord !== undefined &&
-    existingRecord.accessToken.length > 0 &&
-    !isCodexTokenExpired(existingRecord);
+  const oauthStatus = codexOAuthStatusFromStore(oauthResult.store);
 
-  if (hasValidCreds) {
+  if (oauthStatus.status === "ready") {
     return await handleExistingCredentials(options, oauthResult.store);
   }
 
@@ -96,7 +94,7 @@ async function handleExistingCredentials(
     return {
       handled: true,
       exitCode: 1,
-      output: formatOAuthFailure("timeout", flowResult.reason, deviceCodeShown)
+      output: formatCodexOAuthFailure("timeout", flowResult.reason, deviceCodeShown)
     };
   }
 
@@ -104,7 +102,7 @@ async function handleExistingCredentials(
     return {
       handled: true,
       exitCode: 1,
-      output: formatOAuthFailure("error", flowResult.reason, deviceCodeShown)
+      output: formatCodexOAuthFailure("error", flowResult.reason, deviceCodeShown)
     };
   }
 
@@ -113,22 +111,11 @@ async function handleExistingCredentials(
     ...existingStore,
     providers: {
       ...existingStore.providers,
-      codex: {
-        authMethod: "oauth_device_pkce" as const,
-        accessToken: flowResult.tokens.accessToken,
-        ...(flowResult.tokens.refreshToken !== undefined
-          ? { refreshToken: flowResult.tokens.refreshToken }
-          : {}),
-        ...(flowResult.tokens.expiresAt !== undefined
-          ? { expiresAt: flowResult.tokens.expiresAt }
-          : {}),
-        scopes: flowResult.tokens.scopes,
-        source: "estacoda"
-      }
+      codex: buildCodexOAuthTokenRecord(flowResult.tokens)
     }
   };
 
-  const writeResult = await writeOAuthStore(updatedStore, { homeDir: options.homeDir });
+  await writeOAuthStore(updatedStore, { homeDir: options.homeDir });
 
   // Configure route
   const configResult = await configureCodexRoute(options);
@@ -178,7 +165,7 @@ async function handleNewAuthentication(
     return {
       handled: true,
       exitCode: 1,
-      output: formatOAuthFailure("timeout", flowResult.reason, deviceCodeShown)
+      output: formatCodexOAuthFailure("timeout", flowResult.reason, deviceCodeShown)
     };
   }
 
@@ -186,7 +173,7 @@ async function handleNewAuthentication(
     return {
       handled: true,
       exitCode: 1,
-      output: formatOAuthFailure("error", flowResult.reason, deviceCodeShown)
+      output: formatCodexOAuthFailure("error", flowResult.reason, deviceCodeShown)
     };
   }
 
@@ -196,22 +183,11 @@ async function handleNewAuthentication(
     ...oauthResult.store,
     providers: {
       ...oauthResult.store.providers,
-      codex: {
-        authMethod: "oauth_device_pkce" as const,
-        accessToken: flowResult.tokens.accessToken,
-        ...(flowResult.tokens.refreshToken !== undefined
-          ? { refreshToken: flowResult.tokens.refreshToken }
-          : {}),
-        ...(flowResult.tokens.expiresAt !== undefined
-          ? { expiresAt: flowResult.tokens.expiresAt }
-          : {}),
-        scopes: flowResult.tokens.scopes,
-        source: "estacoda"
-      }
+      codex: buildCodexOAuthTokenRecord(flowResult.tokens)
     }
   };
 
-  const writeResult = await writeOAuthStore(updatedStore, { homeDir: options.homeDir });
+  await writeOAuthStore(updatedStore, { homeDir: options.homeDir });
 
   // Configure route
   const configResult = await configureCodexRoute(options);
@@ -234,50 +210,6 @@ async function handleNewAuthentication(
   };
 }
 
-async function runCodexOAuthFlowWithDeviceCodeNotice(
-  options: ModelSetupCodexOptions
-): Promise<{
-  flowResult: Awaited<ReturnType<typeof runCodexOAuthFlow>>;
-  deviceCodeShown: boolean;
-}> {
-  let deviceCodeShown = false;
-  const flowResult = await runCodexOAuthFlow({
-    fetchLike: options.fetchLike,
-    signal: options.signal,
-    onDeviceCode: (info) => {
-      deviceCodeShown = true;
-      options.output?.write(renderDeviceCodeNotice(info));
-    }
-  });
-  return { flowResult, deviceCodeShown };
-}
-
-function renderDeviceCodeNotice(info: {
-  userCode: string;
-  verificationUri: string;
-  verificationUriComplete?: string;
-}): string {
-  return [
-    "Codex OAuth device authorization",
-    `Open: ${info.verificationUriComplete ?? info.verificationUri}`,
-    `Code: ${info.userCode}`,
-    "Waiting for authorization. This may take up to 15 minutes.",
-    ""
-  ].join("\n");
-}
-
-function formatOAuthFailure(kind: "timeout" | "error", reason: string, deviceCodeShown: boolean): string {
-  if (!deviceCodeShown) {
-    return kind === "timeout"
-      ? `Authentication timed out: ${reason}`
-      : `Authentication failed: ${reason}`;
-  }
-
-  return kind === "timeout"
-    ? `Authentication timed out while waiting for authorization: ${reason}`
-    : `Authentication failed while waiting for authorization: ${reason}`;
-}
-
 async function configureCodexRoute(
   options: ModelSetupCodexOptions
 ): Promise<{ ok: true } | { ok: false; message: string }> {
@@ -298,7 +230,7 @@ async function configureCodexRoute(
         codex: {
           ...(existing.config.providers?.codex ?? {}),
           baseUrl: CODEX_DEFAULT_BASE_URL,
-          authMethod: "oauth_device_pkce" as const
+          authMethod: CODEX_OAUTH_AUTH_METHOD
         }
       }
     };
