@@ -50,6 +50,9 @@ const FIRST_RUN_KEYS = [
   "onboarding.providers.description.codex",
   "onboarding.providers.description.custom",
   "onboarding.providers.description.customBaseUrl",
+  "onboarding.providers.localEndpoint.baseUrl",
+  "onboarding.providers.localEndpoint.apiKeyOptional",
+  "onboarding.providers.localEndpoint.invalidBaseUrl",
   "onboarding.catalog.model.features.tools",
   "onboarding.catalog.model.features.vision",
   "onboarding.catalog.model.features.reasoning",
@@ -646,6 +649,12 @@ describe("setup copy", () => {
     expect(resolveSetupCopy("ar", "onboarding.providers.currentRoute")).toContain(isolateLtr("{route}"));
     expect(resolveSetupCopy("ar", "onboarding.providers.currentModelNotShown")).toContain(isolateLtr("{route}"));
     expect(resolveSetupCopy("ar", "onboarding.providers.description.customBaseUrl")).toContain(isolateLtr("{baseUrl}"));
+    expect(resolveSetupCopy("ar", "onboarding.providers.localEndpoint.baseUrl")).toContain(isolateLtr("URL"));
+    expect(resolveSetupCopy("ar", "onboarding.providers.localEndpoint.baseUrl")).toContain(isolateLtr("{baseUrl}"));
+    expect(resolveSetupCopy("ar", "onboarding.providers.localEndpoint.apiKeyOptional")).toContain(isolateLtr("API"));
+    expect(resolveSetupCopy("ar", "onboarding.providers.localEndpoint.apiKeyOptional")).toContain(isolateLtr("{envVar}"));
+    expect(resolveSetupCopy("ar", "onboarding.providers.localEndpoint.invalidBaseUrl")).toContain(isolateLtr("URL"));
+    expect(resolveSetupCopy("ar", "onboarding.providers.localEndpoint.invalidBaseUrl")).toContain(isolateLtr("{baseUrl}"));
     expect(resolveSetupCopy("ar", "setupModules.telegram.title")).toBe(isolateLtr("Telegram"));
     expect(resolveSetupCopy("ar", "onboarding.providers.primaryCredential.localProviderSkip")).toContain(isolateLtr("API"));
     expect(resolveSetupCopy("ar", "setupRouter.configured.title")).toContain(isolateLtr("EstaCoda"));
@@ -1086,6 +1095,32 @@ describe("setup copy", () => {
     expect(resolveSetupCopy("ar", "setupEditor.prompt.localEndpoint.apiKeyOptional")).toContain(isolateLtr("{envVar}"));
     expect(resolveSetupCopy("ar", "setupEditor.result.localEndpointInvalid")).toContain(isolateLtr("URL"));
     expect(resolveSetupCopy("ar", "setupEditor.result.localEndpointInvalid")).toContain(isolateLtr("{baseUrl}"));
+  });
+
+  it("contains onboarding local endpoint prompt copy", () => {
+    expect(getSetupCopyEntry("onboarding.providers.localEndpoint.baseUrl")?.placeholders).toEqual(["{baseUrl}", "URL"]);
+    expect(getSetupCopyEntry("onboarding.providers.localEndpoint.apiKeyOptional")?.placeholders).toEqual(["API", "{envVar}"]);
+    expect(getSetupCopyEntry("onboarding.providers.localEndpoint.invalidBaseUrl")?.placeholders).toEqual(["URL", "{baseUrl}"]);
+    expect(rawSetupCopy("en", "onboarding.providers.localEndpoint.baseUrl")).toBe("Local endpoint base URL [{baseUrl}]:");
+    expect(rawSetupCopy("en", "onboarding.providers.localEndpoint.apiKeyOptional")).toBe("Optional API key for {envVar}. Leave blank for no local auth:");
+    expect(rawSetupCopy("en", "onboarding.providers.localEndpoint.invalidBaseUrl")).toBe("Invalid endpoint URL. Enter an absolute URL such as {baseUrl}.");
+    expect(rawSetupCopy("ar", "onboarding.providers.localEndpoint.baseUrl")).toContain("{baseUrl}");
+    expect(rawSetupCopy("ar", "onboarding.providers.localEndpoint.apiKeyOptional")).toContain("{envVar}");
+    expect(formatSetupCopy("ar", "onboarding.providers.localEndpoint.baseUrl", {
+      baseUrl: "http://localhost:11434/v1",
+    })).toContain(isolateLtr("http://localhost:11434/v1"));
+    expect(formatSetupCopy("ar", "onboarding.providers.localEndpoint.apiKeyOptional", {
+      envVar: "OPENAI_COMPATIBLE_API_KEY",
+    })).toContain(isolateLtr("OPENAI_COMPATIBLE_API_KEY"));
+    expect(formatSetupCopy("ar", "onboarding.providers.localEndpoint.apiKeyOptional", {
+      envVar: "OPENAI_COMPATIBLE_API_KEY",
+    })).toContain(isolateLtr("API"));
+    expect(formatSetupCopy("ar", "onboarding.providers.localEndpoint.invalidBaseUrl", {
+      baseUrl: "http://localhost:11434/v1",
+    })).toContain(isolateLtr("URL"));
+    expect(formatSetupCopy("ar", "onboarding.providers.localEndpoint.invalidBaseUrl", {
+      baseUrl: "http://localhost:11434/v1",
+    })).toContain(isolateLtr("http://localhost:11434/v1"));
   });
 
   it("contains review manifest copy keys", () => {
