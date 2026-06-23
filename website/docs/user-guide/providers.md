@@ -238,15 +238,24 @@ To clear a session override:
 
 ## Codex Setup Path
 
-Codex is not an option in the onboarding wizard. It is a public CLI setup path for advanced users who want to use the Codex CLI model.
+Codex can be configured from the model picker where the nested OpenAI choice is enabled:
+
+1. Choose **OpenAI**.
+2. Choose **Codex**.
+
+The **OpenAI Models** choice is the API-key path for normal OpenAI models. The **Codex** choice is the OAuth path. Codex configuration uses provider `codex`, default model `gpt-5.5`, auth method `oauth_device_pkce`, and Responses API mode (`openai_responses`). It does not use `apiKeyEnv`.
+
+The direct CLI setup command remains available:
 
 ```bash
 estacoda model setup codex
 ```
 
-This command runs OAuth device-code authentication, stores tokens in `~/.estacoda/auth.json`, and configures the `codex/o3` route. Raw OAuth tokens are not printed. Route config remains separate from token storage.
+This command runs OAuth device-code authentication, stores tokens in the selected profile's `auth.json`, and configures the `codex/gpt-5.5` route. Raw OAuth tokens are not printed. Route config remains separate from token storage.
 
-Codex is excluded from the onboarding wizard by design. If you need Codex, run the setup command explicitly.
+The Setup Editor can configure Codex for the primary model route and fallback model routes through reviewed apply. OAuth tokens collected through the Setup Editor are written only after review approval; cancelling review after OAuth does not persist tokens.
+
+Codex setup uses the fixed default model `gpt-5.5`. EstaCoda does not fetch a live Codex model list in this pass, and it does not maintain or apply a fallback Codex model list in this pass. First-run onboarding is unchanged and does not introduce Codex OAuth setup. Auxiliary model routes are unchanged too; they do not introduce Codex OAuth setup in this pass.
 
 ---
 

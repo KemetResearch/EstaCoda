@@ -141,7 +141,7 @@ estacoda model setup codex              # إعداد OAuth device-code لـ Code
 **الحالة المُعدّلة:**
 - `~/.estacoda/profiles/<id>/config.json` (المسار الأساسي، سلسلة الاحتياطي، تسجيل المزود)
 - `~/.estacoda/profiles/<id>/.env` (قيم مفاتيح API الاختيارية بعد تطبيق مُراجع)
-- `~/.estacoda/auth.json` (رموز OAuth لـ Codex)
+- `~/.estacoda/profiles/<id>/auth.json` (رموز OAuth لـ Codex في الملف الشخصي المحدد)
 
 **حدود الملف التعريف:** كل إعدادات النموذج مرتبطة بالملف التعريف.
 
@@ -149,7 +149,9 @@ estacoda model setup codex              # إعداد OAuth device-code لـ Code
 - `estacoda model` الصافي يفتح منتقي تفاعلي في وضع الإعداد عند توفر TTY؛ وإلا يطبع نظرة عامة.
 - `model setup local` يهيئ المزود المدمج `local` لـ Ollama أو LM Studio أو llama.cpp أو vLLM أو نقطة نهاية محلية/خاصة أخرى متوافقة مع OpenAI. القيمة الافتراضية هي `http://localhost:11434/v1`، ولا يحتاج مفتاح API افتراضيًا، ويخزن `--api-key` الاختياري باسم `OPENAI_COMPATIBLE_API_KEY`.
 - `model setup custom` يهيئ معرف مزود OpenAI-compatible منفصلًا مع `baseUrl` صريح؛ استخدمه عندما تحتاج هوية مزود مستقلة عن المزود المدمج `local`.
-- `model setup codex` يُ authenticate عبر تدفق رمز الجهاز OAuth، ويخزن الرموز في `~/.estacoda/auth.json`، ويُهيئ مسار `codex/o3`.
+- `model setup codex` يُ authenticate عبر تدفق رمز الجهاز OAuth، ويخزن الرموز في `auth.json` داخل الملف الشخصي المحدد، ويُهيئ مسار `codex/gpt-5.5` مع طريقة المصادقة `oauth_device_pkce` ونمط API `openai_responses`.
+- يمكن لأمر `estacoda model` الصافي أيضًا إعداد Codex عندما يكون خيار OpenAI المتداخل مفعّلًا: اختر `OpenAI`، ثم `Codex`. خيار `OpenAI Models` هو مسار مفتاح API لـ OpenAI؛ وخيار `Codex` هو مسار OAuth.
+- يمكن لتعديلات المسار الأساسي والاحتياطي في محرّر الإعدادات إعداد Codex عبر تطبيق مُراجع. رموز OAuth لا تُكتب إلا بعد موافقة المراجعة؛ إلغاء المراجعة بعد OAuth لا يحفظ الرموز. لا يضيف onboarding الأولي ولا مسارات النماذج المساعدة إعداد Codex عبر OAuth في هذا المرور.
 - `model fallback` تدير سلسلة الاحتياطي المرتبة وهي متوفرة أيضًا عبر محرّر الإعدادات (`edit-fallback-model-route`). `estacoda model set` مرفوض كأمر مهمل.
 
 **أنماط الفشل:**

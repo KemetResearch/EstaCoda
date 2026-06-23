@@ -143,7 +143,7 @@ estacoda model setup codex              # OAuth device-code setup for Codex
 **State touched:**
 - `~/.estacoda/profiles/<id>/config.json` (primary route, fallback chain, provider registration)
 - `~/.estacoda/profiles/<id>/.env` (optional raw API key values after reviewed setup)
-- `~/.estacoda/auth.json` (Codex OAuth tokens)
+- `~/.estacoda/profiles/<id>/auth.json` (Codex OAuth tokens for the selected profile)
 
 **Profile boundary:** All model config is profile-scoped.
 
@@ -151,7 +151,9 @@ estacoda model setup codex              # OAuth device-code setup for Codex
 - Bare `estacoda model` opens an interactive picker in setup mode when a TTY is available; otherwise prints an overview.
 - `model setup local` configures the built-in `local` provider for Ollama, LM Studio, llama.cpp, vLLM, or another OpenAI-compatible local/private endpoint. It defaults to `http://localhost:11434/v1`, requires no API key by default, and stores an optional `--api-key` as `OPENAI_COMPATIBLE_API_KEY`.
 - `model setup custom` configures a separate named OpenAI-compatible provider ID with an explicit `baseUrl`; use it when you need more than the built-in `local` provider identity.
-- `model setup codex` authenticates through OAuth device code flow, stores tokens in `~/.estacoda/auth.json`, and configures the `codex/o3` route.
+- `model setup codex` authenticates through OAuth device code flow, stores tokens in the selected profile's `auth.json`, and configures the `codex/gpt-5.5` route with auth method `oauth_device_pkce` and API mode `openai_responses`.
+- Bare `estacoda model` can also configure Codex where the nested OpenAI choice is enabled: choose `OpenAI`, then `Codex`. The `OpenAI Models` choice is the API-key OpenAI path; `Codex` is the OAuth path.
+- Setup Editor primary and fallback model-route edits can configure Codex through reviewed apply. OAuth tokens are written only after review approval; cancelling review after OAuth does not persist tokens. First-run onboarding and auxiliary model routes do not add Codex OAuth setup in this pass.
 - `model fallback` manages the ordered fallback chain and is also accessible through the Setup Editor (`edit-fallback-model-route`). `estacoda model set` is deprecated and rejected.
 
 **Failure modes:**

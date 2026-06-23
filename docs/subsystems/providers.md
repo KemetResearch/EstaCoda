@@ -429,8 +429,11 @@ Cloud browser providers are separate from web research providers. Browserbase is
 - Chat-capable providers can be live inference routes.
 - Vision routing is implemented in code, but live success depends on actual provider capability plus working credentials.
 - Smart approval does not build a legacy provider/model assessor fallback. It requires the resolved `auxiliaryModels.assessor` route, the main route, and a provider executor; missing route/config fails safe to manual approval.
-- `estacoda model setup codex` authenticates through OAuth device code, stores tokens in `~/.estacoda/auth.json`, and configures the `codex/o3` route. Raw OAuth tokens are not printed. Route config remains separate from token storage.
-- Codex OAuth setup lives on the model setup surface, not in the Onboarding Wizard. If the Onboarding Wizard later offers Codex OAuth, it must delegate to that model setup/OAuth boundary.
+- Codex can be configured from the model picker when the nested OpenAI choice is enabled: choose `OpenAI`, then `Codex`. `OpenAI Models` is the API-key OpenAI path; `Codex` is the OAuth path.
+- `estacoda model setup codex` remains the direct CLI path. It authenticates through OAuth device code, stores tokens in the selected profile's `auth.json`, and configures the `codex/gpt-5.5` route with provider `codex`, auth method `oauth_device_pkce`, and API mode `openai_responses`. Raw OAuth tokens are not printed, and route config remains separate from token storage.
+- The Setup Editor can configure Codex as a primary or fallback route through reviewed apply. OAuth tokens are written only after review approval; cancelling review after OAuth does not persist tokens.
+- Codex OAuth setup does not live in the Onboarding Wizard in this pass. If the Onboarding Wizard later offers Codex OAuth, it must delegate to that model setup/OAuth boundary.
+- Auxiliary model routes remain unchanged in this pass and do not introduce Codex OAuth setup.
 - `estacoda model setup local` configures the built-in Local / private endpoint route. It prompts for or accepts a `baseUrl`, keeps no-auth as the default, and stores an optional key as `OPENAI_COMPATIBLE_API_KEY` through the normal profile `.env` boundary. Endpoint/base URL changes must be reviewed and applied through provider-route drafts, not credential-only drafts.
 - `estacoda model setup custom` remains the separate named-provider path for OpenAI-compatible endpoints that should not use the built-in `local` provider ID.
 

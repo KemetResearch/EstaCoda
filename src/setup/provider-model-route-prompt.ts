@@ -315,33 +315,27 @@ function promptColumns(locale: SetupCopyLocale): SelectPromptInput<unknown>["col
 }
 
 function openAiCodexTitle(locale: SetupCopyLocale): string {
-  return locale === "ar" ? "طريقة OpenAI" : "OpenAI setup";
+  return setupCopyText(locale, "setupEditor.prompt.openAiRoute.title");
 }
 
 function openAiCodexBody(locale: SetupCopyLocale): string {
-  return locale === "ar"
-    ? "اختر طريقة إعداد OpenAI."
-    : "Choose how to configure OpenAI.";
+  return setupCopyText(locale, "setupEditor.prompt.openAiRoute.body");
 }
 
 function openAiModelsLabel(locale: SetupCopyLocale): string {
-  return locale === "ar" ? "نماذج OpenAI" : "OpenAI Models";
+  return setupCopyText(locale, "setupEditor.prompt.openAiRoute.openAiModels");
 }
 
 function openAiModelsDetails(locale: SetupCopyLocale): string {
-  return locale === "ar"
-    ? "عبر مفاتيح OpenAI API."
-    : "Via OpenAI API keys.";
+  return setupCopyText(locale, "setupEditor.prompt.openAiRoute.openAiModels.description");
 }
 
 function codexOauthLabel(locale: SetupCopyLocale): string {
-  return locale === "ar" ? "Codex" : "Codex";
+  return setupCopyText(locale, "setupEditor.prompt.openAiRoute.codex");
 }
 
 function codexOauthDetails(locale: SetupCopyLocale): string {
-  return locale === "ar"
-    ? "عبر OAuth."
-    : "Via OAuth.";
+  return setupCopyText(locale, "setupEditor.prompt.openAiRoute.codex.description");
 }
 
 export function providerCandidateDescription(locale: SetupCopyLocale, candidate: ProviderCandidate): string {
