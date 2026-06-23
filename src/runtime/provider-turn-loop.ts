@@ -1108,6 +1108,10 @@ export class ProviderTurnLoop {
         ? (secretIndexes.has(index) ? { argumentsRedacted: true as const } : {})
         : toolCall.argumentsText === undefined ? {} : { argumentsText: toolCall.argumentsText })
     }));
+    // This persists protocol material required by some native tool-call replay APIs.
+    // It is not semantic permission to replay hidden reasoning historically; prompt
+    // assembly/native history must later prove an exact active continuation group
+    // before real echo can be reused, otherwise it is stripped or placeholdered.
     const providerReplayEcho = nativeReplaySafe &&
       echoEligibility.required &&
       echoEligibility.providerFamily !== undefined &&
@@ -1229,6 +1233,17 @@ function nativeHistorySerializedDiagnostic(
     message.providerReplayEcho.providerFamily === metadata.reasoningEchoProviderFamily &&
     message.providerReplayEcho.apiMode === "openai_chat_completions"
   ).length;
+  const preservedEchoMessages = assistantToolMessages.filter((message) =>
+    message.providerReplayEcho !== undefined &&
+    message.providerReplayEcho.provenance !== "protocol-placeholder" &&
+    message.providerReplayEcho.providerFamily === metadata.reasoningEchoProviderFamily &&
+    message.providerReplayEcho.apiMode === "openai_chat_completions"
+  ).length;
+  const placeholderEchoMessages = assistantToolMessages.filter((message) =>
+    message.providerReplayEcho?.provenance === "protocol-placeholder" &&
+    message.providerReplayEcho.providerFamily === metadata.reasoningEchoProviderFamily &&
+    message.providerReplayEcho.apiMode === "openai_chat_completions"
+  ).length;
   const echoMissing = requiresEcho ? assistantToolMessages.length - echoMessages : 0;
 
   if (echoMissing > 0) {
@@ -1245,7 +1260,10 @@ function nativeHistorySerializedDiagnostic(
     kind: "structured-tool-history-serialized",
     ...base,
     nativePairs: assistantToolMessages.length,
-    echoMessages
+    echoMessages,
+    preservedEchoMessages,
+    placeholderEchoMessages,
+    strippedEchoMessages: 0
   };
 }
 

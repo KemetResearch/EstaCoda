@@ -1118,12 +1118,19 @@ describe("ProviderTurnLoop semantic session compression", () => {
       expect.objectContaining({
         kind: "structured-tool-history-selected",
         nativePairs: 1,
-        routeRole: "primary"
+        routeRole: "primary",
+        preservedEchoMessages: 0,
+        placeholderEchoMessages: 0,
+        strippedEchoMessages: 0,
+        historicalNativeReplay: true
       }),
       expect.objectContaining({
         kind: "structured-tool-history-serialized",
         nativePairs: 1,
-        routeRole: "primary"
+        routeRole: "primary",
+        preservedEchoMessages: 0,
+        placeholderEchoMessages: 0,
+        strippedEchoMessages: 0
       })
     ]));
     const serializedEvents = JSON.stringify(events.filter((event) =>
@@ -1406,11 +1413,17 @@ describe("ProviderTurnLoop post-tool empty response recovery", () => {
     expect(events).toEqual(expect.arrayContaining([
       expect.objectContaining({
         kind: "structured-tool-history-selected",
-        nativePairs: 1
+        nativePairs: 1,
+        preservedEchoMessages: 0,
+        placeholderEchoMessages: 0,
+        strippedEchoMessages: 0
       }),
       expect.objectContaining({
         kind: "structured-tool-history-serialized",
-        nativePairs: 1
+        nativePairs: 1,
+        preservedEchoMessages: 0,
+        placeholderEchoMessages: 0,
+        strippedEchoMessages: 0
       })
     ]));
   });
@@ -1566,6 +1579,65 @@ describe("ProviderTurnLoop post-tool empty response recovery", () => {
         chars: reasoning.length
       }
     }));
+  });
+
+  it("persists provider replay echo as protocol material, not replay scope", async () => {
+    const echoRoute = echoRequiredRoute();
+    const reasoning = "same-turn protocol reasoning";
+    const harness = await createPostToolNudgeHarness({
+      responses: [
+        providerExecution("", [providerToolCall("call-protocol-echo")], {
+          route: echoRoute,
+          routeRole: "primary",
+          attemptedRouteIndex: 0,
+          response: {
+            ok: true,
+            content: "",
+            model: echoRoute.id,
+            provider: echoRoute.provider,
+            reasoning,
+            reasoningMetadata: {
+              present: true,
+              chars: reasoning.length,
+              format: "reasoning_content"
+            }
+          }
+        })
+      ],
+      toolSteps: [
+        {}
+      ],
+      maxProviderIterations: 1
+    });
+
+    await runBasicProviderTurn(harness.loop);
+
+    const messages = await harness.sessionDb.listMessages(harness.sessionId);
+    const persisted = messages.find((message) => message.metadata?.kind === "provider-tool-call-turn");
+    expect(persisted?.metadata).toEqual(expect.objectContaining({
+      nativeReplaySafe: true,
+      provider: "deepseek",
+      model: "deepseek-reasoner",
+      routeRole: "primary",
+      attemptedRouteIndex: 0,
+      providerToolCalls: [
+        {
+          id: "call-protocol-echo",
+          name: testTool.name,
+          argumentsText: "{}"
+        }
+      ],
+      providerReplayEcho: {
+        field: "reasoning_content",
+        value: reasoning,
+        providerFamily: "deepseek",
+        apiMode: "openai_chat_completions",
+        chars: reasoning.length
+      }
+    }));
+    expect(persisted?.metadata).not.toHaveProperty("reasoningReplayScope");
+    expect(persisted?.metadata).not.toHaveProperty("semanticReplayAllowed");
+    expect(persisted?.metadata).not.toHaveProperty("replayScope");
   });
 
   it("marks echo-required turns unsafe when echo is missing or oversized", async () => {

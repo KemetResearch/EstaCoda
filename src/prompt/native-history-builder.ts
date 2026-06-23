@@ -6,13 +6,40 @@ type ProviderToolCallTurnMetadata = {
   nativeReplaySafe: boolean;
   providerToolCalls: unknown;
   providerReplayEcho?: unknown;
+  provider?: unknown;
+  model?: unknown;
+  routeRole?: unknown;
+  attemptedRouteIndex?: unknown;
 };
 
 export type NativeHistoryBuilderOptions = {
   targetProviderFamily?: ProviderReplayEcho["providerFamily"];
   targetApiMode?: ProviderReplayEcho["apiMode"];
   mergeAdjacentUsers?: boolean;
+  replayEchoContext?: ProviderReplayEchoContext;
+  activeRouteIdentity?: ProviderReplayEchoRouteIdentity;
 };
+
+export type ProviderReplayEchoRouteIdentity = {
+  provider?: string;
+  model?: string;
+  routeRole?: string;
+  attemptedRouteIndex?: number;
+};
+
+export type ProviderReplayEchoContext =
+  | {
+      kind: "historical";
+      requiresReasoningEcho: boolean;
+    }
+  | {
+      kind: "active-continuation";
+      activeToolCallIds: ReadonlySet<string>;
+      requiresReasoningEcho: boolean;
+    }
+  | {
+      kind: "strip";
+    };
 
 export type NativeHistoryBuilderStats = {
   nativeToolTurns: number;
@@ -23,6 +50,8 @@ export type NativeHistoryBuilderStats = {
   droppedToolMessages: number;
   skippedUnsafeTurns: number;
   skippedMalformedTurns: number;
+  preservedProviderReplayEcho: number;
+  placeholderProviderReplayEcho: number;
   strippedProviderReplayEcho: number;
   mergedUserMessages: number;
 };
@@ -47,6 +76,8 @@ export function buildNativeHistoryMessages(
     droppedToolMessages: 0,
     skippedUnsafeTurns: 0,
     skippedMalformedTurns: 0,
+    preservedProviderReplayEcho: 0,
+    placeholderProviderReplayEcho: 0,
     strippedProviderReplayEcho: 0,
     mergedUserMessages: 0
   };
@@ -117,14 +148,7 @@ function buildToolCallTurnMessages(
     content: sessionMessages[index]?.content ?? "",
     toolCalls
   };
-  const echo = providerReplayEcho(metadata.providerReplayEcho);
-  if (echo !== undefined) {
-    if (echoMatchesTarget(echo, options)) {
-      assistant.providerReplayEcho = echo;
-    } else {
-      stats.strippedProviderReplayEcho += 1;
-    }
-  }
+  applyProviderReplayEcho(assistant, metadata, toolCalls, missingIds, options, stats);
 
   const providerMessages: ProviderMessage[] = [assistant];
   for (const toolCall of toolCalls) {
@@ -279,7 +303,11 @@ function providerToolCallTurnMetadata(metadata: SessionMessage["metadata"]): Pro
     kind: "provider-tool-call-turn",
     nativeReplaySafe: metadata.nativeReplaySafe === true,
     providerToolCalls: metadata.providerToolCalls,
-    providerReplayEcho: metadata.providerReplayEcho
+    providerReplayEcho: metadata.providerReplayEcho,
+    provider: metadata.provider,
+    model: metadata.model,
+    routeRole: metadata.routeRole,
+    attemptedRouteIndex: metadata.attemptedRouteIndex
   };
 }
 
@@ -323,13 +351,16 @@ function providerReplayEcho(value: unknown): ProviderReplayEcho | undefined {
     return undefined;
   }
   const record = value as Record<string, unknown>;
+  const provenance = providerReplayEchoProvenance(record.provenance);
   if (
     record.field !== "reasoning_content" ||
     typeof record.value !== "string" ||
     !isProviderReplayEchoFamily(record.providerFamily) ||
     record.apiMode !== "openai_chat_completions" ||
     typeof record.chars !== "number" ||
-    record.chars !== record.value.length
+    record.chars !== record.value.length ||
+    provenance === false ||
+    (provenance === "protocol-placeholder" && (record.value !== " " || record.chars !== 1))
   ) {
     return undefined;
   }
@@ -338,12 +369,111 @@ function providerReplayEcho(value: unknown): ProviderReplayEcho | undefined {
     value: record.value,
     providerFamily: record.providerFamily,
     apiMode: "openai_chat_completions",
-    chars: record.chars
+    chars: record.chars,
+    ...(provenance === undefined ? {} : { provenance })
   };
 }
 
 function isProviderReplayEchoFamily(value: unknown): value is ProviderReplayEcho["providerFamily"] {
   return value === "deepseek" || value === "kimi" || value === "mimo";
+}
+
+function providerReplayEchoProvenance(value: unknown): ProviderReplayEcho["provenance"] | undefined | false {
+  if (value === undefined) {
+    return undefined;
+  }
+  return value === "provider" || value === "protocol-placeholder" ? value : false;
+}
+
+function applyProviderReplayEcho(
+  assistant: ProviderMessage,
+  metadata: ProviderToolCallTurnMetadata,
+  toolCalls: ProviderStructuredToolCall[],
+  missingIds: string[],
+  options: NativeHistoryBuilderOptions,
+  stats: NativeHistoryBuilderStats
+): void {
+  const rawEchoExists = metadata.providerReplayEcho !== undefined;
+  const echo = providerReplayEcho(metadata.providerReplayEcho);
+  const context = options.replayEchoContext ?? { kind: "strip" as const };
+
+  if (
+    context.kind === "active-continuation" &&
+    echo !== undefined &&
+    isProviderOriginatedEcho(echo) &&
+    echoMatchesTarget(echo, options) &&
+    routeIdentityMatchesTarget(metadata, options.activeRouteIdentity) &&
+    missingIds.length === 0 &&
+    toolCallIdsExactlyMatch(toolCalls, context.activeToolCallIds)
+  ) {
+    assistant.providerReplayEcho = echo;
+    stats.preservedProviderReplayEcho += 1;
+    return;
+  }
+
+  if (rawEchoExists) {
+    stats.strippedProviderReplayEcho += 1;
+  }
+
+  if (context.kind !== "strip" && context.requiresReasoningEcho === true) {
+    const placeholder = providerReplayEchoPlaceholder(options);
+    if (placeholder !== undefined) {
+      assistant.providerReplayEcho = placeholder;
+      stats.placeholderProviderReplayEcho += 1;
+    }
+  }
+}
+
+function isProviderOriginatedEcho(echo: ProviderReplayEcho): boolean {
+  return echo.provenance === undefined || echo.provenance === "provider";
+}
+
+function routeIdentityMatchesTarget(
+  metadata: ProviderToolCallTurnMetadata,
+  activeRouteIdentity: ProviderReplayEchoRouteIdentity | undefined
+): boolean {
+  if (activeRouteIdentity === undefined) {
+    return true;
+  }
+
+  return identityFieldMatches(metadata.provider, activeRouteIdentity.provider) &&
+    identityFieldMatches(metadata.model, activeRouteIdentity.model) &&
+    identityFieldMatches(metadata.routeRole, activeRouteIdentity.routeRole) &&
+    identityFieldMatches(metadata.attemptedRouteIndex, activeRouteIdentity.attemptedRouteIndex);
+}
+
+function identityFieldMatches(persisted: unknown, active: string | number | undefined): boolean {
+  if (persisted === undefined || active === undefined) {
+    return true;
+  }
+  return persisted === active;
+}
+
+function providerReplayEchoPlaceholder(options: NativeHistoryBuilderOptions): ProviderReplayEcho | undefined {
+  if (
+    options.targetProviderFamily === undefined ||
+    options.targetApiMode !== "openai_chat_completions"
+  ) {
+    return undefined;
+  }
+  return {
+    field: "reasoning_content",
+    value: " ",
+    providerFamily: options.targetProviderFamily,
+    apiMode: "openai_chat_completions",
+    chars: 1,
+    provenance: "protocol-placeholder"
+  };
+}
+
+function toolCallIdsExactlyMatch(
+  toolCalls: ProviderStructuredToolCall[],
+  activeToolCallIds: ReadonlySet<string>
+): boolean {
+  if (toolCalls.length !== activeToolCallIds.size) {
+    return false;
+  }
+  return toolCalls.every((toolCall) => activeToolCallIds.has(toolCall.id));
 }
 
 function echoMatchesTarget(echo: ProviderReplayEcho, options: NativeHistoryBuilderOptions): boolean {
