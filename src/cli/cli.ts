@@ -892,7 +892,7 @@ async function model(options: CliOptions, args: string[]): Promise<CliCommandRes
       exitCode: 0,
       output: [
         "Model setup commands:",
-        "  estacoda model setup local [--base-url <url>] [--model <id>] [--context-window <n>]",
+        "  estacoda model setup local [--base-url <url>] [--model <id>] [--api-key <key>] [--context-window <n>]",
         "  estacoda model setup custom --base-url <url> [--provider-id <id>] [--model <id>] [--api-key-env <env>] [--context-window <n>]",
         "  estacoda model setup codex"
       ].join("\n")
@@ -1282,7 +1282,7 @@ function renderModelOverview(config: Awaited<ReturnType<typeof loadRuntimeConfig
   diagnosticLines.push("Commands:");
   diagnosticLines.push("  estacoda model status");
   diagnosticLines.push("  estacoda model diagnose");
-  diagnosticLines.push("  estacoda model setup local [--base-url <url>] [--model <id>] [--context-window <n>]");
+  diagnosticLines.push("  estacoda model setup local [--base-url <url>] [--model <id>] [--api-key <key>] [--context-window <n>]");
   diagnosticLines.push("  estacoda model setup custom --base-url <url> [--provider-id <id>] [--model <id>] [--api-key-env <env>] [--context-window <n>]");
   diagnosticLines.push("  estacoda model setup codex");
   diagnosticLines.push("  estacoda model set <provider>/<model> (deprecated; disabled)");
@@ -1349,7 +1349,7 @@ function renderModelSetupHelp(args: string[]): string {
       "EstaCoda local model setup",
       "",
       "Usage:",
-      "  estacoda model setup local [--base-url <url>] [--model <id>] [--context-window <n>]",
+      "  estacoda model setup local [--base-url <url>] [--model <id>] [--api-key <key>] [--context-window <n>]",
       "",
       "Configures a local OpenAI-compatible endpoint such as Ollama or llama.cpp.",
       "",
@@ -1395,7 +1395,7 @@ function renderModelSetupHelp(args: string[]): string {
     "EstaCoda model setup",
     "",
     "Usage:",
-    "  estacoda model setup local [--base-url <url>] [--model <id>] [--context-window <n>]",
+    "  estacoda model setup local [--base-url <url>] [--model <id>] [--api-key <key>] [--context-window <n>]",
     "  estacoda model setup custom --base-url <url> [--provider-id <id>] [--model <id>] [--api-key-env <env>] [--context-window <n>]",
     "  estacoda model setup codex",
     "",

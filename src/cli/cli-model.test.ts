@@ -2354,7 +2354,7 @@ describe("cli model", () => {
       expect(result.handled).toBe(true);
       expect(result.exitCode).toBe(0);
       expect(result.output).toContain("EstaCoda model setup");
-      expect(result.output).toContain("estacoda model setup local");
+      expect(result.output).toContain("estacoda model setup local [--base-url <url>] [--model <id>] [--api-key <key>] [--context-window <n>]");
       expect(result.output).toContain("estacoda model setup custom");
       expect(result.output).toContain("estacoda model setup codex");
       expect(result.output).not.toContain("Unexpected token");
@@ -2370,7 +2370,7 @@ describe("cli model", () => {
       expect(result.handled).toBe(true);
       expect(result.exitCode).toBe(0);
       expect(result.output).toContain("EstaCoda local model setup");
-      expect(result.output).toContain("estacoda model setup local");
+      expect(result.output).toContain("estacoda model setup local [--base-url <url>] [--model <id>] [--api-key <key>] [--context-window <n>]");
       expect(result.output).not.toContain("Endpoint check:");
       expect(result.output).not.toContain("Could not discover models");
     });
