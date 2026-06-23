@@ -1149,11 +1149,24 @@ async function persistModelSelection(
       break;
     }
     case "oauth": {
-      return {
-        handled: true,
-        exitCode: 1,
-        output: `OAuth setup for ${resolution.provider} is not wired into this model picker yet. Use estacoda model setup ${resolution.provider}.`
-      };
+      if (resolution.provider !== "codex") {
+        return {
+          handled: true,
+          exitCode: 1,
+          output: `OAuth setup for ${resolution.provider} is not supported by this model picker yet.`
+        };
+      }
+      if (resolution.credentialAction.status !== "ready") {
+        return runModelSetupCodex({
+          workspaceRoot: options.workspaceRoot,
+          homeDir: options.homeDir,
+          profileId: options.profileId,
+          prompt: options.prompt,
+          fetchLike: options.providerFetch,
+          output: options.output,
+        });
+      }
+      break;
     }
   }
 
@@ -1162,7 +1175,8 @@ async function persistModelSelection(
     provider: resolution.provider,
     baseUrl: resolution.baseUrl,
     apiKeyEnv: envVarName,
-    apiMode: resolution.apiMode
+    apiMode: resolution.apiMode,
+    authMethod: resolution.authMethod === "api_key" ? undefined : resolution.authMethod
   });
 
   mutated = applyRegisterProviderModel(mutated, {
@@ -1239,6 +1253,7 @@ async function runBareModelPicker(
     config: config.config,
     providerRegistry: config.providerRegistry,
     homeDir: options.homeDir,
+    profileId: options.profileId,
     modelsDevOptions: options.modelsDevOptions,
     allowNetwork: false,
     mode: "setup"
@@ -1258,6 +1273,7 @@ async function runBareModelPicker(
     allowBack: true,
     allowCancel: true,
     mode: "primary",
+    openAiCodexChoice: true,
   });
 
   if (routeSelection.kind === "selected") {

@@ -37,6 +37,7 @@ export type ProviderModelSelectionFlowOptions = {
   config: EstaCodaConfig;
   providerRegistry: ProviderRegistry;
   homeDir?: string;
+  profileId?: string;
   modelsDevOptions?: CreateModelSelectionCatalogOptions["modelsDevOptions"];
   modelCatalogOverrides?: CreateModelSelectionCatalogOptions["modelCatalogOverrides"];
   allowNetwork?: boolean;
@@ -127,7 +128,7 @@ export async function createProviderModelSelectionFlow(
 
   // Load the protected .env boundary so credential readiness checks
   // reflect secrets stored in ~/.estacoda/.env, not just shell env.
-  await loadDotEnvSecrets({ homeDir: options.homeDir });
+  await loadDotEnvSecrets({ homeDir: options.homeDir, profileId: options.profileId });
 
   const catalog = await createModelSelectionCatalog({
     config: options.config,
@@ -353,9 +354,13 @@ async function resolveSelectionImpl(
   const providerConfig = config.providers?.[providerId];
   const apiKeyEnv = providerConfig?.apiKeyEnv ?? meta.defaultApiKeyEnv;
   const apiMode = providerConfig?.apiMode ?? meta.apiMode;
+  const authMethod = providerConfig?.authMethod ?? meta.defaultAuthMethod;
 
   // Check credential readiness without exposing secret values
-  const credentialAction = await determineCredentialAction(providerId, apiKeyEnv, meta, options.homeDir);
+  const credentialAction = await determineCredentialAction(providerId, apiKeyEnv, {
+    ...meta,
+    defaultAuthMethod: authMethod,
+  }, options.homeDir, options.profileId);
 
   return {
     kind: "selected",
@@ -363,7 +368,7 @@ async function resolveSelectionImpl(
     model: modelId,
     baseUrl,
     apiMode,
-    authMethod: meta.defaultAuthMethod,
+    authMethod,
     credentialAction,
     profile
   };
@@ -380,11 +385,12 @@ async function determineCredentialAction(
   providerId: ProviderId,
   apiKeyEnv: string | undefined,
   meta: ProviderMetadata,
-  homeDir?: string
+  homeDir?: string,
+  profileId?: string
 ): Promise<CredentialAction> {
   if (isOAuthAuthMethod(meta.defaultAuthMethod)) {
     if (providerId === "codex") {
-      const status = await readCodexOAuthStatus({ homeDir });
+      const status = await readCodexOAuthStatus({ homeDir, profileId });
       return {
         kind: "oauth",
         providerId,

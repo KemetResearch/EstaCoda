@@ -178,6 +178,118 @@ describe("selectProviderModelRoute", () => {
     expect(flow.resolved).toEqual([{ providerId: "local", modelId: "local-model" }]);
   });
 
+  it("shows Codex as an OpenAI sub-choice when the nested choice is enabled", async () => {
+    const flow = fakeFlow({
+      providers: [
+        providerCandidate("openai", "OpenAI", 1),
+        providerCandidate("codex", "Codex", 1),
+        providerCandidate("local", "Local", 1),
+      ],
+    });
+    const prompt = fakePrompt(["openai", "codex-oauth"]);
+
+    const result = await selectProviderModelRoute({
+      prompt,
+      flowEngine: flow.engine,
+      locale: "en",
+      mode: "primary",
+      allowBack: true,
+      allowCancel: true,
+      openAiCodexChoice: true,
+    });
+
+    expect(result).toEqual({
+      kind: "selected",
+      selection: selectionResult("codex", "o3"),
+    });
+    expect(prompt.calls.map((call) => call.title)).toEqual([
+      "Primary provider",
+      "OpenAI setup",
+    ]);
+    expect(prompt.calls[0]?.options.map((option) => option.id)).toEqual([
+      "openai",
+      "local",
+      "back",
+      "cancel",
+    ]);
+    expect(prompt.calls[1]?.options.map((option) => option.id)).toEqual([
+      "openai-api-key",
+      "codex-oauth",
+      "back",
+      "cancel",
+    ]);
+    expect(flow.modelListCount).toBe(0);
+    expect(flow.resolved).toEqual([{ providerId: "codex", modelId: "o3" }]);
+  });
+
+  it("continues to normal OpenAI model selection from the OpenAI sub-choice", async () => {
+    const flow = fakeFlow({
+      providers: [
+        providerCandidate("openai", "OpenAI", 1),
+        providerCandidate("codex", "Codex", 1),
+      ],
+      models: {
+        openai: [modelCandidate("openai", "gpt-5.5")],
+      },
+    });
+    const prompt = fakePrompt(["openai", "openai-api-key", "gpt-5.5"]);
+
+    const result = await selectProviderModelRoute({
+      prompt,
+      flowEngine: flow.engine,
+      locale: "en",
+      mode: "primary",
+      allowBack: true,
+      allowCancel: true,
+      openAiCodexChoice: true,
+    });
+
+    expect(result).toEqual({
+      kind: "selected",
+      selection: selectionResult("openai", "gpt-5.5"),
+    });
+    expect(prompt.calls.map((call) => call.title)).toEqual([
+      "Primary provider",
+      "OpenAI setup",
+      "Primary model",
+    ]);
+    expect(flow.resolved).toEqual([{ providerId: "openai", modelId: "gpt-5.5" }]);
+  });
+
+  it("leaves Codex as a top-level provider when the nested choice is disabled", async () => {
+    const flow = fakeFlow({
+      providers: [
+        providerCandidate("openai", "OpenAI", 1),
+        providerCandidate("codex", "Codex", 1),
+      ],
+      models: {
+        codex: [modelCandidate("codex", "o3")],
+      },
+    });
+    const prompt = fakePrompt(["codex", "o3"]);
+
+    const result = await selectProviderModelRoute({
+      prompt,
+      flowEngine: flow.engine,
+      locale: "en",
+      mode: "primary",
+      allowBack: true,
+      allowCancel: true,
+    });
+
+    expect(result).toEqual({
+      kind: "selected",
+      selection: selectionResult("codex", "o3"),
+    });
+    expect(prompt.calls[0]?.options.map((option) => option.id)).toEqual([
+      "openai",
+      "codex",
+      "back",
+      "cancel",
+    ]);
+    expect(flow.resolved).toEqual([{ providerId: "codex", modelId: "o3" }]);
+  });
+
   it("omits Back rows from provider and model cards when Back is disabled", async () => {
     const flow = fakeFlow();
     const prompt = fakePrompt();

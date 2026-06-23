@@ -1586,6 +1586,70 @@ describe("runConfigEditor", () => {
     expect(JSON.stringify(result)).not.toContain("sk-pr8-provider-route");
   });
 
+  it("applies Codex OAuth primary route through the OpenAI sub-choice without API-key collection", async () => {
+    await writeUserConfig(tempDir, localReadyConfig());
+    await trustWorkspace(tempDir, workspaceRoot);
+
+    const prompt = fakePrompt({ values: ["OpenAI", "Codex", true] });
+    const selectInputs: SelectPromptInput<unknown>[] = [];
+    const baseSelect = prompt.select!;
+    prompt.select = async (input) => {
+      if (input.title === "Primary provider" || input.title === "OpenAI setup") {
+        selectInputs.push(input as SelectPromptInput<unknown>);
+      }
+      return baseSelect(input);
+    };
+
+    const result = await runConfigEditor({
+      homeDir: tempDir,
+      workspaceRoot,
+      prompt,
+      defaultActionId: "edit-primary-model-route",
+      flowEngine: flowEngine({
+        credentialAction: "oauth",
+        oauthStatus: "ready",
+        providers: ["openai", "codex"],
+      }),
+      applyExecutor: createReviewedSetupApplyExecutor({
+        homeDir: tempDir,
+        workspaceRoot,
+        collectVerification: () => readyVerification(profileConfigPath(tempDir)),
+      }),
+    });
+    const rawConfig = await readFile(profileConfigPath(tempDir), "utf8");
+    const config = JSON.parse(rawConfig) as {
+      model?: { provider?: string; id?: string; contextWindowTokens?: number };
+      providers?: Record<string, { apiKeyEnv?: string; authMethod?: string; apiMode?: string; baseUrl?: string }>;
+    };
+
+    expect(result.completed).toBe(true);
+    expect(result.selectedActionId).toBe("edit-primary-model-route");
+    expect(selectInputs.map((input) => input.title)).toEqual(["Primary provider", "OpenAI setup"]);
+    expect(selectInputs[0]?.options.map((option) => option.id)).not.toContain("codex");
+    expect(selectInputs[1]?.options.map((option) => option.id)).toEqual(
+      expect.arrayContaining(["openai-api-key", "codex-oauth"])
+    );
+    expect(result.reviewManifest?.sections["provider-model-network"][0]?.review.values).toEqual(expect.objectContaining({
+      provider: "codex",
+      model: "o3",
+      authMethod: "oauth_device_pkce",
+      oauthCredentialStatus: "ready",
+    }));
+    expect(result.reviewManifest?.sections["secret-refs-to-store"][0]?.review.values).toEqual(expect.objectContaining({
+      provider: "codex",
+      credentialSurface: "oauth",
+      authMethod: "oauth_device_pkce",
+      oauthCredentialStatus: "ready",
+    }));
+    expect(config.model).toEqual({ provider: "codex", id: "o3", contextWindowTokens: 128000 });
+    expect(config.providers?.codex).toEqual(expect.objectContaining({
+      apiMode: "custom_openai_compatible",
+      authMethod: "oauth_device_pkce",
+    }));
+    expect(config.providers?.codex?.apiKeyEnv).toBeUndefined();
+    expect(rawConfig).not.toContain("accessToken");
+  });
+
   it("prompts for local endpoint and uses the default base URL when blank with no API key", async () => {
     await writeUserConfig(tempDir, localReadyConfig());
     await trustWorkspace(tempDir, workspaceRoot);
@@ -4728,8 +4792,9 @@ function blockedVerification(configPath: string) {
 }
 
 function flowEngine(options: {
-  readonly credentialAction?: "none" | "reuse" | "collect" | "endpoint";
+  readonly credentialAction?: "none" | "reuse" | "collect" | "endpoint" | "oauth";
   readonly envVarName?: string;
+  readonly oauthStatus?: "ready" | "required" | "expired";
   readonly diagnostic?: string;
   readonly providers?: readonly ProviderId[];
 } = {}): FlowEngine {
@@ -4757,14 +4822,22 @@ function flowEngine(options: {
         };
       }
       const action = options.credentialAction ?? "collect";
+      const isOAuth = action === "oauth" || providerId === "codex";
       return {
         kind: "selected" as const,
         provider: providerId,
         model: modelId,
         baseUrl: baseUrlForProvider(providerId),
         apiMode: "custom_openai_compatible" as ProviderApiMode,
-        authMethod: "api_key" as ProviderAuthMethod,
-        credentialAction: action === "none"
+        authMethod: (isOAuth ? "oauth_device_pkce" : "api_key") as ProviderAuthMethod,
+        credentialAction: isOAuth
+          ? {
+              kind: "oauth" as const,
+              providerId,
+              authMethod: "oauth_device_pkce" as ProviderAuthMethod,
+              status: options.oauthStatus ?? "ready",
+            }
+          : action === "none"
           ? { kind: "none" as const }
           : action === "reuse"
             ? { kind: "reuse" as const, reference: `env:${envVarName}` as `env:${string}` }
@@ -4788,18 +4861,22 @@ function flowEngine(options: {
 
 function displayNameForProvider(providerId: ProviderId): string {
   if (providerId === "local") return "Local";
+  if (providerId === "codex") return "Codex";
   return providerId === "anthropic" ? "Anthropic" : providerId === "kimi" ? "Kimi" : "OpenAI";
 }
 
 function baseUrlForProvider(providerId: ProviderId): string {
   if (providerId === "local") return "http://localhost:11434/v1";
+  if (providerId === "codex") return "https://chatgpt.com/backend-api/codex";
   if (providerId === "anthropic") return "https://api.anthropic.com/v1";
   if (providerId === "kimi") return "https://api.moonshot.ai/v1";
   return "https://api.openai.com/v1";
 }
 
 function modelCandidateForProvider(providerId: ProviderId) {
-  const id = providerId === "anthropic"
+  const id = providerId === "codex"
+    ? "o3"
+    : providerId === "anthropic"
     ? "claude-sonnet-4-5"
     : providerId === "kimi"
       ? "kimi-k2"

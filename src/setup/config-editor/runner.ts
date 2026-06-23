@@ -22,6 +22,7 @@ import { getProviderMetadata } from "../../providers/provider-metadata.js";
 import type { SkillAutonomy } from "../../skills/skill-learning.js";
 import type {
   SetupApplyEndState,
+  SetupDeferredOAuthWrite,
   SetupDeferredSecretWrite,
   SetupApplyExecutor,
   SetupApplyFlowOptions,
@@ -95,6 +96,13 @@ import {
   runWhatsAppSetupFlow,
   type WhatsAppSetupDependencies,
 } from "../whatsapp-setup-flow.js";
+import {
+  buildCodexOAuthTokenRecord,
+  CODEX_OAUTH_AUTH_METHOD,
+  formatCodexOAuthFailure,
+  runCodexOAuthFlowWithDeviceCodeNotice,
+} from "../../providers/oauth/codex-setup.js";
+import type { FetchLike as CodexOAuthFetchLike } from "../../providers/oauth/codex-oauth.js";
 
 export type ConfigEditorRunnerOptions = CollectSetupRouteOptions & {
   readonly prompt: Prompt;
@@ -104,6 +112,7 @@ export type ConfigEditorRunnerOptions = CollectSetupRouteOptions & {
   readonly renderInitialOverview?: boolean;
   readonly applyFlowOptions?: SetupApplyFlowOptions;
   readonly flowEngine?: FlowEngine;
+  readonly providerFetch?: CodexOAuthFetchLike;
   readonly gatewayServiceActivation?: {
     readonly serviceActions?: GatewayServiceActivationOptions["serviceActions"];
   };
@@ -131,6 +140,7 @@ type LocalizedConfigEditorRunnerOptions = ConfigEditorRunnerOptions & {
 };
 
 type PendingCredentialWrite = SetupDeferredSecretWrite;
+type PendingOAuthWrite = SetupDeferredOAuthWrite;
 
 type RunOnceResult = ConfigEditorRunnerResult & {
   readonly repairAgainDecision?: SetupRouteDecision;
@@ -957,6 +967,7 @@ async function reviewAndApplyBundles(
   bundles: readonly SetupDraftBundle[],
   sideEffects: {
     readonly pendingCredentialWrites?: readonly PendingCredentialWrite[];
+    readonly pendingOAuthWrites?: readonly PendingOAuthWrite[];
   } = {}
 ): Promise<ConfigEditorRunnerResult> {
   const reviewManifest = buildSetupReviewManifest(bundles);
@@ -970,6 +981,7 @@ async function reviewAndApplyManifest(
   reviewManifest: SetupReviewManifest,
   sideEffects: {
     readonly pendingCredentialWrites?: readonly PendingCredentialWrite[];
+    readonly pendingOAuthWrites?: readonly PendingOAuthWrite[];
   } = {}
 ): Promise<ConfigEditorRunnerResult> {
   const reviewAccepted = await promptConfigEditorReviewApproval(options.prompt, {
@@ -986,6 +998,7 @@ async function reviewAndApplyManifest(
     reviewManifest,
     applyPlanningResult,
     deferredSecretWrites: sideEffects.pendingCredentialWrites,
+    deferredOAuthWrites: sideEffects.pendingOAuthWrites,
   });
 }
 
@@ -996,6 +1009,7 @@ async function finalizeReviewedApply(input: {
   readonly reviewManifest: SetupReviewManifest;
   readonly applyPlanningResult: SetupApplyPlanningResult;
   readonly deferredSecretWrites?: readonly SetupDeferredSecretWrite[];
+  readonly deferredOAuthWrites?: readonly SetupDeferredOAuthWrite[];
 }): Promise<RunOnceResult> {
   const { options, initialDecision, selectedActionId, reviewManifest, applyPlanningResult } = input;
   const previouslyReadyGatewayChannelIds = applyPlanningResult.kind === "apply-plan-ready" && options.applyExecutor !== undefined
@@ -1012,6 +1026,9 @@ async function finalizeReviewedApply(input: {
         allowAutomaticLaunch: false,
         ...(input.deferredSecretWrites !== undefined && input.deferredSecretWrites.length > 0
           ? { deferredSecretWrites: input.deferredSecretWrites }
+          : {}),
+        ...(input.deferredOAuthWrites !== undefined && input.deferredOAuthWrites.length > 0
+          ? { deferredOAuthWrites: input.deferredOAuthWrites }
           : {}),
       })
     : undefined;
@@ -1235,6 +1252,7 @@ async function reviewAndApplyResolvedRoute(
     contextWindowTokens: resolution.profile.contextWindowTokens,
     apiMode: resolution.apiMode,
     authMethod: resolution.authMethod,
+    oauthCredentialStatus: credentialResult.oauthCredentialStatus,
   };
   const selectedAction: SetupEditorActionDraft = {
     ...editorAction,
@@ -1279,6 +1297,9 @@ async function reviewAndApplyResolvedRoute(
     deferredSecretWrites: credentialResult.pendingCredentialWrite === undefined
       ? undefined
       : [credentialResult.pendingCredentialWrite],
+    deferredOAuthWrites: credentialResult.pendingOAuthWrite === undefined
+      ? undefined
+      : [credentialResult.pendingOAuthWrite],
   });
 }
 
@@ -1300,6 +1321,7 @@ async function selectResolvedProviderRoute(
     allowBack: true,
     allowCancel: true,
     mode,
+    openAiCodexChoice: mode === "primary" || mode === "fallback",
   });
 }
 
@@ -1369,6 +1391,8 @@ async function resolveCredentialForReview(
       readonly credentialAction?: SetupEditorActionDraft;
       readonly routeAction?: SetupEditorActionDraft;
       readonly pendingCredentialWrite?: PendingCredentialWrite;
+      readonly pendingOAuthWrite?: PendingOAuthWrite;
+      readonly oauthCredentialStatus?: "ready" | "pending";
     }
   | { readonly kind: "diagnostic"; readonly output: string }
 > {
@@ -1444,11 +1468,75 @@ async function resolveCredentialForReview(
     case "endpoint":
       return resolveEndpointCredentialForReview(options, resolution);
     case "oauth":
-      return {
-        kind: "diagnostic",
-        output: `OAuth setup for ${resolution.provider}/${resolution.model} is not wired into the setup editor yet. Run estacoda model setup ${resolution.provider}.`,
-      };
+      return resolveOAuthCredentialForReview(options, resolution);
   }
+}
+
+async function resolveOAuthCredentialForReview(
+  options: LocalizedConfigEditorRunnerOptions,
+  resolution: ProviderModelSelectionResult
+): Promise<
+  | {
+      readonly kind: "ready";
+      readonly credentialAction: SetupEditorActionDraft;
+      readonly pendingOAuthWrite?: PendingOAuthWrite;
+      readonly oauthCredentialStatus: "ready" | "pending";
+    }
+  | { readonly kind: "diagnostic"; readonly output: string }
+> {
+  if (resolution.credentialAction.kind !== "oauth") {
+    throw new Error("OAuth credential review requires an OAuth credential action.");
+  }
+  if (resolution.provider !== "codex" || resolution.credentialAction.authMethod !== CODEX_OAUTH_AUTH_METHOD) {
+    return {
+      kind: "diagnostic",
+      output: `OAuth setup for ${resolution.provider}/${resolution.model} is not supported by the setup editor.`,
+    };
+  }
+
+  if (resolution.credentialAction.status === "ready") {
+    return {
+      kind: "ready",
+      credentialAction: oauthCredentialReferenceAction(resolution, "ready"),
+      oauthCredentialStatus: "ready",
+    };
+  }
+
+  const { flowResult, deviceCodeShown } = await runCodexOAuthFlowWithDeviceCodeNotice({
+    fetchLike: options.providerFetch,
+    output: {
+      write: (chunk) => write(options, chunk),
+    },
+  });
+  if (flowResult.kind === "cancelled") {
+    return {
+      kind: "diagnostic",
+      output: "Codex OAuth authentication was cancelled. No changes were drafted.",
+    };
+  }
+  if (flowResult.kind === "timeout") {
+    return {
+      kind: "diagnostic",
+      output: formatCodexOAuthFailure("timeout", flowResult.reason, deviceCodeShown),
+    };
+  }
+  if (flowResult.kind === "error") {
+    return {
+      kind: "diagnostic",
+      output: formatCodexOAuthFailure("error", flowResult.reason, deviceCodeShown),
+    };
+  }
+
+  return {
+    kind: "ready",
+    credentialAction: oauthCredentialReferenceAction(resolution, "pending"),
+    pendingOAuthWrite: {
+      providerId: "codex",
+      authMethod: CODEX_OAUTH_AUTH_METHOD,
+      tokenRecord: buildCodexOAuthTokenRecord(flowResult.tokens),
+    },
+    oauthCredentialStatus: "pending",
+  };
 }
 
 async function resolveEndpointCredentialForReview(
@@ -1583,6 +1671,35 @@ function credentialReferenceAction(
   };
 }
 
+function oauthCredentialReferenceAction(
+  resolution: ProviderModelSelectionResult,
+  status: "ready" | "pending"
+): SetupEditorActionDraft {
+  return {
+    kind: "setup-editor-action-draft",
+    id: "store-provider-credential-reference",
+    copyKey: "setupEditor.actions.storeProviderCredentialReference",
+    sectionId: "credentials",
+    effect: "draft-config-patch",
+    readOnly: false,
+    mutatesConfig: false,
+    requiresExplicitApply: true,
+    preservesUnrelatedConfig: true,
+    patch: {
+      kind: "scoped-config-patch-intent",
+      fields: ["provider.credentialReference"],
+      preserveUnrelatedConfig: true,
+    },
+    reviewValues: {
+      provider: resolution.provider,
+      model: resolution.model,
+      credentialSurface: "oauth",
+      authMethod: resolution.authMethod,
+      oauthCredentialStatus: status,
+    },
+  };
+}
+
 function diagnosticResult(
   options: LocalizedConfigEditorRunnerOptions,
   initialDecision: SetupRouteDecision,
@@ -1670,6 +1787,7 @@ async function createDefaultFlowEngine(options: CollectSetupRouteOptions): Promi
     config: loaded.config,
     providerRegistry: loaded.providerRegistry,
     homeDir: options.homeDir,
+    profileId: options.profileId,
     allowNetwork: false,
     mode: "setup",
   });

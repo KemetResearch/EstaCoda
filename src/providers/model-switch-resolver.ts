@@ -28,6 +28,7 @@ export type ModelSwitchContext = {
   config: EstaCodaConfig;
   providerRegistry: ProviderRegistry;
   homeDir?: string;
+  profileId?: string;
   modelsDevOptions?: ModelsDevRegistryOptions;
 };
 
@@ -335,6 +336,7 @@ async function resolveExecutableRoute(
     config: seededConfig,
     providerRegistry: context.providerRegistry,
     homeDir: context.homeDir,
+    profileId: context.profileId,
     modelsDevOptions: context.modelsDevOptions,
     allowNetwork: false,
     mode: "normal"

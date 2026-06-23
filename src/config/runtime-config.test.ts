@@ -577,6 +577,35 @@ describe("loadRuntimeConfig auxiliaryModels", () => {
     }
   });
 
+  it("setupProviderConfig preserves OAuth auth method without inventing an API-key env ref", async () => {
+    const workspace = await mkdtemp(join(tmpdir(), "estacoda-config-test-"));
+    try {
+      const result = await setupProviderConfig({
+        workspaceRoot: workspace,
+        homeDir: workspace,
+        input: {
+          provider: "codex",
+          model: "o3",
+          baseUrl: "https://chatgpt.com/backend-api/codex",
+          apiMode: "openai_responses",
+          authMethod: "oauth_device_pkce",
+          enableNetwork: true
+        }
+      });
+
+      const saved = JSON.parse(await readFile(result.path, "utf8"));
+      expect(saved.model).toEqual({ provider: "codex", id: "o3" });
+      expect(saved.providers?.codex).toEqual(expect.objectContaining({
+        apiMode: "openai_responses",
+        authMethod: "oauth_device_pkce"
+      }));
+      expect(saved.providers?.codex?.apiKeyEnv).toBeUndefined();
+      expect(result.secretPath).toBeUndefined();
+    } finally {
+      await rm(workspace, { recursive: true, force: true });
+    }
+  });
+
   it("setupProviderConfig stores custom local baseUrl and omits the default", async () => {
     const workspace = await mkdtemp(join(tmpdir(), "estacoda-config-test-"));
     try {
@@ -2981,6 +3010,7 @@ describe("buildProviderRegistry custom provider baseUrl behavior", () => {
       providers: {
         codex: {
           baseUrl: "https://chatgpt.com/backend-api/codex",
+          apiMode: "openai_responses",
           authMethod: "oauth_device_pkce"
         }
       }

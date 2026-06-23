@@ -516,6 +516,7 @@ function draftFromEditorAction(
       envVars: envVar === undefined ? credentialRefs : [envVar],
       provider: stringReviewValue(action.reviewValues?.provider),
       model: stringReviewValue(action.reviewValues?.model),
+      values: action.reviewValues,
     });
   }
 
@@ -571,6 +572,7 @@ function credentialDraft(input: {
   readonly envVars: readonly string[];
   readonly provider?: string;
   readonly model?: string;
+  readonly values?: SetupDraftReviewMetadata["values"];
 }): SetupDraft {
   return {
     id: input.id,
@@ -588,6 +590,7 @@ function credentialDraft(input: {
       credentialValuesIncluded: false,
       provider: input.provider,
       model: input.model,
+      ...credentialExtraReviewValues(input.values),
     }),
     applyIntent: intent("credential-reference"),
     preserveUnrelatedConfig: true,
@@ -595,6 +598,17 @@ function credentialDraft(input: {
     readOnly: false,
     blockers: [],
     warnings: [],
+  };
+}
+
+function credentialExtraReviewValues(
+  values: SetupDraftReviewMetadata["values"] | undefined
+): SetupDraftReviewMetadata["values"] {
+  if (values?.credentialSurface !== "oauth") return {};
+  return {
+    credentialSurface: "oauth",
+    authMethod: values.authMethod,
+    oauthCredentialStatus: values.oauthCredentialStatus,
   };
 }
 

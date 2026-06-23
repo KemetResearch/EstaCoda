@@ -15,8 +15,11 @@ import {
   runCodexOAuthFlowWithDeviceCodeNotice,
   type OutputSink,
 } from "../providers/oauth/codex-setup.js";
+import { getProviderMetadata } from "../providers/provider-metadata.js";
 import type { Prompt } from "./readline-prompt.js";
 import type { CliOptions, CliCommandResult } from "./cli.js";
+
+const CODEX_API_MODE = getProviderMetadata("codex").apiMode;
 
 export type ModelSetupCodexOptions = {
   homeDir?: string;
@@ -35,7 +38,7 @@ export async function runModelSetupCodex(
   const homeDir = options.homeDir;
 
   // Read existing auth state
-  const oauthResult = await loadOAuthStore({ homeDir });
+  const oauthResult = await loadOAuthStore({ homeDir, profileId: options.profileId });
   const oauthStatus = codexOAuthStatusFromStore(oauthResult.store);
 
   if (oauthStatus.status === "ready") {
@@ -115,7 +118,7 @@ async function handleExistingCredentials(
     }
   };
 
-  await writeOAuthStore(updatedStore, { homeDir: options.homeDir });
+  await writeOAuthStore(updatedStore, { homeDir: options.homeDir, profileId: options.profileId });
 
   // Configure route
   const configResult = await configureCodexRoute(options);
@@ -178,7 +181,7 @@ async function handleNewAuthentication(
   }
 
   // Load existing store (may be empty) and merge
-  const oauthResult = await loadOAuthStore({ homeDir: options.homeDir });
+  const oauthResult = await loadOAuthStore({ homeDir: options.homeDir, profileId: options.profileId });
   const updatedStore = {
     ...oauthResult.store,
     providers: {
@@ -187,7 +190,7 @@ async function handleNewAuthentication(
     }
   };
 
-  await writeOAuthStore(updatedStore, { homeDir: options.homeDir });
+  await writeOAuthStore(updatedStore, { homeDir: options.homeDir, profileId: options.profileId });
 
   // Configure route
   const configResult = await configureCodexRoute(options);
@@ -230,6 +233,7 @@ async function configureCodexRoute(
         codex: {
           ...(existing.config.providers?.codex ?? {}),
           baseUrl: CODEX_DEFAULT_BASE_URL,
+          apiMode: CODEX_API_MODE,
           authMethod: CODEX_OAUTH_AUTH_METHOD
         }
       }
