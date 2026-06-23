@@ -401,7 +401,7 @@ export const voiceToolProvider: SessionToolProvider = {
       stt: ctx.stt,
       fetch: ctx.voiceFetch,
       localWhisper: ctx.localWhisper,
-      tempRoot: requireProviderDependency("voice", "audioTempRoot", ctx.audioTempRoot),
+      tempRoot: ctx.audioTempRoot ?? requireProviderDependency("voice", "audioCacheRoot", ctx.audioCacheRoot),
       pythonStateRoot: ctx.pythonStateRoot
     });
   }
