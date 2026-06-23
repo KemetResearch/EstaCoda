@@ -134,6 +134,7 @@ The base capability is required. The `advancedOcr` group is optional. Failure to
 Registered built-in capability IDs include:
 
 - `ddgs`: DDGS web search subprocess support.
+- `edge-tts`: Edge TTS synthesis support through the pinned Python `edge-tts` package.
 - `faster-whisper`: local STT package support.
 - `pdf-extraction`: PyMuPDF/PyMuPDF4LLM extraction, with optional `tables` and `advancedOcr` groups.
 - `pdf-editor`: nano-pdf editing support.
@@ -168,6 +169,38 @@ estacoda python-env status <id> --group <name>
 `upgrade` compares the installed manifest against the current registered spec. If the spec changed, it installs the current pinned packages, verifies imports, and updates the manifest.
 
 `reset` deletes the generic capability environment path. It is destructive and requires confirmation.
+
+### Edge TTS capability
+
+Edge TTS is registered as the `edge-tts` capability. It installs the pinned Python package `edge-tts` and verifies `import edge_tts`.
+
+Operator setup:
+
+```bash
+estacoda python-env setup edge-tts --yes
+estacoda python-env verify edge-tts
+```
+
+Edge can also be selected through the Setup Editor or first-run Onboarding Wizard. That selection is a reviewed setup action; after the user confirms apply, EstaCoda may install the global managed Python `edge-tts` capability without a second package-install prompt. Setup Editor mode is strict and fails the Edge TTS apply if setup fails. First-run onboarding is tolerant and warns while skipping only the Edge TTS portion if setup fails.
+
+The environment lives under the global managed Python root:
+
+```text
+<stateRoot>/python-envs/edge-tts/
+```
+
+It is not profile-local. Multiple profiles may select Edge TTS, but package installation remains global operator-controlled capability state.
+
+Edge TTS requires no API key. Runtime synthesis sends request text to Microsoft's Edge speech service, so it is a networked external side effect and not local/offline TTS.
+
+Runtime voice synthesis and gateway auto-TTS resolve this capability in non-installing mode only. They do not create the environment, invoke pip, run setup, or repair the capability. If the capability is missing, the repair command is:
+
+```bash
+estacoda python-env setup edge-tts --yes
+estacoda python-env verify edge-tts
+```
+
+Remote Telegram and gateway messages must not trigger hidden package installation.
 
 ## Runtime resolver
 

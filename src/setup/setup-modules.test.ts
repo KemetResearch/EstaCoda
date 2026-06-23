@@ -3,6 +3,7 @@ import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
+import { EDGE_TTS_CAPABILITY_ID } from "../python-env/capability-registry.js";
 import {
   browserSetupModule,
   buildSetupModuleDraftBundle,
@@ -404,6 +405,34 @@ describe("setup modules", () => {
       credentialValuesIncluded: false,
     });
     expect(json).not.toContain("sk-voice-do-not-render");
+  });
+
+  it("Voice module blocks unconfirmed Edge TTS capability setup and records confirmed setup", () => {
+    const missing = voiceSetupModule.toDrafts(context({
+      voice: {
+        ttsProvider: "edge",
+        edgeTtsCapabilityId: EDGE_TTS_CAPABILITY_ID,
+        edgeTtsCapabilityStatus: "missing",
+        edgeTtsSetupConfirmed: false,
+      },
+    }))[0];
+    const confirmed = voiceSetupModule.toDrafts(context({
+      voice: {
+        ttsProvider: "edge",
+        edgeTtsCapabilityId: EDGE_TTS_CAPABILITY_ID,
+        edgeTtsCapabilityStatus: "missing",
+        edgeTtsSetupConfirmed: true,
+      },
+    }))[0];
+
+    expect(missing?.blockers).toContain("Edge TTS requires managed Python capability setup confirmation before apply.");
+    expect(confirmed?.blockers).toEqual([]);
+    expect(confirmed?.review.values).toMatchObject({
+      ttsProvider: "edge",
+      edgeTtsCapabilityId: EDGE_TTS_CAPABILITY_ID,
+      edgeTtsCapabilityStatus: "missing",
+      edgeTtsSetupConfirmed: true,
+    });
   });
 
   it("voice module review values only include the configured side", () => {

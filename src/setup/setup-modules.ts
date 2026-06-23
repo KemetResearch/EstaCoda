@@ -109,6 +109,9 @@ export type SetupModuleContext = SetupDraftBundleOptions & {
     readonly credentialReady?: boolean;
     readonly credentialValuesIncluded?: boolean;
     readonly credentialBlockers?: readonly string[];
+    readonly edgeTtsCapabilityId?: string;
+    readonly edgeTtsCapabilityStatus?: "ready" | "missing" | "failed" | "unknown";
+    readonly edgeTtsSetupConfirmed?: boolean;
   };
   readonly vision?: {
     readonly provider?: ImageGenerationProvider;
@@ -443,6 +446,9 @@ export const voiceSetupModule: SetupModule = optionalCapabilityModule({
     ...(context.voice?.ttsProvider === undefined ? {} : { ttsProvider: context.voice.ttsProvider }),
     ...(context.voice?.ttsModel === undefined ? {} : { ttsModel: context.voice.ttsModel }),
     ...optionalStringReviewValue("ttsApiKeyEnv", context.voice?.ttsApiKeyEnv),
+    ...(context.voice?.edgeTtsCapabilityId === undefined ? {} : { edgeTtsCapabilityId: context.voice.edgeTtsCapabilityId }),
+    ...(context.voice?.edgeTtsCapabilityStatus === undefined ? {} : { edgeTtsCapabilityStatus: context.voice.edgeTtsCapabilityStatus }),
+    ...(context.voice?.edgeTtsSetupConfirmed === undefined ? {} : { edgeTtsSetupConfirmed: context.voice.edgeTtsSetupConfirmed }),
     ...(context.voice?.sttProvider === undefined ? {} : { sttProvider: context.voice.sttProvider }),
     ...(context.voice?.sttModel === undefined ? {} : { sttModel: context.voice.sttModel }),
     ...optionalStringReviewValue("sttApiKeyEnv", context.voice?.sttApiKeyEnv),
@@ -455,6 +461,11 @@ export const voiceSetupModule: SetupModule = optionalCapabilityModule({
   blockers: (context) => [
     ...(context.voice?.credentialReady === false && (context.voice.credentialEnvVars?.length ?? 0) > 0
       ? [`Voice setup requires ${context.voice.credentialEnvVars?.join(", ")} from the environment, profile secret store, or reviewed setup entry.`]
+      : []),
+    ...(context.voice?.ttsProvider === "edge" &&
+      context.voice.edgeTtsCapabilityStatus !== "ready" &&
+      context.voice.edgeTtsSetupConfirmed !== true
+      ? ["Edge TTS requires managed Python capability setup confirmation before apply."]
       : []),
     ...(context.voice?.credentialBlockers ?? []),
   ],

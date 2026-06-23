@@ -110,7 +110,23 @@ Telegram `/voice` commands are parsed by `ChannelGateway` before runtime routing
 - `/voice off` disables spoken replies for the current chat.
 - `/voice status` reports the resolved mode.
 
-Spoken replies use the configured TTS provider. Edge TTS requires no API key, but it sends synthesis text over the network to Microsoft's Edge speech service and is not local/offline TTS.
+Spoken replies use the configured TTS provider. Edge TTS requires no API key, but it sends synthesis text over the network to Microsoft's Edge speech service and is not local/offline TTS. It also requires EstaCoda's global managed Python `edge-tts` capability:
+
+```bash
+estacoda python-env setup edge-tts --yes
+estacoda python-env verify edge-tts
+```
+
+Setup Editor and first-run onboarding may install this capability after the user reviews and confirms a setup plan that chooses Edge TTS. No second package-install prompt is shown during confirmed apply. Setup Editor mode fails the Edge TTS apply if capability setup fails; first-run onboarding warns and skips only the Edge TTS portion.
+
+Gateway auto-TTS does not install this package. If Edge TTS is configured and the capability is missing, the gateway logs the repair path, preserves text delivery, and skips failed TTS usage accounting:
+
+```bash
+estacoda python-env setup edge-tts --yes
+estacoda python-env verify edge-tts
+```
+
+Remote Telegram or gateway messages must not trigger hidden package installation.
 
 For an incoming Telegram voice message with `/voice on`, the path is: Telegram voice message -> STT transcript -> agent text response -> configured TTS provider -> Telegram voice/audio reply. With Edge TTS, the response text is sent to Microsoft's Edge speech service and Edge returns MP3 (`audio/mpeg`).
 

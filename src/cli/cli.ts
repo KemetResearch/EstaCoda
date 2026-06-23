@@ -46,7 +46,7 @@ import { collectSetupEntryState } from "../setup/setup-entry-state.js";
 import { collectSetupRoute } from "../setup/setup-router.js";
 import { renderSetupRouteSummary } from "../setup/setup-state-renderer.js";
 import { runSetupVerification } from "../setup/verification.js";
-import { checkSttProviderStatus, checkTtsProviderStatus } from "../tools/voice-tools.js";
+import { checkSttProviderStatus, checkTtsProviderStatusWithCapabilities, type VoiceProviderStatus } from "../tools/voice-tools.js";
 import type { ToolDefinition } from "../contracts/tool.js";
 import type { FetchLike as ProviderFetchLike } from "../providers/openai-compatible-provider.js";
 import type { ImageGenerationFetchLike } from "../tools/image-generation-tools.js";
@@ -73,6 +73,11 @@ import { resolveHomeDir } from "../config/home-dir.js";
 import { resolveStateHome } from "../config/state-home.js";
 import { defaultProfileId, normalizeProfileId, readActiveProfile, resolveGlobalStateHome, resolveProfileStateHome } from "../config/profile-home.js";
 import { checkManagedEnvironment, createManagedEnvironment } from "../python-env/manager.js";
+import { EDGE_TTS_CAPABILITY_ID } from "../python-env/capability-registry.js";
+import {
+  checkManagedPythonCapabilityStatus,
+  installManagedPythonCapabilityEnvironment
+} from "../python-env/capability-manager.js";
 import { isFasterWhisperConfig } from "../tools/stt-providers.js";
 import { runSessionsCommand } from "./session-commands.js";
 import { runHandoffCommand } from "./handoff-commands.js";
@@ -707,7 +712,7 @@ async function settings(options: CliOptions, args: string[]): Promise<CliCommand
     return {
       handled: true,
       exitCode: 0,
-      output: renderVoiceStatus(config)
+      output: await renderVoiceStatus(config, { homeDir: options.homeDir })
     };
   }
 
@@ -2189,8 +2194,56 @@ async function voice(options: CliOptions, args: string[]): Promise<CliCommandRes
     const parsed = parseVoiceArgs(args.slice(1));
     const setupOutput = createCliOutput(options);
     const previousConfig = await loadRuntimeConfig(options);
+    const explicitTtsInput = hasExplicitVoiceTtsInput(args.slice(1));
     const explicitSttInput = hasExplicitVoiceSttInput(args.slice(1));
+    const effectiveTtsProvider = parsed.ttsProvider ?? previousConfig.tts.provider;
     const effectiveSttProvider = parsed.sttProvider ?? previousConfig.stt.provider;
+
+    if (explicitTtsInput && effectiveTtsProvider === "edge") {
+      const globalPaths = resolveGlobalStateHome({ homeDir: options.homeDir });
+      const status = await checkManagedPythonCapabilityStatus({
+        stateRoot: globalPaths.stateRoot,
+        capabilityId: EDGE_TTS_CAPABILITY_ID
+      });
+      if (!status.ok) {
+        const disclosure = "Edge TTS setup uses EstaCoda's managed Python capability and sends synthesis text to Microsoft's Edge speech service.";
+        if (options.interactive !== false && (options.prompt !== undefined || canRunInteractive())) {
+          const prompt = options.prompt ?? createReadlinePrompt();
+          const answer = await prompt(`${disclosure} Install edge-tts now? [Y/n] `);
+          if (!answer.trim().toLowerCase().startsWith("n")) {
+            const install = await installManagedPythonCapabilityEnvironment({
+              stateRoot: globalPaths.stateRoot,
+              capabilityId: EDGE_TTS_CAPABILITY_ID,
+              onProgress: setupOutput.writeLine
+            });
+            if (!install.ok) {
+              return {
+                handled: true,
+                exitCode: 1,
+                output: [
+                  ...setupOutput.lines,
+                  `Failed to set up Edge TTS: ${install.message}`,
+                  "",
+                  "Repair manually:",
+                  "  estacoda python-env setup edge-tts --yes",
+                  "  estacoda python-env verify edge-tts"
+                ].join("\n")
+              };
+            }
+          } else {
+            setupOutput.writeLine(disclosure);
+            setupOutput.writeLine("Edge TTS configured; install the managed Python capability before runtime synthesis:");
+            setupOutput.writeLine("  estacoda python-env setup edge-tts --yes");
+            setupOutput.writeLine("  estacoda python-env verify edge-tts");
+          }
+        } else {
+          setupOutput.writeLine(disclosure);
+          setupOutput.writeLine("Edge TTS configured; install the managed Python capability before runtime synthesis:");
+          setupOutput.writeLine("  estacoda python-env setup edge-tts --yes");
+          setupOutput.writeLine("  estacoda python-env verify edge-tts");
+        }
+      }
+    }
 
     if (explicitSttInput && effectiveSttProvider === "local" && parsed.pythonBinary === undefined) {
       const globalPaths = resolveGlobalStateHome({ homeDir: options.homeDir });
@@ -2242,7 +2295,7 @@ async function voice(options: CliOptions, args: string[]): Promise<CliCommandRes
       output: [
         ...setupOutput.lines,
         "Configured EstaCoda voice.",
-        renderVoiceStatus(loaded),
+        await renderVoiceStatus(loaded, { homeDir: options.homeDir }),
         `Config: ${result.path}`,
         result.secretPaths.length === 0 ? undefined : `Secret store: ${result.secretPaths.join(", ")}`,
         "Next: voice.speak and voice.transcribe will use this config in runtime sessions."
@@ -2254,7 +2307,7 @@ async function voice(options: CliOptions, args: string[]): Promise<CliCommandRes
   return {
     handled: true,
     exitCode: 0,
-    output: renderVoiceStatus(config)
+    output: await renderVoiceStatus(config, { homeDir: options.homeDir })
   };
 }
 
@@ -2413,10 +2466,15 @@ function imageApiKeyEnv(provider: ImageGenerationProvider, config: Awaited<Retur
     : config.imageGen.fal?.apiKeyEnv ?? defaultImageApiKeyEnv("fal");
 }
 
-function renderVoiceStatus(config: Awaited<ReturnType<typeof loadRuntimeConfig>>): string {
+async function renderVoiceStatus(
+  config: Awaited<ReturnType<typeof loadRuntimeConfig>>,
+  options: { homeDir?: string } = {}
+): Promise<string> {
   const ttsKey = ttsApiKeyEnv(config.tts.provider, config);
   const sttKey = sttApiKeyEnv(config.stt.provider, config);
-  const ttsStatus = checkTtsProviderStatus(config.tts.provider, config.tts);
+  const ttsStatus = await checkTtsProviderStatusWithCapabilities(config.tts.provider, config.tts, {
+    pythonStateRoot: resolveGlobalStateHome({ homeDir: options.homeDir }).stateRoot
+  });
   const sttStatus = checkSttProviderStatus(config.stt.provider, config.stt);
   const sttPython = sttPythonSource(config);
 
@@ -2463,7 +2521,7 @@ function sttPythonSource(config: Awaited<ReturnType<typeof loadRuntimeConfig>>):
     : `custom: ${pythonBinary}`;
 }
 
-function formatVoiceReadiness(status: ReturnType<typeof checkTtsProviderStatus> | ReturnType<typeof checkSttProviderStatus>): string {
+function formatVoiceReadiness(status: VoiceProviderStatus): string {
   return status.ready ? "ready" : `not ready (${status.reason})`;
 }
 
@@ -3556,6 +3614,17 @@ function hasExplicitVoiceSttInput(args: string[]): boolean {
     arg === "--stt-api-key" ||
     arg === "--python-binary" ||
     arg === "--python_binary"
+  );
+}
+
+function hasExplicitVoiceTtsInput(args: string[]): boolean {
+  return args.some((arg) =>
+    arg === "--tts-provider" ||
+    arg === "--tts-speed" ||
+    arg === "--tts-voice" ||
+    arg === "--tts-model" ||
+    arg === "--tts-api-key-env" ||
+    arg === "--tts-api-key"
   );
 }
 

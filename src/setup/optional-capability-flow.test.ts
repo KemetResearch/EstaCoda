@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import type { Prompt } from "../cli/readline-prompt.js";
 import * as capabilityManager from "../python-env/capability-manager.js";
-import { DDGS_CAPABILITY_ID } from "../python-env/capability-registry.js";
+import { DDGS_CAPABILITY_ID, EDGE_TTS_CAPABILITY_ID } from "../python-env/capability-registry.js";
 import {
   collectOptionalCapabilityContext,
   optionalCapabilityModuleForAction,
@@ -243,6 +243,34 @@ describe("optional Search capability flow", () => {
       question: "Enter TTS provider API key for VOICE_TOOLS_OPENAI_KEY: ",
       secret: true,
     });
+  });
+
+  it("collects Edge TTS as a reviewed managed Python setup without prompting for an API key", async () => {
+    vi.spyOn(capabilityManager, "checkManagedPythonCapabilityStatus").mockResolvedValue({
+      ok: false,
+      capabilityId: EDGE_TTS_CAPABILITY_ID,
+      reason: "install_required",
+      message: "Managed Python capability environment has not been installed.",
+    });
+    const seenQuestions: { question: string; secret: boolean }[] = [];
+
+    const collected = await collectOptionalCapabilityContext(options({
+      values: ["edge"],
+      secret: "should-not-be-read",
+      seenQuestions,
+    }), baseContext(), voiceSetupModule, "tts");
+
+    expect(collected.kind).toBe("configured");
+    if (collected.kind === "configured") {
+      expect(collected.context.voice).toMatchObject({
+        ttsProvider: "edge",
+        edgeTtsCapabilityId: EDGE_TTS_CAPABILITY_ID,
+        edgeTtsCapabilityStatus: "missing",
+        edgeTtsSetupConfirmed: true,
+      });
+      expect(collected.pendingCredentialWrites).toEqual([]);
+    }
+    expect(seenQuestions).toEqual([]);
   });
 
   it("reuses an existing provider credential for hosted Voice setup", async () => {

@@ -1,12 +1,18 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
-import { join } from "node:path";
+import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { dirname, join } from "node:path";
 import { tmpdir } from "node:os";
 import { ArtifactStore } from "../artifacts/artifact-store.js";
 import type { LoadedRuntimeConfig } from "../config/runtime-config.js";
+import { EDGE_TTS_CAPABILITY_ID, requireRegisteredPythonCapabilitySpec } from "../python-env/capability-registry.js";
+import { resolveManagedPythonCapabilityPaths } from "../python-env/capability-paths.js";
+import { writeManagedPythonCapabilityManifest } from "../python-env/manifest.js";
+import { fingerprintManagedPythonCapabilitySpec } from "../python-env/spec-hash.js";
+import type { EdgeTtsRunInput } from "./tts-providers.js";
 import {
   checkSttProviderStatus,
   checkTtsProviderStatus,
+  checkTtsProviderStatusWithCapabilities,
   createVoiceTools,
   synthesizeSpeechToEphemeralArtifact,
   type VoiceFetchLike
@@ -26,6 +32,43 @@ async function createRoots(): Promise<{ workspaceRoot: string; audioCacheRoot: s
   await mkdir(audioCacheRoot, { recursive: true });
   await mkdir(outsideRoot, { recursive: true });
   return { workspaceRoot, audioCacheRoot, outsideRoot };
+}
+
+const tempDirs: string[] = [];
+
+async function createTempDir(prefix: string): Promise<string> {
+  const dir = await mkdtemp(join(tmpdir(), prefix));
+  tempDirs.push(dir);
+  return dir;
+}
+
+async function createVerifiedEdgeCapabilityState(): Promise<{ stateRoot: string; tempRoot: string }> {
+  const stateRoot = await createTempDir("estacoda-voice-edge-state-");
+  const tempRoot = await createTempDir("estacoda-voice-edge-temp-");
+  const paths = resolveManagedPythonCapabilityPaths({
+    stateRoot,
+    capabilityId: EDGE_TTS_CAPABILITY_ID
+  });
+  await mkdir(dirname(paths.pythonPath), { recursive: true });
+  await writeFile(paths.pythonPath, "", "utf8");
+  const spec = requireRegisteredPythonCapabilitySpec(EDGE_TTS_CAPABILITY_ID);
+  await writeManagedPythonCapabilityManifest({
+    stateRoot,
+    capabilityId: EDGE_TTS_CAPABILITY_ID
+  }, {
+    id: EDGE_TTS_CAPABILITY_ID,
+    version: spec.version,
+    specHash: fingerprintManagedPythonCapabilitySpec(spec),
+    installedPackages: [...spec.packages],
+    installedGroups: [],
+    pythonPath: paths.pythonPath,
+    envPath: paths.envPath,
+    createdAt: "2026-06-23T00:00:00.000Z",
+    updatedAt: "2026-06-23T00:00:00.000Z",
+    verifiedAt: "2026-06-23T00:00:01.000Z",
+    status: "verified"
+  });
+  return { stateRoot, tempRoot };
 }
 
 async function withEnv<T>(updates: Record<string, string | undefined>, run: () => Promise<T>): Promise<T> {
@@ -63,9 +106,9 @@ function fakeOpenAiSpeechFetch(bytes = Buffer.from("audio")): VoiceFetchLike {
   });
 }
 
-afterEach(() => {
-  vi.doUnmock("@bestcodes/edge-tts");
+afterEach(async () => {
   vi.clearAllMocks();
+  await Promise.all(tempDirs.splice(0).map((path) => rm(path, { recursive: true, force: true })));
 });
 
 describe("voice tool readiness", () => {
@@ -82,6 +125,49 @@ describe("voice tool readiness", () => {
     const speak = tools.find((tool) => tool.name === "voice.speak");
     expect(speak?.isAvailable()).toBe(true);
     expect(checkTtsProviderStatus("edge", tts)).toEqual({ ready: true });
+  });
+
+  it("reports Edge TTS as not ready when its managed Python capability is missing", async () => {
+    const stateRoot = await createTempDir("estacoda-voice-edge-missing-status-");
+    const tts: LoadedRuntimeConfig["tts"] = { provider: "edge", speed: 1, enabled: true };
+    const paths = resolveManagedPythonCapabilityPaths({
+      stateRoot,
+      capabilityId: EDGE_TTS_CAPABILITY_ID
+    });
+
+    const status = await checkTtsProviderStatusWithCapabilities("edge", tts, { pythonStateRoot: stateRoot });
+
+    expect(status.ready).toBe(false);
+    if (!status.ready) {
+      expect(status.reason).toContain("Edge TTS managed Python capability is not ready.");
+      expect(status.reason).toContain("estacoda python-env setup edge-tts --yes");
+      expect(status.reason).toContain("estacoda python-env verify edge-tts");
+    }
+    await expect(stat(paths.envPath)).rejects.toThrow();
+  });
+
+  it("reports Edge TTS as ready when its managed Python capability is verified", async () => {
+    const edgeState = await createVerifiedEdgeCapabilityState();
+    const tts: LoadedRuntimeConfig["tts"] = { provider: "edge", speed: 1, enabled: true };
+
+    await expect(checkTtsProviderStatusWithCapabilities("edge", tts, {
+      pythonStateRoot: edgeState.stateRoot
+    })).resolves.toEqual({ ready: true });
+  });
+
+  it("keeps non-Edge TTS readiness behavior independent from managed Python capability checks", async () => {
+    const tts: LoadedRuntimeConfig["tts"] = {
+      provider: "openai",
+      speed: 1,
+      enabled: true,
+      openai: { apiKeyEnv: "VOICE_TOOLS_OPENAI_KEY" }
+    };
+
+    await withEnv({ VOICE_TOOLS_OPENAI_KEY: "present" }, async () => {
+      await expect(checkTtsProviderStatusWithCapabilities("openai", tts, {
+        pythonStateRoot: "/missing"
+      })).resolves.toEqual({ ready: true });
+    });
   });
 
   it("classifies edge TTS as an external side effect", async () => {
@@ -272,20 +358,23 @@ describe("ephemeral auto-TTS helper", () => {
   });
 
   it("creates an ephemeral voice delivery artifact with edge TTS", async () => {
-    vi.doMock("@bestcodes/edge-tts", () => ({
-      generateSpeech: vi.fn(async () => Buffer.from("edge-audio"))
-    }));
-
     const roots = await createRoots();
+    const edgeState = await createVerifiedEdgeCapabilityState();
+    const runner = vi.fn(async (input: EdgeTtsRunInput) => {
+      await writeFile(input.outputPath, Buffer.from("edge-audio"));
+      return { ok: true as const, outputPath: input.outputPath, mimeType: "audio/mpeg" };
+    });
     const result = await synthesizeSpeechToEphemeralArtifact({
       text: "hello",
       tempRoot: roots.audioCacheRoot,
+      pythonStateRoot: edgeState.stateRoot,
       tts: {
         provider: "edge",
         enabled: true,
         speed: 1,
         edge: { voice: "en-US-AriaNeural" }
       },
+      edgeTtsRunner: runner,
       id: () => "edge-auto-1"
     });
 
@@ -306,6 +395,11 @@ describe("ephemeral auto-TTS helper", () => {
       });
       expect(await readFile(result.artifact.localPath ?? result.artifact.path)).toEqual(Buffer.from("edge-audio"));
     }
+    expect(runner).toHaveBeenCalledWith(expect.objectContaining({
+      text: "hello",
+      voice: "en-US-AriaNeural",
+      rate: "+0%"
+    }));
   });
 });
 
@@ -463,5 +557,41 @@ describe("voice tool execution boundaries", () => {
       expect(artifact.mimeType).toBe("audio/mpeg");
       expect(await readFile(artifact.localPath!, "utf8")).toBe("speech-bytes");
     });
+  });
+
+  it("passes managed Python state and temp root into Edge voice.speak synthesis", async () => {
+    const roots = await createRoots();
+    const edgeState = await createVerifiedEdgeCapabilityState();
+    const store = artifactStore();
+    const runner = vi.fn(async (input: EdgeTtsRunInput) => {
+      await writeFile(input.outputPath, Buffer.from("edge-speech"));
+      return { ok: true as const, outputPath: input.outputPath, mimeType: "audio/mpeg" };
+    });
+    const speak = createVoiceTools({
+      ...roots,
+      artifactStore: store,
+      tts: {
+        provider: "edge",
+        enabled: true,
+        speed: 1.25,
+        edge: { voice: "en-US-AriaNeural" }
+      },
+      pythonStateRoot: edgeState.stateRoot,
+      tempRoot: edgeState.tempRoot,
+      edgeTtsRunner: runner,
+      id: () => "edge-speech-id"
+    }).find((tool) => tool.name === "voice.speak");
+
+    const result = await speak!.run({ text: "hello" });
+
+    expect(result.ok).toBe(true);
+    expect(result.content).toContain("Provider: edge");
+    expect(runner).toHaveBeenCalledWith(expect.objectContaining({
+      rate: "+25%",
+      outputPath: expect.stringContaining(edgeState.tempRoot)
+    }));
+    const artifact = store.list()[0];
+    expect(artifact.mimeType).toBe("audio/mpeg");
+    expect(await readFile(artifact.localPath!, "utf8")).toBe("edge-speech");
   });
 });

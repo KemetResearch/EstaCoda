@@ -5,13 +5,15 @@ import type { ArtifactStore } from "../artifacts/artifact-store.js";
 import type { ArtifactRecord } from "../contracts/artifact.js";
 import type { LoadedRuntimeConfig, SttProvider, TtsProvider } from "../config/runtime-config.js";
 import type { RegisteredTool, SessionToolProvider } from "../contracts/tool.js";
+import { EDGE_TTS_CAPABILITY_ID } from "../python-env/capability-registry.js";
+import { resolveCapabilityPythonEnv } from "../python-env/capability-resolver.js";
 import type { FasterWhisperWorker } from "./stt-local-whisper.js";
 import {
   checkSttProviderStatus as checkSttProviderStatusFromDispatch,
   computeSttRiskClass,
   transcribeSpeech
 } from "./stt-providers.js";
-import { getTtsTextCap, synthesizeSpeech } from "./tts-providers.js";
+import { getTtsTextCap, synthesizeSpeech, type EdgeTtsRunner } from "./tts-providers.js";
 import { formatMissingOpenAiAudioCredential, resolveOpenAiAudioCredential } from "./audio-credentials.js";
 
 export type VoiceFetchLike = (url: string, init?: {
@@ -38,6 +40,8 @@ export type VoiceToolOptions = {
   id?: () => string;
   localWhisper?: FasterWhisperWorker;
   tempRoot?: string;
+  pythonStateRoot?: string;
+  edgeTtsRunner?: EdgeTtsRunner;
 };
 
 export type VoiceProviderStatus =
@@ -85,6 +89,29 @@ export function checkTtsProviderStatus(
   return { ready: false, reason: `${provider} TTS is not implemented in v0.1.0 Stage 1` };
 }
 
+export async function checkTtsProviderStatusWithCapabilities(
+  provider: TtsProvider,
+  config: LoadedRuntimeConfig["tts"],
+  options: { pythonStateRoot?: string } = {}
+): Promise<VoiceProviderStatus> {
+  const baseStatus = checkTtsProviderStatus(provider, config);
+  if (!baseStatus.ready || provider !== "edge") {
+    return baseStatus;
+  }
+  if (options.pythonStateRoot === undefined) {
+    return edgeCapabilityNotReady("Managed Python state root is unavailable.");
+  }
+
+  const capability = await resolveCapabilityPythonEnv(EDGE_TTS_CAPABILITY_ID, {
+    stateRoot: options.pythonStateRoot
+  });
+  if (capability.ok) {
+    return { ready: true };
+  }
+
+  return edgeCapabilityNotReady(capability.message);
+}
+
 export function checkSttProviderStatus(
   provider: SttProvider,
   config: LoadedRuntimeConfig["stt"]
@@ -92,13 +119,27 @@ export function checkSttProviderStatus(
   return checkSttProviderStatusFromDispatch(provider, config);
 }
 
+function edgeCapabilityNotReady(detail: string): VoiceProviderStatus {
+  return {
+    ready: false,
+    reason: [
+      "Edge TTS managed Python capability is not ready.",
+      detail,
+      "Run: estacoda python-env setup edge-tts --yes",
+      "Then: estacoda python-env verify edge-tts"
+    ].join(" ")
+  };
+}
+
 export async function synthesizeSpeechToEphemeralArtifact(input: {
   text: string;
   tts: LoadedRuntimeConfig["tts"];
   tempRoot: string;
+  pythonStateRoot?: string;
   fetch?: VoiceFetchLike;
   id?: () => string;
   signal?: AbortSignal;
+  edgeTtsRunner?: EdgeTtsRunner;
 }): Promise<EphemeralSpeechArtifactResult> {
   const status = checkTtsProviderStatus(input.tts.provider, input.tts);
   if (!status.ready) {
@@ -122,7 +163,10 @@ export async function synthesizeSpeechToEphemeralArtifact(input: {
     text: input.text,
     tts: input.tts,
     fetch: input.fetch,
-    signal: input.signal
+    signal: input.signal,
+    pythonStateRoot: input.pythonStateRoot,
+    tempRoot: input.tempRoot,
+    edgeTtsRunner: input.edgeTtsRunner
   });
   if (!speech.ok) {
     return speech;
@@ -217,7 +261,10 @@ export function createVoiceTools(options: VoiceToolOptions): readonly Registered
           format: input.format,
           tts,
           fetch: options.fetch,
-          signal: context?.signal
+          signal: context?.signal,
+          pythonStateRoot: options.pythonStateRoot,
+          tempRoot: options.tempRoot ?? options.audioCacheRoot,
+          edgeTtsRunner: options.edgeTtsRunner
         });
         if (!result.ok) {
           return result;
@@ -354,7 +401,8 @@ export const voiceToolProvider: SessionToolProvider = {
       stt: ctx.stt,
       fetch: ctx.voiceFetch,
       localWhisper: ctx.localWhisper,
-      tempRoot: ctx.audioCacheRoot
+      tempRoot: ctx.audioTempRoot ?? requireProviderDependency("voice", "audioCacheRoot", ctx.audioCacheRoot),
+      pythonStateRoot: ctx.pythonStateRoot
     });
   }
 };

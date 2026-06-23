@@ -52,7 +52,7 @@ import { centerVisibleBlock, measureVisibleWidth, truncateVisible, wrapText } fr
 import { chromeCopy } from "../ui/cli-ui-copy.js";
 import { promptUiContextForLocale } from "../contracts/ui.js";
 import { resolveHomeDir } from "../config/home-dir.js";
-import { resolveProfileStateHome } from "../config/profile-home.js";
+import { resolveGlobalStateHome, resolveProfileStateHome } from "../config/profile-home.js";
 import { loadRuntimeConfig, saveRuntimeConfig } from "../config/runtime-config.js";
 import { getPackageVersion } from "./version-command.js";
 import {
@@ -1474,6 +1474,7 @@ async function playCliResponseIfEnabled(input: {
   const profileId = await runtimeProfileId(input.runtime);
   const homeDir = resolveHomeDir(input.homeDir);
   const profilePaths = resolveProfileStateHome({ homeDir, profileId });
+  const pythonStateRoot = resolveGlobalStateHome({ homeDir }).stateRoot;
   const config = await loadRuntimeConfig({
     workspaceRoot: input.workspaceRoot ?? process.cwd(),
     homeDir,
@@ -1483,6 +1484,7 @@ async function playCliResponseIfEnabled(input: {
     text: input.text,
     config,
     profilePaths,
+    pythonStateRoot,
     commandExists: input.commandExists,
     signal: input.signal
   });

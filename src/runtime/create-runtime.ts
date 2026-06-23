@@ -381,8 +381,10 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
     registry: providerRegistry
   });
   const processManager = new ProcessManager({ workspaceRoot });
+  const pythonStateRoot = globalPaths.stateRoot;
   const channelMediaRoot = profilePaths.channelMediaPath;
   const audioCacheRoot = profilePaths.audioCachePath;
+  const audioTempRoot = join(profilePaths.tempPath, "audio");
   const imageCacheRoot = profilePaths.imageCachePath;
   const persistentHfHome = options.stt?.local?.fasterWhisper?.hfHome ?? join(globalPaths.stateRoot, "cache", "huggingface");
   const localWhisper = options.localWhisper ?? (options.stt !== undefined && isFasterWhisperConfig(options.stt)
@@ -779,8 +781,10 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
       },
       contextReferenceExpander,
       projectContext,
+      pythonStateRoot,
       channelMediaRoot,
       audioCacheRoot,
+      audioTempRoot,
       imageCacheRoot,
       workspaceFsAdapter: options.workspaceFsAdapter,
       webFetch: options.webFetch,
@@ -1065,7 +1069,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
         fetch: options.voiceFetch,
         localWhisper,
         audioCacheRoot,
-        tempRoot: join(profilePaths.tempPath, "audio"),
+        tempRoot: audioTempRoot,
         signal: input.signal
       });
     },

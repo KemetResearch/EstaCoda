@@ -42,7 +42,7 @@ import {
   writeGatewayRestartPlannedMarker,
 } from "../runtime/gateway-restart-marker.js";
 import { HookRegistry } from "./hook-registry.js";
-import { resolveProfileStateHome, type ProfileStatePaths } from "../config/profile-home.js";
+import { resolveGlobalStateHome, resolveProfileStateHome, type ProfileStatePaths } from "../config/profile-home.js";
 import { createWhatsAppUserAuthCode, defaultWhatsAppUserAuthStorePath } from "../channels/whatsapp-pairing-store.js";
 import { gatewayLifecycleNotification } from "../channels/gateway-lifecycle-notifications.js";
 
@@ -1063,6 +1063,7 @@ describe("runGatewaySupervisor", () => {
     expect(capturedOpts.voiceAutoTtsDefault).toBe(false);
     expect(capturedOpts.autoTtsConfig).toBeDefined();
     expect(capturedOpts.autoTtsTempRoot).toContain("temp");
+    expect(capturedOpts.autoTtsPythonStateRoot).toBe(resolveGlobalStateHome({ homeDir: tmpDir }).stateRoot);
   });
 
   it("runtimeForSession is wired as a function in ChannelGateway options", async () => {

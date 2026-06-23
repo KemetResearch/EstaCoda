@@ -23,8 +23,10 @@ export type SessionToolContext = {
     rotateSession(sessionId: string): void;
   };
   homeDir?: string;
+  pythonStateRoot?: string;
   channelMediaRoot?: string;
   audioCacheRoot?: string;
+  audioTempRoot?: string;
   imageCacheRoot?: string;
   browserBackend?: import("./browser.js").BrowserBackend;
   browserConfig?: Pick<import("../config/runtime-config.js").LoadedRuntimeConfig["browser"], "summarizeSnapshots" | "snapshotSummarizeThreshold">;

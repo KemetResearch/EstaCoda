@@ -18,6 +18,7 @@ export const FASTER_WHISPER_CAPABILITY_ID = "faster-whisper";
 export const PDF_EXTRACTION_CAPABILITY_ID = "pdf-extraction";
 export const PDF_EDITOR_CAPABILITY_ID = "pdf-editor";
 export const DDGS_CAPABILITY_ID = "ddgs";
+export const EDGE_TTS_CAPABILITY_ID = "edge-tts";
 
 const DEFAULT_REGISTERED_CAPABILITY_SPECS: ManagedPythonCapabilityEnvSpec[] = [
   {
@@ -69,6 +70,13 @@ const DEFAULT_REGISTERED_CAPABILITY_SPECS: ManagedPythonCapabilityEnvSpec[] = [
     version: "9.14.4",
     packages: ["ddgs==9.14.4"],
     verifyImports: ["ddgs"],
+    estimatedInstallSizeMb: 25
+  },
+  {
+    id: EDGE_TTS_CAPABILITY_ID,
+    version: "7.2.8",
+    packages: ["edge-tts==7.2.8"],
+    verifyImports: ["edge_tts"],
     estimatedInstallSizeMb: 25
   }
 ];

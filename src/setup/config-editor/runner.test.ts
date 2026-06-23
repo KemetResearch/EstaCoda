@@ -3393,7 +3393,7 @@ describe("runConfigEditor", () => {
       "Back",
     ]);
     expect(ttsProviderPrompt?.descriptions).toEqual([
-      "via Microsoft. No API key required. Recommended.",
+      "Managed Python edge-tts via Microsoft Edge speech service. No API key required. Recommended.",
       "ElevenLabs voice synthesis. Requires API key.",
       "OpenAI speech models. Requires API key.",
       "Minimax speech synthesis. Requires API key.",

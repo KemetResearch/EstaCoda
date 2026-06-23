@@ -1,7 +1,51 @@
+import { spawn } from "node:child_process";
+import { mkdir, mkdtemp, readFile, rm } from "node:fs/promises";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import type { LoadedRuntimeConfig, TtsProvider } from "../config/runtime-config.js";
+import { EDGE_TTS_CAPABILITY_ID } from "../python-env/capability-registry.js";
+import { resolveCapabilityPythonEnv } from "../python-env/capability-resolver.js";
+import { boundDiagnostic } from "../python-env/diagnostics.js";
 import type { VoiceFetchLike } from "./voice-tools.js";
 import { validateAudioOutput } from "./audio-validation.js";
 import { formatMissingOpenAiAudioCredential, resolveOpenAiAudioCredential } from "./audio-credentials.js";
+
+export type EdgeTtsRunInput = {
+  pythonPath: string;
+  workerPath: string;
+  text: string;
+  voice: string;
+  rate: string;
+  outputPath: string;
+  timeoutMs?: number;
+  signal?: AbortSignal;
+  spawnProcess?: EdgeTtsSubprocessSpawn;
+};
+
+export type EdgeTtsRunResult =
+  | { ok: true; outputPath: string; mimeType: string }
+  | { ok: false; content: string; metadata?: Record<string, unknown> };
+
+export type EdgeTtsRunner = (input: EdgeTtsRunInput) => Promise<EdgeTtsRunResult>;
+
+export type EdgeTtsSubprocess = {
+  stdin: NodeJS.WritableStream;
+  stdout: NodeJS.ReadableStream;
+  stderr: NodeJS.ReadableStream;
+  kill(signal?: NodeJS.Signals | number): boolean;
+  on(event: "close", listener: (code: number | null, signal: NodeJS.Signals | null) => void): EdgeTtsSubprocess;
+  on(event: "error", listener: (error: Error) => void): EdgeTtsSubprocess;
+};
+
+export type EdgeTtsSubprocessSpawn = (
+  command: string,
+  args: string[],
+  options: {
+    shell: false;
+    stdio: ["pipe", "pipe", "pipe"];
+    env: NodeJS.ProcessEnv;
+  }
+) => EdgeTtsSubprocess;
 
 export type SpeechSynthesisInput = {
   text: string;
@@ -11,6 +55,9 @@ export type SpeechSynthesisInput = {
   tts: LoadedRuntimeConfig["tts"];
   fetch?: VoiceFetchLike;
   signal?: AbortSignal;
+  pythonStateRoot?: string;
+  tempRoot?: string;
+  edgeTtsRunner?: EdgeTtsRunner;
 };
 
 export type SpeechSynthesisResult =
@@ -20,6 +67,14 @@ export type SpeechSynthesisResult =
 type ProviderFetchResult =
   | { ok: true; response: Awaited<ReturnType<VoiceFetchLike>> }
   | { ok: false; content: string; metadata?: Record<string, unknown> };
+
+const EDGE_TTS_REPAIR_HINT = [
+  "Edge TTS is configured but its managed Python capability is not installed.",
+  "Run: estacoda python-env setup edge-tts --yes"
+].join("\n");
+const EDGE_TTS_WORKER_TIMEOUT_MS = 60_000;
+const EDGE_TTS_STDOUT_LIMIT_CHARS = 64_000;
+const EDGE_TTS_DIAGNOSTIC_LIMIT_CHARS = 1_200;
 
 export const TTS_PROVIDER_CAPS: Record<TtsProvider, number | undefined> = {
   openai: 4096,
@@ -383,46 +438,181 @@ async function synthesizeEdge(input: SpeechSynthesisInput): Promise<SpeechSynthe
   const provider = "edge";
   const voice = input.voice ?? input.tts.edge?.voice ?? "en-US-AriaNeural";
   const speed = input.tts.edge?.speed ?? input.tts.speed ?? 1;
+  const rate = edgeRateForSpeed(speed);
 
-  let generateSpeech: typeof import("@bestcodes/edge-tts").generateSpeech;
-  try {
-    ({ generateSpeech } = await import("@bestcodes/edge-tts"));
-  } catch (error) {
+  if (input.pythonStateRoot === undefined || input.tempRoot === undefined) {
     return {
       ok: false,
-      content: "Edge TTS library not available. Install dependencies and retry.",
+      content: [
+        "Edge TTS requires EstaCoda's managed Python edge-tts capability.",
+        "No managed Python state root or temporary output root was available."
+      ].join("\n"),
       metadata: {
         provider,
-        reason: "missing-dependency",
-        error: stableErrorMessage(error)
+        reason: "managed-python-context-missing"
       }
     };
   }
 
+  const capability = await resolveCapabilityPythonEnv(EDGE_TTS_CAPABILITY_ID, {
+    stateRoot: input.pythonStateRoot
+  });
+  if (!capability.ok) {
+    return {
+      ok: false,
+      content: EDGE_TTS_REPAIR_HINT,
+      metadata: {
+        provider,
+        reason: "managed-python-capability-unavailable",
+        capabilityReason: capability.reason,
+        repairCommand: "estacoda python-env setup edge-tts --yes",
+        diagnostic: capability.diagnostic === undefined
+          ? undefined
+          : sanitizeProviderErrorBody(capability.diagnostic, input.text, EDGE_TTS_DIAGNOSTIC_LIMIT_CHARS)
+      }
+    };
+  }
+
+  await mkdir(input.tempRoot, { recursive: true });
+  const workDir = await mkdtemp(join(input.tempRoot, "edge-tts-"));
+  const outputPath = join(workDir, "speech.mp3");
   try {
-    const buffer = await generateSpeech({
+    const runner = input.edgeTtsRunner ?? runEdgeTtsWorker;
+    const result = await runner({
+      pythonPath: capability.pythonPath,
+      workerPath: defaultEdgeTtsWorkerPath(),
       text: input.text,
       voice,
-      rate: edgeRateForSpeed(speed)
+      rate,
+      outputPath,
+      signal: input.signal
     });
+    if (!result.ok) {
+      return edgeTtsFailure(provider, result, input.text);
+    }
 
+    let bytes: Buffer;
+    try {
+      bytes = await readFile(result.outputPath);
+    } catch (error) {
+      return {
+        ok: false,
+        content: "Edge TTS worker did not produce readable audio output.",
+        metadata: {
+          provider,
+          reason: "worker-protocol-error",
+          error: sanitizeProviderErrorBody(stableErrorMessage(error), input.text)
+        }
+      };
+    }
     return audioResult({
       provider,
-      bytes: Buffer.from(buffer),
-      mimeType: "audio/mpeg",
+      bytes,
+      mimeType: result.mimeType || "audio/mpeg",
       model: "edge",
       voice
     });
-  } catch (error) {
-    return {
-      ok: false,
-      content: `Edge TTS synthesis failed: ${stableErrorMessage(error)}`,
-      metadata: {
-        provider,
-        reason: "synthesis-error"
-      }
-    };
+  } finally {
+    await rm(workDir, { recursive: true, force: true }).catch(() => undefined);
   }
+}
+
+export async function runEdgeTtsWorker(input: EdgeTtsRunInput): Promise<EdgeTtsRunResult> {
+  if (input.signal?.aborted === true) {
+    return edgeTtsWorkerFailure("Edge TTS worker was aborted.", "worker-aborted");
+  }
+
+  return await new Promise<EdgeTtsRunResult>((resolve) => {
+    let stdout = "";
+    let stderr = "";
+    let settled = false;
+    const spawnProcess = input.spawnProcess ?? (spawn as EdgeTtsSubprocessSpawn);
+    const child = spawnProcess(input.pythonPath, [input.workerPath], {
+      shell: false,
+      stdio: ["pipe", "pipe", "pipe"],
+      env: { ...process.env, PYTHONUNBUFFERED: "1" }
+    });
+    let timer: ReturnType<typeof setTimeout> | undefined;
+
+    const cleanup = () => {
+      if (timer !== undefined) {
+        clearTimeout(timer);
+      }
+      input.signal?.removeEventListener("abort", onAbort);
+    };
+    const settle = (result: EdgeTtsRunResult) => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      resolve(result);
+    };
+    const killAndSettle = (result: EdgeTtsRunResult) => {
+      child.kill();
+      settle(result);
+    };
+    const onAbort = () => {
+      killAndSettle(edgeTtsWorkerFailure("Edge TTS worker was aborted.", "worker-aborted"));
+    };
+
+    timer = setTimeout(() => {
+      killAndSettle(edgeTtsWorkerFailure(
+        `Edge TTS worker timed out after ${input.timeoutMs ?? EDGE_TTS_WORKER_TIMEOUT_MS}ms.`,
+        "worker-timeout"
+      ));
+    }, input.timeoutMs ?? EDGE_TTS_WORKER_TIMEOUT_MS);
+
+    input.signal?.addEventListener("abort", onAbort, { once: true });
+    child.stdout.setEncoding("utf8");
+    child.stderr.setEncoding("utf8");
+    child.stdout.on("data", (chunk) => {
+      stdout = appendBounded(stdout, String(chunk), EDGE_TTS_STDOUT_LIMIT_CHARS);
+    });
+    child.stderr.on("data", (chunk) => {
+      stderr = boundDiagnostic(`${stderr}${String(chunk)}`, EDGE_TTS_DIAGNOSTIC_LIMIT_CHARS);
+    });
+    child.on("error", (error) => {
+      settle(edgeTtsWorkerFailure(
+        `Edge TTS worker failed to start: ${boundDiagnostic(error.message, EDGE_TTS_DIAGNOSTIC_LIMIT_CHARS)}`,
+        "worker-protocol-error"
+      ));
+    });
+    child.on("close", (code) => {
+      if (settled) {
+        return;
+      }
+      const parsed = parseEdgeTtsWorkerResponse(stdout);
+      if (parsed.ok && code === 0) {
+        settle(parsed.value);
+        return;
+      }
+      if (parsed.ok && !parsed.value.ok) {
+        settle(parsed.value);
+        return;
+      }
+      const diagnostic = stderr.length === 0 ? "No diagnostic output was captured." : stderr;
+      settle(edgeTtsWorkerFailure(
+        `Edge TTS worker protocol failure: ${boundDiagnostic(parsed.ok ? diagnostic : parsed.error, EDGE_TTS_DIAGNOSTIC_LIMIT_CHARS)}`,
+        "worker-protocol-error",
+        diagnostic
+      ));
+    });
+
+    child.stdin.end(`${JSON.stringify({
+      text: input.text,
+      voice: input.voice,
+      rate: input.rate,
+      outputPath: input.outputPath
+    })}\n`);
+  });
+}
+
+export function defaultEdgeTtsWorkerPath(): string {
+  return edgeTtsWorkerPathFromModuleUrl(import.meta.url);
+}
+
+export function edgeTtsWorkerPathFromModuleUrl(moduleUrl: string): string {
+  const here = dirname(fileURLToPath(moduleUrl));
+  return join(here, "../../workers/edge-tts/edge-tts-worker.py");
 }
 
 async function fetchProvider(input: {
@@ -625,6 +815,90 @@ async function sleepBeforeRetry(baseDelayMs: number, attempt: number): Promise<v
 
 function stableErrorMessage(error: unknown): string {
   return error instanceof Error && error.message.length > 0 ? error.message : "network error";
+}
+
+function edgeTtsWorkerFailure(
+  content: string,
+  reason: "worker-protocol-error" | "worker-timeout" | "worker-aborted" | "synthesis-error",
+  diagnostic?: string
+): EdgeTtsRunResult {
+  return {
+    ok: false,
+    content,
+    metadata: {
+      reason,
+      ...(diagnostic === undefined ? {} : { diagnostic: boundDiagnostic(diagnostic, EDGE_TTS_DIAGNOSTIC_LIMIT_CHARS) })
+    }
+  };
+}
+
+function edgeTtsFailure(provider: string, result: Extract<EdgeTtsRunResult, { ok: false }>, sensitiveText: string): SpeechSynthesisResult {
+  const reason = stableEdgeTtsReason(result.metadata?.reason);
+  const diagnostic = typeof result.metadata?.diagnostic === "string"
+    ? sanitizeProviderErrorBody(result.metadata.diagnostic, sensitiveText, EDGE_TTS_DIAGNOSTIC_LIMIT_CHARS)
+    : undefined;
+  return {
+    ok: false,
+    content: sanitizeProviderErrorBody(result.content, sensitiveText) || "Edge TTS synthesis failed.",
+    metadata: {
+      provider,
+      reason,
+      ...(diagnostic === undefined || diagnostic.length === 0 ? {} : { diagnostic })
+    }
+  };
+}
+
+function stableEdgeTtsReason(reason: unknown): string {
+  return reason === "managed-python-context-missing" ||
+    reason === "managed-python-capability-unavailable" ||
+    reason === "worker-protocol-error" ||
+    reason === "worker-timeout" ||
+    reason === "worker-aborted" ||
+    reason === "synthesis-error" ||
+    reason === "empty-audio-output"
+    ? reason
+    : "synthesis-error";
+}
+
+function parseEdgeTtsWorkerResponse(stdout: string): { ok: true; value: EdgeTtsRunResult } | { ok: false; error: string } {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(stdout);
+  } catch (error) {
+    return { ok: false, error: `Invalid Edge TTS worker JSON: ${stableErrorMessage(error)}` };
+  }
+  if (!isRecord(parsed) || typeof parsed.ok !== "boolean") {
+    return { ok: false, error: "Edge TTS worker response was malformed." };
+  }
+  if (parsed.ok) {
+    if (typeof parsed.outputPath !== "string" || parsed.outputPath.length === 0) {
+      return { ok: false, error: "Edge TTS worker success response did not include outputPath." };
+    }
+    return {
+      ok: true,
+      value: {
+        ok: true,
+        outputPath: parsed.outputPath,
+        mimeType: typeof parsed.mimeType === "string" && parsed.mimeType.length > 0 ? parsed.mimeType : "audio/mpeg"
+      }
+    };
+  }
+  return {
+    ok: true,
+    value: {
+      ok: false,
+      content: typeof parsed.content === "string" && parsed.content.length > 0 ? parsed.content : "Edge TTS synthesis failed.",
+      metadata: isRecord(parsed.metadata) ? parsed.metadata : { reason: "synthesis-error" }
+    }
+  };
+}
+
+function appendBounded(current: string, chunk: string, maxChars: number): string {
+  const combined = `${current}${chunk}`;
+  if (combined.length <= maxChars) {
+    return combined;
+  }
+  return `${combined.slice(0, maxChars)}...[truncated]`;
 }
 
 function sanitizeProviderErrorBody(value: string, sensitiveText: string | undefined, maxChars = 240): string {
