@@ -21,7 +21,7 @@ import { redactSensitiveText } from "../utils/redaction.js";
 import type { PromptCache } from "./prompt-cache.js";
 import { countImageLikeMetadata, estimateTextTokensRough, IMAGE_TOKEN_ESTIMATE } from "./token-estimator.js";
 import type { AgentProfileMode, AgentResponseLanguage, UiFlavor, UiLanguage } from "../config/runtime-config.js";
-import { buildNativeHistoryMessages } from "./native-history-builder.js";
+import { buildNativeHistoryMessages, type ProviderReplayEchoContext } from "./native-history-builder.js";
 import { selectNativeHistoryWindow, type NativeHistoryUnit } from "./native-history-selector.js";
 import {
   isAcknowledgementContinuation,
@@ -39,6 +39,10 @@ type NativeHistoryRouteSupport = {
   apiMode?: ProviderApiMode;
   supportsNativeToolHistory?: boolean;
   reasoningEchoProviderFamily?: ProviderReplayEcho["providerFamily"];
+  requiresReasoningEcho?: boolean;
+  reasoningEchoField?: "reasoning_content";
+  reasoningEchoRequiredForToolCalls?: boolean;
+  allowReasoningEchoPlaceholder?: boolean;
 };
 
 export type ProviderPromptAssembly = {
@@ -738,7 +742,7 @@ function nativeSelectedToolResultIds(messages: ProviderMessage[]): Set<string> {
 }
 
 function buildNativePromptHistory(
-  input: ProviderPromptInput,
+  input: ProviderPromptInput | ProviderContinuationPromptInput,
   budgetTarget: number
 ): { messages: ProviderMessage[]; unselectedSessionHistory: PromptSessionHistoryMessage[]; diagnostics: StructuredToolHistoryDiagnosticEvent[] } | undefined {
   const baseDiagnostic = nativeHistoryDiagnosticBase(input);
@@ -801,8 +805,9 @@ function buildNativePromptHistory(
   const route = input.nativeHistoryRoute!;
   const built = buildNativeHistoryMessages(selectedMessages, {
     targetProviderFamily: route.reasoningEchoProviderFamily,
-    targetApiMode: "openai_chat_completions",
-    mergeAdjacentUsers: true
+    targetApiMode: route.apiMode === "openai_chat_completions" ? route.apiMode : undefined,
+    mergeAdjacentUsers: true,
+    replayEchoContext: nativeReplayEchoContext(input)
   });
   const diagnostics = nativeHistoryBuilderDiagnostics(input, built.stats);
   if (built.stats.nativeToolTurns === 0) {
@@ -848,6 +853,48 @@ function buildNativePromptHistory(
       }
     ]
   };
+}
+
+function nativeReplayEchoContext(input: ProviderPromptInput | ProviderContinuationPromptInput): ProviderReplayEchoContext {
+  const requiresReasoningEcho = nativeHistoryRequiresReasoningEcho(input.nativeHistoryRoute);
+  if ("providerExecution" in input) {
+    const activeToolCallIds = activeContinuationToolCallIds(input);
+    if (activeToolCallIds.size > 0) {
+      return {
+        kind: "active-continuation",
+        activeToolCallIds,
+        requiresReasoningEcho
+      };
+    }
+  }
+  return {
+    kind: "historical",
+    requiresReasoningEcho
+  };
+}
+
+function nativeHistoryRequiresReasoningEcho(route: NativeHistoryRouteSupport | undefined): boolean {
+  return route?.requiresReasoningEcho === true &&
+    route.reasoningEchoField === "reasoning_content" &&
+    route.reasoningEchoRequiredForToolCalls === true;
+}
+
+function activeContinuationToolCallIds(input: ProviderContinuationPromptInput): ReadonlySet<string> {
+  const providerIds = new Set(
+    (input.providerExecution?.toolCalls ?? [])
+      .map((toolCall) => toolCall.id)
+      .filter((id): id is string => typeof id === "string" && id.length > 0)
+  );
+  if (providerIds.size > 0) {
+    return providerIds;
+  }
+
+  return new Set(
+    input.toolPlans
+      .filter((plan) => plan.status === "executed" && plan.source === "provider-tool-call")
+      .map((plan) => plan.id)
+      .filter((id) => id.length > 0)
+  );
 }
 
 function nativeHistoryBuilderDiagnostics(

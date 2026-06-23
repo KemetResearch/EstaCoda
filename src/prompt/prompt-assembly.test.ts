@@ -33,6 +33,22 @@ const supportedNativeRoute = {
   supportsNativeToolHistory: true
 } as ResolvedModelRoute & { supportsNativeToolHistory: true };
 
+const echoRequiredNativeRoute = {
+  ...supportedNativeRoute,
+  provider: "kimi",
+  id: "kimi-k2-thinking",
+  requiresReasoningEcho: true,
+  reasoningEchoField: "reasoning_content",
+  reasoningEchoRequiredForToolCalls: true,
+  reasoningEchoProviderFamily: "kimi"
+} as ResolvedModelRoute & {
+  supportsNativeToolHistory: true;
+  requiresReasoningEcho: true;
+  reasoningEchoField: "reasoning_content";
+  reasoningEchoRequiredForToolCalls: true;
+  reasoningEchoProviderFamily: "kimi";
+};
+
 const generalIntent: IntentRoute = {
   nativeIntent: "general",
   labels: ["general"],
@@ -969,7 +985,7 @@ describe("assembleProviderContinuationPrompt", () => {
     ]));
   });
 
-  it("keeps continuation echo out of rendered text while carrying structured echo", () => {
+  it("keeps active continuation echo out of rendered text while carrying structured echo", () => {
     const echoValue = "private continuation reasoning";
     const prompt = assembleProviderContinuationPrompt(baseContinuationInput({
       model: toolModel,
@@ -985,11 +1001,28 @@ describe("assembleProviderContinuationPrompt", () => {
         }),
         sessionMessage("tool-result", "tool", "native tool result", { tool_call_id: "call-1" })
       ],
+      providerExecution: providerExecution("", [{ id: "call-1", name: "files.read", argumentsText: "{\"path\":\"src/index.ts\"}" }]),
+      toolPlans: [
+        {
+          id: "call-1",
+          tool: "files.read",
+          input: { path: "src/index.ts" },
+          source: "provider-tool-call",
+          status: "executed",
+          result: {
+            ok: true,
+            content: "native tool result"
+          }
+        }
+      ],
       nativeHistoryRoute: {
         ...supportedNativeRoute,
         provider: "deepseek",
         id: "deepseek-reasoner",
-        reasoningEchoProviderFamily: "deepseek"
+        reasoningEchoProviderFamily: "deepseek",
+        requiresReasoningEcho: true,
+        reasoningEchoField: "reasoning_content",
+        reasoningEchoRequiredForToolCalls: true
       }
     }));
 
@@ -1188,8 +1221,8 @@ describe("assembleProviderContinuationPrompt", () => {
     expect(renderMessages(prompt.messages)).toContain("ordinary history only");
   });
 
-  it("keeps provider replay echo out of rendered text while carrying same-provider structured echo", () => {
-    const echoValue = "private provider reasoning";
+  it("uses a placeholder instead of raw provider replay echo for normal historical prompts", () => {
+    const echoValue = "The user wants me to send the ZAI integration plan file as an attachment";
     const prompt = assembleProviderPrompt(basePromptInput({
       model: toolModel,
       rawSessionHistory: [
@@ -1197,7 +1230,7 @@ describe("assembleProviderContinuationPrompt", () => {
           providerReplayEcho: {
             field: "reasoning_content",
             value: echoValue,
-            providerFamily: "deepseek",
+            providerFamily: "kimi",
             apiMode: "openai_chat_completions",
             chars: echoValue.length
           },
@@ -1205,16 +1238,18 @@ describe("assembleProviderContinuationPrompt", () => {
         }, "<think>raw content reasoning</think>Visible tool call."),
         sessionMessage("tool-result", "tool", "native tool result", { tool_call_id: "call-1" })
       ],
-      nativeHistoryRoute: {
-        ...supportedNativeRoute,
-        provider: "deepseek",
-        id: "deepseek-reasoner",
-        reasoningEchoProviderFamily: "deepseek"
-      }
+      nativeHistoryRoute: echoRequiredNativeRoute
     }));
 
     const assistant = prompt.messages.find((message) => message.role === "assistant" && message.toolCalls !== undefined);
-    expect(assistant?.providerReplayEcho?.value).toBe(echoValue);
+    expect(assistant?.providerReplayEcho).toEqual({
+      field: "reasoning_content",
+      value: " ",
+      providerFamily: "kimi",
+      apiMode: "openai_chat_completions",
+      chars: 1,
+      provenance: "protocol-placeholder"
+    });
     const rendered = renderMessages(prompt.messages);
     expect(rendered).toContain("Visible tool call.");
     expect(rendered).not.toContain(echoValue);
@@ -1227,6 +1262,186 @@ describe("assembleProviderContinuationPrompt", () => {
       })
     ]));
     expect(JSON.stringify(prompt.nativeHistoryDiagnostics)).not.toContain(echoValue);
+  });
+
+  it("strips historical provider replay echo for non-echo providers while keeping native structure", () => {
+    const echoValue = "private provider reasoning";
+    const prompt = assembleProviderPrompt(basePromptInput({
+      model: toolModel,
+      rawSessionHistory: [
+        providerToolTurn("tool-turn", {
+          providerReplayEcho: {
+            field: "reasoning_content",
+            value: echoValue,
+            providerFamily: "kimi",
+            apiMode: "openai_chat_completions",
+            chars: echoValue.length
+          }
+        }),
+        sessionMessage("tool-result", "tool", "native tool result", { tool_call_id: "call-1" })
+      ],
+      nativeHistoryRoute: supportedNativeRoute
+    }));
+
+    const assistant = prompt.messages.find((message) => message.role === "assistant" && message.toolCalls !== undefined);
+    expect(assistant).toEqual(expect.objectContaining({
+      role: "assistant",
+      toolCalls: [
+        {
+          id: "call-1",
+          name: "files.read",
+          argumentsText: "{\"path\":\"src/index.ts\"}"
+        }
+      ]
+    }));
+    expect(assistant).not.toHaveProperty("providerReplayEcho");
+    expect(JSON.stringify(prompt.messages)).not.toContain(echoValue);
+  });
+
+  it("placeholders older groups while preserving exact active continuation echo", () => {
+    const staleEcho = "stale provider reasoning";
+    const activeEcho = "current provider reasoning";
+    const prompt = assembleProviderContinuationPrompt(baseContinuationInput({
+      model: toolModel,
+      rawSessionHistory: [
+        providerToolTurn("older-turn", {
+          providerReplayEcho: {
+            field: "reasoning_content",
+            value: staleEcho,
+            providerFamily: "kimi",
+            apiMode: "openai_chat_completions",
+            chars: staleEcho.length
+          }
+        }),
+        sessionMessage("older-tool", "tool", "older native tool result", { tool_call_id: "call-1" }),
+        providerToolTurn("active-turn", {
+          providerToolCalls: [
+            {
+              id: "call-active",
+              name: "files.read",
+              argumentsText: "{\"path\":\"src/index.ts\"}"
+            }
+          ],
+          providerReplayEcho: {
+            field: "reasoning_content",
+            value: activeEcho,
+            providerFamily: "kimi",
+            apiMode: "openai_chat_completions",
+            chars: activeEcho.length
+          }
+        }),
+        sessionMessage("active-tool", "tool", "active native tool result", { tool_call_id: "call-active" })
+      ],
+      providerExecution: providerExecution("", [{ id: "call-active", name: "files.read", argumentsText: "{\"path\":\"src/index.ts\"}" }]),
+      toolPlans: [
+        {
+          id: "call-active",
+          tool: "files.read",
+          input: { path: "src/index.ts" },
+          source: "provider-tool-call",
+          status: "executed",
+          result: {
+            ok: true,
+            content: "active native tool result"
+          }
+        }
+      ],
+      nativeHistoryRoute: echoRequiredNativeRoute
+    }));
+
+    const assistants = prompt.messages.filter((message) => message.role === "assistant" && message.toolCalls !== undefined);
+    expect(assistants[0]?.providerReplayEcho).toEqual({
+      field: "reasoning_content",
+      value: " ",
+      providerFamily: "kimi",
+      apiMode: "openai_chat_completions",
+      chars: 1,
+      provenance: "protocol-placeholder"
+    });
+    expect(assistants[1]?.providerReplayEcho?.value).toBe(activeEcho);
+    expect(JSON.stringify(prompt.messages)).not.toContain(staleEcho);
+    expect(renderMessages(prompt.messages)).not.toContain(activeEcho);
+  });
+
+  it("does not preserve raw echo for partial active continuation id matches", () => {
+    const echoValue = "partial match provider reasoning";
+    const prompt = assembleProviderContinuationPrompt(baseContinuationInput({
+      model: toolModel,
+      rawSessionHistory: [
+        providerToolTurn("tool-turn", {
+          providerToolCalls: [
+            {
+              id: "call-active-1",
+              name: "files.read",
+              argumentsText: "{\"path\":\"src/index.ts\"}"
+            },
+            {
+              id: "call-other-2",
+              name: "files.stat",
+              argumentsText: "{\"path\":\"src/index.ts\"}"
+            }
+          ],
+          providerReplayEcho: {
+            field: "reasoning_content",
+            value: echoValue,
+            providerFamily: "kimi",
+            apiMode: "openai_chat_completions",
+            chars: echoValue.length
+          }
+        }),
+        sessionMessage("tool-1", "tool", "native tool result 1", { tool_call_id: "call-active-1" }),
+        sessionMessage("tool-2", "tool", "native tool result 2", { tool_call_id: "call-other-2" })
+      ],
+      providerExecution: providerExecution("", [
+        { id: "call-active-1", name: "files.read", argumentsText: "{\"path\":\"src/index.ts\"}" },
+        { id: "call-active-2", name: "files.stat", argumentsText: "{\"path\":\"src/index.ts\"}" }
+      ]),
+      nativeHistoryRoute: echoRequiredNativeRoute
+    }));
+
+    const assistant = prompt.messages.find((message) => message.role === "assistant" && message.toolCalls !== undefined);
+    expect(assistant?.providerReplayEcho).toEqual({
+      field: "reasoning_content",
+      value: " ",
+      providerFamily: "kimi",
+      apiMode: "openai_chat_completions",
+      chars: 1,
+      provenance: "protocol-placeholder"
+    });
+    expect(JSON.stringify(prompt.messages)).not.toContain(echoValue);
+  });
+
+  it("falls back to historical replay when continuation active ids are unavailable", () => {
+    const echoValue = "missing active ids provider reasoning";
+    const prompt = assembleProviderContinuationPrompt(baseContinuationInput({
+      model: toolModel,
+      rawSessionHistory: [
+        providerToolTurn("tool-turn", {
+          providerReplayEcho: {
+            field: "reasoning_content",
+            value: echoValue,
+            providerFamily: "kimi",
+            apiMode: "openai_chat_completions",
+            chars: echoValue.length
+          }
+        }),
+        sessionMessage("tool-result", "tool", "native tool result", { tool_call_id: "call-1" })
+      ],
+      providerExecution: providerExecution("", []),
+      toolPlans: [],
+      nativeHistoryRoute: echoRequiredNativeRoute
+    }));
+
+    const assistant = prompt.messages.find((message) => message.role === "assistant" && message.toolCalls !== undefined);
+    expect(assistant?.providerReplayEcho).toEqual({
+      field: "reasoning_content",
+      value: " ",
+      providerFamily: "kimi",
+      apiMode: "openai_chat_completions",
+      chars: 1,
+      provenance: "protocol-placeholder"
+    });
+    expect(JSON.stringify(prompt.messages)).not.toContain(echoValue);
   });
 });
 
@@ -1288,7 +1503,17 @@ function baseContinuationInput(
   };
 }
 
-function providerExecution(content: string): Parameters<typeof assembleProviderContinuationPrompt>[0]["providerExecution"] {
+function providerExecution(
+  content: string,
+  toolCalls: NonNullable<Parameters<typeof assembleProviderContinuationPrompt>[0]["providerExecution"]>["toolCalls"] = [
+    {
+      index: 0,
+      id: "call-read",
+      name: "files.read",
+      argumentsText: "{\"path\":\"src/index.ts\"}"
+    }
+  ]
+): Parameters<typeof assembleProviderContinuationPrompt>[0]["providerExecution"] {
   return {
     ok: true,
     response: {
@@ -1306,14 +1531,7 @@ function providerExecution(content: string): Parameters<typeof assembleProviderC
         content
       }
     ],
-    toolCalls: [
-      {
-        index: 0,
-        id: "call-read",
-        name: "files.read",
-        argumentsText: "{\"path\":\"src/index.ts\"}"
-      }
-    ]
+    toolCalls
   };
 }
 
