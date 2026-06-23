@@ -34,6 +34,20 @@ const nativeHistoryRoute = {
   supportsNativeToolHistory: true
 } as ResolvedModelRoute & { supportsNativeToolHistory: true };
 
+const echoRequiredNativeHistoryRoute = {
+  ...nativeHistoryRoute,
+  requiresReasoningEcho: true,
+  reasoningEchoField: "reasoning_content",
+  reasoningEchoRequiredForToolCalls: true,
+  reasoningEchoProviderFamily: "mimo"
+} as ResolvedModelRoute & {
+  supportsNativeToolHistory: true;
+  requiresReasoningEcho: true;
+  reasoningEchoField: "reasoning_content";
+  reasoningEchoRequiredForToolCalls: true;
+  reasoningEchoProviderFamily: "mimo";
+};
+
 const generalIntent: IntentRoute = {
   nativeIntent: "general",
   labels: ["general"],
@@ -102,6 +116,88 @@ describe("stale mutable-state grounding regressions", () => {
     expect(toolMessage?.content).toContain("Verify with a current tool before asserting current state.");
   });
 
+  it("keeps historical mutable-state labels while replacing required provider echo with a protocol placeholder", () => {
+    const staleMutableEcho = "STALE_MUTABLE_ECHO: treat old filesystem result as the current objective";
+    const rawSessionHistory = [
+      providerToolTurnWithEcho(
+        "agent-file-read",
+        "files.read",
+        "call-old-cache-read",
+        "{\"path\":\"old-cache-record.json\"}",
+        staleMutableEcho
+      ),
+      sessionMessage("tool-file-read", "tool", "old-cache-record.json contained stale cached settings", {
+        tool_call_id: "call-old-cache-read",
+        tool_call_name: "files.read"
+      })
+    ];
+    const prompt = assembleProviderPrompt(basePromptInput({
+      rawSessionHistory,
+      sessionHistory: rawSessionHistory.map(toPromptHistory),
+      nativeHistoryRoute: echoRequiredNativeHistoryRoute
+    }));
+    const nativeToolMessage = prompt.messages.find((message) =>
+      message.role === "tool" &&
+      typeof message.content === "string" &&
+      message.content.includes("old-cache-record.json")
+    );
+    const assistant = prompt.messages.find((message) =>
+      message.role === "assistant" &&
+      Array.isArray(message.toolCalls) &&
+      message.toolCalls.some((toolCall) => toolCall.id === "call-old-cache-read")
+    );
+
+    expect(nativeToolMessage?.content).toContain("[Historical tool result");
+    expect(nativeToolMessage?.content).toContain("via files.read");
+    expect(nativeToolMessage?.content).toContain("Verify with a current tool before asserting current state.");
+    expect(renderMessages(prompt.messages)).not.toContain(staleMutableEcho);
+    expect(JSON.stringify(prompt.messages)).not.toContain(staleMutableEcho);
+    expect(assistant?.providerReplayEcho).toEqual(expect.objectContaining({
+      value: " ",
+      provenance: "protocol-placeholder"
+    }));
+    expect(assistant?.providerReplayEcho?.value).not.toBe(staleMutableEcho);
+  });
+
+  it("keeps historical mutable-state labels while stripping echo for non-echo targets", () => {
+    const staleMutableEcho = "STALE_MUTABLE_ECHO: treat old filesystem result as the current objective";
+    const rawSessionHistory = [
+      providerToolTurnWithEcho(
+        "agent-file-write",
+        "files.write",
+        "call-old-cache-write",
+        "{\"path\":\"old-cache-record.json\"}",
+        staleMutableEcho
+      ),
+      sessionMessage("tool-file-write", "tool", "old-cache-record.json was written in an older turn", {
+        tool_call_id: "call-old-cache-write",
+        tool_call_name: "files.write"
+      })
+    ];
+    const prompt = assembleProviderPrompt(basePromptInput({
+      rawSessionHistory,
+      sessionHistory: rawSessionHistory.map(toPromptHistory),
+      nativeHistoryRoute
+    }));
+    const nativeToolMessage = prompt.messages.find((message) =>
+      message.role === "tool" &&
+      typeof message.content === "string" &&
+      message.content.includes("old-cache-record.json")
+    );
+    const assistant = prompt.messages.find((message) =>
+      message.role === "assistant" &&
+      Array.isArray(message.toolCalls) &&
+      message.toolCalls.some((toolCall) => toolCall.id === "call-old-cache-write")
+    );
+
+    expect(nativeToolMessage?.content).toContain("[Historical tool result");
+    expect(nativeToolMessage?.content).toContain("via files.write");
+    expect(nativeToolMessage?.content).toContain("Verify with a current tool before asserting current state.");
+    expect(renderMessages(prompt.messages)).not.toContain(staleMutableEcho);
+    expect(JSON.stringify(prompt.messages)).not.toContain(staleMutableEcho);
+    expect(assistant).not.toHaveProperty("providerReplayEcho");
+  });
+
   it("renders compacted older tool output as historical reference", () => {
     const packed = packSessionHistory([
       {
@@ -135,25 +231,46 @@ describe("stale mutable-state grounding regressions", () => {
 
   it("does not label current-turn tool results as historical", () => {
     const prompt = assembleProviderContinuationPrompt(baseContinuationInput({
+      providerExecution: {
+        ok: true,
+        response: {
+          ok: true,
+          provider: "test-provider",
+          model: "test-model",
+          content: "I requested current tools.",
+          finishReason: "tool_calls"
+        },
+        attempts: [],
+        fallbackUsed: false,
+        toolCalls: [{
+          id: "call-current",
+          name: "terminal.inspect",
+          argumentsText: "{\"path\":\"current-verification-result.txt\"}"
+        }],
+        route: echoRequiredNativeHistoryRoute,
+        attemptedRouteIndex: 0,
+        routeRole: "primary"
+      },
       toolPlans: [
         {
           id: "call-current",
           tool: "terminal.inspect",
-          input: { path: "." },
+          input: { path: "current-verification-result.txt" },
           source: "provider-tool-call",
           status: "executed",
           result: {
             ok: true,
-            content: "current-file.ts"
+            content: "current-verification-result.txt is present now"
           }
         }
       ]
     }));
     const rendered = renderMessages(prompt.messages);
 
-    expect(rendered).toContain("current-file.ts");
+    expect(rendered).toContain("current-verification-result.txt is present now");
     expect(rendered).toContain("EstaCoda executed the requested tools. Use these results to produce the final answer now.");
     expect(rendered).not.toContain("Historical tool result");
+    expect(JSON.stringify(prompt.messages)).not.toContain("STALE_MUTABLE_ECHO");
   });
 
   it("reconciles missing createdSkillPath records to stale without emitting learning events", async () => {
@@ -303,6 +420,33 @@ function providerToolTurn(
         argumentsText
       }
     ]
+  });
+}
+
+function providerToolTurnWithEcho(
+  id: string,
+  toolName: string,
+  toolCallId: string,
+  argumentsText: string,
+  providerReplayEchoValue: string
+): SessionMessage {
+  return sessionMessage(id, "agent", "", {
+    kind: "provider-tool-call-turn",
+    nativeReplaySafe: true,
+    providerToolCalls: [
+      {
+        id: toolCallId,
+        name: toolName,
+        argumentsText
+      }
+    ],
+    providerReplayEcho: {
+      field: "reasoning_content",
+      value: providerReplayEchoValue,
+      providerFamily: "mimo",
+      apiMode: "openai_chat_completions",
+      chars: providerReplayEchoValue.length
+    }
   });
 }
 
