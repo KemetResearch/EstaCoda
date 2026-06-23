@@ -8,7 +8,13 @@ import type { PromptBudgetReport, PromptLayerName, PromptLayerReport, PromptSema
 import type { ModelProfile, ProviderApiMode, ProviderMessage, ProviderMessageContentPart, ProviderReplayEcho, ProviderId } from "../contracts/provider.js";
 import type { SecurityDecision } from "../contracts/security.js";
 import type { SessionMessage, StructuredToolHistoryDiagnosticEvent, StructuredToolHistoryDiagnosticReason } from "../contracts/session.js";
-import type { LoadedSkill, SkillCatalogEntry, SkillDefinition, SkillResourceEntry } from "../contracts/skill.js";
+import type {
+  LoadedSkill,
+  SelectedSkillPromptContent,
+  SkillCatalogEntry,
+  SkillDefinition,
+  SkillResourceEntry
+} from "../contracts/skill.js";
 import type { ToolCallPlan } from "../contracts/tool-plan.js";
 import type { ProviderExecutionResult } from "../providers/provider-executor.js";
 import { stripInlineReasoning } from "../providers/provider-reasoning.js";
@@ -67,6 +73,7 @@ export type ProviderPromptInput = {
   userText: string;
   routedText: string;
   selectedSkill: LoadedSkill | SkillDefinition | undefined;
+  selectedSkillPromptContent?: SelectedSkillPromptContent;
   selectedSkillInstructions: string | undefined;
   attachments?: ChannelAttachment[];
   selectedSkillSetup?: {
@@ -251,14 +258,12 @@ function buildBaseLayers(input: ProviderPromptInput): InternalPromptLayer[] {
     : input.projectContext.files
         .map((file) => `Source: ${file.source}\n${truncate(file.content, 1_500)}`)
         .join("\n\n");
-  const skillInstructions = input.selectedSkillInstructions === undefined
-    ? "No skill instruction body was loaded."
-    : truncate(input.selectedSkillInstructions, 4_000);
   const skillSetup = renderSkillSetup(input.selectedSkillSetup);
   const skillResources = renderSkillResources(input.selectedSkillResources);
   const skillPlaybookPlan = input.selectedSkill === undefined
     ? "No skill playbook plan was selected."
     : renderSkillPlaybookPlan(compileSkillPlaybook(input.selectedSkill));
+  const selectedSkillBlock = renderSelectedSkillBlock(input, skillPlaybookPlan);
   const toolMenu = input.providerTools === undefined || input.providerTools.length === 0
     ? "No native provider tools were exposed for this route."
     : input.providerTools
@@ -399,15 +404,11 @@ function buildBaseLayers(input: ProviderPromptInput): InternalPromptLayer[] {
     }),
     layer({
       name: "skill",
-      cacheable: input.selectedSkillInstructions !== undefined,
+      cacheable: selectedSkillBlock.loaded,
       protectedLayer: true,
       priority: 2,
-      content: [
-        `Skill instructions:\n${skillInstructions}`,
-        "",
-        `Skill playbook plan:\n${skillPlaybookPlan}`
-      ].join("\n"),
-      truncated: input.selectedSkillInstructions !== undefined && input.selectedSkillInstructions.length > skillInstructions.length
+      content: selectedSkillBlock.content,
+      truncated: selectedSkillBlock.truncated
     }),
     layer({
       name: "skill-setup",
@@ -631,13 +632,74 @@ function renderSkillResources(resources: SkillResourceEntry[] | undefined): stri
     ...sections,
     "",
     "Resource handling:",
-    "- references: load targeted background files with skill.view when the playbook needs specific context.",
-    "- templates: load the template with skill.view, adapt it, then write the finished output with file.write or file.replace.",
-    "- scripts: inspect the script with skill.view before running it through terminal.run or execute_code under normal sandbox rules.",
-    "- assets: use skill.view for metadata, then route the file through media/document/browser tools if content inspection is needed.",
+    "- references: load targeted background files with skill.read when the playbook needs specific context.",
+    "- templates: load the template with skill.read, adapt it, then write the finished output with file.write or file.replace.",
+    "- scripts: inspect the script with skill.read before running it through terminal.run or execute_code under normal sandbox rules.",
+    "- assets: use skill.read for metadata, then route the file through media/document/browser tools if content inspection is needed.",
     "",
-    "Load only the file you need with the skill.view tool using the selected skill name and a specific path."
+    "Load only the file you need with the skill.read tool using the selected skill name and a specific path."
   ].join("\n");
+}
+
+function renderSelectedSkillBlock(
+  input: ProviderPromptInput,
+  skillPlaybookPlan: string
+): { content: string; loaded: boolean; truncated: boolean } {
+  const promptContent = input.selectedSkillPromptContent;
+  if (promptContent !== undefined) {
+    const loadInstruction = promptContent.loadInstruction ??
+      renderSkillReadFullInstruction(promptContent.name);
+    const skillContent = promptContent.contentMode === "contract"
+      ? [
+          `Selected skill: ${promptContent.name}`,
+          "Skill content mode: contract",
+          `Original skill chars: ${promptContent.originalChars ?? "unknown"}`,
+          promptContent.content,
+          "Full content is available with:",
+          loadInstruction,
+          `Skill playbook plan:\n${skillPlaybookPlan}`
+        ].join("\n")
+      : [
+          `Selected skill: ${promptContent.name}`,
+          "Skill content mode: full",
+          `Skill instructions:\n${promptContent.content}`,
+          `Skill playbook plan:\n${skillPlaybookPlan}`
+        ].join("\n");
+
+    return {
+      content: skillContent,
+      loaded: true,
+      truncated: promptContent.truncated
+    };
+  }
+
+  if (input.selectedSkillInstructions !== undefined) {
+    return {
+      content: [
+        `Selected skill: ${input.selectedSkill?.name ?? "unknown"}`,
+        "Skill content mode: full",
+        `Skill instructions:\n${input.selectedSkillInstructions}`,
+        `Skill playbook plan:\n${skillPlaybookPlan}`
+      ].join("\n"),
+      loaded: true,
+      truncated: false
+    };
+  }
+
+  return {
+    content: [
+      "Selected skill: none",
+      "Skill content mode: none",
+      "Skill instructions:\nNo skill instruction body was loaded.",
+      `Skill playbook plan:\n${skillPlaybookPlan}`
+    ].join("\n"),
+    loaded: false,
+    truncated: false
+  };
+}
+
+function renderSkillReadFullInstruction(name: string): string {
+  return `skill.read({ "name": ${JSON.stringify(name)}, "mode": "full" })`;
 }
 
 function renderSkillSetup(input: ProviderPromptInput["selectedSkillSetup"]): string {
