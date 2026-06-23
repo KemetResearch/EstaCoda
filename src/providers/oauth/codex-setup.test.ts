@@ -5,7 +5,9 @@ import { tmpdir } from "node:os";
 import {
   buildCodexOAuthTokenRecord,
   CODEX_OAUTH_AUTH_METHOD,
+  formatCodexOAuthFailure,
   readCodexOAuthStatus,
+  renderCodexDeviceCodeNotice,
 } from "./codex-setup.js";
 
 async function withHomeDir(testFn: (homeDir: string) => Promise<void>): Promise<void> {
@@ -72,5 +74,30 @@ describe("codex setup helpers", () => {
       scopes: ["read"],
       source: "estacoda",
     });
+  });
+
+  it("renders the fixed Codex device URL and user code without sensitive auth fields", () => {
+    const notice = renderCodexDeviceCodeNotice({
+      userCode: "ABC-DEF",
+    });
+
+    expect(notice).toContain("https://auth.openai.com/codex/device");
+    expect(notice).toContain("ABC-DEF");
+    expect(notice).not.toContain("access-token-secret");
+    expect(notice).not.toContain("refresh-token-secret");
+    expect(notice).not.toContain("authorization-code-secret");
+    expect(notice).not.toContain("code-verifier-secret");
+    expect(notice).not.toContain("device-auth-secret");
+  });
+
+  it("formats OAuth failures before and after the device code is shown", () => {
+    expect(formatCodexOAuthFailure("error", "Device code request failed.", false))
+      .toBe("Authentication failed: Device code request failed.");
+    expect(formatCodexOAuthFailure("timeout", "Authorization timed out.", false))
+      .toBe("Authentication timed out: Authorization timed out.");
+    expect(formatCodexOAuthFailure("error", "Authorization poll failed.", true))
+      .toBe("Authentication failed while waiting for authorization: Authorization poll failed.");
+    expect(formatCodexOAuthFailure("timeout", "Authorization timed out.", true))
+      .toBe("Authentication timed out while waiting for authorization: Authorization timed out.");
   });
 });
