@@ -31,6 +31,11 @@ describe("Papyrus screen string width utilities", () => {
   it("does not add width for combining marks", () => {
     expect(stringWidth("e\u0301")).toBe(1);
   });
+
+  it("does not add width for bidi isolate controls", () => {
+    expect(stringWidth("\u2067العربية\u2069")).toBe(7);
+    expect(stringWidth("\u2066/model\u2069")).toBe(6);
+  });
 });
 
 describe("Papyrus line width cache", () => {

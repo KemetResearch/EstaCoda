@@ -2,6 +2,8 @@
 // Handles Unicode width measurement, wrapping, truncation, frames, and rails.
 // ANSI-aware variants strip escape codes before measuring visible width.
 
+import { stringWidth } from "../papyrus/screen/stringWidth.js";
+
 const ANSI_REGEX = /\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])/g;
 
 export function stripAnsi(text: string): string {
@@ -9,23 +11,11 @@ export function stripAnsi(text: string): string {
 }
 
 export function measureTextWidth(text: string): number {
-  let width = 0;
-  for (const ch of text) {
-    const cp = ch.codePointAt(0) ?? 0;
-    if (isCombiningChar(cp) || isBidiControl(cp)) {
-      continue;
-    }
-    if (isFullWidthChar(cp) || isEmoji(cp)) {
-      width += 2;
-    } else {
-      width += 1;
-    }
-  }
-  return width;
+  return stringWidth(text);
 }
 
 export function measureVisibleWidth(text: string): number {
-  return measureTextWidth(stripAnsi(text));
+  return stringWidth(text);
 }
 
 export function wrapText(text: string, maxWidth: number): string[] {

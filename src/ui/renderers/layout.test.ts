@@ -37,6 +37,10 @@ describe("measureTextWidth", () => {
     expect(measureTextWidth("Hello World")).toBe(11);
   });
 
+  it("does not count ANSI escape sequences", () => {
+    expect(measureTextWidth("\x1b[31mred\x1b[0m")).toBe(3);
+  });
+
   it("measures empty string as 0", () => {
     expect(measureTextWidth("")).toBe(0);
   });
@@ -59,9 +63,19 @@ describe("measureTextWidth", () => {
     expect(measureTextWidth("⚠")).toBe(2);
   });
 
+  it("measures emoji variation selector cases with grapheme width", () => {
+    expect(measureTextWidth("❤️")).toBe(2);
+    expect(measureTextWidth("1️")).toBe(1);
+  });
+
   it("measures mixed-script text", () => {
     const text = "Hello العربية";
     expect(measureTextWidth(text)).toBe(13); // Hello(5) + space(1) + Arabic(7)
+  });
+
+  it("does not count bidi isolate controls", () => {
+    expect(measureTextWidth("\u2067العربية\u2069")).toBe(7);
+    expect(measureTextWidth("\u2066/model\u2069")).toBe(6);
   });
 
   it("handles surrogate pairs correctly", () => {
@@ -83,6 +97,10 @@ describe("measureVisibleWidth", () => {
   it("handles colored Unicode", () => {
     const text = "\x1b[38;2;90;172;255m💎\x1b[0m";
     expect(measureVisibleWidth(text)).toBe(2);
+  });
+
+  it("measures Arabic text through the visible width helper", () => {
+    expect(measureVisibleWidth("\x1b[32mالعربية\x1b[0m")).toBe(7);
   });
 });
 
