@@ -362,6 +362,15 @@ Idle placeholder copy is not a separate shortcut rail and must not include a pro
 
 ---
 
+## Papyrus Renderer Flag
+
+`ESTACODA_UI_RENDERER=legacy|papyrus` is reserved for the Papyrus renderer rollout.
+The parser exists so later integration can select a renderer deliberately, but
+the default remains `legacy` and `papyrus` does not change live rendering until a
+future PR wires it into the CLI renderer.
+
+---
+
 ## 7. Renderer Fallback Reference
 
 When `StandardRenderer` encounters restricted capabilities, it falls back automatically:
