@@ -51,6 +51,13 @@ function status(text = "model") {
   return buildSessionStatusRailViewModel({ modelLabel: text, turnState: "idle" });
 }
 
+function expectManagedRegionSafeOutput(output: string): void {
+  expect(output).not.toContain("\x1b[3J");
+  expect(output).not.toContain("\x1b[2J");
+  expect(output).not.toContain("\x1b[H");
+  expect(output).not.toMatch(/\x1b\[\d+;\d+H/u);
+}
+
 function slashMenu() {
   return buildSlashMenuViewModel({
     query: "/h",
@@ -196,7 +203,82 @@ describe("BottomChromeController", () => {
     expect(chunks).toEqual([
       `\x1b7\x1b[2A\x1b[2K\rafter | idle\x1b[1B\x1b[2K\r${"─".repeat(40)}\x1b8`,
     ]);
-    expect(chunks.join("")).not.toMatch(/\x1b\[\d+;\d+H/u);
+    expectManagedRegionSafeOutput(chunks.join(""));
+  });
+
+  it("keeps Papyrus bottom chrome managed-region output scrollback safe", () => {
+    const { chunks, stream } = mockOutput();
+    const ctrl = new BottomChromeController({
+      output: stream,
+      capabilities: makeCaps(),
+      renderViewModel,
+      rendererMode: "papyrus",
+    });
+
+    ctrl.updateState({ statusRail: status("safe") });
+    ctrl.updateStateInPlace({ statusRail: status("still-safe") });
+
+    const rendered = chunks.join("");
+    expect(rendered).toContain("safe | idle");
+    expect(rendered).toContain("still-safe | idle");
+    expectManagedRegionSafeOutput(rendered);
+  });
+
+  it("reflows Papyrus bottom chrome when terminal width changes", () => {
+    const { chunks, stream } = mockOutput();
+    const caps = makeCaps({ terminalWidth: 18 });
+    const ctrl = new BottomChromeController({
+      output: stream,
+      capabilities: caps,
+      renderViewModel,
+      rendererMode: "papyrus",
+    });
+
+    ctrl.updateState({ statusRail: status("very-long-model-name") });
+    expect(chunks.join("").split("\n").filter(Boolean)).toEqual([
+      "very-long-model...",
+      "──────────────────",
+    ]);
+
+    chunks.length = 0;
+    caps.terminalWidth = 8;
+    ctrl.updateState({ statusRail: status("very-long-model-name") });
+
+    const rendered = chunks.join("");
+    expect(rendered).toContain("very-...");
+    expect(rendered).toContain("────────");
+    expect(rendered).not.toContain("model-name");
+    expectManagedRegionSafeOutput(rendered);
+  });
+
+  it("clears stale Papyrus bottom chrome rows when the managed region shrinks", () => {
+    const { chunks, stream } = mockOutput();
+    const ctrl = new BottomChromeController({
+      output: stream,
+      capabilities: makeCaps(),
+      renderViewModel,
+      rendererMode: "papyrus",
+    });
+
+    ctrl.updateManagedRegionAboveReadline({
+      state: { statusRail: status("status"), slashMenu: slashMenu(), slashMenuMinRows: 4 },
+      transientLines: ["paste preview"],
+      promptLineCount: 1,
+    });
+    chunks.length = 0;
+
+    ctrl.updateManagedRegionAboveReadline({
+      state: { statusRail: status("status") },
+      transientLines: [],
+      promptLineCount: 1,
+    });
+
+    const rendered = chunks.join("");
+    expect(rendered).toContain("\x1b[5M");
+    expect(rendered).toContain("status | idle");
+    expect(rendered).not.toContain("/help Show command help");
+    expect(rendered).not.toContain("paste preview");
+    expectManagedRegionSafeOutput(rendered);
   });
 
   it("does not route spinner-only chrome through Papyrus", () => {
