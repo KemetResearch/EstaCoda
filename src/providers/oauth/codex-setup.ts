@@ -57,6 +57,10 @@ export async function runCodexOAuthFlowWithDeviceCodeNotice(options: {
   readonly fetchLike?: FetchLike;
   readonly signal?: AbortSignal;
   readonly output?: OutputSink;
+  readonly onDeviceCodeNotice?: (notice: {
+    readonly userCode: string;
+    readonly rendered: string;
+  }) => void;
 }): Promise<{
   readonly flowResult: Awaited<ReturnType<typeof runCodexOAuthFlow>>;
   readonly deviceCodeShown: boolean;
@@ -67,7 +71,12 @@ export async function runCodexOAuthFlowWithDeviceCodeNotice(options: {
     signal: options.signal,
     onDeviceCode: (info) => {
       deviceCodeShown = true;
-      options.output?.write(renderCodexDeviceCodeNotice(info));
+      const rendered = renderCodexDeviceCodeNotice(info);
+      options.output?.write(rendered);
+      options.onDeviceCodeNotice?.({
+        userCode: info.userCode,
+        rendered,
+      });
     },
   });
   return { flowResult, deviceCodeShown };

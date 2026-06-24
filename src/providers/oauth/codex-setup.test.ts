@@ -8,6 +8,7 @@ import {
   formatCodexOAuthFailure,
   readCodexOAuthStatus,
   renderCodexDeviceCodeNotice,
+  runCodexOAuthFlowWithDeviceCodeNotice,
 } from "./codex-setup.js";
 
 async function withHomeDir(testFn: (homeDir: string) => Promise<void>): Promise<void> {
@@ -90,6 +91,49 @@ describe("codex setup helpers", () => {
     expect(notice).not.toContain("device-auth-secret");
   });
 
+  it("notifies callers when the device-code notice is rendered", async () => {
+    const renderedChunks: string[] = [];
+    const callbackNotices: Array<{ readonly userCode: string; readonly rendered: string }> = [];
+    const fetchLike = async (url: string) => {
+      if (url.endsWith("/api/accounts/deviceauth/usercode")) {
+        return fetchResponse({
+          user_code: "ABC-DEF",
+          device_auth_id: "device-auth-secret",
+          interval: 0,
+        });
+      }
+      if (url.endsWith("/api/accounts/deviceauth/token")) {
+        return fetchResponse({
+          authorization_code: "authorization-code-secret",
+          code_verifier: "code-verifier-secret",
+        });
+      }
+      return fetchResponse({
+        access_token: "access-token-secret",
+        refresh_token: "refresh-token-secret",
+        expires_in: 3600,
+      });
+    };
+
+    const result = await runCodexOAuthFlowWithDeviceCodeNotice({
+      fetchLike,
+      output: {
+        write: (chunk) => renderedChunks.push(chunk),
+      },
+      onDeviceCodeNotice: (notice) => callbackNotices.push(notice),
+    });
+
+    expect(result.deviceCodeShown).toBe(true);
+    expect(result.flowResult.kind).toBe("success");
+    expect(renderedChunks).toHaveLength(1);
+    expect(callbackNotices).toEqual([{
+      userCode: "ABC-DEF",
+      rendered: renderedChunks[0],
+    }]);
+    expect(callbackNotices[0]?.rendered).toContain("https://auth.openai.com/codex/device");
+    expect(callbackNotices[0]?.rendered).not.toContain("device-auth-secret");
+  });
+
   it("formats OAuth failures before and after the device code is shown", () => {
     expect(formatCodexOAuthFailure("error", "Device code request failed.", false))
       .toBe("Authentication failed: Device code request failed.");
@@ -101,3 +145,20 @@ describe("codex setup helpers", () => {
       .toBe("Authentication timed out while waiting for authorization: Authorization timed out.");
   });
 });
+
+function fetchResponse(
+  json: unknown,
+  options: { readonly ok?: boolean; readonly status?: number; readonly statusText?: string } = {}
+): {
+  readonly ok: boolean;
+  readonly status: number;
+  readonly statusText: string;
+  readonly json: () => Promise<unknown>;
+} {
+  return {
+    ok: options.ok ?? true,
+    status: options.status ?? 200,
+    statusText: options.statusText ?? "OK",
+    json: async () => json,
+  };
+}
