@@ -93,6 +93,20 @@ describe("Papyrus surface controller", () => {
     expect(result.frame.screen.rowText(1)).toBe(" z   ");
   });
 
+  it("renders managed rows without absolute cursor patches", () => {
+    const controller = createPapyrusSurfaceController({ width: 6, height: 2 });
+    const result = controller.renderRows({
+      surfaces: [
+        { x: 0, y: 0, text: "row" },
+        { x: 1, y: 1, text: "two" },
+      ],
+    });
+
+    expect(result.rows).toEqual(["row", " two"]);
+    expect(result.rows.join("\n")).not.toMatch(/\x1b\[\d+;\d+H/u);
+    expect(result.output).toMatch(/\x1b\[\d+;\d+H/u);
+  });
+
   it("preserves ANSI style behavior through Output", () => {
     const controller = createPapyrusSurfaceController({ width: 3, height: 1 });
     const result = controller.render({ surfaces: [{ x: 0, y: 0, text: "\x1b[31mr\x1b[0mx" }] });

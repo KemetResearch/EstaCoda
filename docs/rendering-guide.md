@@ -364,15 +364,14 @@ Idle placeholder copy is not a separate shortcut rail and must not include a pro
 
 ## Papyrus Renderer Flag
 
-`ESTACODA_UI_RENDERER=legacy|papyrus` is reserved for the Papyrus renderer rollout.
-The parser exists so later integration can select a renderer deliberately, but
-the default remains `legacy` and `papyrus` does not change live rendering until a
-future PR wires it into the CLI renderer.
+`ESTACODA_UI_RENDERER=legacy|papyrus` controls the first Papyrus renderer
+rollout seam. The default remains `legacy`; unset, empty, or invalid values keep
+the existing bottom chrome path.
 
-The dormant Papyrus surface controller adapter can compose rendered string
-surfaces into Papyrus frames and return diff output data for future renderer
-integration. It is not active in the CLI, and current renderer behavior remains
-unchanged.
+`ESTACODA_UI_RENDERER=papyrus` opts the bottom chrome/status rail surface into
+the Papyrus surface controller. This is not a full renderer replacement:
+transcript rendering, width/wrap behavior, spinners outside the status rail
+seam, and readline/raw input remain on the existing implementation.
 
 ---
 

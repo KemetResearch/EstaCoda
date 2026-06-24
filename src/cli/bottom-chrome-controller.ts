@@ -10,6 +10,9 @@ import type {
   SlashMenuViewModel,
   ViewModel,
 } from "../contracts/view-model.js";
+import type { PapyrusSurfaceFrame, PapyrusSurfaceRenderResult, PapyrusSurfaceRowsResult } from "../ui/papyrus/papyrus-surface-controller.js";
+import { createPapyrusSurfaceControllerForMode } from "../ui/papyrus/papyrus-surface-controller.js";
+import type { UiRendererMode } from "../ui/renderer-mode.js";
 import { truncateVisible } from "../ui/renderers/layout.js";
 
 export interface BottomChromeState {
@@ -25,6 +28,8 @@ export interface BottomChromeControllerOptions {
   readonly capabilities: TerminalCapabilities;
   readonly renderViewModel: (vm: ViewModel) => string;
   readonly renderHorizontalRule?: (width: number) => string;
+  readonly rendererMode?: UiRendererMode;
+  readonly createPapyrusSurfaceControllerForMode?: PapyrusSurfaceControllerFactory;
   readonly enabled?: boolean;
   readonly tickMs?: number;
   readonly readlineTickMs?: number;
@@ -37,6 +42,18 @@ export interface UpdateManagedRegionAboveReadlineInput {
 }
 
 type WritableWrite = (chunk: unknown, ...args: unknown[]) => boolean;
+type PapyrusSurfaceControllerLike = {
+  initialize(width: number, height: number): PapyrusSurfaceRenderResult;
+  getSize(): { width: number; height: number };
+  render(frame: PapyrusSurfaceFrame): PapyrusSurfaceRenderResult;
+  renderRows(frame: PapyrusSurfaceFrame): PapyrusSurfaceRowsResult;
+  reset(): PapyrusSurfaceRenderResult;
+};
+
+type PapyrusSurfaceControllerFactory = (
+  rendererMode: UiRendererMode,
+  size: { width: number; height: number }
+) => PapyrusSurfaceControllerLike | undefined;
 
 export class BottomChromeController {
   readonly #output: NodeJS.WritableStream;
@@ -46,6 +63,7 @@ export class BottomChromeController {
   readonly #enabled: boolean;
   readonly #tickMs: number;
   readonly #readlineTickMs: number;
+  readonly #papyrusSurfaceController?: PapyrusSurfaceControllerLike;
   #activeLineCount = 0;
   #renderedTransientLineCount = 0;
   #transientLines: readonly string[] = [];
@@ -67,6 +85,12 @@ export class BottomChromeController {
     this.#enabled = options.enabled ?? detectEnabled(options.capabilities);
     this.#tickMs = options.tickMs ?? 200;
     this.#readlineTickMs = options.readlineTickMs ?? 1000;
+    const rendererMode = options.rendererMode ?? "legacy";
+    if (rendererMode === "papyrus") {
+      this.#papyrusSurfaceController = (
+        options.createPapyrusSurfaceControllerForMode ?? createPapyrusSurfaceControllerForMode
+      )(rendererMode, { width: Math.max(1, options.capabilities.terminalWidth), height: 0 });
+    }
   }
 
   get enabled(): boolean {
@@ -98,6 +122,7 @@ export class BottomChromeController {
     this.#renderedTransientLineCount = 0;
     this.#lastRenderedTransientLines = undefined;
     this.#lastRenderedLines = undefined;
+    this.#resetPapyrusChromeFrame();
   }
 
   writeAboveChromeSync<T>(fn: () => T): T {
@@ -215,6 +240,7 @@ export class BottomChromeController {
     this.#renderedTransientLineCount = 0;
     this.#lastRenderedTransientLines = undefined;
     this.#lastRenderedLines = undefined;
+    this.#resetPapyrusChromeFrame();
   }
 
   startTicker(stateFactory: () => BottomChromeState): void {
@@ -332,6 +358,14 @@ export class BottomChromeController {
     if (linesEqual(lines, this.#lastRenderedLines)) {
       return;
     }
+    if (this.#shouldUsePapyrusChrome()) {
+      const managedLines = this.#renderChromeRowsWithPapyrus(lines);
+      if (managedLines.length > 0) {
+        this.#output.write(this.#relativeManagedRegionUpdate(managedLines));
+      }
+      this.#lastRenderedLines = lines;
+      return;
+    }
 
     let sequence = "\x1b7";
     sequence += `\x1b[${this.#activeLineCount}A`;
@@ -404,6 +438,7 @@ export class BottomChromeController {
     this.#renderedTransientLineCount = 0;
     this.#lastRenderedTransientLines = undefined;
     this.#lastRenderedLines = undefined;
+    this.#resetPapyrusChromeFrame();
   }
 
   #redraw(): void {
@@ -420,6 +455,7 @@ export class BottomChromeController {
     this.#renderedTransientLineCount = 0;
     this.#lastRenderedTransientLines = undefined;
     this.#lastRenderedLines = undefined;
+    this.#resetPapyrusChromeFrame();
   }
 
   #drawManagedRegion(): void {
@@ -429,7 +465,10 @@ export class BottomChromeController {
       const chromeLines = this.#buildChromeLines();
       const lines = [...this.#transientLines, ...chromeLines];
       if (lines.length === 0) return;
-      this.#output.write(`${lines.join("\n")}\n`);
+      const papyrusRows = this.#shouldUsePapyrusChrome()
+        ? this.#renderChromeRowsWithPapyrus(lines)
+        : undefined;
+      this.#output.write(papyrusRows === undefined ? `${lines.join("\n")}\n` : `${papyrusRows.join("\n")}\n`);
       this.#renderedTransientLineCount = this.#transientLines.length;
       this.#activeLineCount = chromeLines.length;
       this.#lastRenderedTransientLines = this.#transientLines;
@@ -538,6 +577,40 @@ export class BottomChromeController {
     }
     const fill = this.#capabilities.supportsUnicode ? "─" : "-";
     return fill.repeat(width);
+  }
+
+  #shouldUsePapyrusChrome(): boolean {
+    return this.#papyrusSurfaceController !== undefined && this.#currentState.statusRail !== undefined;
+  }
+
+  #renderChromeRowsWithPapyrus(lines: readonly string[]): readonly string[] {
+    if (this.#papyrusSurfaceController === undefined) return [];
+    const width = Math.max(1, this.#capabilities.terminalWidth);
+    const height = Math.max(1, lines.length);
+    const size = this.#papyrusSurfaceController.getSize();
+    if (size.width !== width || size.height !== height) {
+      this.#papyrusSurfaceController.initialize(width, height);
+    }
+    return this.#papyrusSurfaceController.renderRows({
+      surfaces: lines.map((text, y) => ({ x: 0, y, text })),
+    }).rows;
+  }
+
+  #relativeManagedRegionUpdate(lines: readonly string[]): string {
+    let sequence = "\x1b7";
+    sequence += `\x1b[${this.#activeLineCount}A`;
+    for (let index = 0; index < lines.length; index += 1) {
+      sequence += `\x1b[2K\r${lines[index]}`;
+      if (index < lines.length - 1) {
+        sequence += "\x1b[1B";
+      }
+    }
+    sequence += "\x1b8";
+    return sequence;
+  }
+
+  #resetPapyrusChromeFrame(): void {
+    this.#papyrusSurfaceController?.reset();
   }
 }
 

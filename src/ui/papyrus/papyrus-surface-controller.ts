@@ -22,6 +22,10 @@ export type PapyrusSurfaceRenderResult = {
   output: string;
 };
 
+export type PapyrusSurfaceRowsResult = PapyrusSurfaceRenderResult & {
+  rows: readonly string[];
+};
+
 export class PapyrusSurfaceController {
   private compositor: Compositor;
   private previousFrame: Frame;
@@ -52,6 +56,14 @@ export class PapyrusSurfaceController {
     }
 
     return this.commit(previous, this.compositor.snapshot());
+  }
+
+  renderRows(frame: PapyrusSurfaceFrame): PapyrusSurfaceRowsResult {
+    const result = this.render(frame);
+    return {
+      ...result,
+      rows: rowsFromFrame(result.frame),
+    };
   }
 
   reset(): PapyrusSurfaceRenderResult {
@@ -85,6 +97,10 @@ export class PapyrusSurfaceController {
       output: "",
     };
   }
+}
+
+function rowsFromFrame(frame: Frame): string[] {
+  return Array.from({ length: frame.screen.height }, (_, y) => frame.screen.rowText(y).trimEnd());
 }
 
 export function createPapyrusSurfaceController(size: Partial<CompositorSize>): PapyrusSurfaceController {
