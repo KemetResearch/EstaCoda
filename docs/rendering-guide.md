@@ -369,6 +369,11 @@ The parser exists so later integration can select a renderer deliberately, but
 the default remains `legacy` and `papyrus` does not change live rendering until a
 future PR wires it into the CLI renderer.
 
+The dormant Papyrus surface controller adapter can compose rendered string
+surfaces into Papyrus frames and return diff output data for future renderer
+integration. It is not active in the CLI, and current renderer behavior remains
+unchanged.
+
 ---
 
 ## 7. Renderer Fallback Reference
