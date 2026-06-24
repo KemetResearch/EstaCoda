@@ -298,6 +298,64 @@ describe("BottomChromeController", () => {
     expect(chunks).toEqual(["spinner:thinking\n"]);
   });
 
+  it("keeps Papyrus status and spinner updates managed-region safe when rewriting rows", () => {
+    const { chunks, stream } = mockOutput();
+    const ctrl = new BottomChromeController({
+      output: stream,
+      capabilities: makeCaps(),
+      renderViewModel,
+      rendererMode: "papyrus",
+    });
+
+    ctrl.updateState({
+      statusRail: status("status"),
+      activeSpinner: buildActiveTurnSpinnerViewModel({ phase: "thinking" }),
+    });
+    chunks.length = 0;
+
+    ctrl.updateStateInPlace({
+      statusRail: status("status"),
+      activeSpinner: buildActiveTurnSpinnerViewModel({ phase: "tool" }),
+    });
+
+    const rendered = chunks.join("");
+    expect(chunks).toHaveLength(1);
+    expect(rendered).toBe(
+      `\x1b7\x1b[3A\x1b[2K\rstatus | idle\x1b[1B\x1b[2K\rspinner:tool\x1b[1B\x1b[2K\r${"─".repeat(40)}\x1b8`,
+    );
+    expect(rendered).toContain("status | idle");
+    expect(rendered).toContain("spinner:tool");
+    expect(rendered).not.toContain("spinner:thinking");
+    expect(rendered).not.toContain("\x1b[1G\x1b[0J");
+    expectManagedRegionSafeOutput(rendered);
+  });
+
+  it("keeps legacy status and spinner updates unchanged without constructing Papyrus", () => {
+    const { chunks, stream } = mockOutput();
+    const papyrus = fakePapyrusFactory();
+    const ctrl = new BottomChromeController({
+      output: stream,
+      capabilities: makeCaps(),
+      renderViewModel,
+      rendererMode: "legacy",
+      createPapyrusSurfaceControllerForMode: papyrus.factory,
+    });
+
+    ctrl.updateState({
+      statusRail: status("status"),
+      activeSpinner: buildActiveTurnSpinnerViewModel({ phase: "thinking" }),
+    });
+    chunks.length = 0;
+
+    ctrl.updateStateInPlace({
+      statusRail: status("status"),
+      activeSpinner: buildActiveTurnSpinnerViewModel({ phase: "tool" }),
+    });
+
+    expect(papyrus.calls.created).toEqual([]);
+    expect(chunks).toEqual(["\x1b7\x1b[3A\x1b[1B\x1b[2K\rspinner:tool\x1b[1B\x1b8"]);
+  });
+
   it("bounds rendered chrome lines to terminal width", () => {
     const { chunks, stream } = mockOutput();
     const ctrl = makeController(stream, makeCaps({ terminalWidth: 12 }));
