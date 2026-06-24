@@ -386,6 +386,21 @@ Current PR 2 scope:
   extracts managed-region-compatible rows instead of writing full-screen
   absolute diff output.
 
+## Input Mode Flag
+
+`ESTACODA_INPUT_MODE=readline|raw` is reserved for the raw-input migration
+track. The default remains `readline`; unset, empty, or invalid values keep the
+existing readline prompt path. `ESTACODA_INPUT_MODE=raw` is accepted by the
+configuration parser for later PR 4 commits, but it does not change live input
+behavior yet.
+
+Current PR 4 Commit 1 scope:
+
+- Adds only the narrow input-mode parser/resolver.
+- Does not enable raw mode.
+- Does not change readline, paste, history, suspend/resume, or terminal
+  lifecycle behavior.
+
 ---
 
 ## 7. Renderer Fallback Reference
