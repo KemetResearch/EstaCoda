@@ -50,6 +50,7 @@ import type { SetupVerificationReport } from "../verification.js";
 import type { SetupCopyLocale } from "../setup-copy.js";
 import {
   formatSetupCopy,
+  promptSetupChoice,
   renderSetupApplyEndState,
   renderSetupApplyPlanningResult,
   setupProviderCredentialQuestion,
@@ -102,7 +103,7 @@ import {
   formatCodexOAuthFailure,
   runCodexOAuthFlowWithDeviceCodeNotice,
 } from "../../providers/oauth/codex-setup.js";
-import type { FetchLike as CodexOAuthFetchLike } from "../../providers/oauth/codex-oauth.js";
+import { codexDeviceVerificationUrl, type FetchLike as CodexOAuthFetchLike } from "../../providers/oauth/codex-oauth.js";
 
 export type ConfigEditorRunnerOptions = CollectSetupRouteOptions & {
   readonly prompt: Prompt;
@@ -1502,11 +1503,26 @@ async function resolveOAuthCredentialForReview(
     };
   }
 
+  const oauthChoice = await promptCodexOAuthSetupChoice(options);
+  if (oauthChoice === "cancel") {
+    return {
+      kind: "diagnostic",
+      output: "Codex OAuth authentication was cancelled. No changes were drafted.",
+    };
+  }
+
+  const hasLiveDeviceCodeNotice = options.prompt.onboardingCard !== undefined;
+  showCodexOAuthRequestingDeviceCode(options);
   const { flowResult, deviceCodeShown } = await runCodexOAuthFlowWithDeviceCodeNotice({
     fetchLike: options.providerFetch,
-    output: {
+    output: hasLiveDeviceCodeNotice ? undefined : {
       write: (chunk) => write(options, chunk),
     },
+    onDeviceCodeNotice: hasLiveDeviceCodeNotice
+      ? (notice) => {
+          showCodexOAuthDeviceCodeNotice(options, notice.userCode);
+        }
+      : undefined,
   });
   if (flowResult.kind === "cancelled") {
     return {
@@ -1537,6 +1553,66 @@ async function resolveOAuthCredentialForReview(
     },
     oauthCredentialStatus: "pending",
   };
+}
+
+type CodexOAuthSetupChoice = "signin" | "cancel";
+
+async function promptCodexOAuthSetupChoice(
+  options: LocalizedConfigEditorRunnerOptions
+): Promise<CodexOAuthSetupChoice> {
+  return promptSetupChoice(options.prompt, {
+    title: setupCopyText(options.locale, "setupEditor.prompt.codexOAuth.title"),
+    message: `${setupCopyText(options.locale, "setupEditor.prompt.codexOAuth.body")}\n`,
+    choices: [
+      {
+        id: "codex-oauth-signin",
+        label: setupCopyText(options.locale, "setupEditor.prompt.codexOAuth.signIn"),
+        description: setupCopyText(options.locale, "setupEditor.prompt.codexOAuth.signIn.description"),
+        value: "signin",
+      },
+      {
+        id: "codex-oauth-cancel",
+        label: setupCopyText(options.locale, "setupEditor.prompt.codexOAuth.cancel"),
+        description: setupCopyText(options.locale, "setupEditor.prompt.codexOAuth.cancel.description"),
+        group: "navigation",
+        value: "cancel",
+      },
+    ],
+    defaultValue: "signin",
+  });
+}
+
+function showCodexOAuthRequestingDeviceCode(options: LocalizedConfigEditorRunnerOptions): void {
+  options.prompt.onboardingCard?.({
+    title: setupCopyText(options.locale, "setupEditor.prompt.codexOAuth.title"),
+    bodyLines: [setupCopyText(options.locale, "setupEditor.prompt.codexOAuth.requesting")],
+    options: [],
+    selectedOptionIndex: 0,
+    locale: options.locale,
+    direction: options.locale === "ar" ? "rtl" : "ltr",
+  });
+}
+
+function showCodexOAuthDeviceCodeNotice(
+  options: LocalizedConfigEditorRunnerOptions,
+  userCode: string
+): void {
+  options.prompt.onboardingCard?.({
+    title: setupCopyText(options.locale, "setupEditor.prompt.codexOAuth.device.title"),
+    bodyLines: [
+      formatSetupCopy(options.locale, "setupEditor.prompt.codexOAuth.device.open", {
+        url: codexDeviceVerificationUrl(),
+      }),
+      formatSetupCopy(options.locale, "setupEditor.prompt.codexOAuth.device.code", {
+        code: userCode,
+      }),
+      setupCopyText(options.locale, "setupEditor.prompt.codexOAuth.device.waiting"),
+    ],
+    options: [],
+    selectedOptionIndex: 0,
+    locale: options.locale,
+    direction: options.locale === "ar" ? "rtl" : "ltr",
+  });
 }
 
 async function resolveEndpointCredentialForReview(

@@ -126,6 +126,38 @@ describe("requestCodexDeviceCode", () => {
     expect(result.interval).toBe(5);
   });
 
+  it("coerces string interval to a number (OpenAI returns \"5\" not 5)", async () => {
+    const { fetchLike } = createMockFetch({
+      usercode: () => response({
+        user_code: "ABC-DEF",
+        device_auth_id: "device-auth-secret",
+        interval: "7"
+      })
+    });
+
+    const result = await requestCodexDeviceCode(fetchLike);
+
+    expect(result.interval).toBe(7);
+  });
+
+  it("handles expires_at ISO timestamp when expires_in is absent", async () => {
+    const future = new Date(Date.now() + 900 * 1000).toISOString();
+    const { fetchLike } = createMockFetch({
+      usercode: () => response({
+        user_code: "ABC-DEF",
+        device_auth_id: "device-auth-secret",
+        interval: "5",
+        expires_at: future
+      })
+    });
+
+    const result = await requestCodexDeviceCode(fetchLike);
+
+    expect(result.expires_in).toBeDefined();
+    expect(result.expires_in).toBeGreaterThanOrEqual(899);
+    expect(result.expires_in).toBeLessThanOrEqual(901);
+  });
+
   it("throws CodexOAuthError on HTTP failure without exposing response body fields", async () => {
     const { fetchLike } = createMockFetch({
       usercode: () => response(

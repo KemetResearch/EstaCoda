@@ -1087,6 +1087,16 @@ describe("setup copy", () => {
     expect(resolveSetupCopy("ar", "setupEditor.prompt.openAiRoute.codex.description")).toContain(isolateLtr("OpenAI Codex"));
     expect(resolveSetupCopy("ar", "setupEditor.prompt.openAiRoute.codex.description")).toContain(isolateLtr("OAuth"));
     expect(resolveSetupCopy("ar", "setupEditor.prompt.openAiRoute.codex.description")).toContain(isolateLtr("gpt-5.5"));
+    expect(rawSetupCopy("en", "setupEditor.prompt.codexOAuth.title")).toBe("Codex OAuth");
+    expect(rawSetupCopy("en", "setupEditor.prompt.codexOAuth.signIn")).toBe("Sign in with device code");
+    expect(rawSetupCopy("en", "setupEditor.prompt.codexOAuth.device.open")).toBe("Open: {url}");
+    expect(rawSetupCopy("en", "setupEditor.prompt.codexOAuth.device.code")).toBe("Code: {code}");
+    expect(resolveSetupCopy("ar", "setupEditor.prompt.codexOAuth.title")).toContain(isolateLtr("Codex"));
+    expect(resolveSetupCopy("ar", "setupEditor.prompt.codexOAuth.title")).toContain(isolateLtr("OAuth"));
+    expect(resolveSetupCopy("ar", "setupEditor.prompt.codexOAuth.body")).toContain(isolateLtr("Codex"));
+    expect(resolveSetupCopy("ar", "setupEditor.prompt.codexOAuth.body")).toContain(isolateLtr("OAuth"));
+    expect(resolveSetupCopy("ar", "setupEditor.prompt.codexOAuth.device.open")).toContain(isolateLtr("{url}"));
+    expect(resolveSetupCopy("ar", "setupEditor.prompt.codexOAuth.device.code")).toContain(isolateLtr("{code}"));
     expect(rawSetupCopy("ar", "setupEditor.prompt.auxiliaryRoute.assessor.description")).toContain("assessor");
     expect(rawSetupCopy("ar", "setupEditor.prompt.auxiliaryRoute.compression.description")).toContain("compression");
     expect(rawSetupCopy("ar", "setupEditor.prompt.auxiliaryRoute.sessionSearch.description")).toContain("session_search");

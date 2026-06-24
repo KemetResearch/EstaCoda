@@ -300,17 +300,36 @@ function parseDeviceCodeResponse(data: unknown): CodexDeviceCodeResponse | null 
 
   if (typeof obj.user_code !== "string" || obj.user_code.length === 0) return null;
   if (typeof obj.device_auth_id !== "string" || obj.device_auth_id.length === 0) return null;
-  if (obj.interval !== undefined && typeof obj.interval !== "number") return null;
-  if (obj.expires_in !== undefined && typeof obj.expires_in !== "number") return null;
+
+  // OpenAI returns interval as either a number or a string (e.g. "5").
+  const intervalRaw = obj.interval;
+  let intervalNum: number;
+  if (typeof intervalRaw === "number") {
+    intervalNum = intervalRaw;
+  } else if (typeof intervalRaw === "string") {
+    intervalNum = Number.parseInt(intervalRaw, 10);
+    if (Number.isNaN(intervalNum)) intervalNum = DEFAULT_POLL_INTERVAL_SECONDS;
+  } else {
+    intervalNum = DEFAULT_POLL_INTERVAL_SECONDS;
+  }
 
   const response: CodexDeviceCodeResponse = {
     user_code: obj.user_code,
     device_auth_id: obj.device_auth_id,
-    interval: typeof obj.interval === "number" ? obj.interval : DEFAULT_POLL_INTERVAL_SECONDS
+    interval: intervalNum
   };
+
+  // OpenAI returns either expires_in (seconds) or expires_at (ISO timestamp).
   if (typeof obj.expires_in === "number") {
     response.expires_in = obj.expires_in;
+  } else if (typeof obj.expires_at === "string") {
+    const expiresAtMs = Date.parse(obj.expires_at);
+    if (!Number.isNaN(expiresAtMs)) {
+      const nowMs = Date.now();
+      response.expires_in = Math.max(0, Math.ceil((expiresAtMs - nowMs) / 1000));
+    }
   }
+
   return response;
 }
 

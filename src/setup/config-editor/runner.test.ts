@@ -1650,6 +1650,163 @@ describe("runConfigEditor", () => {
     expect(rawConfig).not.toContain("accessToken");
   });
 
+  it("runs missing Codex OAuth through a live setup-editor device-code notice before reviewed apply", async () => {
+    await writeUserConfig(tempDir, localReadyConfig());
+    await trustWorkspace(tempDir, workspaceRoot);
+
+    const prompt = trackingPrompt({ values: ["OpenAI", "Codex", "signin", true] });
+    const selectInputs = captureSelectInputs(prompt);
+    const cards: Array<Parameters<NonNullable<Prompt["onboardingCard"]>>[0]> = [];
+    prompt.onboardingCard = (input) => {
+      cards.push(input);
+    };
+    const calls: Array<{ readonly url: string; readonly body: string }> = [];
+    const providerFetch = async (url: string, init: {
+      readonly method: string;
+      readonly headers: Record<string, string>;
+      readonly body: string;
+    }) => {
+      calls.push({ url, body: init.body });
+      if (url.endsWith("/api/accounts/deviceauth/usercode")) {
+        return fetchResponse({
+          user_code: "LIVE-CODE",
+          device_auth_id: "device-auth-secret",
+          interval: "0",
+          expires_at: new Date(Date.now() + 900_000).toISOString(),
+        });
+      }
+      if (url.endsWith("/api/accounts/deviceauth/token")) {
+        return fetchResponse({
+          authorization_code: "authorization-code-secret",
+          code_verifier: "code-verifier-secret",
+        });
+      }
+      if (url.endsWith("/oauth/token")) {
+        return fetchResponse({
+          access_token: "access-token-secret",
+          refresh_token: "refresh-token-secret",
+          expires_in: 3600,
+          scope: "openid profile",
+        });
+      }
+      return fetchResponse({ error: "unexpected" }, { ok: false, status: 404, statusText: "Not Found" });
+    };
+
+    const result = await runConfigEditor({
+      homeDir: tempDir,
+      workspaceRoot,
+      prompt,
+      defaultActionId: "edit-primary-model-route",
+      flowEngine: flowEngine({
+        credentialAction: "oauth",
+        oauthStatus: "required",
+        providers: ["openai", "codex"],
+      }),
+      providerFetch,
+      applyExecutor: createReviewedSetupApplyExecutor({
+        homeDir: tempDir,
+        workspaceRoot,
+        collectVerification: () => readyVerification(profileConfigPath(tempDir)),
+      }),
+    });
+    const rawConfig = await readFile(profileConfigPath(tempDir), "utf8");
+    const rawAuth = await readFile(profileAuthPath(tempDir), "utf8");
+    const config = JSON.parse(rawConfig) as {
+      model?: { provider?: string; id?: string };
+      providers?: Record<string, { apiKeyEnv?: string; authMethod?: string; apiMode?: string }>;
+    };
+
+    expect(result.completed).toBe(true);
+    expect(prompt.secretPromptCount()).toBe(0);
+    expect(selectInputs.map((input) => input.title)).toEqual([
+      "Primary provider",
+      "OpenAI setup",
+      "Codex OAuth",
+      "Finalize configuration",
+    ]);
+    expect(selectInputs[2]?.options.map((option) => option.id)).toEqual([
+      "codex-oauth-signin",
+      "codex-oauth-cancel",
+    ]);
+    expect(cards.map((card) => card.title)).toEqual([
+      "Codex OAuth",
+      "Codex OAuth device authorization",
+    ]);
+    expect(cards[0]?.bodyLines).toContain("Requesting a Codex OAuth device code...");
+    expect(cards[1]?.bodyLines).toContain("Open: https://auth.openai.com/codex/device");
+    expect(cards[1]?.bodyLines).toContain("Code: LIVE-CODE");
+    expect(config.model).toEqual(expect.objectContaining({ provider: "codex", id: "gpt-5.5" }));
+    expect(config.providers?.codex).toEqual(expect.objectContaining({
+      authMethod: "oauth_device_pkce",
+    }));
+    expect(config.providers?.codex?.apiKeyEnv).toBeUndefined();
+    expect(rawAuth).toContain("access-token-secret");
+    expect(result.reviewManifest?.sections["provider-model-network"][0]?.review.values).toEqual(expect.objectContaining({
+      provider: "codex",
+      model: "gpt-5.5",
+      authMethod: "oauth_device_pkce",
+      oauthCredentialStatus: "pending",
+    }));
+    expect(result.reviewManifest?.sections["secret-refs-to-store"][0]?.review.values).toEqual(expect.objectContaining({
+      provider: "codex",
+      credentialSurface: "oauth",
+      authMethod: "oauth_device_pkce",
+      oauthCredentialStatus: "pending",
+    }));
+    expect(calls.map((call) => call.url)).toEqual([
+      "https://auth.openai.com/api/accounts/deviceauth/usercode",
+      "https://auth.openai.com/api/accounts/deviceauth/token",
+      "https://auth.openai.com/oauth/token",
+    ]);
+    const serializedResult = JSON.stringify(result);
+    expect(serializedResult).not.toContain("access-token-secret");
+    expect(serializedResult).not.toContain("refresh-token-secret");
+    expect(serializedResult).not.toContain("authorization-code-secret");
+    expect(serializedResult).not.toContain("code-verifier-secret");
+    expect(serializedResult).not.toContain("device-auth-secret");
+    expect(rawConfig).not.toContain("access-token-secret");
+    expect(rawConfig).not.toContain("refresh-token-secret");
+  });
+
+  it("does not start Codex OAuth or draft changes when setup-editor Codex sign-in is cancelled", async () => {
+    await writeUserConfig(tempDir, localReadyConfig());
+    await trustWorkspace(tempDir, workspaceRoot);
+
+    const prompt = trackingPrompt({ values: ["OpenAI", "Codex", "cancel"] });
+    const selectInputs = captureSelectInputs(prompt);
+    const providerFetch = vi.fn();
+
+    const result = await runConfigEditor({
+      homeDir: tempDir,
+      workspaceRoot,
+      prompt,
+      defaultActionId: "edit-primary-model-route",
+      flowEngine: flowEngine({
+        credentialAction: "oauth",
+        oauthStatus: "required",
+        providers: ["openai", "codex"],
+      }),
+      providerFetch,
+      applyExecutor: createReviewedSetupApplyExecutor({
+        homeDir: tempDir,
+        workspaceRoot,
+      }),
+    });
+    const rawConfig = await readFile(profileConfigPath(tempDir), "utf8");
+
+    expect(result.completed).toBe(false);
+    expect(result.output).toContain("Codex OAuth authentication was cancelled. No changes were drafted.");
+    expect(prompt.secretPromptCount()).toBe(0);
+    expect(providerFetch).not.toHaveBeenCalled();
+    expect(selectInputs.map((input) => input.title)).toEqual([
+      "Primary provider",
+      "OpenAI setup",
+      "Codex OAuth",
+    ]);
+    expect(JSON.parse(rawConfig)).toEqual(localReadyConfig());
+    await expect(readFile(profileAuthPath(tempDir), "utf8")).rejects.toThrow();
+  });
+
   it("prompts for local endpoint and uses the default base URL when blank with no API key", async () => {
     await writeUserConfig(tempDir, localReadyConfig());
     await trustWorkspace(tempDir, workspaceRoot);
@@ -4700,6 +4857,29 @@ function profileConfigPath(homeDir: string, profileId = "default"): string {
 
 function profileEnvPath(homeDir: string, profileId = "default"): string {
   return resolveProfileStateHome({ homeDir, profileId }).envPath;
+}
+
+function profileAuthPath(homeDir: string, profileId = "default"): string {
+  return resolveProfileStateHome({ homeDir, profileId }).authJsonPath;
+}
+
+function fetchResponse(
+  json: unknown,
+  options: { readonly ok?: boolean; readonly status?: number; readonly statusText?: string } = {}
+): {
+  readonly ok: boolean;
+  readonly status: number;
+  readonly statusText: string;
+  readonly json: () => Promise<unknown>;
+  readonly text: () => Promise<string>;
+} {
+  return {
+    ok: options.ok ?? true,
+    status: options.status ?? 200,
+    statusText: options.statusText ?? "OK",
+    json: async () => json,
+    text: async () => JSON.stringify(json),
+  };
 }
 
 async function trustWorkspace(homeDir: string, workspaceRoot: string): Promise<void> {
