@@ -26,6 +26,24 @@ filesystem providers, and command/provider features belong to later scoped PRs.
 Current root UI behavior remains untouched until the later renderer integration
 PRs intentionally opt into Papyrus behind reviewed rollout paths.
 
+## Current Substrate Surface
+
+This PR may expose only the intentional inert substrate APIs under this
+namespace: terminal I/O sequence primitives, screen-local geometry and width
+helpers, cell buffers, frame snapshots, pure frame diffs, an inert compositor
+bridge, and an inert border primitive.
+
+The root `src/ui/papyrus/index.ts` remains intentionally inert for this PR so
+future integration can choose a reviewed public import surface. Nested barrels
+may expose local substrate modules for tests and later integration work, but
+they should not export product view-model builders, provider/runtime/session
+types, prompt chrome, CLI commands, raw input handlers, or live terminal
+lifecycle managers.
+
+Raw input, widgets beyond the inert border primitive, autocomplete, clipboard,
+shell-history, Slack/MCP integration, focus/mouse tracking, terminal lifecycle,
+Vim-style editing, and live renderer adoption remain outside this PR.
+
 ## Porting Rules
 
 Reference material is adapted from the Papyrus/Ink renderer substrate inventory.
@@ -45,3 +63,8 @@ Filesystem, command, shell-history, clipboard, provider, Slack/MCP, and other
 external or privacy-sensitive features are outside PR 1 unless explicitly
 scoped and reviewed.
 
+Implementation files under `src/ui/papyrus` must not write to stdout or stderr,
+toggle raw mode, spawn subprocesses, execute shell helpers, mutate terminal
+state at module load, or introduce clipboard behavior. Dependency files should
+change only in the same commit that first consumes the dependency and documents
+why it is needed.
