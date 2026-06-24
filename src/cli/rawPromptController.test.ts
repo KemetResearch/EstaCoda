@@ -67,6 +67,26 @@ async function readWithFakeInput(inputText: string) {
   };
 }
 
+function startPendingRead() {
+  const input = new FakeInput();
+  const output = fakeOutput();
+  const lifecycle = fakeLifecycle();
+  const controller = new RawPromptController({ input, output, lifecycle: lifecycle.lifecycle });
+  let resolved = false;
+  const pending = controller.read("> ").then((result) => {
+    resolved = true;
+    return result;
+  });
+
+  return {
+    input,
+    output,
+    lifecycle,
+    pending,
+    isResolved: () => resolved,
+  };
+}
+
 describe("raw prompt controller", () => {
   it("does not construct a raw controller in readline mode", async () => {
     const input = new FakeInput();
@@ -128,23 +148,48 @@ describe("raw prompt controller", () => {
   });
 
   it("inserts bracketed paste without submitting until enter", async () => {
-    const input = new FakeInput();
-    const output = fakeOutput();
-    const lifecycle = fakeLifecycle();
-    const controller = new RawPromptController({ input, output, lifecycle: lifecycle.lifecycle });
-    let resolved = false;
+    const read = startPendingRead();
 
-    const pending = controller.read("> ").then((result) => {
-      resolved = true;
-      return result;
-    });
-
-    input.send(`${PASTE_START}line one\nline two${PASTE_END}`);
+    read.input.send(`${PASTE_START}line one\nline two${PASTE_END}`);
     await Promise.resolve();
-    expect(resolved).toBe(false);
+    expect(read.isResolved()).toBe(false);
 
-    input.send("\r");
-    expect(await pending).toEqual({ type: "submit", text: "line one\nline two" });
+    read.input.send("\r");
+    expect(await read.pending).toEqual({ type: "submit", text: "line one\nline two" });
+  });
+
+  it("inserts single-line bracketed paste without auto-submit", async () => {
+    const read = startPendingRead();
+
+    read.input.send(`${PASTE_START}pasted text${PASTE_END}`);
+    await Promise.resolve();
+
+    expect(read.isResolved()).toBe(false);
+    read.input.send("\r");
+    expect(await read.pending).toEqual({ type: "submit", text: "pasted text" });
+  });
+
+  it("allows pasted text to be edited before submit", async () => {
+    const read = startPendingRead();
+
+    read.input.send(`${PASTE_START}abc${PASTE_END}`);
+    await Promise.resolve();
+    read.input.send("\x1b[D\x7f\r");
+
+    expect(await read.pending).toEqual({ type: "submit", text: "ac" });
+  });
+
+  it("keeps large bracketed paste deterministic until enter", async () => {
+    const read = startPendingRead();
+    const largePaste = Array.from({ length: 150 }, (_, index) => `line-${index}`).join("\n");
+
+    read.input.send(`${PASTE_START}${largePaste}${PASTE_END}`);
+    await Promise.resolve();
+
+    expect(read.isResolved()).toBe(false);
+    read.input.send("\r");
+    expect(await read.pending).toEqual({ type: "submit", text: largePaste });
+    expect(read.lifecycle.calls).toEqual(["start", "stop"]);
   });
 
   it("returns cancel for Ctrl-C and Escape", async () => {
@@ -152,10 +197,42 @@ describe("raw prompt controller", () => {
     expect((await readWithFakeInput("\x1b")).result).toEqual({ type: "cancel" });
   });
 
+  it("cancels without submitting partial input and cleans up once", async () => {
+    const { result, lifecycle } = await readWithFakeInput("partial\x03");
+
+    expect(result).toEqual({ type: "cancel" });
+    expect(lifecycle.calls).toEqual(["start", "stop"]);
+  });
+
   it("returns eof for Ctrl-D on empty input", async () => {
     const { result } = await readWithFakeInput("\x04");
 
     expect(result).toEqual({ type: "eof" });
+  });
+
+  it("Ctrl-D deletes the next grapheme on non-empty input instead of exiting", async () => {
+    const { result } = await readWithFakeInput("ab\x01\x04\r");
+
+    expect(result).toEqual({ type: "submit", text: "b" });
+  });
+
+  it("submits after cursor movement and editing", async () => {
+    const { result, lifecycle } = await readWithFakeInput("abc\x1b[DX\r");
+
+    expect(result).toEqual({ type: "submit", text: "abXc" });
+    expect(lifecycle.calls).toEqual(["start", "stop"]);
+  });
+
+  it("treats Up and Down history keys as safe no-ops for now", async () => {
+    const { result } = await readWithFakeInput("draft\x1b[A\x1b[B\r");
+
+    expect(result).toEqual({ type: "submit", text: "draft" });
+  });
+
+  it("preserves prompt safety for unknown escape sequences", async () => {
+    const { result } = await readWithFakeInput("\x1b[999~ok\r");
+
+    expect(result).toEqual({ type: "submit", text: "ok" });
   });
 
   it("maps cancel and eof to /exit in the Prompt adapter", async () => {
