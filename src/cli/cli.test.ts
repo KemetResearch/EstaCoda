@@ -207,11 +207,11 @@ describe("runCliCommand model setup codex dispatch", () => {
       configurable: true,
       value: true,
     });
-    readlineMock.prompt.mockReset();
-    readlineMock.close.mockReset();
-    readlineMock.createReadlinePrompt.mockReset();
-    readlineMock.createReadlinePrompt.mockReturnValue(Object.assign(readlineMock.prompt, {
-      close: readlineMock.close,
+    interactivePromptMock.prompt.mockReset();
+    interactivePromptMock.close.mockReset();
+    interactivePromptMock.createInteractivePrompt.mockReset();
+    interactivePromptMock.createInteractivePrompt.mockReturnValue(Object.assign(interactivePromptMock.prompt, {
+      close: interactivePromptMock.close,
     }));
   });
 
@@ -224,7 +224,7 @@ describe("runCliCommand model setup codex dispatch", () => {
   });
 
   it("creates an interactive prompt for direct Codex setup instead of silently cancelling", async () => {
-    readlineMock.prompt.mockResolvedValue("2");
+    interactivePromptMock.prompt.mockResolvedValue("2");
 
     const result = await runCliCommand({
       argv: ["model", "setup", "codex"],
@@ -234,9 +234,24 @@ describe("runCliCommand model setup codex dispatch", () => {
 
     expect(result.handled).toBe(true);
     expect(result.output).toBe("Cancelled. No changes were made.");
-    expect(readlineMock.createReadlinePrompt).toHaveBeenCalledOnce();
-    expect(readlineMock.prompt).toHaveBeenCalledWith(expect.stringContaining("Codex requires OAuth authentication."));
-    expect(readlineMock.close).toHaveBeenCalledOnce();
+    expect(interactivePromptMock.createInteractivePrompt).toHaveBeenCalledOnce();
+    expect(interactivePromptMock.prompt).toHaveBeenCalledWith(expect.stringContaining("Codex requires OAuth authentication."));
+    expect(interactivePromptMock.close).toHaveBeenCalledOnce();
+  });
+
+  it("keeps injected Codex setup prompts on the explicit prompt path", async () => {
+    const prompt = fakePrompt(["2"]);
+
+    const result = await runCliCommand({
+      argv: ["model", "setup", "codex"],
+      workspaceRoot: tempDir,
+      homeDir: tempDir,
+      prompt,
+    });
+
+    expect(result.handled).toBe(true);
+    expect(result.output).toBe("Cancelled. No changes were made.");
+    expect(interactivePromptMock.createInteractivePrompt).not.toHaveBeenCalled();
   });
 });
 
@@ -308,11 +323,11 @@ describe("runCliCommand WhatsApp dispatch", () => {
 
   beforeEach(async () => {
     tempDir = await mkdtemp(join(tmpdir(), "estacoda-cli-whatsapp-"));
-    readlineMock.prompt.mockReset();
-    readlineMock.close.mockReset();
-    readlineMock.createReadlinePrompt.mockReset();
-    readlineMock.createReadlinePrompt.mockReturnValue(Object.assign(readlineMock.prompt, {
-      close: readlineMock.close
+    interactivePromptMock.prompt.mockReset();
+    interactivePromptMock.close.mockReset();
+    interactivePromptMock.createInteractivePrompt.mockReset();
+    interactivePromptMock.createInteractivePrompt.mockReturnValue(Object.assign(interactivePromptMock.prompt, {
+      close: interactivePromptMock.close
     }));
   });
 
@@ -343,10 +358,11 @@ describe("runCliCommand WhatsApp dispatch", () => {
     expect(result.handled).toBe(true);
     expect(result.exitCode).toBe(1);
     expect(result.output).toContain("⌘ WhatsApp Setup");
+    expect(interactivePromptMock.createInteractivePrompt).not.toHaveBeenCalled();
   });
 
   it("creates and closes a prompt for estacoda whatsapp when none is injected", async () => {
-    readlineMock.prompt.mockResolvedValue("n");
+    interactivePromptMock.prompt.mockResolvedValue("n");
 
     const result = await runCliCommand({
       argv: ["whatsapp"],
@@ -368,9 +384,9 @@ describe("runCliCommand WhatsApp dispatch", () => {
 
     expect(result.handled).toBe(true);
     expect(result.exitCode).toBe(1);
-    expect(readlineMock.createReadlinePrompt).toHaveBeenCalledOnce();
-    expect(readlineMock.prompt).toHaveBeenCalledWith(expect.stringContaining("npm ci"));
-    expect(readlineMock.close).toHaveBeenCalledOnce();
+    expect(interactivePromptMock.createInteractivePrompt).toHaveBeenCalledOnce();
+    expect(interactivePromptMock.prompt).toHaveBeenCalledWith(expect.stringContaining("npm ci"));
+    expect(interactivePromptMock.close).toHaveBeenCalledOnce();
   });
 
   it("does not close an injected WhatsApp prompt", async () => {
@@ -399,6 +415,7 @@ describe("runCliCommand WhatsApp dispatch", () => {
     expect(result.handled).toBe(true);
     expect(result.exitCode).toBe(1);
     expect(close).not.toHaveBeenCalled();
+    expect(interactivePromptMock.createInteractivePrompt).not.toHaveBeenCalled();
   });
 
   it("does not expose WhatsApp subcommands", async () => {
