@@ -6,7 +6,7 @@ import { launchInteractiveSession } from "./interactive-launcher.js";
 import { runCliCommand } from "./cli.js";
 import { setupProviderConfig, setupUiConfig } from "../config/runtime-config.js";
 import { WorkspaceTrustStore } from "../security/workspace-trust-store.js";
-import type { Prompt } from "./readline-prompt.js";
+import type { Prompt } from "./prompt-contract.js";
 
 describe("launchInteractiveSession", () => {
   const originalIsTTY = process.stdin.isTTY;

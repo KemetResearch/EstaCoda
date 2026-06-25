@@ -1,6 +1,7 @@
 import { rm } from "node:fs/promises";
 import type { CliCommandResult, CliOptions } from "./cli.js";
-import { canRunInteractive, createReadlinePrompt } from "./readline-prompt.js";
+import { createReadlinePrompt } from "./readline-prompt.js";
+import { canRunInteractive } from "../ui/terminal-capabilities.js";
 import { resolveGlobalStateHome } from "../config/profile-home.js";
 import {
   getRegisteredPythonCapabilitySpec,

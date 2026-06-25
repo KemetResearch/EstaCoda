@@ -36,7 +36,9 @@ import {
   type VoiceSetupInput,
   type WebSetupInput
 } from "../config/runtime-config.js";
-import { canRunInteractive, createReadlinePrompt, type Prompt } from "./readline-prompt.js";
+import { createReadlinePrompt } from "./readline-prompt.js";
+import type { Prompt } from "./prompt-contract.js";
+import { canRunInteractive } from "../ui/terminal-capabilities.js";
 import { promptUiContextForLocale } from "../contracts/ui.js";
 import { runFirstRunSetup } from "../setup/onboarding-wizard/runner.js";
 import { runConfigEditorSetup } from "../setup/config-editor/runner.js";
