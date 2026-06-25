@@ -362,46 +362,44 @@ Idle placeholder copy is not a separate shortcut rail and must not include a pro
 
 ---
 
-## Papyrus Renderer Flag
+## Papyrus Default Rollout
 
-`ESTACODA_UI_RENDERER=legacy|papyrus` controls the first Papyrus renderer
-rollout seam. The default remains `legacy`; unset, empty, or invalid values keep
-the existing bottom chrome path. To return to the legacy renderer, unset the
-environment variable or set `ESTACODA_UI_RENDERER=legacy`.
+Core interactive TTY sessions now default to the Papyrus session surface:
 
-`ESTACODA_UI_RENDERER=papyrus` opts the bottom chrome/status rail surface into
-the Papyrus surface controller. This is not a full renderer replacement.
+- `ESTACODA_UI_RENDERER` defaults to `papyrus`.
+- Core TTY sessions default to raw prompt input.
+- Raw prompt sessions show the Papyrus slash autocomplete overlay by default.
+- Raw Papyrus sessions use Papyrus approval cards for promptable approvals.
 
-Current PR 2 scope:
+Non-TTY one-shot and pipe-driven sessions keep the plain/readline-safe fallback
+behavior. Setup and operator prompts are not part of this rollout; they continue
+to use their existing prompt paths.
 
-- Bottom chrome/status rail rendering can use Papyrus only when explicitly
-  opted in with `ESTACODA_UI_RENDERER=papyrus`.
-- Raw input remains readline-owned.
-- Transcript rendering remains on the legacy renderer.
-- Width and wrap migration is deferred to PR 3.
-- Spinner/tool rail coverage is limited to the existing status-bearing bottom
-  chrome path; spinner-only and unrelated tool rail surfaces are not broadly
-  migrated here.
-- Until a later full-surface integration exists, the Papyrus bottom-chrome path
-  extracts managed-region-compatible rows instead of writing full-screen
-  absolute diff output.
+Temporary fallback flags remain available during soak:
 
-## Input Mode Flag
+| Flag | Effect |
+|------|--------|
+| `ESTACODA_UI_RENDERER=legacy` | Use the legacy session renderer/bottom-chrome path. |
+| `ESTACODA_INPUT_MODE=readline` | Use the legacy readline prompt path. |
+| `ESTACODA_APPROVAL_WIDGETS=legacy` | Use the plain text approval prompt in core sessions. |
 
-`ESTACODA_INPUT_MODE=readline|raw` controls the prompt input implementation.
-The default remains `readline`; unset, empty, or invalid values keep the
-existing readline prompt path. `ESTACODA_INPUT_MODE=raw` enables the opt-in raw
-prompt controller MVP.
+These fallback flags are temporary rollout controls and are expected to be
+removed in PR6B after the Papyrus defaults have soaked.
 
-Current raw input MVP scope:
+Optional Papyrus capabilities remain opt-in. They are not enabled by the default
+renderer/input rollout:
 
-- Uses the raw prompt controller for prompt submission only when explicitly
-  selected.
-- Keeps autocomplete, shell history, clipboard/image paste, Vim mode, and
-  mouse/focus handling deferred.
-- Keeps renderer rollout and runtime/provider/session behavior unchanged.
-- Escape hatch: unset `ESTACODA_INPUT_MODE` or set
-  `ESTACODA_INPUT_MODE=readline`.
+| Capability | Opt-in flag |
+|------------|-------------|
+| Vim keymap | `ESTACODA_INPUT_KEYMAP=vim` |
+| shell-history suggestions | `ESTACODA_SHELL_HISTORY=1` |
+| clipboard reads | `ESTACODA_CLIPBOARD=1` |
+| MCP resource suggestions | `ESTACODA_MCP_SUGGESTIONS=1` |
+| skill suggestions | `ESTACODA_SKILL_SUGGESTIONS=1` |
+
+`/status` reports these optional Papyrus capability states so operators can
+confirm whether a session is using only the default rollout surface or additional
+explicitly enabled helpers.
 
 ---
 
