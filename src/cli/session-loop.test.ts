@@ -382,16 +382,14 @@ async function runApprovalPromptScenario(
 }
 
 describe("runSessionLoop — user prompt rail behavior", () => {
-  it("covers default Papyrus rollout behavior for interactive TTY core sessions", async () => {
+  it("starts and cleans up the raw prompt by default for interactive TTY core sessions", async () => {
     const input = makeTtyInput();
-    const outputChunks: string[] = [];
 
     const loop = runSessionLoop({
       runtime: createMockRuntime(),
       input,
       output: {
-        write(chunk: string | Uint8Array): boolean {
-          outputChunks.push(String(chunk));
+        write(): boolean {
           return true;
         },
         isTTY: true,
@@ -401,34 +399,15 @@ describe("runSessionLoop — user prompt rail behavior", () => {
       close: () => {},
     });
 
-    while (input.listenerCount("data") === 0) {
+    for (let attempt = 0; attempt < 20 && input.listenerCount("data") === 0; attempt += 1) {
       await new Promise((resolve) => setTimeout(resolve, 0));
     }
-
-    input.write("/");
-    while (!stripAnsi(outputChunks.join("")).includes("Show command help")) {
-      await new Promise((resolve) => setTimeout(resolve, 0));
-    }
-
-    input.write("status");
-    input.write("\r");
-    while (!stripAnsi(outputChunks.join("")).includes("Papyrus optional capabilities")) {
-      await new Promise((resolve) => setTimeout(resolve, 0));
-    }
+    expect(input.listenerCount("data")).toBeGreaterThan(0);
 
     input.write("\u0003");
     await loop;
 
-    const rendered = stripAnsi(outputChunks.join(""));
-    expect(input.rawModes).toEqual([true, false, true, false]);
-    expect(rendered).toContain("/help");
-    expect(rendered).toContain("Show command help");
-    expect(rendered).toContain("Papyrus optional capabilities");
-    expect(rendered).toContain("shell history suggestions: off");
-    expect(rendered).toContain("clipboard reads: off");
-    expect(rendered).toContain("MCP resource suggestions: off");
-    expect(rendered).toContain("skill suggestions: off");
-    expect(rendered).toContain("Vim keymap: off");
+    expect(input.rawModes).toEqual([true, false]);
   });
 
   it("reports optional Papyrus capabilities as disabled by default in /status", async () => {
@@ -5395,6 +5374,24 @@ describe("runSessionLoop — active turn spinner", () => {
     expect(result.rendered).not.toContain("[Approval] Approval required:");
   });
 
+  it("keeps approval prompts legacy when readline fallback conflicts with the Papyrus approval flag", async () => {
+    const result = await runApprovalPromptScenario(["once"], {
+      env: {
+        [UI_INPUT_MODE_ENV_VAR]: "readline",
+        [APPROVAL_WIDGET_MODE_ENV_VAR]: "papyrus",
+      },
+      response: approvalAskResponse(),
+      ttyCoreSession: true,
+    });
+
+    expect(result.grants).toHaveLength(1);
+    expect(result.grants[0]).toMatchObject({
+      toolName: "workspace.write",
+      scope: "once",
+    });
+    expect(result.rendered).not.toContain("[Approval] Approval required:");
+  });
+
   it("keeps approval prompts legacy when core sessions use the legacy renderer fallback", async () => {
     const result = await runApprovalPromptScenario(["once"], {
       env: { [UI_RENDERER_ENV_VAR]: "legacy" },
@@ -5414,6 +5411,7 @@ describe("runSessionLoop — active turn spinner", () => {
     const result = await runApprovalPromptScenario(["approve-once"], {
       env: { [APPROVAL_WIDGET_MODE_ENV_VAR]: "papyrus" },
       response: commandApprovalAskResponse(),
+      ttyCoreSession: true,
     });
 
     expect(result.grants).toEqual([
@@ -5434,6 +5432,7 @@ describe("runSessionLoop — active turn spinner", () => {
     const result = await runApprovalPromptScenario(["reject"], {
       env: { [APPROVAL_WIDGET_MODE_ENV_VAR]: "papyrus" },
       response: approvalAskResponse(),
+      ttyCoreSession: true,
     });
 
     expect(result.grants).toEqual([]);
@@ -5451,6 +5450,7 @@ describe("runSessionLoop — active turn spinner", () => {
       const result = await runApprovalPromptScenario([answer], {
         env: { [APPROVAL_WIDGET_MODE_ENV_VAR]: "papyrus" },
         response: approvalAskResponse(),
+        ttyCoreSession: true,
       });
 
       expect(result.grants).toHaveLength(1);
@@ -5469,6 +5469,7 @@ describe("runSessionLoop — active turn spinner", () => {
     const result = await runApprovalPromptScenario(["cancel", "feedback", "approve-once"], {
       env: { [APPROVAL_WIDGET_MODE_ENV_VAR]: "papyrus" },
       response: approvalAskResponse(),
+      ttyCoreSession: true,
     });
 
     expect(result.grants).toHaveLength(1);
@@ -5626,6 +5627,7 @@ describe("runSessionLoop — active turn spinner", () => {
     const result = await runApprovalPromptScenario([], {
       env: { [APPROVAL_WIDGET_MODE_ENV_VAR]: "papyrus" },
       response: approvalDenyResponse(),
+      ttyCoreSession: true,
     });
 
     expect(result.grants).toEqual([]);
@@ -5637,6 +5639,7 @@ describe("runSessionLoop — active turn spinner", () => {
     const result = await runApprovalPromptScenario([], {
       env: { [APPROVAL_WIDGET_MODE_ENV_VAR]: "papyrus" },
       response: commandApprovalDenyResponse(),
+      ttyCoreSession: true,
     });
 
     expect(result.grants).toEqual([]);

@@ -32,8 +32,12 @@ export function resolveApprovalWidgetMode(options?: ResolveApprovalWidgetModeOpt
 export function resolveCoreSessionApprovalWidgetMode(
   options: ResolveCoreSessionApprovalWidgetModeOptions
 ): ApprovalWidgetMode {
+  if (options.inputMode !== "raw" || options.rendererMode !== "papyrus") {
+    return "legacy";
+  }
+
   return resolveApprovalWidgetMode({
     env: options.env,
-    defaultMode: options.inputMode === "raw" && options.rendererMode === "papyrus" ? "papyrus" : "legacy",
+    defaultMode: "papyrus",
   });
 }

@@ -100,6 +100,19 @@ describe("approval widget mode", () => {
     })).toBe("legacy");
   });
 
+  it("keeps readline and legacy renderer fallback gates above explicit Papyrus approval widgets", () => {
+    expect(resolveCoreSessionApprovalWidgetMode({
+      env: { [APPROVAL_WIDGET_MODE_ENV_VAR]: "papyrus" },
+      inputMode: "readline",
+      rendererMode: "papyrus",
+    })).toBe("legacy");
+    expect(resolveCoreSessionApprovalWidgetMode({
+      env: { [APPROVAL_WIDGET_MODE_ENV_VAR]: "papyrus" },
+      inputMode: "raw",
+      rendererMode: "legacy",
+    })).toBe("legacy");
+  });
+
   it("keeps explicit legacy as the core session approval widget escape hatch", () => {
     expect(resolveCoreSessionApprovalWidgetMode({
       env: { [APPROVAL_WIDGET_MODE_ENV_VAR]: "legacy" },
