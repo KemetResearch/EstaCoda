@@ -69,10 +69,12 @@ describe("Papyrus substrate boundaries", () => {
       "./multiSelectModel.js",
       "./optionMap.js",
       "./overlayStack.js",
+      "./previewPaneModel.js",
       "./scrollPaneModel.js",
       "./selectKeymap.js",
       "./selectModel.js",
       "./selectRenderRows.js",
+      "./terminalHeightConstraints.js",
       "./virtualListModel.js",
     ]);
   });
