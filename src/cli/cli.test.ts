@@ -15,6 +15,17 @@ const readlineMock = vi.hoisted(() => ({
   createReadlinePrompt: vi.fn(),
 }));
 
+const interactivePromptMock = vi.hoisted(() => ({
+  prompt: vi.fn(),
+  close: vi.fn(),
+  createInteractivePrompt: vi.fn(),
+}));
+
+const setupFlowMock = vi.hoisted(() => ({
+  collectSetupRoute: vi.fn(),
+  runFirstRunSetup: vi.fn(),
+}));
+
 const updateCommandMock = vi.hoisted(() => ({
   runUpdateCommand: vi.fn(),
 }));
@@ -24,6 +35,26 @@ vi.mock("./readline-prompt.js", async (importOriginal) => {
   return {
     ...actual,
     createReadlinePrompt: readlineMock.createReadlinePrompt,
+  };
+});
+
+vi.mock("./create-interactive-prompt.js", () => ({
+  createInteractivePrompt: interactivePromptMock.createInteractivePrompt,
+}));
+
+vi.mock("../setup/setup-router.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../setup/setup-router.js")>();
+  return {
+    ...actual,
+    collectSetupRoute: setupFlowMock.collectSetupRoute,
+  };
+});
+
+vi.mock("../setup/onboarding-wizard/runner.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../setup/onboarding-wizard/runner.js")>();
+  return {
+    ...actual,
+    runFirstRunSetup: setupFlowMock.runFirstRunSetup,
   };
 });
 
@@ -206,6 +237,69 @@ describe("runCliCommand model setup codex dispatch", () => {
     expect(readlineMock.createReadlinePrompt).toHaveBeenCalledOnce();
     expect(readlineMock.prompt).toHaveBeenCalledWith(expect.stringContaining("Codex requires OAuth authentication."));
     expect(readlineMock.close).toHaveBeenCalledOnce();
+  });
+});
+
+describe("runCliCommand setup prompt factory dispatch", () => {
+  let tempDir: string;
+
+  beforeEach(async () => {
+    tempDir = await mkdtemp(join(tmpdir(), "estacoda-cli-setup-factory-"));
+    setupFlowMock.collectSetupRoute.mockReset();
+    setupFlowMock.collectSetupRoute.mockResolvedValue({ kind: "first-run-onboarding" });
+    setupFlowMock.runFirstRunSetup.mockReset();
+    setupFlowMock.runFirstRunSetup.mockResolvedValue({
+      exitCode: 0,
+      output: "setup ok",
+      launchRequested: false,
+    });
+    interactivePromptMock.prompt.mockReset();
+    interactivePromptMock.close.mockReset();
+    interactivePromptMock.createInteractivePrompt.mockReset();
+    interactivePromptMock.createInteractivePrompt.mockReturnValue(Object.assign(interactivePromptMock.prompt, {
+      close: interactivePromptMock.close,
+    }));
+  });
+
+  afterEach(async () => {
+    await rm(tempDir, { recursive: true, force: true });
+  });
+
+  it("routes setup --interactive prompt creation through the Papyrus-capable factory", async () => {
+    const result = await runCliCommand({
+      argv: ["setup", "--interactive"],
+      workspaceRoot: tempDir,
+      homeDir: tempDir,
+    });
+
+    expect(result).toMatchObject({
+      handled: true,
+      exitCode: 0,
+      output: "setup ok",
+    });
+    expect(interactivePromptMock.createInteractivePrompt).toHaveBeenCalledOnce();
+    expect(setupFlowMock.runFirstRunSetup).toHaveBeenCalledWith(expect.objectContaining({
+      prompt: interactivePromptMock.prompt,
+    }));
+    expect(interactivePromptMock.close).toHaveBeenCalledOnce();
+  });
+
+  it("keeps injected setup prompts on the existing explicit prompt path", async () => {
+    const prompt = Object.assign(vi.fn(async () => ""), { close: vi.fn() });
+
+    const result = await runCliCommand({
+      argv: ["setup", "--interactive"],
+      workspaceRoot: tempDir,
+      homeDir: tempDir,
+      prompt,
+    });
+
+    expect(result.exitCode).toBe(0);
+    expect(interactivePromptMock.createInteractivePrompt).not.toHaveBeenCalled();
+    expect(setupFlowMock.runFirstRunSetup).toHaveBeenCalledWith(expect.objectContaining({
+      prompt,
+    }));
+    expect(prompt.close).not.toHaveBeenCalled();
   });
 });
 

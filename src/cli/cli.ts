@@ -39,6 +39,7 @@ import {
 import { createReadlinePrompt } from "./readline-prompt.js";
 import type { Prompt } from "./prompt-contract.js";
 import { canRunInteractive } from "../ui/terminal-capabilities.js";
+import { createInteractivePrompt } from "./create-interactive-prompt.js";
 import { promptUiContextForLocale } from "../contracts/ui.js";
 import { runFirstRunSetup } from "../setup/onboarding-wizard/runner.js";
 import { runConfigEditorSetup } from "../setup/config-editor/runner.js";
@@ -424,7 +425,7 @@ async function setup(options: CliOptions, args: string[]): Promise<CliCommandRes
 }
 
 async function interactiveSetup(options: CliOptions, input: { readonly advanced: boolean }): Promise<CliCommandResult> {
-  const prompt = options.prompt ?? createReadlinePrompt();
+  const prompt = options.prompt ?? createInteractivePrompt();
   try {
     const decision = await collectSetupRoute(options);
     if (decision.kind === "first-run-onboarding") {
