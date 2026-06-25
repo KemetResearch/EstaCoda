@@ -5267,6 +5267,57 @@ describe("runSessionLoop — active turn spinner", () => {
     expect(result.rendered).toContain("Permission denied.");
   });
 
+  it("maps Papyrus approval scope answers through existing grant handling", async () => {
+    for (const [answer, scope] of [
+      ["approve-once", "once"],
+      ["session", "session"],
+      ["always", "always"],
+    ] as const) {
+      const result = await runApprovalPromptScenario([answer], {
+        env: { [APPROVAL_WIDGET_MODE_ENV_VAR]: "papyrus" },
+        response: approvalAskResponse(),
+      });
+
+      expect(result.grants).toHaveLength(1);
+      expect(result.grants[0]).toMatchObject({
+        toolName: "workspace.write",
+        riskClass: "workspace-write",
+        targetKey: "src/app.ts",
+        targetSummary: "src/app.ts",
+        scope,
+      });
+      expect(result.handleInputs).toEqual(["write file", "write file"]);
+    }
+  });
+
+  it("keeps Papyrus cancel and unsupported rich answers on the existing invalid-answer path", async () => {
+    const result = await runApprovalPromptScenario(["cancel", "feedback", "approve-once"], {
+      env: { [APPROVAL_WIDGET_MODE_ENV_VAR]: "papyrus" },
+      response: approvalAskResponse(),
+    });
+
+    expect(result.grants).toHaveLength(1);
+    expect(result.grants[0]?.scope).toBe("once");
+    expect(result.handleInputs).toEqual(["write file", "write file"]);
+    expect(result.rendered.split("Enter one of: once, session, always, deny.")).toHaveLength(3);
+  });
+
+  it("prefers an injected approval prompt adapter over the Papyrus approval widget flag", async () => {
+    const adapter = vi.fn<ApprovalPromptAdapter>(async () => "deny");
+    const result = await runApprovalPromptScenario([], {
+      env: { [APPROVAL_WIDGET_MODE_ENV_VAR]: "papyrus" },
+      approvalPromptAdapter: adapter,
+      response: approvalAskResponse(),
+    });
+
+    expect(adapter).toHaveBeenCalledTimes(1);
+    expect(result.adapterCalls).toBe(1);
+    expect(result.grants).toEqual([]);
+    expect(result.handleInputs).toEqual(["write file"]);
+    expect(result.rendered).toContain("Permission denied.");
+    expect(result.rendered).not.toContain("[Approval] Approval required:");
+  });
+
   it("routes promptable command approvals through the adapter and keeps grant scope in core approval code", async () => {
     const adapter = vi.fn<ApprovalPromptAdapter>(async (input) => {
       expect(input.execution).toMatchObject({

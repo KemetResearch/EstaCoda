@@ -95,6 +95,13 @@ describe("approval prompt adapter routing", () => {
     expect(rendered).not.toContain("Don't ask again");
   });
 
+  it("leaves unsupported rich approval answers for existing core validation", async () => {
+    await expect(papyrusApprovalPromptAdapter(adapterInput("feedback").input)).resolves.toBe("feedback");
+    await expect(papyrusApprovalPromptAdapter(adapterInput("amend").input)).resolves.toBe("amend");
+    await expect(papyrusApprovalPromptAdapter(adapterInput("ask-user").input)).resolves.toBe("ask-user");
+    await expect(papyrusApprovalPromptAdapter(adapterInput("dont-ask-again").input)).resolves.toBe("dont-ask-again");
+  });
+
   it("keeps persistent approval unavailable when the existing adapter input disallows it", async () => {
     const { input, outputChunks } = adapterInput("once", { allowPersistentApproval: false });
 
