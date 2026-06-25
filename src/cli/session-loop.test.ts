@@ -305,6 +305,7 @@ async function runApprovalPromptScenario(
     approvalPromptAdapter?: ApprovalPromptAdapter;
     response?: AgentLoopResponse;
     env?: Record<string, string | undefined>;
+    ttyCoreSession?: boolean;
   } = {}
 ): Promise<{
   grants: ApprovalGrantInput[];
@@ -337,6 +338,12 @@ async function runApprovalPromptScenario(
   } as Runtime;
 
   let promptIndex = 0;
+  const capabilities = options.ttyCoreSession
+    ? interactiveCaps({ supportsAnimation: false })
+    : interactiveCaps({
+        isTTY: false,
+        supportsAnimation: false,
+      });
   await runSessionLoop({
     runtime,
     output: {
@@ -344,13 +351,11 @@ async function runApprovalPromptScenario(
         outputChunks.push(String(chunk));
         return true;
       },
-      isTTY: false,
+      isTTY: capabilities.isTTY,
       columns: 120,
     } as unknown as NodeJS.WritableStream,
-    capabilities: interactiveCaps({
-      isTTY: false,
-      supportsAnimation: false,
-    }),
+    capabilities,
+    input: options.ttyCoreSession ? makeTtyInput() : undefined,
     prompt: Object.assign(
       async () => {
         const values = ["write file", ...approvalAnswers, "/exit"];
@@ -5234,6 +5239,7 @@ describe("runSessionLoop — active turn spinner", () => {
     const result = await runApprovalPromptScenario(["once"], {
       env: { [APPROVAL_WIDGET_MODE_ENV_VAR]: "legacy" },
       response: approvalAskResponse(),
+      ttyCoreSession: true,
     });
 
     expect(result.grants).toHaveLength(1);
@@ -5244,7 +5250,57 @@ describe("runSessionLoop — active turn spinner", () => {
     expect(result.rendered).not.toContain("[Approval] Approval required:");
   });
 
-  it("routes promptable command approvals through Papyrus adapter only behind the explicit flag", async () => {
+  it("defaults promptable approvals to Papyrus cards in raw Papyrus core sessions", async () => {
+    const result = await runApprovalPromptScenario(["approve-once"], {
+      response: approvalAskResponse(),
+      ttyCoreSession: true,
+    });
+
+    expect(result.grants).toEqual([
+      {
+        toolName: "workspace.write",
+        riskClass: "workspace-write",
+        targetKey: "src/app.ts",
+        targetSummary: "src/app.ts",
+        scope: "once",
+      },
+    ]);
+    expect(result.handleInputs).toEqual(["write file", "write file"]);
+    expect(result.rendered).toContain("[Approval] Approval required: workspace.write");
+    expect(result.rendered).toContain("Approval granted (once). Retrying now.");
+  });
+
+  it("keeps approval prompts legacy when core sessions use the readline escape hatch", async () => {
+    const result = await runApprovalPromptScenario(["once"], {
+      env: { [UI_INPUT_MODE_ENV_VAR]: "readline" },
+      response: approvalAskResponse(),
+      ttyCoreSession: true,
+    });
+
+    expect(result.grants).toHaveLength(1);
+    expect(result.grants[0]).toMatchObject({
+      toolName: "workspace.write",
+      scope: "once",
+    });
+    expect(result.rendered).not.toContain("[Approval] Approval required:");
+  });
+
+  it("keeps approval prompts legacy when core sessions use the legacy renderer fallback", async () => {
+    const result = await runApprovalPromptScenario(["once"], {
+      env: { [UI_RENDERER_ENV_VAR]: "legacy" },
+      response: approvalAskResponse(),
+      ttyCoreSession: true,
+    });
+
+    expect(result.grants).toHaveLength(1);
+    expect(result.grants[0]).toMatchObject({
+      toolName: "workspace.write",
+      scope: "once",
+    });
+    expect(result.rendered).not.toContain("[Approval] Approval required:");
+  });
+
+  it("routes promptable command approvals through Papyrus adapter behind the explicit flag", async () => {
     const result = await runApprovalPromptScenario(["approve-once"], {
       env: { [APPROVAL_WIDGET_MODE_ENV_VAR]: "papyrus" },
       response: commandApprovalAskResponse(),
@@ -5264,7 +5320,7 @@ describe("runSessionLoop — active turn spinner", () => {
     expect(result.rendered).toContain("Approval granted (once). Retrying now.");
   });
 
-  it("routes promptable file approvals through Papyrus adapter only behind the explicit flag", async () => {
+  it("routes promptable file approvals through Papyrus adapter behind the explicit flag", async () => {
     const result = await runApprovalPromptScenario(["reject"], {
       env: { [APPROVAL_WIDGET_MODE_ENV_VAR]: "papyrus" },
       response: approvalAskResponse(),
@@ -5471,6 +5527,17 @@ describe("runSessionLoop — active turn spinner", () => {
     const result = await runApprovalPromptScenario([], {
       env: { [APPROVAL_WIDGET_MODE_ENV_VAR]: "papyrus" },
       response: commandApprovalDenyResponse(),
+    });
+
+    expect(result.grants).toEqual([]);
+    expect(result.handleInputs).toEqual(["write file"]);
+    expect(result.rendered).not.toContain("[Approval] Approval required:");
+  });
+
+  it("does not render default Papyrus approval cards for hardline or policy-denied command executions", async () => {
+    const result = await runApprovalPromptScenario([], {
+      response: commandApprovalDenyResponse(),
+      ttyCoreSession: true,
     });
 
     expect(result.grants).toEqual([]);

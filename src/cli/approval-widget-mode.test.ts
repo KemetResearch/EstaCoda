@@ -3,6 +3,7 @@ import {
   APPROVAL_WIDGET_MODE_ENV_VAR,
   APPROVAL_WIDGET_MODES,
   parseApprovalWidgetMode,
+  resolveCoreSessionApprovalWidgetMode,
   resolveApprovalWidgetMode,
   type ApprovalWidgetMode,
 } from "./approval-widget-mode.js";
@@ -39,6 +40,49 @@ describe("approval widget mode", () => {
   it("falls back to legacy for invalid values", () => {
     expect(parseApprovalWidgetMode("raw")).toBe("legacy");
     expect(parseApprovalWidgetMode("papyrus-beta")).toBe("legacy");
+  });
+
+  it("can use papyrus as an injected default for raw Papyrus core sessions", () => {
+    expect(resolveApprovalWidgetMode({ env: {}, defaultMode: "papyrus" })).toBe("papyrus");
+    expect(parseApprovalWidgetMode(undefined, "papyrus")).toBe("papyrus");
+    expect(parseApprovalWidgetMode("", "papyrus")).toBe("papyrus");
+    expect(parseApprovalWidgetMode("invalid", "papyrus")).toBe("papyrus");
+  });
+
+  it("keeps explicit legacy as an escape hatch when papyrus is the default", () => {
+    expect(resolveApprovalWidgetMode({
+      env: { [APPROVAL_WIDGET_MODE_ENV_VAR]: "legacy" },
+      defaultMode: "papyrus",
+    })).toBe("legacy");
+  });
+
+  it("defaults raw Papyrus core sessions to papyrus approval widgets", () => {
+    expect(resolveCoreSessionApprovalWidgetMode({
+      env: {},
+      inputMode: "raw",
+      rendererMode: "papyrus",
+    })).toBe("papyrus");
+  });
+
+  it("preserves legacy approval prompts for readline or legacy renderer fallback sessions", () => {
+    expect(resolveCoreSessionApprovalWidgetMode({
+      env: {},
+      inputMode: "readline",
+      rendererMode: "papyrus",
+    })).toBe("legacy");
+    expect(resolveCoreSessionApprovalWidgetMode({
+      env: {},
+      inputMode: "raw",
+      rendererMode: "legacy",
+    })).toBe("legacy");
+  });
+
+  it("keeps explicit legacy as the core session approval widget escape hatch", () => {
+    expect(resolveCoreSessionApprovalWidgetMode({
+      env: { [APPROVAL_WIDGET_MODE_ENV_VAR]: "legacy" },
+      inputMode: "raw",
+      rendererMode: "papyrus",
+    })).toBe("legacy");
   });
 
   it("resolves ESTACODA_APPROVAL_WIDGETS from a passed env object", () => {

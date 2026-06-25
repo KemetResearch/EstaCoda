@@ -35,7 +35,7 @@ import {
   buildSetupNeededViewModel,
 } from "./tool-activity-view-models.js";
 import { approvalPromptAdapterForMode, type ApprovalPromptAdapter } from "./approval-prompt-adapter.js";
-import { resolveApprovalWidgetMode } from "./approval-widget-mode.js";
+import { resolveCoreSessionApprovalWidgetMode } from "./approval-widget-mode.js";
 import {
   buildActiveTurnSpinnerViewModel,
   buildAssistantResponseViewModel,
@@ -341,7 +341,11 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
     env: options.env,
     isInteractiveTty: cliInput.isTTY === true && renderer.capabilities.isTTY,
   });
-  const approvalWidgetMode = resolveApprovalWidgetMode({ env: options.env });
+  const approvalWidgetMode = resolveCoreSessionApprovalWidgetMode({
+    env: options.env,
+    inputMode,
+    rendererMode,
+  });
   const approvalPromptAdapter = options.approvalPromptAdapter ?? approvalPromptAdapterForMode(approvalWidgetMode);
   let runtime = options.runtime;
   const now = options.now ?? (() => Date.now());
