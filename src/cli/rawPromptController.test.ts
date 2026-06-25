@@ -1,10 +1,12 @@
 import { EventEmitter } from "node:events";
 import { describe, expect, it, vi } from "vitest";
 import { createPromptForInputMode, createRawPrompt, RawPromptController, type RawPromptInput, type RawPromptOutput } from "./rawPromptController.js";
+import { RawPromptOverlayHost } from "./rawPromptRenderLoop.js";
 import type { TerminalLifecycle } from "../ui/input/terminalLifecycle.js";
 
 const PASTE_START = "\x1b[200~";
 const PASTE_END = "\x1b[201~";
+const forbiddenManagedRegionOutput = /\x1b\[3J|\x1b\[2J|\x1b\[H|\x1b\[\d+;\d+H/u;
 
 class FakeInput extends EventEmitter implements RawPromptInput {
   isTTY = true;
@@ -144,7 +146,8 @@ describe("raw prompt controller", () => {
     const { result, output, lifecycle } = await readWithFakeInput("hello\r");
 
     expect(result).toEqual({ type: "submit", text: "hello" });
-    expect(output.writes).toEqual(["> ", "\n"]);
+    expect(output.writes.join("")).toContain("> hello");
+    expect(output.writes.join("")).not.toMatch(forbiddenManagedRegionOutput);
     expect(lifecycle.calls).toEqual(["start", "stop"]);
   });
 
@@ -176,6 +179,9 @@ describe("raw prompt controller", () => {
     read.input.send(`${PASTE_START}line one\nline two${PASTE_END}`);
     await Promise.resolve();
     expect(read.isResolved()).toBe(false);
+    expect(read.output.writes.join("")).toContain("> line one");
+    expect(read.output.writes.join("")).toContain("line two");
+    expect(read.output.writes.join("")).not.toMatch(forbiddenManagedRegionOutput);
 
     read.input.send("\r");
     expect(await read.pending).toEqual({ type: "submit", text: "line one\nline two" });
@@ -244,6 +250,72 @@ describe("raw prompt controller", () => {
 
     expect(result).toEqual({ type: "submit", text: "abXc" });
     expect(lifecycle.calls).toEqual(["start", "stop"]);
+  });
+
+  it("redraws after editing and cursor movement through the render loop", async () => {
+    const read = startPendingRead();
+
+    read.input.send("abc");
+    read.input.send("\x1b[D");
+    read.input.send("X\r");
+
+    expect(await read.pending).toEqual({ type: "submit", text: "abXc" });
+    expect(read.output.writes.join("")).toContain("> abc");
+    expect(read.output.writes.join("")).toContain("> abXc");
+    expect(read.output.writes.join("")).toContain("\x1b[4C");
+    expect(read.output.writes.join("")).not.toMatch(forbiddenManagedRegionOutput);
+  });
+
+  it("renders inert overlay rows and clears them on submit", async () => {
+    const input = new FakeInput();
+    const output = fakeOutput();
+    const lifecycle = fakeLifecycle();
+    const overlayHost = new RawPromptOverlayHost();
+    overlayHost.setRows([{ id: "overlay", text: "future overlay row" }]);
+    const controller = new RawPromptController({
+      input,
+      output,
+      lifecycle: lifecycle.lifecycle,
+      overlayHost,
+    });
+    const pending = controller.read("> ");
+
+    input.send("\r");
+
+    expect(await pending).toEqual({ type: "submit", text: "" });
+    expect(output.writes.join("")).toContain("future overlay row");
+    expect(overlayHost.getRows()).toEqual([]);
+    expect(output.writes.join("")).not.toMatch(forbiddenManagedRegionOutput);
+  });
+
+  it("does not render overlay rows when none are attached", async () => {
+    const { result, output } = await readWithFakeInput("plain\r");
+
+    expect(result).toEqual({ type: "submit", text: "plain" });
+    expect(output.writes.join("")).not.toContain("future overlay row");
+    expect(output.writes.join("")).not.toMatch(forbiddenManagedRegionOutput);
+  });
+
+  it("clears overlay rows on cancel", async () => {
+    const input = new FakeInput();
+    const output = fakeOutput();
+    const lifecycle = fakeLifecycle();
+    const overlayHost = new RawPromptOverlayHost();
+    overlayHost.setRows([{ text: "dismiss me" }]);
+    const controller = new RawPromptController({
+      input,
+      output,
+      lifecycle: lifecycle.lifecycle,
+      overlayHost,
+    });
+    const pending = controller.read("> ");
+
+    input.send("\x1b");
+
+    expect(await pending).toEqual({ type: "cancel" });
+    expect(output.writes.join("")).toContain("dismiss me");
+    expect(overlayHost.getRows()).toEqual([]);
+    expect(output.writes.join("")).not.toMatch(forbiddenManagedRegionOutput);
   });
 
   it("treats Up and Down history keys as safe no-ops for now", async () => {

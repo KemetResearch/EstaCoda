@@ -4,6 +4,7 @@ import { parseKeypress } from "../ui/input/parseKeypress.js";
 import { applyKeypress, createLineEditorState, type LineEditorState } from "../ui/input/lineEditor.js";
 import { createTerminalLifecycle, type TerminalLifecycle } from "../ui/input/terminalLifecycle.js";
 import type { UiInputMode } from "../ui/input-mode.js";
+import { RawPromptOverlayHost, RawPromptRenderLoop } from "./rawPromptRenderLoop.js";
 import { createReadlinePrompt, type CreateReadlinePromptOptions, type Prompt, type PromptOptions } from "./readline-prompt.js";
 
 type RawPromptDataListener = (chunk: string | Buffer | Uint8Array) => void;
@@ -38,6 +39,7 @@ export type RawPromptControllerOptions = {
   input: RawPromptInput;
   output: RawPromptOutput;
   lifecycle?: TerminalLifecycle;
+  overlayHost?: RawPromptOverlayHost;
 };
 
 export type CreatePromptForInputModeOptions = Omit<CreateReadlinePromptOptions, "input" | "output"> & {
@@ -52,10 +54,12 @@ export class RawPromptController {
   readonly #input: RawPromptInput;
   readonly #output: RawPromptOutput;
   readonly #lifecycle: TerminalLifecycle;
+  readonly #overlayHost: RawPromptOverlayHost;
 
   constructor(options: RawPromptControllerOptions) {
     this.#input = options.input;
     this.#output = options.output;
+    this.#overlayHost = options.overlayHost ?? new RawPromptOverlayHost();
     this.#lifecycle = options.lifecycle ?? createTerminalLifecycle({
       stdin: options.input,
       stdout: options.output,
@@ -63,22 +67,35 @@ export class RawPromptController {
   }
 
   async read(question: string, options?: PromptOptions): Promise<RawPromptResult> {
-    this.#output.write(question);
-    options?.onRowsChange?.(1);
+    const renderLoop = new RawPromptRenderLoop(this.#output);
+    let state = createLineEditorState();
+    const render = () => {
+      const rows = renderLoop.render({
+        prompt: question,
+        state,
+        overlayRows: this.#overlayHost.getRows(),
+      });
+      options?.onRowsChange?.(rows);
+    };
+
+    render();
 
     try {
       this.#lifecycle.start();
     } catch (error) {
+      renderLoop.clear();
       this.#lifecycle.stop();
       throw error;
     }
 
     return await new Promise<RawPromptResult>((resolve, reject) => {
-      let state = createLineEditorState();
       let settled = false;
 
       const cleanup = () => {
         detachDataListener(this.#input, onData);
+        this.#overlayHost.clear();
+        renderLoop.clear();
+        options?.onRowsChange?.(1);
         const stopResult = this.#lifecycle.stop();
         if (stopResult.errors.length > 0) {
           reject(stopResult.errors[0]);
@@ -90,8 +107,10 @@ export class RawPromptController {
       const finish = (result: RawPromptResult) => {
         if (settled) return;
         settled = true;
-        this.#output.write("\n");
-        if (cleanup()) resolve(result);
+        if (cleanup()) {
+          this.#output.write("\n");
+          resolve(result);
+        }
       };
 
       const updateState = (nextState: LineEditorState) => {
@@ -99,7 +118,7 @@ export class RawPromptController {
           options?.onInputChange?.(nextState.text);
         }
         state = nextState;
-        options?.onRowsChange?.(1);
+        render();
       };
 
       const onData = (chunk: string | Buffer | Uint8Array) => {
