@@ -243,6 +243,58 @@ describe("raw prompt controller", () => {
     expect(createReadline).not.toHaveBeenCalled();
   });
 
+  it("renders Papyrus slash autocomplete by default in raw mode", async () => {
+    const input = new FakeInput();
+    const output = fakeOutput();
+
+    const prompt = createPromptForInputMode({
+      mode: "raw",
+      input,
+      output,
+    });
+
+    const pending = prompt("> ");
+    input.send("/");
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    const rendered = output.writes.join("");
+    expect(rendered).toContain("/help");
+    expect(rendered).toContain("Show command help");
+    input.send("\u0003");
+    expect(await pending).toBe("/exit");
+  });
+
+  it("keeps optional providers out of the default raw slash autocomplete path", async () => {
+    const input = new FakeInput();
+    const output = fakeOutput();
+    let rawOptions: RawPromptControllerOptions | undefined;
+    const createRaw = vi.fn((options: RawPromptControllerOptions) => {
+      rawOptions = options;
+      return Object.assign(vi.fn(async () => "raw"), { close: vi.fn() });
+    });
+
+    await createPromptForInputMode({
+      mode: "raw",
+      input,
+      output,
+      env: {
+        ESTACODA_SHELL_HISTORY: "1",
+        ESTACODA_MCP_SUGGESTIONS: "1",
+        ESTACODA_SKILL_SUGGESTIONS: "1",
+      },
+      createRaw,
+    })("> ");
+
+    const providers = rawOptions?.typeahead?.router.route({
+      input: "/",
+      cursorOffset: 1,
+    });
+
+    expect(providers?.provider.id).toBe(SLASH_COMMAND_SUGGESTION_PROVIDER_ID);
+    expect(rawOptions?.typeahead).toBeDefined();
+    expect(rawOptions?.ghostText).toBeUndefined();
+  });
+
   it("passes ghost text options to the raw prompt only when the flag is on", async () => {
     const input = new FakeInput();
     const output = fakeOutput();

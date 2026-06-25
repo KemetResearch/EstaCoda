@@ -1111,6 +1111,7 @@ describe("runSessionLoop — user prompt rail behavior", () => {
         columns: 120,
       } as unknown as NodeJS.WritableStream,
       capabilities: interactiveCaps(),
+      env: { [UI_INPUT_MODE_ENV_VAR]: "readline" },
       prompt: Object.assign(
         async () => {
           const values = ["/", "hello", "/exit"];
@@ -1149,6 +1150,7 @@ describe("runSessionLoop — user prompt rail behavior", () => {
         columns: 120,
       } as unknown as NodeJS.WritableStream,
       capabilities: interactiveCaps(),
+      env: { [UI_INPUT_MODE_ENV_VAR]: "readline" },
       prompt: Object.assign(
         async () => {
           const values = ["/mo", "/exit"];
@@ -1181,6 +1183,7 @@ describe("runSessionLoop — user prompt rail behavior", () => {
         columns: 120,
       } as unknown as NodeJS.WritableStream,
       capabilities: interactiveCaps(),
+      env: { [UI_INPUT_MODE_ENV_VAR]: "readline" },
       prompt: Object.assign(
         async () => {
           const values = ["/zzzz", "/exit"];
