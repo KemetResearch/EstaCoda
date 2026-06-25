@@ -168,6 +168,198 @@ describe("Papyrus Vim state machine", () => {
     expect(result.actions).toEqual([{ type: "noop" }]);
   });
 
+  it("emits delete intent for x and resets count state", () => {
+    const count = transitionPapyrusVimState(createInitialPapyrusVimState("normal"), {
+      type: "key",
+      key: "2",
+    });
+    const result = transitionPapyrusVimState(
+      count.state,
+      { type: "key", key: "x" },
+      { line: createLineEditorState("abcd", 1) }
+    );
+
+    expect(result.state).toMatchObject({
+      mode: "normal",
+      command: { type: "idle" },
+      countBuffer: "",
+    });
+    expect(result.actions).toEqual([
+      { type: "delete-range", operator: "x", count: 2, range: { start: 1, end: 3 } },
+    ]);
+  });
+
+  it("emits delete intent for dw and remains normal mode", () => {
+    const operator = transitionPapyrusVimState(createInitialPapyrusVimState("normal"), {
+      type: "key",
+      key: "d",
+    });
+    const result = transitionPapyrusVimState(
+      operator.state,
+      { type: "key", key: "w" },
+      { line: createLineEditorState("one two", 0) }
+    );
+
+    expect(result.state).toMatchObject({
+      mode: "normal",
+      command: { type: "idle" },
+      countBuffer: "",
+    });
+    expect(result.actions).toEqual([
+      {
+        type: "delete-range",
+        operator: "delete",
+        count: 1,
+        motion: "w",
+        range: { start: 0, end: "one ".length },
+      },
+    ]);
+  });
+
+  it("applies counts to operator motions", () => {
+    const count = transitionPapyrusVimState(createInitialPapyrusVimState("normal"), {
+      type: "key",
+      key: "3",
+    });
+    const operator = transitionPapyrusVimState(count.state, { type: "key", key: "d" });
+    const result = transitionPapyrusVimState(
+      operator.state,
+      { type: "key", key: "w" },
+      { line: createLineEditorState("one two three four", 0) }
+    );
+
+    expect(result.state).toMatchObject({
+      mode: "normal",
+      command: { type: "idle" },
+      countBuffer: "",
+    });
+    expect(result.actions).toEqual([
+      {
+        type: "delete-range",
+        operator: "delete",
+        count: 3,
+        motion: "w",
+        range: { start: 0, end: "one two three ".length },
+      },
+    ]);
+  });
+
+  it("emits change intent for cw and enters insert mode", () => {
+    const operator = transitionPapyrusVimState(createInitialPapyrusVimState("normal"), {
+      type: "key",
+      key: "c",
+    });
+    const result = transitionPapyrusVimState(
+      operator.state,
+      { type: "key", key: "w" },
+      { line: createLineEditorState("one two", 0) }
+    );
+
+    expect(result.state).toMatchObject({
+      mode: "insert",
+      command: { type: "idle" },
+      countBuffer: "",
+    });
+    expect(result.actions).toEqual([
+      {
+        type: "change-range",
+        operator: "change",
+        count: 1,
+        motion: "w",
+        range: { start: 0, end: "one".length },
+        enterInsert: true,
+      },
+      { type: "set-mode", mode: "insert" },
+    ]);
+  });
+
+  it("applies counts to change motions", () => {
+    const count = transitionPapyrusVimState(createInitialPapyrusVimState("normal"), {
+      type: "key",
+      key: "2",
+    });
+    const operator = transitionPapyrusVimState(count.state, { type: "key", key: "c" });
+    const result = transitionPapyrusVimState(
+      operator.state,
+      { type: "key", key: "w" },
+      { line: createLineEditorState("one two three", 0) }
+    );
+
+    expect(result.state).toMatchObject({
+      mode: "insert",
+      command: { type: "idle" },
+      countBuffer: "",
+    });
+    expect(result.actions).toEqual([
+      {
+        type: "change-range",
+        operator: "change",
+        count: 2,
+        motion: "w",
+        range: { start: 0, end: "one two".length },
+        enterInsert: true,
+      },
+      { type: "set-mode", mode: "insert" },
+    ]);
+  });
+
+  it("resets pending operators safely for invalid operator motions", () => {
+    const operator = transitionPapyrusVimState(createInitialPapyrusVimState("normal"), {
+      type: "key",
+      key: "d",
+    });
+    const result = transitionPapyrusVimState(operator.state, { type: "key", key: "z" });
+
+    expect(result.state).toMatchObject({
+      mode: "normal",
+      command: { type: "idle" },
+      countBuffer: "",
+    });
+    expect(result.actions).toEqual([{ type: "reset-pending-command" }]);
+  });
+
+  it("does not produce delete ranges for unsupported delete motions", () => {
+    for (const key of ["h", "$", "0", "b", "e"]) {
+      const operator = transitionPapyrusVimState(createInitialPapyrusVimState("normal"), {
+        type: "key",
+        key: "d",
+      });
+      const result = transitionPapyrusVimState(
+        operator.state,
+        { type: "key", key },
+        { line: createLineEditorState("one two", 0) }
+      );
+
+      expect(result.state).toMatchObject({
+        mode: "normal",
+        command: { type: "idle" },
+        countBuffer: "",
+      });
+      expect(result.actions).toEqual([{ type: "reset-pending-command" }]);
+    }
+  });
+
+  it("does not produce change ranges for unsupported change motions", () => {
+    for (const key of ["h", "$", "0", "b", "e"]) {
+      const operator = transitionPapyrusVimState(createInitialPapyrusVimState("normal"), {
+        type: "key",
+        key: "c",
+      });
+      const result = transitionPapyrusVimState(
+        operator.state,
+        { type: "key", key },
+        { line: createLineEditorState("one two", 0) }
+      );
+
+      expect(result.state).toMatchObject({
+        mode: "normal",
+        command: { type: "idle" },
+        countBuffer: "",
+      });
+      expect(result.actions).toEqual([{ type: "reset-pending-command" }]);
+    }
+  });
+
   it("resets pending state on normal-mode escape without altering submit/cancel semantics", () => {
     const state: PapyrusVimState = {
       ...createInitialPapyrusVimState("normal"),

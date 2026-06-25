@@ -13,6 +13,11 @@ import {
   type PapyrusVimMotionIntent,
   type PapyrusVimMotionKey,
 } from "./vimMotions.js";
+import {
+  resolvePapyrusVimDeleteGraphemes,
+  resolvePapyrusVimOperatorMotion,
+  type PapyrusVimOperatorIntent,
+} from "./vimOperators.js";
 
 export type PapyrusVimCursorIntent = "right" | "start" | "end";
 
@@ -24,6 +29,7 @@ export type PapyrusVimActionIntent =
   | { readonly type: "set-mode"; readonly mode: PapyrusVimMode }
   | { readonly type: "move-cursor"; readonly target: PapyrusVimCursorIntent }
   | PapyrusVimMotionIntent
+  | PapyrusVimOperatorIntent
   | { readonly type: "passthrough-key"; readonly key: string }
   | { readonly type: "reset-pending-command" }
   | { readonly type: "noop" };
@@ -86,6 +92,10 @@ function transitionNormalKey(
 ): PapyrusVimTransitionResult {
   if (key.length !== 1) return resetNormalState(state);
 
+  if (state.command.type === "operator") {
+    return transitionPendingOperator(state, state.command, key, options);
+  }
+
   if (isCountStart(state, key)) {
     return {
       state: {
@@ -113,6 +123,10 @@ function transitionNormalKey(
     return transitionMotion(state, key, options);
   }
 
+  if (key === "x") {
+    return transitionDeleteGraphemes(state, options);
+  }
+
   const operator = operatorByKey[key];
   if (operator !== undefined) {
     return {
@@ -135,6 +149,67 @@ function transitionNormalKey(
   if (key === "A") return enterInsert(state, { type: "move-cursor", target: "end" });
 
   return resetNormalState(state);
+}
+
+function transitionPendingOperator(
+  state: PapyrusVimState,
+  command: Extract<PapyrusVimCommandState, { type: "operator" }>,
+  key: string,
+  options: PapyrusVimTransitionOptions
+): PapyrusVimTransitionResult {
+  if (key !== "w" || options.line === undefined) {
+    return resetNormalState(state);
+  }
+
+  if (command.operator !== "delete" && command.operator !== "change") {
+    return resetNormalState(state);
+  }
+
+  const intent = resolvePapyrusVimOperatorMotion(
+    options.line,
+    command.operator,
+    key,
+    command.count
+  );
+  const reset = resetPapyrusVimCommandState(state);
+  if (intent === undefined) {
+    return {
+      state: reset,
+      actions: [{ type: "reset-pending-command" }],
+    };
+  }
+
+  if (intent.type === "change-range") {
+    return {
+      state: setPapyrusVimMode(reset, "insert"),
+      actions: [intent, { type: "set-mode", mode: "insert" }],
+    };
+  }
+
+  return {
+    state: reset,
+    actions: [intent],
+  };
+}
+
+function transitionDeleteGraphemes(
+  state: PapyrusVimState,
+  options: PapyrusVimTransitionOptions
+): PapyrusVimTransitionResult {
+  const reset = resetPapyrusVimCommandState(state);
+  if (options.line === undefined) {
+    return {
+      state: reset,
+      actions: pendingChanged(state.command, reset.command)
+        ? [{ type: "reset-pending-command" }]
+        : [{ type: "noop" }],
+    };
+  }
+
+  return {
+    state: reset,
+    actions: [resolvePapyrusVimDeleteGraphemes(options.line, countFromCommand(state.command))],
+  };
 }
 
 function transitionMotion(
