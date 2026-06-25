@@ -5186,6 +5186,38 @@ describe("runSessionLoop — active turn spinner", () => {
     expect(result.rendered).toContain("Approval granted (session). Retrying now.");
   });
 
+  it("routes promptable file approvals through the adapter and keeps grant scope in core approval code", async () => {
+    const adapter = vi.fn<ApprovalPromptAdapter>(async (input) => {
+      expect(input.execution).toMatchObject({
+        tool: { name: "workspace.write" },
+        decision: "ask",
+        riskClass: "workspace-write",
+        targetKey: "src/app.ts",
+        targetSummary: "src/app.ts",
+      });
+      return "always";
+    });
+
+    const result = await runApprovalPromptScenario([], {
+      approvalPromptAdapter: adapter,
+      response: approvalAskResponse(),
+    });
+
+    expect(adapter).toHaveBeenCalledTimes(1);
+    expect(result.adapterCalls).toBe(1);
+    expect(result.grants).toEqual([
+      {
+        toolName: "workspace.write",
+        riskClass: "workspace-write",
+        targetKey: "src/app.ts",
+        targetSummary: "src/app.ts",
+        scope: "always",
+      },
+    ]);
+    expect(result.handleInputs).toEqual(["write file", "write file"]);
+    expect(result.rendered).toContain("Approval granted (persistent for this workspace). Retrying now.");
+  });
+
   it("routes promptable command approvals through the adapter and keeps grant scope in core approval code", async () => {
     const adapter = vi.fn<ApprovalPromptAdapter>(async (input) => {
       expect(input.execution).toMatchObject({
@@ -5239,6 +5271,31 @@ describe("runSessionLoop — active turn spinner", () => {
     expect(cancelLike.rendered).toContain("Enter one of: once, session, always, deny.");
   });
 
+  it("maps file adapter deny and invalid answers through existing approval semantics", async () => {
+    const deny = await runApprovalPromptScenario([], {
+      approvalPromptAdapter: async () => "reject",
+      response: approvalAskResponse(),
+    });
+    expect(deny.adapterCalls).toBe(1);
+    expect(deny.grants).toEqual([]);
+    expect(deny.handleInputs).toEqual(["write file"]);
+    expect(deny.rendered).toContain("Permission denied.");
+
+    const invalidThenApprove = await runApprovalPromptScenario([], {
+      approvalPromptAdapter: vi.fn()
+        .mockResolvedValueOnce("cancel")
+        .mockResolvedValueOnce("session"),
+      response: approvalAskResponse(),
+    });
+    expect(invalidThenApprove.adapterCalls).toBe(2);
+    expect(invalidThenApprove.grants).toHaveLength(1);
+    expect(invalidThenApprove.grants[0]).toMatchObject({
+      toolName: "workspace.write",
+      scope: "session",
+    });
+    expect(invalidThenApprove.rendered).toContain("Enter one of: once, session, always, deny.");
+  });
+
   it("maps command adapter deny and invalid answers through existing approval semantics", async () => {
     const deny = await runApprovalPromptScenario([], {
       approvalPromptAdapter: async () => "reject",
@@ -5265,6 +5322,19 @@ describe("runSessionLoop — active turn spinner", () => {
   });
 
   it("does not call the approval prompt adapter for policy-denied tool executions", async () => {
+    const adapter = vi.fn<ApprovalPromptAdapter>(async () => "once");
+    const result = await runApprovalPromptScenario([], {
+      approvalPromptAdapter: adapter,
+      response: approvalDenyResponse(),
+    });
+
+    expect(adapter).not.toHaveBeenCalled();
+    expect(result.adapterCalls).toBe(0);
+    expect(result.grants).toEqual([]);
+    expect(result.handleInputs).toEqual(["write file"]);
+  });
+
+  it("does not call the approval prompt adapter for policy-denied file executions", async () => {
     const adapter = vi.fn<ApprovalPromptAdapter>(async () => "once");
     const result = await runApprovalPromptScenario([], {
       approvalPromptAdapter: adapter,
