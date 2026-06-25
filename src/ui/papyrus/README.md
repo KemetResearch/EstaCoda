@@ -68,3 +68,8 @@ toggle raw mode, spawn subprocesses, execute shell helpers, mutate terminal
 state at module load, or introduce clipboard behavior. Dependency files should
 change only in the same commit that first consumes the dependency and documents
 why it is needed.
+
+Part 2 widget, suggestion, and approval-card porting boundaries are tracked in
+`PART2.md`. Those notes are behavior guidance only; React, Ink, Yoga, and
+source-app reference files must be decontaminated into EstaCoda-owned pure state
+machines before any implementation is added.
