@@ -8,6 +8,7 @@ export type SelectNavigationState<TValue = string, TMetadata = unknown> = {
   readonly optionMap: PapyrusOptionMap<TValue, TMetadata>;
   readonly focusedValue?: TValue;
   readonly selectedValue?: TValue;
+  readonly inputValues: ReadonlyMap<TValue, string>;
   readonly viewportStart: number;
   readonly viewportSize: number;
   readonly wrap: boolean;
@@ -16,6 +17,7 @@ export type SelectNavigationState<TValue = string, TMetadata = unknown> = {
 export type CreateSelectNavigationStateOptions<TValue = string> = {
   readonly focusedValue?: TValue;
   readonly selectedValue?: TValue;
+  readonly inputValues?: ReadonlyMap<TValue, string> | ReadonlyArray<readonly [TValue, string]>;
   readonly viewportStart?: number;
   readonly viewportSize?: number;
   readonly wrap?: boolean;
@@ -43,6 +45,7 @@ export function createSelectNavigationState<TValue = string, TMetadata = unknown
     optionMap,
     focusedValue,
     selectedValue,
+    inputValues: normalizeInputValues(stateOptions.inputValues),
     viewportStart,
     viewportSize,
     wrap: stateOptions.wrap ?? true,
@@ -59,6 +62,13 @@ export function getVisibleOptions<TValue, TMetadata>(
   state: SelectNavigationState<TValue, TMetadata>
 ): readonly PapyrusOptionItem<TValue, TMetadata>[] {
   return state.optionMap.items.slice(state.viewportStart, state.viewportStart + state.viewportSize);
+}
+
+export function isFocusedInputRow<TValue, TMetadata>(
+  state: SelectNavigationState<TValue, TMetadata>
+): boolean {
+  const focused = getFocusedOption(state);
+  return focused?.kind === "input";
 }
 
 export function focusNextOption<TValue, TMetadata>(
@@ -115,6 +125,32 @@ export function focusOption<TValue, TMetadata>(
   return focusOptionItem(state, item);
 }
 
+export function selectFocusedOption<TValue, TMetadata>(
+  state: SelectNavigationState<TValue, TMetadata>
+): SelectNavigationState<TValue, TMetadata> {
+  const focused = getFocusedOption(state);
+  if (focused === undefined || focused.disabled === true) return state;
+  return {
+    ...state,
+    selectedValue: focused.value,
+  };
+}
+
+export function updateInputValue<TValue, TMetadata>(
+  state: SelectNavigationState<TValue, TMetadata>,
+  value: TValue,
+  inputValue: string
+): SelectNavigationState<TValue, TMetadata> {
+  const item = state.optionMap.get(value);
+  if (item?.kind !== "input" || item.disabled === true) return state;
+  const inputValues = new Map(state.inputValues);
+  inputValues.set(value, inputValue);
+  return {
+    ...state,
+    inputValues,
+  };
+}
+
 export function reconcileSelectNavigationState<TValue = string, TMetadata = unknown>(
   state: SelectNavigationState<TValue, TMetadata>,
   options: readonly PapyrusOption<TValue, TMetadata>[]
@@ -135,6 +171,7 @@ export function reconcileSelectNavigationState<TValue = string, TMetadata = unkn
     optionMap: nextMap,
     focusedValue,
     selectedValue,
+    inputValues: reconcileInputValues(nextMap, state.inputValues),
     viewportStart,
     viewportSize: state.viewportSize,
     wrap: state.wrap,
@@ -192,6 +229,25 @@ function valueExists<TValue, TMetadata>(
 function normalizeViewportSize(value: number | undefined): number {
   if (value === undefined || !Number.isFinite(value)) return 5;
   return Math.max(1, Math.floor(value));
+}
+
+function normalizeInputValues<TValue>(
+  values: ReadonlyMap<TValue, string> | ReadonlyArray<readonly [TValue, string]> | undefined
+): ReadonlyMap<TValue, string> {
+  return values === undefined ? new Map() : new Map(values);
+}
+
+function reconcileInputValues<TValue, TMetadata>(
+  optionMap: PapyrusOptionMap<TValue, TMetadata>,
+  values: ReadonlyMap<TValue, string>
+): ReadonlyMap<TValue, string> {
+  const nextValues = new Map<TValue, string>();
+  for (const [value, inputValue] of values) {
+    if (optionMap.get(value)?.kind === "input") {
+      nextValues.set(value, inputValue);
+    }
+  }
+  return nextValues;
 }
 
 function normalizeViewportStart<TValue, TMetadata>(input: {

@@ -3,8 +3,10 @@ export type PapyrusOptionLabel = string;
 export type PapyrusOption<TValue = string, TMetadata = unknown> = {
   readonly value: TValue;
   readonly label: PapyrusOptionLabel;
+  readonly kind?: "option" | "input";
   readonly description?: string;
   readonly disabled?: boolean;
+  readonly placeholder?: string;
   readonly metadata?: TMetadata;
 };
 
@@ -49,8 +51,7 @@ export class PapyrusOptionMap<TValue = string, TMetadata = unknown> {
       if (option.disabled !== true) enabledIndexes.push(index);
     }
 
-    const items = provisionalItems.map((item, enabledPosition) => {
-      void enabledPosition;
+    const items = provisionalItems.map((item) => {
       if (item.disabled === true) return item;
       const enabledIndex = enabledIndexes.indexOf(item.index);
       const previousIndex = enabledIndex > 0 ? enabledIndexes[enabledIndex - 1] : undefined;
