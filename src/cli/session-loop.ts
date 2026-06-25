@@ -34,7 +34,8 @@ import {
   buildSecurityAuditViewModel,
   buildSetupNeededViewModel,
 } from "./tool-activity-view-models.js";
-import { defaultApprovalPromptAdapter, type ApprovalPromptAdapter } from "./approval-prompt-adapter.js";
+import { approvalPromptAdapterForMode, type ApprovalPromptAdapter } from "./approval-prompt-adapter.js";
+import { resolveApprovalWidgetMode } from "./approval-widget-mode.js";
 import {
   buildActiveTurnSpinnerViewModel,
   buildAssistantResponseViewModel,
@@ -336,6 +337,8 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
   const renderer = createSessionRenderer({ output, locale: options.locale, capabilities: options.capabilities });
   const rendererMode = resolveUiRendererMode({ env: options.env });
   const inputMode = resolveUiInputMode({ env: options.env });
+  const approvalWidgetMode = resolveApprovalWidgetMode({ env: options.env });
+  const approvalPromptAdapter = options.approvalPromptAdapter ?? approvalPromptAdapterForMode(approvalWidgetMode);
   let runtime = options.runtime;
   const now = options.now ?? (() => Date.now());
   const sessionStartedAtMs = now();
@@ -1277,7 +1280,7 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
           output,
           renderer,
           chrome: bottomChrome.enabled ? bottomChrome : chrome,
-          approvalPromptAdapter: options.approvalPromptAdapter ?? defaultApprovalPromptAdapter,
+          approvalPromptAdapter,
           execution: response.toolExecutions.find((execution) => execution.decision === "ask")
         });
 

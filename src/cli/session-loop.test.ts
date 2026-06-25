@@ -5,6 +5,7 @@ import { dirname, join } from "node:path";
 import { PassThrough } from "node:stream";
 import { handleSlashCommand, runSessionLoop } from "./session-loop.js";
 import type { ApprovalPromptAdapter } from "./approval-prompt-adapter.js";
+import { APPROVAL_WIDGET_MODE_ENV_VAR } from "./approval-widget-mode.js";
 import type { PromptOptions } from "./readline-prompt.js";
 import { InMemorySessionDB } from "../session/in-memory-session-db.js";
 import type { Runtime } from "../runtime/create-runtime.js";
@@ -301,6 +302,7 @@ async function runApprovalPromptScenario(
   options: {
     approvalPromptAdapter?: ApprovalPromptAdapter;
     response?: AgentLoopResponse;
+    env?: Record<string, string | undefined>;
   } = {}
 ): Promise<{
   grants: ApprovalGrantInput[];
@@ -355,6 +357,7 @@ async function runApprovalPromptScenario(
       { close: () => {} }
     ),
     close: () => {},
+    env: options.env,
     approvalPromptAdapter,
   });
 
@@ -5218,6 +5221,52 @@ describe("runSessionLoop — active turn spinner", () => {
     expect(result.rendered).toContain("Approval granted (persistent for this workspace). Retrying now.");
   });
 
+  it("keeps explicit legacy approval widget mode on the current adapter path", async () => {
+    const result = await runApprovalPromptScenario(["once"], {
+      env: { [APPROVAL_WIDGET_MODE_ENV_VAR]: "legacy" },
+      response: approvalAskResponse(),
+    });
+
+    expect(result.grants).toHaveLength(1);
+    expect(result.grants[0]).toMatchObject({
+      toolName: "workspace.write",
+      scope: "once",
+    });
+    expect(result.rendered).not.toContain("[Approval] Approval required:");
+  });
+
+  it("routes promptable command approvals through Papyrus adapter only behind the explicit flag", async () => {
+    const result = await runApprovalPromptScenario(["approve-once"], {
+      env: { [APPROVAL_WIDGET_MODE_ENV_VAR]: "papyrus" },
+      response: commandApprovalAskResponse(),
+    });
+
+    expect(result.grants).toEqual([
+      {
+        toolName: "terminal.run",
+        riskClass: "destructive-local",
+        targetKey: "npm install left-pad",
+        targetSummary: "npm install left-pad",
+        scope: "once",
+      },
+    ]);
+    expect(result.handleInputs).toEqual(["write file", "write file"]);
+    expect(result.rendered).toContain("[Approval] Approval required: terminal.run");
+    expect(result.rendered).toContain("Approval granted (once). Retrying now.");
+  });
+
+  it("routes promptable file approvals through Papyrus adapter only behind the explicit flag", async () => {
+    const result = await runApprovalPromptScenario(["reject"], {
+      env: { [APPROVAL_WIDGET_MODE_ENV_VAR]: "papyrus" },
+      response: approvalAskResponse(),
+    });
+
+    expect(result.grants).toEqual([]);
+    expect(result.handleInputs).toEqual(["write file"]);
+    expect(result.rendered).toContain("[Approval] Approval required: workspace.write");
+    expect(result.rendered).toContain("Permission denied.");
+  });
+
   it("routes promptable command approvals through the adapter and keeps grant scope in core approval code", async () => {
     const adapter = vi.fn<ApprovalPromptAdapter>(async (input) => {
       expect(input.execution).toMatchObject({
@@ -5347,6 +5396,28 @@ describe("runSessionLoop — active turn spinner", () => {
     expect(result.handleInputs).toEqual(["write file"]);
   });
 
+  it("does not call the Papyrus approval adapter for policy-denied file executions when the flag is enabled", async () => {
+    const result = await runApprovalPromptScenario([], {
+      env: { [APPROVAL_WIDGET_MODE_ENV_VAR]: "papyrus" },
+      response: approvalDenyResponse(),
+    });
+
+    expect(result.grants).toEqual([]);
+    expect(result.handleInputs).toEqual(["write file"]);
+    expect(result.rendered).not.toContain("[Approval] Approval required:");
+  });
+
+  it("does not call the Papyrus approval adapter for hardline or policy-denied command executions when the flag is enabled", async () => {
+    const result = await runApprovalPromptScenario([], {
+      env: { [APPROVAL_WIDGET_MODE_ENV_VAR]: "papyrus" },
+      response: commandApprovalDenyResponse(),
+    });
+
+    expect(result.grants).toEqual([]);
+    expect(result.handleInputs).toEqual(["write file"]);
+    expect(result.rendered).not.toContain("[Approval] Approval required:");
+  });
+
   it("does not call the approval prompt adapter for hardline or policy-denied command executions", async () => {
     const adapter = vi.fn<ApprovalPromptAdapter>(async () => "once");
     const result = await runApprovalPromptScenario([], {
@@ -5360,14 +5431,9 @@ describe("runSessionLoop — active turn spinner", () => {
     expect(result.handleInputs).toEqual(["write file"]);
   });
 
-  it("keeps the approval prompt adapter free of Papyrus widget imports", async () => {
-    const [adapterSource, sessionLoopSource] = await Promise.all([
-      readFile(new URL("./approval-prompt-adapter.ts", import.meta.url), "utf8"),
-      readFile(new URL("./session-loop.ts", import.meta.url), "utf8"),
-    ]);
+  it("keeps the session loop free of direct Papyrus widget imports", async () => {
+    const sessionLoopSource = await readFile(new URL("./session-loop.ts", import.meta.url), "utf8");
 
-    expect(adapterSource).not.toContain("papyrus/widgets");
-    expect(adapterSource).not.toContain("papyrus-widgets");
     expect(sessionLoopSource).not.toContain("papyrus/widgets");
     expect(sessionLoopSource).not.toContain("papyrus-widgets");
   });
