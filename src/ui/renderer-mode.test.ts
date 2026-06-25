@@ -8,17 +8,17 @@ import {
 } from "./renderer-mode.js";
 
 describe("UI renderer mode", () => {
-  it("defaults unset values to legacy", () => {
-    expect(resolveUiRendererMode({ env: {} })).toBe("legacy");
-    expect(parseUiRendererMode(undefined)).toBe("legacy");
+  it("defaults unset values to papyrus", () => {
+    expect(resolveUiRendererMode({ env: {} })).toBe("papyrus");
+    expect(parseUiRendererMode(undefined)).toBe("papyrus");
   });
 
-  it("defaults empty values to legacy", () => {
-    expect(parseUiRendererMode("")).toBe("legacy");
-    expect(parseUiRendererMode("   ")).toBe("legacy");
+  it("defaults empty values to papyrus", () => {
+    expect(parseUiRendererMode("")).toBe("papyrus");
+    expect(parseUiRendererMode("   ")).toBe("papyrus");
   });
 
-  it("accepts legacy", () => {
+  it("accepts explicit legacy as an escape hatch", () => {
     expect(parseUiRendererMode("legacy")).toBe("legacy");
   });
 
@@ -36,13 +36,14 @@ describe("UI renderer mode", () => {
     expect(parseUiRendererMode("Legacy")).toBe("legacy");
   });
 
-  it("falls back to legacy for invalid values", () => {
-    expect(parseUiRendererMode("screen")).toBe("legacy");
-    expect(parseUiRendererMode("papyrus-beta")).toBe("legacy");
+  it("falls back to papyrus for invalid values", () => {
+    expect(parseUiRendererMode("screen")).toBe("papyrus");
+    expect(parseUiRendererMode("papyrus-beta")).toBe("papyrus");
   });
 
   it("resolves ESTACODA_UI_RENDERER from a passed env object", () => {
     expect(resolveUiRendererMode({ env: { [UI_RENDERER_ENV_VAR]: "papyrus" } })).toBe("papyrus");
+    expect(resolveUiRendererMode({ env: { [UI_RENDERER_ENV_VAR]: "legacy" } })).toBe("legacy");
   });
 
   it("does not mutate env objects", () => {

@@ -30,9 +30,16 @@ export interface BottomChromeControllerOptions {
   readonly renderHorizontalRule?: (width: number) => string;
   readonly rendererMode?: UiRendererMode;
   readonly createPapyrusSurfaceControllerForMode?: PapyrusSurfaceControllerFactory;
+  readonly onRendererFallback?: (diagnostic: BottomChromeRendererFallbackDiagnostic) => void;
   readonly enabled?: boolean;
   readonly tickMs?: number;
   readonly readlineTickMs?: number;
+}
+
+export interface BottomChromeRendererFallbackDiagnostic {
+  readonly requestedMode: "papyrus";
+  readonly fallbackMode: "legacy";
+  readonly reason: "papyrus-surface-controller-unavailable";
 }
 
 export interface UpdateManagedRegionAboveReadlineInput {
@@ -85,11 +92,18 @@ export class BottomChromeController {
     this.#enabled = options.enabled ?? detectEnabled(options.capabilities);
     this.#tickMs = options.tickMs ?? 200;
     this.#readlineTickMs = options.readlineTickMs ?? 1000;
-    const rendererMode = options.rendererMode ?? "legacy";
+    const rendererMode = options.rendererMode ?? "papyrus";
     if (rendererMode === "papyrus") {
       this.#papyrusSurfaceController = (
         options.createPapyrusSurfaceControllerForMode ?? createPapyrusSurfaceControllerForMode
       )(rendererMode, { width: Math.max(1, options.capabilities.terminalWidth), height: 0 });
+      if (this.#papyrusSurfaceController === undefined) {
+        options.onRendererFallback?.({
+          requestedMode: "papyrus",
+          fallbackMode: "legacy",
+          reason: "papyrus-surface-controller-unavailable",
+        });
+      }
     }
   }
 

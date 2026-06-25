@@ -10,8 +10,8 @@ export type ResolveUiRendererModeOptions = {
 
 export function parseUiRendererMode(value: string | undefined): UiRendererMode {
   const normalized = value?.trim().toLowerCase();
-  if (normalized === "papyrus") return "papyrus";
-  return "legacy";
+  if (normalized === "legacy") return "legacy";
+  return "papyrus";
 }
 
 export function resolveUiRendererMode(options?: ResolveUiRendererModeOptions): UiRendererMode {
