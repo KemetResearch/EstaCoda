@@ -5,6 +5,7 @@ import { RawPromptOverlayHost } from "./rawPromptRenderLoop.js";
 import type { TerminalLifecycle } from "../ui/input/terminalLifecycle.js";
 import {
   SLASH_COMMAND_SUGGESTION_PROVIDER_ID,
+  type SlashCommandSuggestionMetadata,
 } from "../ui/papyrus/input/providers/slashCommandProvider.js";
 import {
   createSuggestionTokenContext,
@@ -22,13 +23,19 @@ import type {
 const PASTE_START = "\x1b[200~";
 const PASTE_END = "\x1b[201~";
 const forbiddenManagedRegionOutput = /\x1b\[3J|\x1b\[2J|\x1b\[H|\x1b\[\d+;\d+H/u;
-const slashSuggestion: SuggestionItem = {
+const slashSuggestion: SuggestionItem<SlashCommandSuggestionMetadata> = {
   id: "slash.help",
   label: "/help",
+  description: "Show help",
   replacementText: "/help",
   replacementRange: { start: 0, end: 2 },
   providerId: SLASH_COMMAND_SUGGESTION_PROVIDER_ID,
   kind: "slash",
+  metadata: {
+    commandName: "help",
+    aliases: [],
+    category: "System",
+  },
 };
 
 class FakeInput extends EventEmitter implements RawPromptInput {
@@ -456,8 +463,10 @@ describe("raw prompt controller", () => {
     expect(await pending).toEqual({ type: "submit", text: "/h" });
     expect(typeahead.route).toHaveBeenCalled();
     expect(provider.getSuggestions).toHaveBeenCalled();
+    expect(output.writes.join("")).toContain("> /help - Show help");
     expect(states.some((state) => state.status === "open" && state.providerId === SLASH_COMMAND_SUGGESTION_PROVIDER_ID)).toBe(true);
     expect(states.at(-1)?.status).toBe("dismissed");
+    expect(output.writes.join("")).not.toMatch(forbiddenManagedRegionOutput);
   });
 
   it("does not trigger the slash provider for non-slash input", async () => {
@@ -480,16 +489,17 @@ describe("raw prompt controller", () => {
 
     expect(await pending).toEqual({ type: "submit", text: "hello" });
     expect(provider.getSuggestions).not.toHaveBeenCalled();
+    expect(output.writes.join("")).not.toContain("/help");
   });
 
   it("ignores stale async typeahead results after input changes", async () => {
-    const pendingProviders: Array<(suggestions: readonly SuggestionItem[]) => void> = [];
-    const provider: SuggestionProvider = {
+    const pendingProviders: Array<(suggestions: readonly SuggestionItem<SlashCommandSuggestionMetadata>[]) => void> = [];
+    const provider: SuggestionProvider<SlashCommandSuggestionMetadata> = {
       id: SLASH_COMMAND_SUGGESTION_PROVIDER_ID,
       name: "Slash",
-      getSuggestions: vi.fn(() => new Promise<SuggestionProviderResult>((resolve) => {
+      getSuggestions: vi.fn(() => new Promise<SuggestionProviderResult<SlashCommandSuggestionMetadata>>((resolve) => {
         pendingProviders.push((suggestions) => {
-          resolve(normalizeSuggestionProviderResult(SLASH_COMMAND_SUGGESTION_PROVIDER_ID, { suggestions }));
+          resolve(normalizeSuggestionProviderResult<SlashCommandSuggestionMetadata>(SLASH_COMMAND_SUGGESTION_PROVIDER_ID, { suggestions }));
         });
       })),
     };
@@ -521,7 +531,7 @@ describe("raw prompt controller", () => {
   });
 
   it("represents provider errors as data without crashing the prompt", async () => {
-    const provider: SuggestionProvider = {
+    const provider: SuggestionProvider<SlashCommandSuggestionMetadata> = {
       id: SLASH_COMMAND_SUGGESTION_PROVIDER_ID,
       name: "Slash",
       getSuggestions: vi.fn(() => {
@@ -550,10 +560,14 @@ describe("raw prompt controller", () => {
 
     expect(await prompt).toEqual({ type: "submit", text: "/h" });
     expect(states.some((state) => state.status === "error" && state.error?.message === "provider failed")).toBe(true);
+    expect(output.writes.join("")).toContain("Slash suggestions unavailable: provider failed");
   });
 });
 
-function providerFor(id: string, suggestions: readonly SuggestionItem[]): SuggestionProvider {
+function providerFor(
+  id: string,
+  suggestions: readonly SuggestionItem<SlashCommandSuggestionMetadata>[]
+): SuggestionProvider<SlashCommandSuggestionMetadata> {
   return {
     id,
     name: id,
@@ -561,8 +575,8 @@ function providerFor(id: string, suggestions: readonly SuggestionItem[]): Sugges
   };
 }
 
-function fakeTypeahead(provider: SuggestionProvider): {
-  readonly router: TypeaheadProviderRouter;
+function fakeTypeahead(provider: SuggestionProvider<SlashCommandSuggestionMetadata>): {
+  readonly router: TypeaheadProviderRouter<SlashCommandSuggestionMetadata>;
   readonly route: ReturnType<typeof vi.fn>;
 } {
   const route = vi.fn((input: { readonly input: string; readonly cursorOffset: number }) => {
@@ -577,7 +591,7 @@ function fakeTypeahead(provider: SuggestionProvider): {
       triggerKind: "slash",
       context,
       provider,
-    } satisfies TypeaheadProviderSelection;
+    } satisfies TypeaheadProviderSelection<SlashCommandSuggestionMetadata>;
   });
   return {
     router: { route },

@@ -5,7 +5,7 @@ import { parseKeypress } from "../ui/input/parseKeypress.js";
 import { applyKeypress, createLineEditorState, type LineEditorState } from "../ui/input/lineEditor.js";
 import { createTerminalLifecycle, type TerminalLifecycle } from "../ui/input/terminalLifecycle.js";
 import type { UiInputMode } from "../ui/input-mode.js";
-import { createSlashCommandSuggestionProvider } from "../ui/papyrus/input/providers/slashCommandProvider.js";
+import { createSlashCommandSuggestionProvider, type SlashCommandSuggestionMetadata } from "../ui/papyrus/input/providers/slashCommandProvider.js";
 import {
   applyTypeaheadResult,
   createTypeaheadControllerState,
@@ -18,6 +18,7 @@ import {
   type TypeaheadProviderRouter,
 } from "../ui/papyrus/input/typeaheadProviderRouter.js";
 import { RawPromptOverlayHost, RawPromptRenderLoop } from "./rawPromptRenderLoop.js";
+import { buildRawPromptSlashAutocompleteRows } from "./rawPromptSlashAutocomplete.js";
 import { createReadlinePrompt, type CreateReadlinePromptOptions, type Prompt, type PromptOptions } from "./readline-prompt.js";
 
 type RawPromptDataListener = (chunk: string | Buffer | Uint8Array) => void;
@@ -57,8 +58,8 @@ export type RawPromptControllerOptions = {
 };
 
 export type RawPromptTypeaheadOptions = {
-  readonly router: TypeaheadProviderRouter;
-  readonly onStateChange?: (state: TypeaheadState) => void;
+  readonly router: TypeaheadProviderRouter<SlashCommandSuggestionMetadata>;
+  readonly onStateChange?: (state: TypeaheadState<SlashCommandSuggestionMetadata>) => void;
 };
 
 export type CreatePromptForInputModeOptions = Omit<CreateReadlinePromptOptions, "input" | "output"> & {
@@ -90,7 +91,7 @@ export class RawPromptController {
   async read(question: string, options?: PromptOptions): Promise<RawPromptResult> {
     const renderLoop = new RawPromptRenderLoop(this.#output);
     let state = createLineEditorState();
-    let typeaheadState: TypeaheadState = createTypeaheadControllerState();
+    let typeaheadState: TypeaheadState<SlashCommandSuggestionMetadata> = createTypeaheadControllerState();
     const render = () => {
       const rows = renderLoop.render({
         prompt: question,
@@ -114,6 +115,7 @@ export class RawPromptController {
       let settled = false;
 
       const notifyTypeahead = () => {
+        this.#overlayHost.setRows(buildRawPromptSlashAutocompleteRows(typeaheadState));
         this.#typeahead?.onStateChange?.(typeaheadState);
       };
 
@@ -148,7 +150,7 @@ export class RawPromptController {
         const request = requestTypeaheadSuggestions(
           typeaheadState,
           selection.context,
-          [selection.provider]
+          [selection.provider] as const
         );
         typeaheadState = request.state;
         notifyTypeahead();
