@@ -220,6 +220,25 @@ describe("Papyrus select navigation model", () => {
     expect(getVisibleOptions(reconciled).map((item) => item.value)).toContain("charlie");
   });
 
+  it("preserves input values and viewport when reconciling matching input rows", () => {
+    const state = createSelectNavigationState(optionsWithInput, {
+      focusedValue: "custom",
+      inputValues: [["custom", "draft"]],
+      viewportSize: 2,
+      viewportStart: 1,
+    });
+
+    const reconciled = reconcileSelectNavigationState(state, [
+      { value: "alpha", label: "Alpha" },
+      { value: "custom", label: "Custom", kind: "input" },
+      { value: "delta", label: "Delta" },
+    ]);
+
+    expect(reconciled.focusedValue).toBe("custom");
+    expect(reconciled.inputValues.get("custom")).toBe("draft");
+    expect(reconciled.viewportStart).toBe(1);
+  });
+
   it("handles all-disabled navigation without changing focus", () => {
     const state = createSelectNavigationState([
       { value: "a", label: "A", disabled: true },
@@ -252,6 +271,22 @@ describe("Papyrus select navigation model", () => {
       inputValue: "edited",
     });
     expect(state.inputValues.get("custom")).toBe("edited");
+  });
+
+  it("ignores input changes for disabled or non-input rows", () => {
+    const state = createSelectNavigationState(optionsWithInput);
+
+    expect(applySelectEvent(state, {
+      type: "input-change",
+      value: "alpha",
+      inputValue: "ignored",
+    }).state).toBe(state);
+
+    expect(applySelectEvent(state, {
+      type: "input-change",
+      value: "bravo",
+      inputValue: "ignored",
+    }).state).toBe(state);
   });
 });
 
@@ -429,6 +464,16 @@ describe("Papyrus select render rows", () => {
         marker: "selected",
       },
     ]);
+  });
+
+  it("uses Papyrus width measurement for Unicode labels in render rows", () => {
+    const state = createSelectNavigationState([
+      { value: "emoji", label: "Go 👍" },
+      { value: "cjk", label: "界面" },
+      { value: "ansi", label: "\u001b[31mred\u001b[0m" },
+    ], { viewportSize: 3 });
+
+    expect(buildSelectRenderRows(state).map((row) => row.width)).toEqual([5, 4, 3]);
   });
 
   it("preserves viewport order in render rows", () => {

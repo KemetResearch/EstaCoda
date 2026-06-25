@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   applyDialogKey,
   applyMultiSelectKey,
+  applySelectKey,
   applyOverlayEscape,
   cancelMultiSelect,
   createDialogState,
@@ -14,6 +15,7 @@ import {
   toggleFocusedMultiSelectOption,
   toggleMultiSelectValue,
   topOverlay,
+  type OverlayDescriptor,
   type DialogAction,
   type PapyrusOption,
 } from "./index.js";
@@ -105,6 +107,31 @@ describe("Papyrus multi-select model", () => {
       selected: true,
     });
   });
+
+  it("can use select navigation before submitting selected values", () => {
+    let state = createMultiSelectState(options, {
+      focusedValue: "alpha",
+      selectedValues: ["alpha"],
+    });
+
+    state = {
+      ...state,
+      navigation: applySelectKey(state.navigation, { key: "arrowDown" }).state,
+    };
+    state = toggleFocusedMultiSelectOption(state).state;
+
+    expect(state.navigation.focusedValue).toBe("charlie");
+    expect(submitMultiSelect(state).intent).toEqual({
+      type: "submitted",
+      values: ["alpha", "charlie"],
+    });
+  });
+
+  it("returns no submit intent when minimum selections are not met", () => {
+    const state = createMultiSelectState(options, { minSelections: 1 });
+
+    expect(submitMultiSelect(state).intent).toBeUndefined();
+  });
 });
 
 describe("Papyrus dialog model", () => {
@@ -164,6 +191,20 @@ describe("Papyrus dialog model", () => {
 
     expect(state.focusedAction).toBe("yes");
     expect(applyDialogKey(state, { key: "escape" }).intent).toBeUndefined();
+  });
+
+  it("is safe when every dialog action is disabled", () => {
+    const state = createDialogState({
+      title: "Disabled",
+      actions: [
+        { value: "a", label: "A", disabled: true },
+        { value: "b", label: "B", disabled: true },
+      ],
+    });
+
+    expect(state.focusedAction).toBeUndefined();
+    expect(applyDialogKey(state, { key: "enter" }).intent).toBeUndefined();
+    expect(applyDialogKey(state, { key: "arrowRight" }).state.focusedAction).toBeUndefined();
   });
 });
 
@@ -227,6 +268,24 @@ describe("Papyrus overlay stack", () => {
       type: "popped",
       overlay: { id: "required", kind: "dialog", dismissible: false },
     });
+  });
+
+  it("captures underlying overlay only after the covering overlay is popped", () => {
+    let stack = createOverlayStack([
+      { id: "under", kind: "select" },
+      { id: "top", kind: "dialog" },
+    ]);
+    const seen: string[] = [];
+    const handler = (overlay: OverlayDescriptor, event: { key: string }) => {
+      seen.push(`${overlay.id}:${event.key}`);
+      return overlay.id;
+    };
+
+    dispatchToTopOverlay(stack, { key: "enter" }, handler);
+    stack = popOverlay(stack).state;
+    dispatchToTopOverlay(stack, { key: "escape" }, handler);
+
+    expect(seen).toEqual(["top:enter", "under:escape"]);
   });
 
   it("returns blocked intent for empty stacks", () => {
