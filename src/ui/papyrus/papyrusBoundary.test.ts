@@ -55,7 +55,10 @@ describe("Papyrus substrate boundaries", () => {
   it("keeps the root namespace and empty future namespaces intentionally inert", () => {
     expect(read("index.ts").trim()).toBe("export {};");
     expect(read("input/index.ts").trim()).toBe("export {};");
-    expect(read("widgets/index.ts").trim()).toBe("export {};");
+    expect(exportedModules(read("widgets/index.ts"))).toEqual([
+      "./optionMap.js",
+      "./selectModel.js",
+    ]);
   });
 
   it("exports only the intended nested substrate modules", () => {
