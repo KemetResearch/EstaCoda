@@ -53,6 +53,22 @@ describe("raw prompt render loop", () => {
     expect(output.text()).not.toMatch(forbiddenManagedRegionOutput);
   });
 
+  it("renders inline ghost text without moving the real cursor", () => {
+    const output = fakeOutput();
+    const loop = new RawPromptRenderLoop(output);
+
+    const rows = loop.render({
+      prompt: "> ",
+      state: createLineEditorState("hel", 3),
+      ghostText: { text: "lo" },
+    });
+
+    expect(rows).toBe(1);
+    expect(output.text()).toContain("> hello");
+    expect(output.text()).toContain("\x1b[5C");
+    expect(output.text()).not.toMatch(forbiddenManagedRegionOutput);
+  });
+
   it("renders inert overlay rows and clears them later", () => {
     const output = fakeOutput();
     const host = new RawPromptOverlayHost();
