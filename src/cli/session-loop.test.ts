@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { PassThrough } from "node:stream";
 import { handleSlashCommand, runSessionLoop } from "./session-loop.js";
+import type { ApprovalPromptAdapter } from "./approval-prompt-adapter.js";
 import type { PromptOptions } from "./readline-prompt.js";
 import { InMemorySessionDB } from "../session/in-memory-session-db.js";
 import type { Runtime } from "../runtime/create-runtime.js";
@@ -222,6 +223,17 @@ function approvalAskResponse(): AgentLoopResponse {
   };
 }
 
+function approvalDenyResponse(): AgentLoopResponse {
+  return {
+    ...approvalAskResponse(),
+    securityDecision: "deny",
+    toolExecutions: approvalAskResponse().toolExecutions.map((execution) => ({
+      ...execution,
+      decision: "deny" as const,
+    })),
+  };
+}
+
 function approvalAllowResponse(): AgentLoopResponse {
   return {
     label: "EstaCoda",
@@ -248,15 +260,29 @@ function approvalAllowResponse(): AgentLoopResponse {
   };
 }
 
-async function runApprovalPromptScenario(approvalAnswers: string[]): Promise<{
+async function runApprovalPromptScenario(
+  approvalAnswers: string[],
+  options: {
+    approvalPromptAdapter?: ApprovalPromptAdapter;
+    response?: AgentLoopResponse;
+  } = {}
+): Promise<{
   grants: ApprovalGrantInput[];
   handleInputs: string[];
   rendered: string;
+  adapterCalls: number;
 }> {
   const outputChunks: string[] = [];
   const grants: ApprovalGrantInput[] = [];
   const handleInputs: string[] = [];
   let handleCalls = 0;
+  let adapterCalls = 0;
+  const approvalPromptAdapter = options.approvalPromptAdapter === undefined
+    ? undefined
+    : (async (input) => {
+        adapterCalls += 1;
+        return await options.approvalPromptAdapter!(input);
+      }) satisfies ApprovalPromptAdapter;
   const runtime = {
     ...createMockRuntime(),
     revokeApproval: async () => true,
@@ -266,7 +292,7 @@ async function runApprovalPromptScenario(approvalAnswers: string[]): Promise<{
     handle: async (input): Promise<AgentLoopResponse> => {
       handleCalls += 1;
       handleInputs.push(input.text);
-      return handleCalls === 1 ? approvalAskResponse() : approvalAllowResponse();
+      return handleCalls === 1 ? options.response ?? approvalAskResponse() : approvalAllowResponse();
     },
   } as Runtime;
 
@@ -293,12 +319,14 @@ async function runApprovalPromptScenario(approvalAnswers: string[]): Promise<{
       { close: () => {} }
     ),
     close: () => {},
+    approvalPromptAdapter,
   });
 
   return {
     grants,
     handleInputs,
     rendered: outputChunks.join(""),
+    adapterCalls,
   };
 }
 
@@ -5083,6 +5111,83 @@ describe("runSessionLoop — active turn spinner", () => {
     expect(result.grants[0]?.scope).toBe("session");
     expect(result.handleInputs).toEqual(["write file", "write file"]);
     expect(result.rendered).toContain("Enter one of: once, session, always, deny.");
+  });
+
+  it("routes promptable approval requests through the approval prompt adapter without moving grant policy", async () => {
+    const adapterInputs: Array<{
+      toolName: string;
+      allowPersistentApproval: boolean;
+      promptAvailable: boolean;
+    }> = [];
+    const result = await runApprovalPromptScenario([], {
+      approvalPromptAdapter: async (input) => {
+        adapterInputs.push({
+          toolName: input.execution.tool.name,
+          allowPersistentApproval: input.allowPersistentApproval,
+          promptAvailable: typeof input.prompt === "function",
+        });
+        return "/approve session";
+      },
+    });
+
+    expect(adapterInputs).toEqual([
+      {
+        toolName: "workspace.write",
+        allowPersistentApproval: true,
+        promptAvailable: true,
+      },
+    ]);
+    expect(result.adapterCalls).toBe(1);
+    expect(result.grants).toHaveLength(1);
+    expect(result.grants[0]).toMatchObject({
+      toolName: "workspace.write",
+      riskClass: "workspace-write",
+      targetKey: "src/app.ts",
+      targetSummary: "src/app.ts",
+      scope: "session",
+    });
+    expect(result.handleInputs).toEqual(["write file", "write file"]);
+    expect(result.rendered).toContain("Approval granted (session). Retrying now.");
+  });
+
+  it("maps fake adapter deny and cancel-like answers through existing approval semantics", async () => {
+    const deny = await runApprovalPromptScenario([], {
+      approvalPromptAdapter: async () => "deny",
+    });
+    expect(deny.adapterCalls).toBe(1);
+    expect(deny.grants).toEqual([]);
+    expect(deny.handleInputs).toEqual(["write file"]);
+    expect(deny.rendered).toContain("Permission denied.");
+
+    const cancelLike = await runApprovalPromptScenario([], {
+      approvalPromptAdapter: vi.fn()
+        .mockResolvedValueOnce("cancel")
+        .mockResolvedValueOnce("once"),
+    });
+    expect(cancelLike.adapterCalls).toBe(2);
+    expect(cancelLike.grants).toHaveLength(1);
+    expect(cancelLike.grants[0]?.scope).toBe("once");
+    expect(cancelLike.rendered).toContain("Enter one of: once, session, always, deny.");
+  });
+
+  it("does not call the approval prompt adapter for policy-denied tool executions", async () => {
+    const adapter = vi.fn<ApprovalPromptAdapter>(async () => "once");
+    const result = await runApprovalPromptScenario([], {
+      approvalPromptAdapter: adapter,
+      response: approvalDenyResponse(),
+    });
+
+    expect(adapter).not.toHaveBeenCalled();
+    expect(result.adapterCalls).toBe(0);
+    expect(result.grants).toEqual([]);
+    expect(result.handleInputs).toEqual(["write file"]);
+  });
+
+  it("keeps the approval prompt adapter free of Papyrus widget imports", async () => {
+    const source = await readFile(new URL("./approval-prompt-adapter.ts", import.meta.url), "utf8");
+
+    expect(source).not.toContain("papyrus/widgets");
+    expect(source).not.toContain("papyrus-widgets");
   });
 
   it("renders agent-cancelled as durable message in chrome mode", async () => {
