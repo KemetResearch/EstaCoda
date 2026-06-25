@@ -80,6 +80,60 @@ describe("raw prompt render loop", () => {
     expect(output.text()).not.toMatch(forbiddenManagedRegionOutput);
   });
 
+  it("recalculates overlay rows after prompt-region size changes while keeping focus visible", () => {
+    const output = fakeOutput();
+    const loop = new RawPromptRenderLoop(output);
+
+    expect(loop.render({
+      prompt: "> ",
+      state: createLineEditorState("/"),
+      overlayRows: [
+        { id: "help", text: "> /help - Show help" },
+        { id: "status", text: "  /status - Show status" },
+        { id: "model", text: "  /model - Show model" },
+      ],
+    })).toBe(4);
+
+    expect(loop.render({
+      prompt: "> ",
+      state: createLineEditorState("/s"),
+      overlayRows: [
+        { id: "status", text: "> /status - Show status" },
+      ],
+    })).toBe(2);
+
+    expect(loop.render({
+      prompt: "> ",
+      state: createLineEditorState("/"),
+      overlayRows: [
+        { id: "help", text: "  /help - Show help" },
+        { id: "status", text: "> /status - Show status" },
+      ],
+    })).toBe(3);
+
+    expect(output.text()).toContain("> /status - Show status");
+    expect(output.text()).not.toMatch(forbiddenManagedRegionOutput);
+  });
+
+  it("coexists with surrounding bottom-chrome writes without destructive terminal sequences", () => {
+    const output = fakeOutput();
+    const loop = new RawPromptRenderLoop(output);
+
+    output.write("bottom chrome before\n");
+    loop.render({
+      prompt: "> ",
+      state: createLineEditorState("/h"),
+      overlayRows: [{ id: "help", text: "> /help - Show help" }],
+    });
+    output.write("\nbottom chrome after");
+
+    expect(output.text()).toContain("bottom chrome before");
+    expect(output.text()).toContain("> /help - Show help");
+    expect(output.text()).toContain("bottom chrome after");
+    expect(output.text()).toContain("\x1b[0K");
+    expect(output.text()).not.toMatch(forbiddenManagedRegionOutput);
+  });
+
   it("clears previously rendered prompt and overlay rows safely", () => {
     const output = fakeOutput();
     const loop = new RawPromptRenderLoop(output);

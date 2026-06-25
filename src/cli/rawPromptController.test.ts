@@ -373,6 +373,12 @@ describe("raw prompt controller", () => {
     expect(result).toEqual({ type: "submit", text: "draft" });
   });
 
+  it("treats Ctrl-N and Ctrl-P as safe no-ops when autocomplete is closed", async () => {
+    const { result } = await readWithFakeInput("draft\x0e\x10\r");
+
+    expect(result).toEqual({ type: "submit", text: "draft" });
+  });
+
   it("preserves prompt safety for unknown escape sequences", async () => {
     const { result } = await readWithFakeInput("\x1b[999~ok\r");
 
@@ -822,6 +828,40 @@ describe("raw prompt controller", () => {
     expect(output.writes.join("")).toContain("> /status - Show status");
 
     input.send("\x1b[A");
+    expect(states.at(-1)?.focusedIndex).toBe(0);
+    input.send("\r");
+    input.send("\r");
+
+    expect(await pending).toEqual({ type: "submit", text: "/help" });
+    expect(output.writes.join("")).not.toMatch(forbiddenManagedRegionOutput);
+  });
+
+  it("moves slash autocomplete focus with Ctrl-N and Ctrl-P without touching history", async () => {
+    const provider = providerFor(SLASH_COMMAND_SUGGESTION_PROVIDER_ID, [slashSuggestion, statusSlashSuggestion]);
+    const typeahead = fakeTypeahead(provider);
+    const input = new FakeInput();
+    const output = fakeOutput();
+    const lifecycle = fakeLifecycle();
+    const states: TypeaheadState[] = [];
+    const controller = new RawPromptController({
+      input,
+      output,
+      lifecycle: lifecycle.lifecycle,
+      typeahead: {
+        router: typeahead.router,
+        onStateChange: (state) => states.push(state),
+      },
+    });
+    const pending = controller.read("> ");
+
+    input.send("/h");
+    await flushPromises();
+    input.send("\x0e");
+
+    expect(states.at(-1)?.focusedIndex).toBe(1);
+    expect(output.writes.join("")).toContain("> /status - Show status");
+
+    input.send("\x10");
     expect(states.at(-1)?.focusedIndex).toBe(0);
     input.send("\r");
     input.send("\r");

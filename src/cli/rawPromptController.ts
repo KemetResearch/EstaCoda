@@ -201,14 +201,14 @@ export class RawPromptController {
           return true;
         }
 
-        if (event.key === "up") {
+        if (event.key === "up" || (event.ctrl === true && event.key === "p")) {
           typeaheadState = focusPreviousSuggestion(typeaheadState);
           notifyTypeahead();
           render();
           return true;
         }
 
-        if (event.key === "down") {
+        if (event.key === "down" || (event.ctrl === true && event.key === "n")) {
           typeaheadState = focusNextSuggestion(typeaheadState);
           notifyTypeahead();
           render();
