@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import {
+  acceptPartialGhostText,
   acceptGhostText,
   clearGhostText,
   createGhostTextState,
@@ -75,6 +76,115 @@ describe("Papyrus ghost text controller", () => {
     expect(state.input).toBe("run /he now");
   });
 
+  it("partially accepts the next word or token without mutating state", () => {
+    const state = setGhostTextSuggestion(
+      createGhostTextState({ input: "hel", cursorOffset: 3 }),
+      {
+        suggestionText: "hello world",
+        replacementRange: { start: 0, end: 3 },
+      }
+    );
+
+    const result = acceptPartialGhostText(state);
+    expect(result.state).toBe(state);
+    expect(result.intent).toEqual({
+      type: "replace",
+      replacementText: "hello ",
+      replacementRange: { start: 0, end: 3 },
+      nextInput: "hello ",
+      nextCursorOffset: 6,
+      acceptedText: "lo ",
+      remainingText: "world",
+    });
+    expect(state.input).toBe("hel");
+  });
+
+  it("partially accepts one grapheme when no word boundary is available", () => {
+    const state = setGhostTextSuggestion(
+      createGhostTextState({ input: "", cursorOffset: 0 }),
+      {
+        suggestionText: "abc",
+        replacementRange: { start: 0, end: 0 },
+      }
+    );
+
+    expect(acceptPartialGhostText(state).intent).toEqual({
+      type: "replace",
+      replacementText: "a",
+      replacementRange: { start: 0, end: 0 },
+      nextInput: "a",
+      nextCursorOffset: 1,
+      acceptedText: "a",
+      remainingText: "bc",
+    });
+  });
+
+  it("partially accepts Arabic text without splitting graphemes", () => {
+    const state = setGhostTextSuggestion(
+      createGhostTextState({ input: "مر", cursorOffset: "مر".length }),
+      {
+        suggestionText: "مرحبا عالم",
+        replacementRange: { start: 0, end: "مر".length },
+      }
+    );
+
+    expect(acceptPartialGhostText(state).intent).toMatchObject({
+      replacementText: "مرحبا ",
+      nextInput: "مرحبا ",
+      acceptedText: "حبا ",
+      remainingText: "عالم",
+    });
+  });
+
+  it("partially accepts emoji clusters and combining marks without splitting graphemes", () => {
+    const family = "👨‍👩‍👧‍👦";
+    const emoji = setGhostTextSuggestion(
+      createGhostTextState({ input: "say ", cursorOffset: 4 }),
+      {
+        suggestionText: `${family} family`,
+        replacementRange: { start: 4, end: 4 },
+      }
+    );
+    expect(acceptPartialGhostText(emoji).intent).toMatchObject({
+      replacementText: family,
+      nextInput: `say ${family}`,
+      acceptedText: family,
+      remainingText: " family",
+    });
+
+    const combining = "e\u0301";
+    const accented = setGhostTextSuggestion(
+      createGhostTextState({ input: "", cursorOffset: 0 }),
+      {
+        suggestionText: `${combining}clair`,
+        replacementRange: { start: 0, end: 0 },
+      }
+    );
+    expect(acceptPartialGhostText(accented).intent).toMatchObject({
+      replacementText: combining,
+      nextInput: combining,
+      acceptedText: combining,
+      remainingText: "clair",
+    });
+  });
+
+  it("partially accepts CJK text one grapheme at a time when no word boundary is available", () => {
+    const state = setGhostTextSuggestion(
+      createGhostTextState({ input: "", cursorOffset: 0 }),
+      {
+        suggestionText: "東京駅",
+        replacementRange: { start: 0, end: 0 },
+      }
+    );
+
+    expect(acceptPartialGhostText(state).intent).toMatchObject({
+      replacementText: "東",
+      nextInput: "東",
+      acceptedText: "東",
+      remainingText: "京駅",
+    });
+  });
+
   it("ignores stale generations without overwriting newer state", () => {
     const newer = setGhostTextSuggestion(
       createGhostTextState({ input: "he", cursorOffset: 2 }),
@@ -90,6 +200,36 @@ describe("Papyrus ghost text controller", () => {
       replacementRange: { start: 0, end: 2 },
       generation: 1,
     })).toBe(newer);
+  });
+
+  it("does not partially accept hidden, dismissed, mismatched, or stale ghost text", () => {
+    const hidden = createGhostTextState({ input: "he", cursorOffset: 2 });
+    expect(acceptPartialGhostText(hidden).intent).toBeUndefined();
+
+    const active = setGhostTextSuggestion(hidden, {
+      suggestionText: "hello",
+      replacementRange: { start: 0, end: 2 },
+      generation: 2,
+    });
+    expect(acceptPartialGhostText(dismissGhostText(active).state).intent).toBeUndefined();
+
+    const mismatched = setGhostTextSuggestion(
+      createGhostTextState({ input: "hello", cursorOffset: 2 }),
+      {
+        suggestionText: "hello world",
+        replacementRange: { start: 0, end: 5 },
+      }
+    );
+    expect(acceptPartialGhostText(mismatched).intent).toBeUndefined();
+
+    const staleBase = createGhostTextState({ input: "he", cursorOffset: 2, generation: 2 });
+    const stale = setGhostTextSuggestion(staleBase, {
+      suggestionText: "help",
+      replacementRange: { start: 0, end: 2 },
+      generation: 1,
+    });
+    expect(stale).toBe(staleBase);
+    expect(acceptPartialGhostText(stale).intent).toBeUndefined();
   });
 
   it("hides ghost text when cursor and replacement range no longer match", () => {
@@ -205,6 +345,6 @@ describe("Papyrus ghost text controller", () => {
 
     expect(source).not.toMatch(/\bprocess\b|\bstdout\b|\bstderr\b|\bsetRawMode\b/u);
     expect(source).not.toMatch(/\bsrc\/(cli|security|runtime|providers|session)\//u);
-    expect(source).not.toMatch(/\bchild_process\b|\bfs\b|readline/u);
+    expect(source).not.toMatch(/\bchild_process\b|\bfs\b|readline\b|\bclipboard\b|\bhistory\b|\brawPrompt\b/u);
   });
 });

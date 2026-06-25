@@ -35,6 +35,8 @@ export type GhostTextAcceptIntent = {
   readonly replacementRange: SuggestionReplacementRange;
   readonly nextInput: string;
   readonly nextCursorOffset: number;
+  readonly acceptedText?: string;
+  readonly remainingText?: string;
 };
 
 export type GhostTextDismissIntent = {
@@ -125,20 +127,24 @@ export function updateGhostTextInput(
 }
 
 export function acceptGhostText(state: GhostTextState): GhostTextResult {
-  if (!state.visible || state.suggestionText === undefined || state.replacementRange === undefined) {
-    return { state };
-  }
+  const intent = createGhostTextAcceptIntent(state, state.suggestionText);
+  if (intent === undefined) return { state };
+  return {
+    state,
+    intent,
+  };
+}
 
-  assertGhostTextRange(state.input, state.replacementRange);
-  const nextInput = applySuggestionReplacement(state.input, state.replacementRange, state.suggestionText);
+export function acceptPartialGhostText(state: GhostTextState): GhostTextResult {
+  const suggestion = partialGhostReplacementText(state);
+  const intent = createGhostTextAcceptIntent(state, suggestion);
+  if (intent === undefined) return { state };
   return {
     state,
     intent: {
-      type: "replace",
-      replacementText: state.suggestionText,
-      replacementRange: state.replacementRange,
-      nextInput,
-      nextCursorOffset: state.replacementRange.start + state.suggestionText.length,
+      ...intent,
+      acceptedText: partialGhostAcceptedText(state),
+      remainingText: remainingGhostText(state, suggestion),
     },
   };
 }
@@ -160,6 +166,65 @@ export function assertGhostTextRange(
 
 function isStaleGeneration(current: number | undefined, next: number | undefined): boolean {
   return current !== undefined && next !== undefined && next < current;
+}
+
+function createGhostTextAcceptIntent(
+  state: GhostTextState,
+  replacementText: string | undefined
+): GhostTextAcceptIntent | undefined {
+  if (!state.visible || state.dismissed || replacementText === undefined || state.replacementRange === undefined) {
+    return undefined;
+  }
+
+  assertGhostTextRange(state.input, state.replacementRange);
+  const nextInput = applySuggestionReplacement(state.input, state.replacementRange, replacementText);
+  return {
+    type: "replace",
+    replacementText,
+    replacementRange: state.replacementRange,
+    nextInput,
+    nextCursorOffset: state.replacementRange.start + replacementText.length,
+  };
+}
+
+function partialGhostReplacementText(state: GhostTextState): string | undefined {
+  if (state.suggestionText === undefined || state.replacementRange === undefined) return undefined;
+  const currentText = state.input.slice(state.replacementRange.start, state.replacementRange.end);
+  const suffix = ghostSuffix(state.suggestionText, currentText);
+  const accepted = nextPartialAcceptSegment(suffix);
+  if (accepted.length === 0) return undefined;
+  return state.suggestionText.startsWith(currentText) ? `${currentText}${accepted}` : accepted;
+}
+
+function partialGhostAcceptedText(state: GhostTextState): string | undefined {
+  if (state.suggestionText === undefined || state.replacementRange === undefined) return undefined;
+  const currentText = state.input.slice(state.replacementRange.start, state.replacementRange.end);
+  return nextPartialAcceptSegment(ghostSuffix(state.suggestionText, currentText));
+}
+
+function remainingGhostText(state: GhostTextState, partialReplacementText: string | undefined): string | undefined {
+  if (state.suggestionText === undefined || partialReplacementText === undefined) return undefined;
+  const remaining = state.suggestionText.slice(partialReplacementText.length);
+  return remaining.length === 0 ? undefined : remaining;
+}
+
+function ghostSuffix(suggestionText: string, currentText: string): string {
+  return suggestionText.startsWith(currentText) ? suggestionText.slice(currentText.length) : suggestionText;
+}
+
+function nextPartialAcceptSegment(text: string): string {
+  const spans = graphemeSpans(text);
+  if (spans.length === 0) return "";
+
+  for (const span of spans) {
+    if (isTokenBoundaryGrapheme(text.slice(span.start, span.end))) return text.slice(0, span.end);
+  }
+
+  return text.slice(0, spans[0]!.end);
+}
+
+function isTokenBoundaryGrapheme(grapheme: string): boolean {
+  return /\s|\p{P}|\p{S}/u.test(grapheme);
 }
 
 function normalizeGraphemeOffset(input: string, offset: number): number {
