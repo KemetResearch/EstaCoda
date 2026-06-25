@@ -8,6 +8,11 @@ import {
 } from "./renderer-mode.js";
 
 describe("UI renderer mode", () => {
+  it("covers the rollout matrix default and explicit legacy override", () => {
+    expect(resolveUiRendererMode({ env: {} })).toBe("papyrus");
+    expect(resolveUiRendererMode({ env: { [UI_RENDERER_ENV_VAR]: "legacy" } })).toBe("legacy");
+  });
+
   it("defaults unset values to papyrus", () => {
     expect(resolveUiRendererMode({ env: {} })).toBe("papyrus");
     expect(parseUiRendererMode(undefined)).toBe("papyrus");

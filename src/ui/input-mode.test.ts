@@ -9,6 +9,21 @@ import {
 } from "./input-mode.js";
 
 describe("UI input mode", () => {
+  it("covers the rollout matrix for core TTY, readline override, and non-TTY sessions", () => {
+    expect(resolveCoreSessionUiInputMode({
+      env: {},
+      isInteractiveTty: true,
+    })).toBe("raw");
+    expect(resolveCoreSessionUiInputMode({
+      env: { [UI_INPUT_MODE_ENV_VAR]: "readline" },
+      isInteractiveTty: true,
+    })).toBe("readline");
+    expect(resolveCoreSessionUiInputMode({
+      env: {},
+      isInteractiveTty: false,
+    })).toBe("readline");
+  });
+
   it("defaults unset values to readline", () => {
     expect(resolveUiInputMode({ env: {} })).toBe("readline");
     expect(parseUiInputMode(undefined)).toBe("readline");

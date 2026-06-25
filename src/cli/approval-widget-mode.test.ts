@@ -9,6 +9,29 @@ import {
 } from "./approval-widget-mode.js";
 
 describe("approval widget mode", () => {
+  it("covers the rollout matrix for Papyrus cards and plain fallback overrides", () => {
+    expect(resolveCoreSessionApprovalWidgetMode({
+      env: {},
+      inputMode: "raw",
+      rendererMode: "papyrus",
+    })).toBe("papyrus");
+    expect(resolveCoreSessionApprovalWidgetMode({
+      env: { [APPROVAL_WIDGET_MODE_ENV_VAR]: "legacy" },
+      inputMode: "raw",
+      rendererMode: "papyrus",
+    })).toBe("legacy");
+    expect(resolveCoreSessionApprovalWidgetMode({
+      env: {},
+      inputMode: "readline",
+      rendererMode: "papyrus",
+    })).toBe("legacy");
+    expect(resolveCoreSessionApprovalWidgetMode({
+      env: {},
+      inputMode: "raw",
+      rendererMode: "legacy",
+    })).toBe("legacy");
+  });
+
   it("defaults unset values to legacy", () => {
     expect(resolveApprovalWidgetMode({ env: {} })).toBe("legacy");
     expect(parseApprovalWidgetMode(undefined)).toBe("legacy");

@@ -382,6 +382,55 @@ async function runApprovalPromptScenario(
 }
 
 describe("runSessionLoop — user prompt rail behavior", () => {
+  it("covers default Papyrus rollout behavior for interactive TTY core sessions", async () => {
+    const input = makeTtyInput();
+    const outputChunks: string[] = [];
+
+    const loop = runSessionLoop({
+      runtime: createMockRuntime(),
+      input,
+      output: {
+        write(chunk: string | Uint8Array): boolean {
+          outputChunks.push(String(chunk));
+          return true;
+        },
+        isTTY: true,
+        columns: 120,
+      } as unknown as NodeJS.WritableStream,
+      capabilities: interactiveCaps({ terminalWidth: 120, supportsAnimation: false }),
+      close: () => {},
+    });
+
+    while (input.listenerCount("data") === 0) {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    }
+
+    input.write("/");
+    while (!stripAnsi(outputChunks.join("")).includes("Show command help")) {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    }
+
+    input.write("status");
+    input.write("\r");
+    while (!stripAnsi(outputChunks.join("")).includes("Papyrus optional capabilities")) {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    }
+
+    input.write("\u0003");
+    await loop;
+
+    const rendered = stripAnsi(outputChunks.join(""));
+    expect(input.rawModes).toEqual([true, false, true, false]);
+    expect(rendered).toContain("/help");
+    expect(rendered).toContain("Show command help");
+    expect(rendered).toContain("Papyrus optional capabilities");
+    expect(rendered).toContain("shell history suggestions: off");
+    expect(rendered).toContain("clipboard reads: off");
+    expect(rendered).toContain("MCP resource suggestions: off");
+    expect(rendered).toContain("skill suggestions: off");
+    expect(rendered).toContain("Vim keymap: off");
+  });
+
   it("reports optional Papyrus capabilities as disabled by default in /status", async () => {
     const outputChunks: string[] = [];
 
