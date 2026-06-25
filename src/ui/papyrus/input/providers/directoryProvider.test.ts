@@ -50,6 +50,58 @@ describe("Papyrus directory suggestion provider", () => {
     ]);
   });
 
+  it("handles relative directory prefixes", async () => {
+    const provider = createDirectorySuggestionProvider({
+      fs: fakeFs({
+        [resolve(cwd, "src")]: [dir("prompt"), dir("providers"), dir("ui")],
+      }),
+      cwd,
+      workspaceRoot,
+    });
+
+    const result = await provider.getSuggestions(pathContext("src/p"));
+
+    expect(result.type).toBe("success");
+    expect(result.suggestions.map((suggestion) => suggestion.replacementText)).toEqual([
+      "src/prompt/",
+      "src/providers/",
+    ]);
+  });
+
+  it("supports explicit safe home expansion when enabled", async () => {
+    const homeDir = resolve("/workspace/app/home");
+    const provider = createDirectorySuggestionProvider({
+      fs: fakeFs({
+        [homeDir]: [dir("projects")],
+      }),
+      cwd,
+      workspaceRoot,
+      homeDir,
+      allowHomeExpansion: true,
+    });
+
+    const result = await provider.getSuggestions(pathContext("~/"));
+
+    expect(result.type).toBe("success");
+    expect(result.suggestions.map((suggestion) => suggestion.replacementText)).toEqual(["~/projects/"]);
+  });
+
+  it("does not expand home paths unless explicitly enabled", async () => {
+    const reads: string[] = [];
+    const provider = createDirectorySuggestionProvider({
+      fs: fakeFs({ [resolve("/workspace/app/home")]: [dir("projects")] }, { reads }),
+      cwd,
+      workspaceRoot,
+      homeDir: resolve("/workspace/app/home"),
+    });
+
+    const result = await provider.getSuggestions(pathContext("~/"));
+
+    expect(result.type).toBe("empty");
+    expect(result.suggestions).toEqual([]);
+    expect(reads).toEqual([]);
+  });
+
   it("prevents escaping above the workspace root", async () => {
     const reads: string[] = [];
     const provider = createDirectorySuggestionProvider({

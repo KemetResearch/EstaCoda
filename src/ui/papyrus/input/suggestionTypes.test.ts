@@ -64,6 +64,22 @@ describe("Papyrus suggestion contracts", () => {
     expect(input).toBe("ask /he please");
   });
 
+  it("accepts cursor positions at token range boundaries", () => {
+    expect(createSuggestionTokenContext({
+      input: "/help now",
+      cursorOffset: 0,
+      tokenRange: { start: 0, end: 5 },
+      triggerKind: "slash",
+    }).token).toBe("/help");
+
+    expect(createSuggestionTokenContext({
+      input: "/help now",
+      cursorOffset: 5,
+      tokenRange: { start: 0, end: 5 },
+      triggerKind: "slash",
+    }).token).toBe("/help");
+  });
+
   it("rejects token context when cursor or token range is out of bounds", () => {
     expect(() => createSuggestionTokenContext({ input: "abc", cursorOffset: 4 })).toThrow(
       InvalidSuggestionRangeError
@@ -73,6 +89,13 @@ describe("Papyrus suggestion contracts", () => {
         input: "abc",
         cursorOffset: 0,
         tokenRange: { start: 1, end: 2 },
+      })
+    ).toThrow(InvalidSuggestionRangeError);
+    expect(() =>
+      createSuggestionTokenContext({
+        input: "abc def",
+        cursorOffset: 4,
+        tokenRange: { start: 0, end: 3 },
       })
     ).toThrow(InvalidSuggestionRangeError);
   });

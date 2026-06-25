@@ -159,6 +159,32 @@ describe("Papyrus typeahead controller", () => {
     expect(state.items).toEqual([]);
   });
 
+  it("ignores stale canceled results without overwriting the active generation", async () => {
+    const oldResult = normalizeSuggestionProviderResult("old", {
+      canceled: true,
+      requestId: "old-req",
+    });
+    const active = applyTypeaheadResult(
+      {
+        status: "loading",
+        context,
+        providerId: "next",
+        items: [],
+        generation: 2,
+        requestId: "next-req",
+      },
+      2,
+      normalizeSuggestionProviderResult("next", { suggestions: [helpItem], requestId: "next-req" })
+    );
+
+    const afterStaleCancel = applyTypeaheadResult(active, 1, oldResult);
+
+    expect(afterStaleCancel.status).toBe("open");
+    expect(afterStaleCancel.generation).toBe(2);
+    expect(afterStaleCancel.requestId).toBe("next-req");
+    expect(afterStaleCancel.items.map((suggestion) => suggestion.id)).toEqual(["help"]);
+  });
+
   it("moves focus next and previous through items", async () => {
     const request = requestTypeaheadSuggestions(createTypeaheadControllerState(), context, [
       providerFor("slash", () => [helpItem, helloItem]),
@@ -225,6 +251,19 @@ describe("Papyrus typeahead controller", () => {
       "same-b",
       "low",
     ]);
+  });
+
+  it("preserves provider order for exact ranking ties", async () => {
+    const request = requestTypeaheadSuggestions(createTypeaheadControllerState(), context, [
+      providerFor("slash", () => [
+        item("first", "/first", { priority: 1, score: 1 }),
+        item("second", "/second", { priority: 1, score: 1 }),
+        item("third", "/third", { priority: 1, score: 1 }),
+      ]),
+    ]);
+    const state = applyTypeaheadResult(request.state, request.generation, await request.result);
+
+    expect(state.items.map((suggestion) => suggestion.id)).toEqual(["first", "second", "third"]);
   });
 
   it("does not import command registry, policy, approval, or session code", () => {

@@ -27,6 +27,19 @@ describe("Papyrus file suggestion provider skeleton", () => {
         deferred: true,
       },
     });
+    expect(result.suggestions[0]?.description).toContain("deferred");
+  });
+
+  it("allows the deferred reason to be explicit data", async () => {
+    const provider = createFileSuggestionProvider({
+      reason: "File index provider deferred for PR 8.",
+    });
+    const result = await provider.getSuggestions(pathContext("src/"));
+
+    expect(result.suggestions[0]?.availability).toEqual({
+      state: "unavailable",
+      reason: "File index provider deferred for PR 8.",
+    });
   });
 
   it("returns canceled data when the signal is already aborted", async () => {

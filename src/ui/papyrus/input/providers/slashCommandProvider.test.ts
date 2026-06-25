@@ -64,6 +64,16 @@ describe("Papyrus slash command suggestion provider", () => {
     );
   });
 
+  it("detects slash tokens when the cursor is inside the token", async () => {
+    const provider = createSlashCommandSuggestionProvider({ registry: commandRegistry });
+    const context = createSlashSuggestionTokenContext("run /model now", 6);
+    const result = await provider.getSuggestions(context!);
+
+    expect(context?.token).toBe("/model");
+    expect(context?.tokenRange).toEqual({ start: 4, end: 10 });
+    expect(result.suggestions.map((suggestion) => suggestion.label)).toContain("/model");
+  });
+
   it("does not produce false positives for non-slash text", async () => {
     const provider = createSlashCommandSuggestionProvider({ registry: commandRegistry });
     const plainContext = createSlashSuggestionTokenContext("hello status", 7);
@@ -111,6 +121,18 @@ describe("Papyrus slash command suggestion provider", () => {
     )).toBe(true);
   });
 
+  it("keeps exact slash command queries aligned with the existing menu helper", async () => {
+    const provider = createSlashCommandSuggestionProvider({ registry: commandRegistry });
+    const context = createSlashSuggestionTokenContext("/status", 7);
+    const result = await provider.getSuggestions(context!);
+    const menuLabels = buildSlashCompletionViewModel(runtime as never, "/status", { limit: 100 })
+      .options
+      .map((option) => option.label);
+
+    expect(result.suggestions.map((suggestion) => suggestion.label)).toEqual(menuLabels);
+    expect(result.suggestions[0]?.label).toBe("/status");
+  });
+
   it("matches active-turn filtering parity with the current completion menu", async () => {
     const idleProvider = createSlashCommandSuggestionProvider({ registry: commandRegistry });
     const activeProvider = createSlashCommandSuggestionProvider({
@@ -146,8 +168,10 @@ describe("Papyrus slash command suggestion provider", () => {
 
   it("does not create a parallel registry or import command execution paths", () => {
     const source = readFileSync(fileURLToPath(new URL("./slashCommandProvider.ts", import.meta.url)), "utf8");
+    const sharedSource = readFileSync(fileURLToPath(new URL("../../../slashCompletionSource.ts", import.meta.url)), "utf8");
 
     expect(source).not.toMatch(/commandRegistry\.register|new Set\(\[\s*["']help["']|execute|runSessionLoop/i);
     expect(source).not.toMatch(/src\/cli|src\/security|src\/runtime|src\/providers|grantApproval|approval/i);
+    expect(sharedSource).not.toMatch(/fuse|match-sorter|commandRegistry\.register|execute|runSessionLoop/i);
   });
 });
