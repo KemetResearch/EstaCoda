@@ -9,6 +9,10 @@ import {
 import { createOperatorConsoleLayout } from "./operatorConsoleLayout.js";
 import { getPromptSurfaceMetrics } from "./promptSurface.js";
 import { renderOperatorConsoleTextLines } from "./operatorConsoleRenderer.js";
+import {
+  type OperatorConsoleRuntimeFrame,
+  type OperatorConsoleRuntimeHost,
+} from "./operatorConsoleRuntimeHost.js";
 
 export type OperatorConsoleRawPromptOverlayRow = {
   readonly text: string;
@@ -58,18 +62,35 @@ export function buildOperatorConsoleRawPromptFrame(
   const state = buildOperatorConsoleStateFromRawPrompt(snapshot);
   const layout = createOperatorConsoleLayout(state, state.terminal);
   const renderedRows = renderOperatorConsoleTextLines(state, layout);
-  const rows = insertOverlayRowsBeforeStatus(renderedRows, snapshot.overlayRows ?? []);
   const promptRegion = layout.regions.find((region) => region.kind === "prompt");
   const cursor = promptRegion === undefined
     ? { row: 0, column: 0 }
     : getPromptCursorPosition(state, promptRegion.y, promptRegion.height);
 
   return {
-    rows,
+    rows: insertOverlayRowsBeforeStatus(renderedRows, snapshot.overlayRows ?? []),
     cursorRow: cursor.row,
     cursorColumn: cursor.column,
     state,
   };
+}
+
+export function buildOperatorConsoleRawPromptFrameWithRuntimeHost(
+  host: OperatorConsoleRuntimeHost,
+  snapshot: OperatorConsoleRawPromptSnapshot
+): OperatorConsoleRawPromptFrame {
+  const terminal = normalizeTerminal(snapshot.terminal);
+  host.clear();
+  host.setTerminal(terminal);
+  host.setStatus(snapshot.status ?? createDefaultOperatorConsoleRawPromptStatus());
+  host.setPrompt({
+    text: snapshot.state.text,
+    cursorOffset: snapshot.state.cursor,
+    multiline: snapshot.state.text.includes("\n"),
+    scrollOffset: 0,
+    mode: "prompt",
+  });
+  return rawPromptFrameFromRuntimeFrame(host.render(), snapshot.overlayRows ?? []);
 }
 
 export function createDefaultOperatorConsoleRawPromptStatus(): StatusRailState {
@@ -84,6 +105,23 @@ export function createDefaultOperatorConsoleRawPromptStatus(): StatusRailState {
     sessionTimer: {
       elapsedMs: 0,
     },
+  };
+}
+
+function rawPromptFrameFromRuntimeFrame(
+  frame: OperatorConsoleRuntimeFrame,
+  overlayRows: readonly OperatorConsoleRawPromptOverlayRow[]
+): OperatorConsoleRawPromptFrame {
+  const promptRegion = frame.layout.regions.find((region) => region.kind === "prompt");
+  const cursor = promptRegion === undefined
+    ? { row: 0, column: 0 }
+    : getPromptCursorPosition(frame.state, promptRegion.y, promptRegion.height);
+
+  return {
+    rows: insertOverlayRowsBeforeStatus(frame.lines, overlayRows),
+    cursorRow: cursor.row,
+    cursorColumn: cursor.column,
+    state: frame.state,
   };
 }
 

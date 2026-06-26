@@ -6,6 +6,8 @@ import {
   RawPromptRenderLoop,
   type RawPromptRenderOutput,
 } from "./rawPromptRenderLoop.js";
+import { createOperatorConsoleRuntimeHost } from "../ui/papyrus/operator-console/operatorConsoleRuntimeHost.js";
+import type { StatusRailState } from "../ui/papyrus/operator-console/operatorConsoleState.js";
 
 const forbiddenManagedRegionOutput = /\x1b\[3J|\x1b\[2J|\x1b\[H|\x1b\[\d+;\d+H/u;
 
@@ -50,9 +52,97 @@ describe("raw prompt render loop", () => {
     expect(output.text()).not.toMatch(forbiddenManagedRegionOutput);
   });
 
+  it("uses a persistent Operator Console runtime host for gated prompt/status rendering", () => {
+    const output = fakeOutput();
+    const host = createOperatorConsoleRuntimeHost();
+    const factory = vi.fn(() => host);
+    const setPrompt = vi.spyOn(host, "setPrompt");
+    const setStatus = vi.spyOn(host, "setStatus");
+    const setTerminal = vi.spyOn(host, "setTerminal");
+    const render = vi.spyOn(host, "render");
+    const loop = new RawPromptRenderLoop(output, {
+      operatorConsoleHostFactory: factory,
+    });
+
+    loop.render({
+      prompt: "> ",
+      state: createLineEditorState("first", 2),
+      operatorConsole: {
+        enabled: true,
+        terminal: { width: 72, height: 12, isTty: true },
+        status: status({ usedTokens: 1000, elapsedMs: 1000 }),
+      },
+    });
+    loop.render({
+      prompt: "> ",
+      state: createLineEditorState("second\nline", 8),
+      operatorConsole: {
+        enabled: true,
+        terminal: { width: 60, height: 10, isTty: true },
+        status: status({ usedTokens: 2000, elapsedMs: 2000 }),
+      },
+    });
+
+    expect(factory).toHaveBeenCalledOnce();
+    expect(setTerminal).toHaveBeenCalledTimes(2);
+    expect(setStatus).toHaveBeenCalledTimes(2);
+    expect(setPrompt).toHaveBeenNthCalledWith(1, expect.objectContaining({
+      text: "first",
+      cursorOffset: 2,
+      multiline: false,
+      mode: "prompt",
+    }));
+    expect(setPrompt).toHaveBeenNthCalledWith(2, expect.objectContaining({
+      text: "second\nline",
+      cursorOffset: 8,
+      multiline: true,
+      mode: "prompt",
+    }));
+    expect(render).toHaveBeenCalledTimes(2);
+    expect(host.getState().terminal).toEqual({ width: 60, height: 10, isTty: true });
+    expect(host.getState().status.context.usedTokens).toBe(2000);
+    expect(host.getState().status.sessionTimer.elapsedMs).toBe(2000);
+  });
+
+  it("keeps status rail state limited when noisy live status input reaches the runtime host", () => {
+    const output = fakeOutput();
+    const host = createOperatorConsoleRuntimeHost();
+    const loop = new RawPromptRenderLoop(output, {
+      operatorConsoleHostFactory: () => host,
+    });
+    const noisyStatus = {
+      ...status({ usedTokens: 18_400, elapsedMs: 72_000 }),
+      tools: ["rg"],
+      approvals: ["approval-1"],
+      workspace: "trusted",
+      trust: "trusted",
+      setup: "ready",
+      steer: "queued",
+      channel: "cli",
+      activeTurn: "thinking",
+    } as unknown as StatusRailState;
+
+    loop.render({
+      prompt: "> ",
+      state: createLineEditorState("review the plan"),
+      operatorConsole: {
+        enabled: true,
+        terminal: { width: 72, height: 12, isTty: true },
+        status: noisyStatus,
+      },
+    });
+
+    expect(Object.keys(host.getState().status).sort()).toEqual(["context", "model", "sessionTimer"]);
+    expect(output.text()).toContain("kimi-k2.7-code ● │ ctx");
+    expect(output.text()).not.toMatch(/\b(tool|approval|workspace|trust|setup|steer|channel|active)\b/iu);
+  });
+
   it("keeps non-Operator Console raw rendering unchanged by default", () => {
     const output = fakeOutput();
-    const loop = new RawPromptRenderLoop(output);
+    const factory = vi.fn(() => createOperatorConsoleRuntimeHost());
+    const loop = new RawPromptRenderLoop(output, {
+      operatorConsoleHostFactory: factory,
+    });
 
     const rows = loop.render({
       prompt: "> ",
@@ -63,6 +153,7 @@ describe("raw prompt render loop", () => {
     expect(output.text()).toContain("> plain");
     expect(output.text()).not.toContain("╭─ Prompt");
     expect(output.text()).not.toContain("session 00:00");
+    expect(factory).not.toHaveBeenCalled();
   });
 
   it("places raw overlay rows between Operator Console prompt and status rail", () => {
@@ -254,5 +345,13 @@ function fakeOutput(): RawPromptRenderOutput & { text(): string } {
       writes.push(chunk);
     }),
     text: () => writes.join(""),
+  };
+}
+
+function status(input: { readonly usedTokens: number; readonly elapsedMs: number }): StatusRailState {
+  return {
+    model: { label: "kimi-k2.7-code", state: "working" },
+    context: { usedTokens: input.usedTokens, totalTokens: 262_000, percent: 7 },
+    sessionTimer: { elapsedMs: input.elapsedMs },
   };
 }

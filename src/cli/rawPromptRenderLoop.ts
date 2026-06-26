@@ -1,9 +1,13 @@
 import { stringWidth } from "../ui/papyrus/screen/stringWidth.js";
 import type { LineEditorState } from "../ui/input/lineEditor.js";
 import {
-  buildOperatorConsoleRawPromptFrame,
+  buildOperatorConsoleRawPromptFrameWithRuntimeHost,
   type OperatorConsoleRawPromptSnapshot,
 } from "../ui/papyrus/operator-console/operatorConsoleHost.js";
+import {
+  createOperatorConsoleRuntimeHost,
+  type OperatorConsoleRuntimeHost,
+} from "../ui/papyrus/operator-console/operatorConsoleRuntimeHost.js";
 
 export type RawPromptRenderOutput = {
   write(chunk: string): unknown;
@@ -51,15 +55,21 @@ export class RawPromptOverlayHost {
 
 export class RawPromptRenderLoop {
   readonly #output: RawPromptRenderOutput;
+  readonly #operatorConsoleHostFactory: () => OperatorConsoleRuntimeHost;
+  #operatorConsoleHost: OperatorConsoleRuntimeHost | undefined;
   #renderedRows = 0;
 
-  constructor(output: RawPromptRenderOutput) {
+  constructor(
+    output: RawPromptRenderOutput,
+    options: { readonly operatorConsoleHostFactory?: () => OperatorConsoleRuntimeHost } = {}
+  ) {
     this.#output = output;
+    this.#operatorConsoleHostFactory = options.operatorConsoleHostFactory ?? createOperatorConsoleRuntimeHost;
   }
 
   render(snapshot: RawPromptRenderSnapshot): number {
     const frame = snapshot.operatorConsole?.enabled === true
-      ? buildOperatorConsoleRawPromptFrame({
+      ? buildOperatorConsoleRawPromptFrameWithRuntimeHost(this.#getOperatorConsoleHost(), {
         prompt: snapshot.prompt,
         state: snapshot.state,
         status: snapshot.operatorConsole.status,
@@ -90,6 +100,13 @@ export class RawPromptRenderLoop {
     }
     this.#moveToFrameCursor(this.#renderedRows, 0, 0);
     this.#renderedRows = 0;
+  }
+
+  #getOperatorConsoleHost(): OperatorConsoleRuntimeHost {
+    if (this.#operatorConsoleHost === undefined) {
+      this.#operatorConsoleHost = this.#operatorConsoleHostFactory();
+    }
+    return this.#operatorConsoleHost;
   }
 
   #moveToFirstRenderedRow(): void {
