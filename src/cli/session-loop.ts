@@ -22,10 +22,10 @@ import { CronStore } from "../cron/cron-store.js";
 import { WorkspaceTrustStore } from "../security/workspace-trust-store.js";
 import { storeCapabilitySecret, type SetupNeededMetadata } from "../capabilities/capability-setup.js";
 import { defaultImageModel } from "../contracts/image-generation.js";
-import type { Prompt, PromptOptions, PromptSpecialKeyControl } from "./prompt-contract.js";
+import type { Prompt, PromptOptions } from "./prompt-contract.js";
 import { createInteractivePrompt } from "./create-interactive-prompt.js";
 import type { ToolExecutionRecord } from "../tools/tool-executor.js";
-import { renderSlashMenu, renderToolsMenu, buildSlashMenuViewModel, buildSlashCompletionViewModel, buildToolsMenuViewModel, buildSkillsMenuViewModel, isImplementedSlashCommand } from "./slash-menu.js";
+import { renderToolsMenu, buildSlashCompletionViewModel, buildToolsMenuViewModel, buildSkillsMenuViewModel } from "./slash-menu.js";
 import { renderSessionHelp, buildSessionHelpViewModel } from "./session-help.js";
 import { commandRegistry } from "./command-registry.js";
 import { toolIcon } from "./tool-activity-renderer.js";
@@ -410,9 +410,6 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
   process.once("SIGINT", onSigint);
 
   try {
-    let pendingSlashCompletion: SlashMenuViewModel | undefined;
-    let slashCompletionLine = "";
-    let slashCompletionSelectedIndex = 0;
     let latestContextUsage: ContextUsageSnapshot | undefined;
     let activeTurnContextUsageSource: ContextUsageSource | undefined;
     let timerMode: StatusRailTimerMode = "idle";
@@ -477,74 +474,16 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
 
     while (true) {
       let livePromptRows = 1;
-      let readlineTransientLines: readonly string[] = [];
-      let currentInputLine = "";
       const inputPlaceholder = bottomChrome.enabled
         ? promptInputPlaceholder(renderer, promptPrefix, useColor, termWidth)
         : undefined;
       const idleBottomState = () => buildBottomChromeState({
         runtime,
         renderer,
-        slashMenu: pendingSlashCompletion,
-        slashMenuMinRows: pendingSlashCompletion === undefined ? undefined : PROMPT_REGION_SLASH_PANEL_ROWS,
         contextUsage: latestContextUsage,
         timing: railTiming(),
         providerExecutionSummary: lastProviderExecutionSummary
       });
-      const redrawIdleReadlineChrome = () => {
-        if (!bottomChrome.enabled) return;
-        bottomChrome.updateManagedRegionAboveReadline({
-          state: idleBottomState(),
-          transientLines: readlineTransientLines,
-          promptLineCount: livePromptRows
-        });
-      };
-      const updateIdleSlashCompletionForLine = (line: string) => {
-        currentInputLine = line;
-        slashCompletionLine = line;
-        if (!line.startsWith("/")) {
-          pendingSlashCompletion = undefined;
-          slashCompletionSelectedIndex = 0;
-          return;
-        }
-        pendingSlashCompletion = buildPromptRegionSlashCompletionViewModel(runtime, line, slashCompletionSelectedIndex);
-        slashCompletionSelectedIndex = pendingSlashCompletion.absoluteSelectedIndex ?? 0;
-      };
-      const hasSlashCompletionState = () =>
-        pendingSlashCompletion !== undefined && currentInputLine.startsWith("/");
-      const hasSelectableSlashCompletion = () =>
-        hasSlashCompletionState() && (pendingSlashCompletion?.options.length ?? 0) > 0;
-      const moveIdleSlashSelection = (delta: -1 | 1): "handled" | undefined => {
-        if (!hasSelectableSlashCompletion()) return undefined;
-        const totalOptions = pendingSlashCompletion?.totalOptions ?? pendingSlashCompletion?.options.length ?? 0;
-        if (totalOptions <= 0) return undefined;
-        const currentIndex = pendingSlashCompletion?.absoluteSelectedIndex ?? pendingSlashCompletion?.selectedIndex ?? 0;
-        slashCompletionSelectedIndex = Math.min(Math.max(0, currentIndex + delta), totalOptions - 1);
-        pendingSlashCompletion = buildPromptRegionSlashCompletionViewModel(
-          runtime,
-          slashCompletionLine,
-          slashCompletionSelectedIndex
-        );
-        slashCompletionSelectedIndex = pendingSlashCompletion.absoluteSelectedIndex ?? slashCompletionSelectedIndex;
-        redrawIdleReadlineChrome();
-        return "handled";
-      };
-      const closeIdleSlashMenu = (): "handled" | undefined => {
-        if (!hasSlashCompletionState()) return undefined;
-        pendingSlashCompletion = undefined;
-        slashCompletionSelectedIndex = 0;
-        redrawIdleReadlineChrome();
-        return "handled";
-      };
-      const applyIdleSlashCompletion = (control: PromptSpecialKeyControl): "handled" | undefined => {
-        if (!hasSelectableSlashCompletion()) return undefined;
-        const selectedOption = pendingSlashCompletion?.options[pendingSlashCompletion.selectedIndex];
-        if (selectedOption === undefined) return undefined;
-        slashCompletionSelectedIndex = pendingSlashCompletion?.absoluteSelectedIndex ?? pendingSlashCompletion?.selectedIndex ?? 0;
-        control.setInputLine(selectedOption.label);
-        redrawIdleReadlineChrome();
-        return "handled";
-      };
       let submittedInput = queuedSubmittedInput;
       queuedSubmittedInput = undefined;
       let turnVoiceMode: CliVoiceMode = "off";
@@ -552,9 +491,9 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
       if (submittedInput === undefined) {
         if (bottomChrome.enabled) {
           bottomChrome.updateState(idleBottomState());
-          bottomChrome.startReadlineTicker(idleBottomState, () => livePromptRows);
+          bottomChrome.startPromptTicker(idleBottomState, () => livePromptRows);
         } else if (chrome.enabled) {
-          chrome.renderChrome(buildPromptChromeState(runtime, renderer, undefined, pendingSlashCompletion, latestContextUsage, railTiming(), lastProviderExecutionSummary));
+          chrome.renderChrome(buildPromptChromeState(runtime, renderer, undefined, undefined, latestContextUsage, railTiming(), lastProviderExecutionSummary));
         } else {
           const topRule = renderHorizontalRule(renderer.tokens, useColor, useUnicode, termWidth);
           output.write(`${topRule}\n`);
@@ -579,34 +518,12 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
           onPromptResolved: () => {
             if (bottomChrome.enabled) {
               bottomChrome.stopTicker();
-              readlineTransientLines = [];
-              redrawIdleReadlineChrome();
             }
           },
           onPromptRowsChange: (rows) => {
             livePromptRows = rows;
-          },
-          onInputChange: (line) => {
-            updateIdleSlashCompletionForLine(line);
-            redrawIdleReadlineChrome();
-          },
-          specialKeyController: {
-            shouldHandleSpecialKey: () => hasSlashCompletionState(),
-            onSpecialKey: (key, control) => {
-              if (key === "down") return moveIdleSlashSelection(1);
-              if (key === "up") return moveIdleSlashSelection(-1);
-              if (key === "escape") return closeIdleSlashMenu();
-              if (key === "tab") return applyIdleSlashCompletion(control);
-              return undefined;
-            },
-          },
-          onPastePreview: (_original, displayed) => {
-            readlineTransientLines = buildPastePreviewLines(displayed, renderer.capabilities.terminalWidth);
-            redrawIdleReadlineChrome();
           }
         });
-      } else {
-        pendingSlashCompletion = undefined;
       }
 
       const text = submittedInput.text;
@@ -615,7 +532,7 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
       if (submittedInput.clearSubmittedPrompt === true) {
         if (bottomChrome.enabled) {
           bottomChrome.stopTicker();
-          bottomChrome.clearForReadline(submittedPromptRows);
+          bottomChrome.clearForPrompt(submittedPromptRows);
         } else if (chrome.enabled) {
           chrome.clearChrome(submittedPromptRows);
         } else {
@@ -629,29 +546,15 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
       }
 
       if (text.length === 0) {
-        pendingSlashCompletion = undefined;
         continue;
       }
 
       if (text === "/exit") {
-        pendingSlashCompletion = undefined;
         output.write("Ending EstaCoda session.\n");
         return;
       }
 
       if (text.startsWith("/")) {
-        const [submittedCommand = ""] = text.slice(1).trim().split(/\s+/u);
-        const resolvedSubmittedCommand = commandRegistry.resolve(submittedCommand);
-        if (
-          submittedCommand.length === 0 ||
-          resolvedSubmittedCommand === undefined ||
-          !isImplementedSlashCommand(resolvedSubmittedCommand.name)
-        ) {
-          pendingSlashCompletion = buildPromptRegionSlashCompletionViewModel(runtime, text);
-          continue;
-        }
-
-        pendingSlashCompletion = undefined;
         const shouldExit = await handleSlashCommand({
           text,
           runtime,
@@ -689,8 +592,6 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
 
         continue;
       }
-
-      pendingSlashCompletion = undefined;
 
       // Render submitted non-slash user prompts as lightweight transcript rails
       const userPromptRail = buildUserPromptRailViewModel({ text });
@@ -1349,9 +1250,6 @@ async function readNextCliInput(input: {
   inputPlaceholder?: string;
   onPromptResolved?: () => void;
   onPromptRowsChange?: (rows: number) => void;
-  onInputChange?: (line: string) => void;
-  specialKeyController?: PromptOptions["specialKeyController"];
-  onPastePreview?: (original: string, displayed: string) => void;
 }): Promise<SubmittedCliInput> {
   if (input.voiceMode === "off") {
     const echoedPromptPrefix = colorPromptPrefix(input.promptPrefix, input.renderer.tokens, input.useColor);
@@ -1359,9 +1257,6 @@ async function readNextCliInput(input: {
     const profilePaths = resolveProfileStateHome({ homeDir: resolveHomeDir(input.homeDir), profileId });
     const promptOptions: PromptOptions = {
       onRowsChange: input.onPromptRowsChange,
-      onInputChange: input.onInputChange,
-      specialKeyController: input.specialKeyController,
-      onPastePreview: input.onPastePreview,
       placeholder: input.inputPlaceholder,
       pasteReferenceStore: createFilePasteReferenceStore({
         directory: join(profilePaths.tempPath, "pastes"),
@@ -1476,16 +1371,6 @@ function submittedPromptLineCount(
   return Math.max(1, Math.ceil(Math.max(1, visibleWidth) / terminalWidth));
 }
 
-function buildPastePreviewLines(displayed: string, terminalWidth: number): string[] {
-  const width = Math.max(1, terminalWidth);
-  const lines = displayed.split(/\r\n|\r|\n/u);
-  const previewLines = lines.slice(0, 3);
-  if (lines.length > previewLines.length) {
-    previewLines.push("...");
-  }
-  return previewLines.flatMap((line) => wrapText(line, width));
-}
-
 function buildSteeredRetryText(originalText: string, note: string): string {
   return `${originalText}\n\n[Steering note while previous turn was interrupted]\n${note}`;
 }
@@ -1545,7 +1430,7 @@ export async function handleSlashCommand(input: {
 
   switch (canonical) {
     case "":
-      input.output.write(`${input.renderer.render(buildSlashMenuViewModel(input.runtime))}\n\n`);
+      input.output.write("Use /help to see available commands.\n\n");
       return false;
     case "help":
       input.output.write(`${input.renderer.render(buildSessionHelpViewModel())}\n\n`);
@@ -1874,11 +1759,6 @@ export async function handleSlashCommand(input: {
       input.output.write("Ending EstaCoda session.\n");
       return true;
     default:
-      if (renderSlashMenu(input.runtime, command).startsWith("No slash commands or skills match") === false) {
-        input.output.write(`${input.renderer.render(buildSlashMenuViewModel(input.runtime, command))}\n\n`);
-        return false;
-      }
-
       input.output.write(`Unknown command: /${command}\nUse /help to see available commands.\n\n`);
       return false;
   }
@@ -3077,17 +2957,6 @@ function buildBottomChromeState(input: {
     slashMenu: chromeState.slashMenu,
     slashMenuMinRows: input.slashMenuMinRows,
   };
-}
-
-function buildPromptRegionSlashCompletionViewModel(
-  runtime: Runtime,
-  line: string,
-  selectedIndex = 0
-): SlashMenuViewModel {
-  return buildSlashCompletionViewModel(runtime, line, {
-    selectedIndex,
-    visibleRows: PROMPT_REGION_SLASH_PANEL_ROWS,
-  });
 }
 
 function buildActiveTurnSlashCompletionViewModel(runtime: Runtime, line: string): SlashMenuViewModel {

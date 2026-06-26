@@ -33,7 +33,7 @@ export interface BottomChromeControllerOptions {
   readonly onRendererFallback?: (diagnostic: BottomChromeRendererFallbackDiagnostic) => void;
   readonly enabled?: boolean;
   readonly tickMs?: number;
-  readonly readlineTickMs?: number;
+  readonly promptTickMs?: number;
 }
 
 export interface BottomChromeRendererFallbackDiagnostic {
@@ -42,7 +42,7 @@ export interface BottomChromeRendererFallbackDiagnostic {
   readonly reason: "papyrus-surface-controller-unavailable";
 }
 
-export interface UpdateManagedRegionAboveReadlineInput {
+export interface UpdateManagedPromptRegionInput {
   readonly state: BottomChromeState;
   readonly transientLines: readonly string[];
   readonly promptLineCount?: number;
@@ -69,7 +69,7 @@ export class BottomChromeController {
   readonly #renderHorizontalRule?: (width: number) => string;
   readonly #enabled: boolean;
   readonly #tickMs: number;
-  readonly #readlineTickMs: number;
+  readonly #promptTickMs: number;
   readonly #papyrusSurfaceController?: PapyrusSurfaceControllerLike;
   #activeLineCount = 0;
   #renderedTransientLineCount = 0;
@@ -79,7 +79,7 @@ export class BottomChromeController {
   #currentState: BottomChromeState = {};
   #ticker?: ReturnType<typeof setInterval>;
   #stateFactory?: () => BottomChromeState;
-  #readlinePromptLineCountFactory?: () => number;
+  #promptLineCountFactory?: () => number;
   #isDrawing = false;
   #writingAboveChrome = false;
   #disposed = false;
@@ -91,7 +91,7 @@ export class BottomChromeController {
     this.#renderHorizontalRule = options.renderHorizontalRule;
     this.#enabled = options.enabled ?? detectEnabled(options.capabilities);
     this.#tickMs = options.tickMs ?? 200;
-    this.#readlineTickMs = options.readlineTickMs ?? 1000;
+    this.#promptTickMs = options.promptTickMs ?? 1000;
     const rendererMode = options.rendererMode ?? "papyrus";
     if (rendererMode === "papyrus") {
       this.#papyrusSurfaceController = (
@@ -117,7 +117,7 @@ export class BottomChromeController {
     this.#redraw();
   }
 
-  clearForReadline(promptLineCount = 1): void {
+  clearForPrompt(promptLineCount = 1): void {
     if (!this.#enabled || this.#disposed || this.#managedLineCount() === 0) return;
     const chromeLines = this.#activeLineCount;
     const transientLines = this.#renderedTransientLineCount;
@@ -272,22 +272,22 @@ export class BottomChromeController {
     this.#stateFactory = stateFactory;
   }
 
-  startReadlineTicker(stateFactory: () => BottomChromeState, promptLineCountFactory: () => number = () => 1): void {
+  startPromptTicker(stateFactory: () => BottomChromeState, promptLineCountFactory: () => number = () => 1): void {
     if (!this.#enabled || this.#disposed) return;
     this.#stateFactory = stateFactory;
-    this.#readlinePromptLineCountFactory = promptLineCountFactory;
+    this.#promptLineCountFactory = promptLineCountFactory;
     this.stopTicker();
     this.#ticker = setInterval(() => {
       if (this.#stateFactory === undefined) return;
-      this.updateManagedRegionAboveReadline({
+      this.updateManagedPromptRegion({
         state: this.#stateFactory(),
         transientLines: this.#transientLines,
-        promptLineCount: this.#readlinePromptLineCountFactory?.() ?? 1,
+        promptLineCount: this.#promptLineCountFactory?.() ?? 1,
       });
-    }, this.#readlineTickMs);
+    }, this.#promptTickMs);
   }
 
-  updateManagedRegionAboveReadline(input: UpdateManagedRegionAboveReadlineInput): void {
+  updateManagedPromptRegion(input: UpdateManagedPromptRegionInput): void {
     if (!this.#enabled || this.#disposed) return;
     const nextTransientLines = this.#boundedTransientLines(input.transientLines);
     this.#currentState = input.state;
@@ -351,8 +351,8 @@ export class BottomChromeController {
     this.#lastRenderedLines = nextChromeLines;
   }
 
-  updateStateAboveReadline(state: BottomChromeState, promptLineCount = 1): void {
-    this.updateManagedRegionAboveReadline({
+  updateStateAbovePrompt(state: BottomChromeState, promptLineCount = 1): void {
+    this.updateManagedPromptRegion({
       state,
       transientLines: this.#transientLines,
       promptLineCount,

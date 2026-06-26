@@ -1189,7 +1189,7 @@ describe("runSessionLoop — user prompt rail behavior", () => {
     expect(rendered).not.toContain("> /help");
   });
 
-  it("renders slash completion chrome for submitted slash prefix without table transcript", async () => {
+  it("does not render slash completion chrome for submitted slash prefix", async () => {
     const outputChunks: string[] = [];
     const runtime = createMockRuntime();
     let promptIndex = 0;
@@ -1217,18 +1217,15 @@ describe("runSessionLoop — user prompt rail behavior", () => {
     });
 
     const rendered = outputChunks.join("");
-    expect(rendered).toContain("/help");
-    expect(rendered).toContain("Show command help");
+    expect(rendered).not.toContain("Show command help");
     expect(rendered).not.toContain("Name  Description");
-    const completionIndexInOutput = outputChunks.findIndex((chunk) => String(chunk).includes("Show command help"));
+    expect(rendered).toContain("Use /help to see available commands.");
     const promptIndexInOutput = outputChunks.findIndex((chunk) => String(chunk).includes("hello"));
-    expect(completionIndexInOutput).toBeGreaterThanOrEqual(0);
     expect(promptIndexInOutput).toBeGreaterThanOrEqual(0);
-    expect(outputChunks.slice(completionIndexInOutput, promptIndexInOutput).join("")).not.toContain("Commands");
     expect(outputChunks.slice(promptIndexInOutput).join("")).not.toContain("Show command help");
   });
 
-  it("filters slash completion chrome for submitted partial slash input", async () => {
+  it("does not render slash completion chrome for submitted partial slash input", async () => {
     const outputChunks: string[] = [];
     const runtime = createMockRuntime();
     let promptIndex = 0;
@@ -1256,12 +1253,13 @@ describe("runSessionLoop — user prompt rail behavior", () => {
     });
 
     const rendered = outputChunks.join("");
-    expect(rendered).toContain("/model");
-    expect(rendered).toContain("Show active model");
-    expect(rendered).not.toContain("Show command help");
+    const commandOutput = rendered.slice(rendered.indexOf("Unknown command: /mo"));
+    expect(rendered).toContain("Unknown command: /mo");
+    expect(commandOutput).not.toContain("Show active model");
+    expect(commandOutput).not.toContain("Show command help");
   });
 
-  it("renders slash completion empty state for unknown slash input", async () => {
+  it("renders unknown command text for unknown slash input", async () => {
     const outputChunks: string[] = [];
     const runtime = createMockRuntime();
     let promptIndex = 0;
@@ -1288,7 +1286,8 @@ describe("runSessionLoop — user prompt rail behavior", () => {
       close: () => {},
     });
 
-    expect(outputChunks.join("")).toContain('No slash commands match "/zzzz".');
+    expect(outputChunks.join("")).toContain("Unknown command: /zzzz");
+    expect(outputChunks.join("")).not.toContain("No slash commands");
   });
 
   it("keeps slash completion out of plain non-TTY transcript fallback", async () => {
@@ -3388,7 +3387,7 @@ describe("runSessionLoop — active turn spinner", () => {
     expect(outputChunks.some((chunk) => /\x1b7\x1b\[\d+A/u.test(chunk))).toBe(true);
   });
 
-  it("renders slash completion chrome while typing idle input", async () => {
+  it("does not install idle prompt slash or transient chrome callbacks", async () => {
     const outputChunks: string[] = [];
     let resolvePrompt: ((value: string) => void) | undefined;
     let promptOptions: PromptOptions | undefined;
@@ -3420,245 +3419,16 @@ describe("runSessionLoop — active turn spinner", () => {
     while (resolvePrompt === undefined || promptOptions === undefined) {
       await new Promise((resolve) => setTimeout(resolve, 0));
     }
-    promptOptions.onInputChange?.("/h");
-    expect(outputChunks.join("")).toContain("/help");
-    expect(outputChunks.join("")).toContain("Show command help");
+    expect(promptOptions.onInputChange).toBeUndefined();
+    expect(promptOptions.specialKeyController).toBeUndefined();
+    expect(promptOptions.onPastePreview).toBeUndefined();
+    expect(stripAnsi(outputChunks.join(""))).not.toContain("Show command help");
 
     resolvePrompt("/exit");
     await loop;
   });
 
-  it("moves idle slash completion selection with special arrow keys", async () => {
-    const outputChunks: string[] = [];
-    let resolvePrompt: ((value: string) => void) | undefined;
-    let promptOptions: PromptOptions | undefined;
-    const prompt = Object.assign(
-      vi.fn(async (_question: string, options?: PromptOptions) => {
-        promptOptions = options;
-        return await new Promise<string>((resolve) => {
-          resolvePrompt = resolve;
-        });
-      }),
-      { close: () => {} }
-    );
-
-    const loop = runSessionLoop({
-      runtime: createMockRuntime(),
-      output: {
-        write(chunk: string | Uint8Array): boolean {
-          outputChunks.push(String(chunk));
-          return true;
-        },
-        isTTY: true,
-        columns: 120,
-      } as unknown as NodeJS.WritableStream,
-      capabilities: interactiveCaps({ terminalWidth: 120, supportsAnimation: false }),
-      prompt,
-      close: () => {},
-    });
-
-    while (resolvePrompt === undefined || promptOptions === undefined) {
-      await new Promise((resolve) => setTimeout(resolve, 0));
-    }
-    promptOptions.onInputChange?.("/");
-    const beforeMove = outputChunks.length;
-    const result = promptOptions.specialKeyController?.onSpecialKey("down", {
-      getInputLine: () => "/",
-      setInputLine: () => undefined,
-    });
-
-    expect(result).toBe("handled");
-    expect(stripAnsi(outputChunks.slice(beforeMove).join(""))).toContain("> /status");
-
-    resolvePrompt("/exit");
-    await loop;
-  });
-
-  it("applies idle slash completion on Tab", async () => {
-    const outputChunks: string[] = [];
-    let resolvePrompt: ((value: string) => void) | undefined;
-    let promptOptions: PromptOptions | undefined;
-    let inputLine = "/h";
-    const prompt = Object.assign(
-      vi.fn(async (_question: string, options?: PromptOptions) => {
-        promptOptions = options;
-        return await new Promise<string>((resolve) => {
-          resolvePrompt = resolve;
-        });
-      }),
-      { close: () => {} }
-    );
-
-    const loop = runSessionLoop({
-      runtime: createMockRuntime(),
-      output: {
-        write(chunk: string | Uint8Array): boolean {
-          outputChunks.push(String(chunk));
-          return true;
-        },
-        isTTY: true,
-        columns: 120,
-      } as unknown as NodeJS.WritableStream,
-      capabilities: interactiveCaps({ terminalWidth: 120, supportsAnimation: false }),
-      prompt,
-      close: () => {},
-    });
-
-    while (resolvePrompt === undefined || promptOptions === undefined) {
-      await new Promise((resolve) => setTimeout(resolve, 0));
-    }
-    promptOptions.onInputChange?.(inputLine);
-    const result = promptOptions.specialKeyController?.onSpecialKey("tab", {
-      getInputLine: () => inputLine,
-      setInputLine: (nextLine) => {
-        inputLine = nextLine;
-        promptOptions?.onInputChange?.(nextLine);
-      },
-    });
-
-    expect(result).toBe("handled");
-    expect(inputLine).toBe("/help");
-
-    resolvePrompt("/exit");
-    await loop;
-  });
-
-  it("lets Tab fall through for no-match idle slash completion", async () => {
-    const outputChunks: string[] = [];
-    let resolvePrompt: ((value: string) => void) | undefined;
-    let promptOptions: PromptOptions | undefined;
-    let inputLine = "/zzzz";
-    const prompt = Object.assign(
-      vi.fn(async (_question: string, options?: PromptOptions) => {
-        promptOptions = options;
-        return await new Promise<string>((resolve) => {
-          resolvePrompt = resolve;
-        });
-      }),
-      { close: () => {} }
-    );
-
-    const loop = runSessionLoop({
-      runtime: createMockRuntime(),
-      output: {
-        write(chunk: string | Uint8Array): boolean {
-          outputChunks.push(String(chunk));
-          return true;
-        },
-        isTTY: true,
-        columns: 120,
-      } as unknown as NodeJS.WritableStream,
-      capabilities: interactiveCaps({ terminalWidth: 120, supportsAnimation: false }),
-      prompt,
-      close: () => {},
-    });
-
-    while (resolvePrompt === undefined || promptOptions === undefined) {
-      await new Promise((resolve) => setTimeout(resolve, 0));
-    }
-    promptOptions.onInputChange?.(inputLine);
-    const result = promptOptions.specialKeyController?.onSpecialKey("tab", {
-      getInputLine: () => inputLine,
-      setInputLine: (nextLine) => {
-        inputLine = nextLine;
-      },
-    });
-
-    expect(result).toBeUndefined();
-    expect(inputLine).toBe("/zzzz");
-
-    resolvePrompt("/exit");
-    await loop;
-  });
-
-  it("closes no-match idle slash completion on Escape", async () => {
-    const outputChunks: string[] = [];
-    let resolvePrompt: ((value: string) => void) | undefined;
-    let promptOptions: PromptOptions | undefined;
-    const prompt = Object.assign(
-      vi.fn(async (_question: string, options?: PromptOptions) => {
-        promptOptions = options;
-        return await new Promise<string>((resolve) => {
-          resolvePrompt = resolve;
-        });
-      }),
-      { close: () => {} }
-    );
-
-    const loop = runSessionLoop({
-      runtime: createMockRuntime(),
-      output: {
-        write(chunk: string | Uint8Array): boolean {
-          outputChunks.push(String(chunk));
-          return true;
-        },
-        isTTY: true,
-        columns: 120,
-      } as unknown as NodeJS.WritableStream,
-      capabilities: interactiveCaps({ terminalWidth: 120, supportsAnimation: false }),
-      prompt,
-      close: () => {},
-    });
-
-    while (resolvePrompt === undefined || promptOptions === undefined) {
-      await new Promise((resolve) => setTimeout(resolve, 0));
-    }
-    promptOptions.onInputChange?.("/zzzz");
-    const result = promptOptions.specialKeyController?.onSpecialKey("escape", {
-      getInputLine: () => "/zzzz",
-      setInputLine: () => undefined,
-    });
-
-    expect(result).toBe("handled");
-
-    resolvePrompt("/exit");
-    await loop;
-  });
-
-  it("clears live slash completion chrome when idle input is no longer slash-prefixed", async () => {
-    const outputChunks: string[] = [];
-    let resolvePrompt: ((value: string) => void) | undefined;
-    let promptOptions: PromptOptions | undefined;
-    const prompt = Object.assign(
-      vi.fn(async (_question: string, options?: PromptOptions) => {
-        promptOptions = options;
-        return await new Promise<string>((resolve) => {
-          resolvePrompt = resolve;
-        });
-      }),
-      { close: () => {} }
-    );
-
-    const loop = runSessionLoop({
-      runtime: createMockRuntime(),
-      output: {
-        write(chunk: string | Uint8Array): boolean {
-          outputChunks.push(String(chunk));
-          return true;
-        },
-        isTTY: true,
-        columns: 120,
-      } as unknown as NodeJS.WritableStream,
-      capabilities: interactiveCaps({ terminalWidth: 120, supportsAnimation: false }),
-      prompt,
-      close: () => {},
-    });
-
-    while (resolvePrompt === undefined || promptOptions === undefined) {
-      await new Promise((resolve) => setTimeout(resolve, 0));
-    }
-    promptOptions.onInputChange?.("/h");
-    const afterSlashHint = outputChunks.length;
-    promptOptions.onInputChange?.("hello");
-    const clearChunks = outputChunks.slice(afterSlashHint).join("");
-    expect(clearChunks).not.toContain("/help");
-    expect(clearChunks).toContain("mock-model");
-
-    resolvePrompt("/exit");
-    await loop;
-  });
-
-  it("shows idle shortcuts only for empty bottom-chrome input and gives slash menu priority", async () => {
+  it("passes idle prompt placeholder without installing prompt slash chrome", async () => {
     const outputChunks: string[] = [];
     let resolvePrompt: ((value: string) => void) | undefined;
     let promptOptions: PromptOptions | undefined;
@@ -3700,120 +3470,11 @@ describe("runSessionLoop — active turn spinner", () => {
     expect(initial).not.toContain("/help · /tools · /model · /status · Ctrl+C exit");
     expect(initial).not.toContain("Type a message.");
 
-    const afterInitial = outputChunks.length;
-    promptOptions.onInputChange?.("hello");
-    const afterTyping = stripAnsi(outputChunks.slice(afterInitial).join(""));
-    expect(afterTyping).not.toContain("Ctrl+C exit");
-    expect(afterTyping).not.toContain("Show command help");
-
-    const afterTypingIndex = outputChunks.length;
-    promptOptions.onInputChange?.("/");
-    const afterSlash = stripAnsi(outputChunks.slice(afterTypingIndex).join(""));
-    expect(afterSlash).toContain("Show command help");
-    expect(afterSlash).not.toContain("Ctrl+C exit");
-
-    const afterSlashIndex = outputChunks.length;
-    promptOptions.onInputChange?.("");
-    const afterEmpty = stripAnsi(outputChunks.slice(afterSlashIndex).join(""));
-    expect(promptOptions.placeholder).toContain("/help · /tools · /model · /status · Ctrl+C exit");
-    expect(afterEmpty).not.toContain("/help · /tools · /model · /status · Ctrl+C exit");
-    expect(afterEmpty).not.toContain("Show command help");
-
     resolvePrompt("/exit");
     await loop;
   });
 
-  it("renders and clears paste preview chrome around idle readline submission", async () => {
-    const outputChunks: string[] = [];
-    let resolvePrompt: ((value: string) => void) | undefined;
-    let promptOptions: PromptOptions | undefined;
-    const prompt = Object.assign(
-      vi.fn(async (_question: string, options?: PromptOptions) => {
-        promptOptions = options;
-        return await new Promise<string>((resolve) => {
-          resolvePrompt = resolve;
-        });
-      }),
-      { close: () => {} }
-    );
-
-    const loop = runSessionLoop({
-      runtime: createMockRuntime(),
-      output: {
-        write(chunk: string | Uint8Array): boolean {
-          outputChunks.push(String(chunk));
-          return true;
-        },
-        isTTY: true,
-        columns: 120,
-      } as unknown as NodeJS.WritableStream,
-      capabilities: interactiveCaps({ terminalWidth: 120, supportsAnimation: false }),
-      prompt,
-      close: () => {},
-    });
-
-    while (resolvePrompt === undefined || promptOptions === undefined) {
-      await new Promise((resolve) => setTimeout(resolve, 0));
-    }
-    promptOptions.onPastePreview?.("line one\nline two", "line one ↵ line two");
-    const previewOutput = outputChunks.join("");
-    expect(previewOutput).toContain("line one");
-    expect(previewOutput).toContain("line two");
-    const afterPreview = outputChunks.length;
-
-    resolvePrompt("/exit");
-    await loop;
-
-    expect(outputChunks.slice(afterPreview).join("")).not.toContain("line one");
-    expect(outputChunks.slice(afterPreview).join("")).not.toContain("line two");
-  });
-
-  it("renders compact paste references in preview chrome without exposing original paste content", async () => {
-    const outputChunks: string[] = [];
-    let resolvePrompt: ((value: string) => void) | undefined;
-    let promptOptions: PromptOptions | undefined;
-    const prompt = Object.assign(
-      vi.fn(async (_question: string, options?: PromptOptions) => {
-        promptOptions = options;
-        return await new Promise<string>((resolve) => {
-          resolvePrompt = resolve;
-        });
-      }),
-      { close: () => {} }
-    );
-
-    const loop = runSessionLoop({
-      runtime: createMockRuntime(),
-      output: {
-        write(chunk: string | Uint8Array): boolean {
-          outputChunks.push(String(chunk));
-          return true;
-        },
-        isTTY: true,
-        columns: 120,
-      } as unknown as NodeJS.WritableStream,
-      capabilities: interactiveCaps({ terminalWidth: 120, supportsAnimation: false }),
-      prompt,
-      close: () => {},
-    });
-
-    while (resolvePrompt === undefined || promptOptions === undefined) {
-      await new Promise((resolve) => setTimeout(resolve, 0));
-    }
-    promptOptions.onPastePreview?.(
-      "do not echo this pasted body\nsecond line",
-      "[Pasted text #1: 2 lines → /tmp/estacoda-test-paste.txt]"
-    );
-    const previewOutput = outputChunks.join("");
-    expect(previewOutput).toContain("[Pasted text #1: 2 lines");
-    expect(previewOutput).not.toContain("do not echo this pasted body");
-    expect(previewOutput).not.toContain("second line");
-
-    resolvePrompt("/exit");
-    await loop;
-  });
-
-  it("keeps submitted multiline text intact after paste preview", async () => {
+  it("keeps submitted multiline text intact", async () => {
     const handledTexts: string[] = [];
     const runtime = createMockRuntime({
       handle: async (input: Parameters<Runtime["handle"]>[0]) => {
@@ -3854,14 +3515,13 @@ describe("runSessionLoop — active turn spinner", () => {
     while (resolvePrompt === undefined || promptOptions === undefined) {
       await new Promise((resolve) => setTimeout(resolve, 0));
     }
-    promptOptions.onPastePreview?.("line one\nline two", "line one ↵ line two");
     resolvePrompt("line one\nline two");
     await loop;
 
     expect(handledTexts).toEqual(["line one\nline two"]);
   });
 
-  it("provides a profile-local paste reference store to idle readline prompts", async () => {
+  it("provides a profile-local paste reference store to idle prompts", async () => {
     const homeDir = await mkdtemp(join(tmpdir(), "estacoda-session-paste-home-"));
     try {
       let promptOptions: PromptOptions | undefined;
@@ -3897,45 +3557,6 @@ describe("runSessionLoop — active turn spinner", () => {
     } finally {
       await rm(homeDir, { recursive: true, force: true });
     }
-  });
-
-  it("keeps live slash callbacks out of disabled bottom chrome output", async () => {
-    const outputChunks: string[] = [];
-    let resolvePrompt: ((value: string) => void) | undefined;
-    let promptOptions: PromptOptions | undefined;
-    const prompt = Object.assign(
-      vi.fn(async (_question: string, options?: PromptOptions) => {
-        promptOptions = options;
-        return await new Promise<string>((resolve) => {
-          resolvePrompt = resolve;
-        });
-      }),
-      { close: () => {} }
-    );
-
-    const loop = runSessionLoop({
-      runtime: createMockRuntime(),
-      output: {
-        write(chunk: string | Uint8Array): boolean {
-          outputChunks.push(String(chunk));
-          return true;
-        },
-        isTTY: false,
-        columns: 120,
-      } as unknown as NodeJS.WritableStream,
-      capabilities: interactiveCaps({ isTTY: false, supportsAnimation: false }),
-      prompt,
-      close: () => {},
-    });
-
-    while (resolvePrompt === undefined || promptOptions === undefined) {
-      await new Promise((resolve) => setTimeout(resolve, 0));
-    }
-    promptOptions.onInputChange?.("/h");
-    resolvePrompt("/exit");
-    await loop;
-
-    expect(stripAnsi(outputChunks.join(""))).not.toContain("Show command help");
   });
 
   it("updates chrome status rail from provider-actual context usage events", async () => {

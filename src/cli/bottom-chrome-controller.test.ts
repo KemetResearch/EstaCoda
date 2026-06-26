@@ -294,14 +294,14 @@ describe("BottomChromeController", () => {
       createPapyrusSurfaceControllerForMode: papyrus.factory,
     });
 
-    ctrl.updateManagedRegionAboveReadline({
+    ctrl.updateManagedPromptRegion({
       state: { statusRail: status("status"), slashMenu: slashMenu(), slashMenuMinRows: 4 },
       transientLines: ["paste preview"],
       promptLineCount: 1,
     });
     chunks.length = 0;
 
-    ctrl.updateManagedRegionAboveReadline({
+    ctrl.updateManagedPromptRegion({
       state: { statusRail: status("status") },
       transientLines: [],
       promptLineCount: 1,
@@ -320,7 +320,7 @@ describe("BottomChromeController", () => {
     expectManagedRegionSafeOutput(rendered);
   });
 
-  it("routes readline-managed status chrome through Papyrus in papyrus mode", () => {
+  it("routes prompt-managed status chrome through Papyrus in papyrus mode", () => {
     const { chunks, stream } = mockOutput();
     const papyrus = fakePapyrusFactory({
       renderRows: (frame) => frame.surfaces.map((surface) => `papyrus:${surface.text}`),
@@ -333,7 +333,7 @@ describe("BottomChromeController", () => {
       createPapyrusSurfaceControllerForMode: papyrus.factory,
     });
 
-    ctrl.updateManagedRegionAboveReadline({
+    ctrl.updateManagedPromptRegion({
       state: { statusRail: status("status") },
       transientLines: [],
       promptLineCount: 1,
@@ -351,7 +351,7 @@ describe("BottomChromeController", () => {
     expectManagedRegionSafeOutput(rendered);
   });
 
-  it("keeps legacy readline-managed status chrome unchanged without constructing Papyrus", () => {
+  it("keeps legacy prompt-managed status chrome unchanged without constructing Papyrus", () => {
     const { chunks, stream } = mockOutput();
     const papyrus = fakePapyrusFactory();
     const ctrl = new BottomChromeController({
@@ -362,7 +362,7 @@ describe("BottomChromeController", () => {
       createPapyrusSurfaceControllerForMode: papyrus.factory,
     });
 
-    ctrl.updateManagedRegionAboveReadline({
+    ctrl.updateManagedPromptRegion({
       state: { statusRail: status("status") },
       transientLines: [],
       promptLineCount: 1,
@@ -459,12 +459,12 @@ describe("BottomChromeController", () => {
     ]);
   });
 
-  it("clears for readline with wrapped submitted prompt rows", () => {
+  it("clears for prompt with wrapped submitted prompt rows", () => {
     const { chunks, stream } = mockOutput();
     const ctrl = makeController(stream);
     ctrl.updateState({ statusRail: status("status") });
     chunks.length = 0;
-    ctrl.clearForReadline(3);
+    ctrl.clearForPrompt(3);
     expect(chunks).toEqual(["\x1b[5A\x1b[2K\x1b[1B\x1b[2K\x1b[4B"]);
   });
 
@@ -800,7 +800,7 @@ describe("BottomChromeController", () => {
         capabilities: makeCaps(),
         renderViewModel,
         tickMs: 100,
-        readlineTickMs: 100,
+        promptTickMs: 100,
       });
       let phase = "thinking";
       ctrl.updateState({ activeSpinner: buildActiveTurnSpinnerViewModel({ phase }) });
@@ -815,7 +815,7 @@ describe("BottomChromeController", () => {
     }
   });
 
-  it("redraws chrome above an active readline prompt without clearing the prompt row", () => {
+  it("redraws chrome above an active prompt without clearing the prompt row", () => {
     vi.useFakeTimers();
     try {
       const { chunks, stream } = mockOutput();
@@ -824,12 +824,12 @@ describe("BottomChromeController", () => {
         capabilities: makeCaps(),
         renderViewModel,
         tickMs: 100,
-        readlineTickMs: 100,
+        promptTickMs: 100,
       });
       let label = "first";
       ctrl.updateState({ statusRail: status(label) });
       chunks.length = 0;
-      ctrl.startReadlineTicker(() => ({ statusRail: status(label) }));
+      ctrl.startPromptTicker(() => ({ statusRail: status(label) }));
       label = "second";
       vi.advanceTimersByTime(100);
       expect(chunks).toEqual([
@@ -841,7 +841,7 @@ describe("BottomChromeController", () => {
     }
   });
 
-  it("redraws chrome above a wrapped active readline prompt", () => {
+  it("redraws chrome above a wrapped active prompt", () => {
     vi.useFakeTimers();
     try {
       const { chunks, stream } = mockOutput();
@@ -850,13 +850,13 @@ describe("BottomChromeController", () => {
         capabilities: makeCaps(),
         renderViewModel,
         tickMs: 100,
-        readlineTickMs: 100,
+        promptTickMs: 100,
       });
       let label = "first";
       let promptRows = 3;
       ctrl.updateState({ statusRail: status(label) });
       chunks.length = 0;
-      ctrl.startReadlineTicker(() => ({ statusRail: status(label) }), () => promptRows);
+      ctrl.startPromptTicker(() => ({ statusRail: status(label) }), () => promptRows);
       label = "second";
       vi.advanceTimersByTime(100);
       expect(chunks).toEqual([
@@ -868,13 +868,13 @@ describe("BottomChromeController", () => {
     }
   });
 
-  it("grows the managed readline region for transient lines and slash menu chrome", () => {
+  it("grows the managed prompt region for transient lines and slash menu chrome", () => {
     const { chunks, stream } = mockOutput();
     const ctrl = makeController(stream);
     ctrl.updateState({ statusRail: status("status") });
 
     chunks.length = 0;
-    ctrl.updateManagedRegionAboveReadline({
+    ctrl.updateManagedPromptRegion({
       state: { statusRail: status("status"), slashMenu: slashMenu() },
       transientLines: ["paste preview"],
       promptLineCount: 1,
@@ -891,7 +891,7 @@ describe("BottomChromeController", () => {
     ctrl.updateState({ statusRail: status("status") });
 
     chunks.length = 0;
-    ctrl.updateManagedRegionAboveReadline({
+    ctrl.updateManagedPromptRegion({
       state: { statusRail: status("status"), slashMenu: slashMenu(), slashMenuMinRows: 4 },
       transientLines: [],
       promptLineCount: 1,
@@ -903,18 +903,18 @@ describe("BottomChromeController", () => {
     expect(rendered).toContain(`\r${"─".repeat(40)}`);
   });
 
-  it("clears slash and transient readline chrome when the managed region shrinks", () => {
+  it("clears slash and transient prompt chrome when the managed region shrinks", () => {
     const { chunks, stream } = mockOutput();
     const ctrl = makeController(stream);
     ctrl.updateState({ statusRail: status("status") });
-    ctrl.updateManagedRegionAboveReadline({
+    ctrl.updateManagedPromptRegion({
       state: { statusRail: status("status"), slashMenu: slashMenu() },
       transientLines: ["paste preview"],
       promptLineCount: 1,
     });
 
     chunks.length = 0;
-    ctrl.updateManagedRegionAboveReadline({
+    ctrl.updateManagedPromptRegion({
       state: { statusRail: status("status") },
       transientLines: [],
       promptLineCount: 1,
@@ -925,13 +925,13 @@ describe("BottomChromeController", () => {
     ]);
   });
 
-  it("clears the full managed readline region when no chrome remains", () => {
+  it("clears the full managed prompt region when no chrome remains", () => {
     const { chunks, stream } = mockOutput();
     const ctrl = makeController(stream);
     ctrl.updateState({ statusRail: status("status") });
 
     chunks.length = 0;
-    ctrl.updateManagedRegionAboveReadline({
+    ctrl.updateManagedPromptRegion({
       state: {},
       transientLines: [],
       promptLineCount: 1,
@@ -940,13 +940,13 @@ describe("BottomChromeController", () => {
     expect(chunks).toEqual(["\x1b7\x1b[2A\x1b[2M\x1b8\x1b[2A"]);
   });
 
-  it("renders paste preview-style transient lines above an active readline prompt", () => {
+  it("renders paste preview-style transient lines above an active prompt", () => {
     const { chunks, stream } = mockOutput();
     const ctrl = makeController(stream);
     ctrl.updateState({ statusRail: status("status") });
 
     chunks.length = 0;
-    ctrl.updateManagedRegionAboveReadline({
+    ctrl.updateManagedPromptRegion({
       state: { statusRail: status("status") },
       transientLines: ["line one", "line two"],
       promptLineCount: 1,
@@ -957,13 +957,13 @@ describe("BottomChromeController", () => {
     ]);
   });
 
-  it("accounts for wrapped prompt rows when growing the managed readline region", () => {
+  it("accounts for wrapped prompt rows when growing the managed prompt region", () => {
     const { chunks, stream } = mockOutput();
     const ctrl = makeController(stream);
     ctrl.updateState({ statusRail: status("status") });
 
     chunks.length = 0;
-    ctrl.updateManagedRegionAboveReadline({
+    ctrl.updateManagedPromptRegion({
       state: { statusRail: status("next") },
       transientLines: ["paste preview"],
       promptLineCount: 3,
@@ -974,18 +974,18 @@ describe("BottomChromeController", () => {
     ]);
   });
 
-  it("handles transient line-count changes above readline safely", () => {
+  it("handles transient line-count changes above prompt safely", () => {
     const { chunks, stream } = mockOutput();
     const ctrl = makeController(stream);
     ctrl.updateState({ statusRail: status("status") });
-    ctrl.updateManagedRegionAboveReadline({
+    ctrl.updateManagedPromptRegion({
       state: { statusRail: status("status") },
       transientLines: ["one"],
       promptLineCount: 1,
     });
 
     chunks.length = 0;
-    ctrl.updateManagedRegionAboveReadline({
+    ctrl.updateManagedPromptRegion({
       state: { statusRail: status("status") },
       transientLines: ["one", "two"],
       promptLineCount: 1,
@@ -995,7 +995,7 @@ describe("BottomChromeController", () => {
     ]);
 
     chunks.length = 0;
-    ctrl.updateManagedRegionAboveReadline({
+    ctrl.updateManagedPromptRegion({
       state: { statusRail: status("status") },
       transientLines: ["two"],
       promptLineCount: 1,
@@ -1005,11 +1005,11 @@ describe("BottomChromeController", () => {
     ]);
   });
 
-  it("skips managed readline updates when disabled", () => {
+  it("skips managed prompt updates when disabled", () => {
     const { chunks, stream } = mockOutput();
     const ctrl = makeController(stream, makeCaps({ isTTY: false }));
 
-    ctrl.updateManagedRegionAboveReadline({
+    ctrl.updateManagedPromptRegion({
       state: { statusRail: status("status") },
       transientLines: ["paste preview"],
       promptLineCount: 2,
@@ -1018,7 +1018,7 @@ describe("BottomChromeController", () => {
     expect(chunks).toEqual([]);
   });
 
-  it("skips identical readline redraw frames", () => {
+  it("skips identical prompt redraw frames", () => {
     vi.useFakeTimers();
     try {
       const { chunks, stream } = mockOutput();
@@ -1027,11 +1027,11 @@ describe("BottomChromeController", () => {
         capabilities: makeCaps(),
         renderViewModel,
         tickMs: 100,
-        readlineTickMs: 100,
+        promptTickMs: 100,
       });
       ctrl.updateState({ statusRail: status("same") });
       chunks.length = 0;
-      ctrl.startReadlineTicker(() => ({ statusRail: status("same") }));
+      ctrl.startPromptTicker(() => ({ statusRail: status("same") }));
       vi.advanceTimersByTime(300);
       expect(chunks).toEqual([]);
 
@@ -1041,7 +1041,7 @@ describe("BottomChromeController", () => {
     }
   });
 
-  it("uses a slower default readline ticker than active-turn animation", () => {
+  it("uses a slower default prompt ticker than active-turn animation", () => {
     vi.useFakeTimers();
     try {
       const { chunks, stream } = mockOutput();
@@ -1054,7 +1054,7 @@ describe("BottomChromeController", () => {
       let label = "first";
       ctrl.updateState({ statusRail: status(label) });
       chunks.length = 0;
-      ctrl.startReadlineTicker(() => ({ statusRail: status(label) }));
+      ctrl.startPromptTicker(() => ({ statusRail: status(label) }));
       label = "second";
       vi.advanceTimersByTime(999);
       expect(chunks).toEqual([]);
