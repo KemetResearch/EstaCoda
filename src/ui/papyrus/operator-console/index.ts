@@ -1,3 +1,4 @@
+export * from "./attachmentSurface.js";
 export * from "./focusModel.js";
 export * from "./operatorConsoleEvents.js";
 export * from "./operatorConsoleLayout.js";

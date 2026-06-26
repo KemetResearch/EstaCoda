@@ -62,12 +62,7 @@ describe("Papyrus operator console layout", () => {
     expect(regionKinds(createOperatorConsoleLayout(createState()))).not.toContain("attachments");
 
     const layout = createOperatorConsoleLayout(createState({
-      attachments: [{
-        id: "paste-1",
-        kind: "pastedText",
-        title: "pasted text",
-        summary: "2,481 chars",
-      }],
+      attachments: [pastedAttachment("paste-1")],
     }));
     expect(regionKinds(layout)).toContain("attachments");
   });
@@ -192,12 +187,7 @@ function createFullState(): OperatorConsoleState {
       cursorOffset: 0,
       queued: { text: "focus on approvals" },
     },
-    attachments: [{
-      id: "paste-1",
-      kind: "pastedText",
-      title: "pasted text",
-      summary: "2,481 chars",
-    }],
+    attachments: [pastedAttachment("paste-1")],
     slash: {
       query: "/mo",
       items: [{ id: "model", label: "/model" }],
@@ -219,4 +209,15 @@ function region(layout: OperatorConsoleLayout, kind: OperatorConsoleRegion["kind
 
 function numberedLines(count: number): string {
   return Array.from({ length: count }, (_, index) => `line ${index + 1}`).join("\n");
+}
+
+function pastedAttachment(id: string) {
+  return {
+    id,
+    kind: "pastedText" as const,
+    title: "pasted text",
+    preview: "MVP known issue",
+    content: "MVP known issue details",
+    metadata: { chars: 2_481 },
+  };
 }

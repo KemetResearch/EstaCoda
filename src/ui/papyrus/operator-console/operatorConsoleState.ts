@@ -38,10 +38,15 @@ export type StatusRailState = {
 
 export type AttachmentCardState = {
   readonly id: string;
-  readonly kind: "pastedText" | "fileExcerpt" | "other";
+  readonly kind: "pastedText" | "fileExcerpt";
   readonly title: string;
-  readonly summary: string;
-  readonly detail?: string;
+  readonly preview: string;
+  readonly content: string;
+  readonly metadata: {
+    readonly chars?: number;
+    readonly lines?: number;
+    readonly path?: string;
+  };
 };
 
 export type ToolActivityEvent = {

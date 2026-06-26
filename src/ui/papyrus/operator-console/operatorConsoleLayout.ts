@@ -3,6 +3,7 @@ import type {
   OperatorConsoleSurface,
   TerminalMetrics,
 } from "./operatorConsoleState.js";
+import { getAttachmentSurfaceDesiredHeight } from "./attachmentSurface.js";
 import { getPromptSurfaceDesiredHeight } from "./promptSurface.js";
 
 export type OperatorConsoleRegionKind = OperatorConsoleSurface;
@@ -105,7 +106,7 @@ function createRegionDescriptors(
       kind: "attachments",
       priority: ATTACHMENTS_PRIORITY,
       minHeight: 1,
-      desiredHeight: Math.min(4, Math.max(1, state.attachments.length + 1)),
+      desiredHeight: getAttachmentSurfaceDesiredHeight(state.attachments, terminal.width),
     });
   }
 

@@ -5,6 +5,7 @@ import type {
 import type {
   OperatorConsoleState,
 } from "./operatorConsoleState.js";
+import { renderAttachmentSurface } from "./attachmentSurface.js";
 import { renderPromptSurface } from "./promptSurface.js";
 import { renderStatusRailSurface } from "./statusRailSurface.js";
 
@@ -37,6 +38,12 @@ function renderRegionLines(
       width: region.width,
       height: region.height,
       terminalHeight: layoutHeightForRegion(region),
+    }).map((text) => ({ region: region.kind, text }));
+  }
+  if (region.kind === "attachments") {
+    return renderAttachmentSurface(state.attachments, {
+      width: region.width,
+      height: region.height,
     }).map((text) => ({ region: region.kind, text }));
   }
   if (region.kind === "statusRail") {

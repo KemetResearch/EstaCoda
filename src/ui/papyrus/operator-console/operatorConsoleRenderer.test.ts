@@ -87,6 +87,29 @@ describe("Papyrus operator console renderer", () => {
     expect(output.every((line) => stringWidth(line) <= 72)).toBe(true);
   });
 
+  it("renders attachments above prompt and status rail", () => {
+    const state = createFullState();
+    const layout = createOperatorConsoleLayout(state, { width: 120, height: 20, isTty: true });
+    const output = renderOperatorConsoleTextLines(state, layout);
+
+    expect(output[0]).toBe("Transcript: 1 block");
+    expect(output).toContain("Attachments");
+    expect(output.findIndex((line) => line === "Attachments")).toBeLessThan(
+      output.findIndex((line) => line.includes("Prompt"))
+    );
+    expect(output.at(-1)).toContain("session 01:12");
+    expect(output.every((line) => stringWidth(line) <= 120)).toBe(true);
+  });
+
+  it("does not reserve attachment rows when attachments are absent", () => {
+    const state = createState();
+    const layout = createOperatorConsoleLayout(state, { width: 80, height: 8, isTty: true });
+    const output = renderOperatorConsoleTextLines(state, layout);
+
+    expect(output).not.toContain("Attachments");
+    expect(output[0]).toContain("Prompt");
+  });
+
   it("keeps rendered line widths within the terminal width", () => {
     const state = createFullState();
     const layout = createOperatorConsoleLayout(state, { width: 20, height: 20, isTty: true });
@@ -179,7 +202,9 @@ function createFullState(): OperatorConsoleState {
       id: "paste-1",
       kind: "pastedText",
       title: "pasted text",
-      summary: "2,481 chars",
+      preview: "MVP known issue",
+      content: "MVP known issue details",
+      metadata: { chars: 2_481 },
     }],
     slash: {
       query: "/mo",
