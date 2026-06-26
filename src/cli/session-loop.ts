@@ -31,10 +31,11 @@ import { commandRegistry } from "./command-registry.js";
 import { toolIcon } from "./tool-activity-renderer.js";
 import {
   ToolActivityViewModelBuilder,
-  buildApprovalPromptViewModel,
   buildSecurityAuditViewModel,
   buildSetupNeededViewModel,
 } from "./tool-activity-view-models.js";
+import { approvalPromptAdapterForMode, type ApprovalPromptAdapter } from "./approval-prompt-adapter.js";
+import { resolveApprovalWidgetMode } from "./approval-widget-mode.js";
 import {
   buildActiveTurnSpinnerViewModel,
   buildAssistantResponseViewModel,
@@ -88,6 +89,7 @@ export type SessionLoopOptions = {
   showResponseProgress?: boolean;
   capabilities?: TerminalCapabilities;
   env?: Record<string, string | undefined>;
+  approvalPromptAdapter?: ApprovalPromptAdapter;
   cliVoice?: {
     recorder?: CliVoiceRecorder;
     envOptions?: CliVoiceEnvironmentOptions;
@@ -335,6 +337,8 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
   const renderer = createSessionRenderer({ output, locale: options.locale, capabilities: options.capabilities });
   const rendererMode = resolveUiRendererMode({ env: options.env });
   const inputMode = resolveUiInputMode({ env: options.env });
+  const approvalWidgetMode = resolveApprovalWidgetMode({ env: options.env });
+  const approvalPromptAdapter = options.approvalPromptAdapter ?? approvalPromptAdapterForMode(approvalWidgetMode);
   let runtime = options.runtime;
   const now = options.now ?? (() => Date.now());
   const sessionStartedAtMs = now();
@@ -1276,6 +1280,7 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
           output,
           renderer,
           chrome: bottomChrome.enabled ? bottomChrome : chrome,
+          approvalPromptAdapter,
           execution: response.toolExecutions.find((execution) => execution.decision === "ask")
         });
 
@@ -2368,6 +2373,7 @@ async function maybeHandleApprovalGate(input: {
   output: NodeJS.WritableStream;
   renderer: { render(viewModel: import("../contracts/view-model.js").ViewModel): string };
   chrome: TranscriptChrome;
+  approvalPromptAdapter: ApprovalPromptAdapter;
   execution: ToolExecutionRecord | undefined;
 }): Promise<{
   retry: boolean;
@@ -2383,7 +2389,14 @@ async function maybeHandleApprovalGate(input: {
   while (true) {
     const allowPersistentApproval = input.runtime.revokeApproval !== undefined;
     const answer = normalizeApprovalPromptAnswer(
-      await promptForApprovalAnswer(input, execution, allowPersistentApproval)
+      await input.approvalPromptAdapter({
+        prompt: input.prompt,
+        output: input.output,
+        renderer: input.renderer,
+        chrome: input.chrome,
+        execution,
+        allowPersistentApproval,
+      })
     );
     if (answer?.kind === "deny") {
       return {
@@ -2560,45 +2573,6 @@ function setupNeededMetadata(result: ToolResult | undefined): SetupNeededMetadat
     return undefined;
   }
   return metadata as SetupNeededMetadata;
-}
-
-async function promptForApprovalAnswer(
-  input: {
-    prompt: (question: string) => Promise<string>;
-    output: NodeJS.WritableStream;
-    renderer: { render(viewModel: import("../contracts/view-model.js").ViewModel): string };
-    chrome: TranscriptChrome;
-  },
-  execution: ToolExecutionRecord,
-  allowPersistentApproval: boolean
-): Promise<string> {
-  const promptText = "approval > ";
-  const cardText = renderApprovalPromptCard(execution, input.renderer, allowPersistentApproval);
-  if (input.chrome.suspendForPrompt !== undefined) {
-    return await input.chrome.suspendForPrompt(async () => {
-      input.output.write(`${cardText}\n`);
-      return await input.prompt(promptText);
-    });
-  }
-
-  input.chrome.clearInlineSpinner();
-  if (input.chrome.enabled) {
-    await input.chrome.suspendChromeForTranscript(() => {
-      input.output.write(`${cardText}\n`);
-    });
-  } else {
-    input.output.write(`${cardText}\n`);
-  }
-  return await input.prompt(promptText);
-}
-
-function renderApprovalPromptCard(
-  execution: ToolExecutionRecord,
-  renderer: { render(viewModel: import("../contracts/view-model.js").ViewModel): string },
-  allowPersistentApproval: boolean
-): string {
-  const vm = buildApprovalPromptViewModel(execution, { allowPersistentApproval });
-  return renderer.render(vm);
 }
 
 async function writeDetachedInteraction<T>(

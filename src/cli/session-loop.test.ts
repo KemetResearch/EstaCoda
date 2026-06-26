@@ -4,6 +4,8 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { PassThrough } from "node:stream";
 import { handleSlashCommand, runSessionLoop } from "./session-loop.js";
+import type { ApprovalPromptAdapter } from "./approval-prompt-adapter.js";
+import { APPROVAL_WIDGET_MODE_ENV_VAR } from "./approval-widget-mode.js";
 import type { PromptOptions } from "./readline-prompt.js";
 import { InMemorySessionDB } from "../session/in-memory-session-db.js";
 import type { Runtime } from "../runtime/create-runtime.js";
@@ -222,6 +224,53 @@ function approvalAskResponse(): AgentLoopResponse {
   };
 }
 
+function approvalDenyResponse(): AgentLoopResponse {
+  return {
+    ...approvalAskResponse(),
+    securityDecision: "deny",
+    toolExecutions: approvalAskResponse().toolExecutions.map((execution) => ({
+      ...execution,
+      decision: "deny" as const,
+    })),
+  };
+}
+
+function commandApprovalAskResponse(): AgentLoopResponse {
+  return {
+    ...approvalAskResponse(),
+    text: "I need permission before running this command.",
+    toolExecutions: [
+      {
+        tool: {
+          name: "terminal.run",
+          description: "Run a bounded shell command in the active workspace.",
+          inputSchema: {},
+          riskClass: "destructive-local",
+          toolsets: ["shell-write"],
+          progressLabel: "running command",
+          maxResultSizeChars: 1000,
+        },
+        input: { command: "npm install left-pad" },
+        decision: "ask",
+        riskClass: "destructive-local",
+        targetKey: "npm install left-pad",
+        targetSummary: "npm install left-pad",
+      },
+    ],
+  };
+}
+
+function commandApprovalDenyResponse(): AgentLoopResponse {
+  return {
+    ...commandApprovalAskResponse(),
+    securityDecision: "deny",
+    toolExecutions: commandApprovalAskResponse().toolExecutions.map((execution) => ({
+      ...execution,
+      decision: "deny" as const,
+    })),
+  };
+}
+
 function approvalAllowResponse(): AgentLoopResponse {
   return {
     label: "EstaCoda",
@@ -248,15 +297,30 @@ function approvalAllowResponse(): AgentLoopResponse {
   };
 }
 
-async function runApprovalPromptScenario(approvalAnswers: string[]): Promise<{
+async function runApprovalPromptScenario(
+  approvalAnswers: string[],
+  options: {
+    approvalPromptAdapter?: ApprovalPromptAdapter;
+    response?: AgentLoopResponse;
+    env?: Record<string, string | undefined>;
+  } = {}
+): Promise<{
   grants: ApprovalGrantInput[];
   handleInputs: string[];
   rendered: string;
+  adapterCalls: number;
 }> {
   const outputChunks: string[] = [];
   const grants: ApprovalGrantInput[] = [];
   const handleInputs: string[] = [];
   let handleCalls = 0;
+  let adapterCalls = 0;
+  const approvalPromptAdapter = options.approvalPromptAdapter === undefined
+    ? undefined
+    : (async (input) => {
+        adapterCalls += 1;
+        return await options.approvalPromptAdapter!(input);
+      }) satisfies ApprovalPromptAdapter;
   const runtime = {
     ...createMockRuntime(),
     revokeApproval: async () => true,
@@ -266,7 +330,7 @@ async function runApprovalPromptScenario(approvalAnswers: string[]): Promise<{
     handle: async (input): Promise<AgentLoopResponse> => {
       handleCalls += 1;
       handleInputs.push(input.text);
-      return handleCalls === 1 ? approvalAskResponse() : approvalAllowResponse();
+      return handleCalls === 1 ? options.response ?? approvalAskResponse() : approvalAllowResponse();
     },
   } as Runtime;
 
@@ -293,12 +357,15 @@ async function runApprovalPromptScenario(approvalAnswers: string[]): Promise<{
       { close: () => {} }
     ),
     close: () => {},
+    env: options.env,
+    approvalPromptAdapter,
   });
 
   return {
     grants,
     handleInputs,
     rendered: outputChunks.join(""),
+    adapterCalls,
   };
 }
 
@@ -5083,6 +5150,343 @@ describe("runSessionLoop — active turn spinner", () => {
     expect(result.grants[0]?.scope).toBe("session");
     expect(result.handleInputs).toEqual(["write file", "write file"]);
     expect(result.rendered).toContain("Enter one of: once, session, always, deny.");
+  });
+
+  it("routes promptable approval requests through the approval prompt adapter without moving grant policy", async () => {
+    const adapterInputs: Array<{
+      toolName: string;
+      allowPersistentApproval: boolean;
+      promptAvailable: boolean;
+    }> = [];
+    const result = await runApprovalPromptScenario([], {
+      approvalPromptAdapter: async (input) => {
+        adapterInputs.push({
+          toolName: input.execution.tool.name,
+          allowPersistentApproval: input.allowPersistentApproval,
+          promptAvailable: typeof input.prompt === "function",
+        });
+        return "/approve session";
+      },
+    });
+
+    expect(adapterInputs).toEqual([
+      {
+        toolName: "workspace.write",
+        allowPersistentApproval: true,
+        promptAvailable: true,
+      },
+    ]);
+    expect(result.adapterCalls).toBe(1);
+    expect(result.grants).toHaveLength(1);
+    expect(result.grants[0]).toMatchObject({
+      toolName: "workspace.write",
+      riskClass: "workspace-write",
+      targetKey: "src/app.ts",
+      targetSummary: "src/app.ts",
+      scope: "session",
+    });
+    expect(result.handleInputs).toEqual(["write file", "write file"]);
+    expect(result.rendered).toContain("Approval granted (session). Retrying now.");
+  });
+
+  it("routes promptable file approvals through the adapter and keeps grant scope in core approval code", async () => {
+    const adapter = vi.fn<ApprovalPromptAdapter>(async (input) => {
+      expect(input.execution).toMatchObject({
+        tool: { name: "workspace.write" },
+        decision: "ask",
+        riskClass: "workspace-write",
+        targetKey: "src/app.ts",
+        targetSummary: "src/app.ts",
+      });
+      return "always";
+    });
+
+    const result = await runApprovalPromptScenario([], {
+      approvalPromptAdapter: adapter,
+      response: approvalAskResponse(),
+    });
+
+    expect(adapter).toHaveBeenCalledTimes(1);
+    expect(result.adapterCalls).toBe(1);
+    expect(result.grants).toEqual([
+      {
+        toolName: "workspace.write",
+        riskClass: "workspace-write",
+        targetKey: "src/app.ts",
+        targetSummary: "src/app.ts",
+        scope: "always",
+      },
+    ]);
+    expect(result.handleInputs).toEqual(["write file", "write file"]);
+    expect(result.rendered).toContain("Approval granted (persistent for this workspace). Retrying now.");
+  });
+
+  it("keeps explicit legacy approval widget mode on the current adapter path", async () => {
+    const result = await runApprovalPromptScenario(["once"], {
+      env: { [APPROVAL_WIDGET_MODE_ENV_VAR]: "legacy" },
+      response: approvalAskResponse(),
+    });
+
+    expect(result.grants).toHaveLength(1);
+    expect(result.grants[0]).toMatchObject({
+      toolName: "workspace.write",
+      scope: "once",
+    });
+    expect(result.rendered).not.toContain("[Approval] Approval required:");
+  });
+
+  it("routes promptable command approvals through Papyrus adapter only behind the explicit flag", async () => {
+    const result = await runApprovalPromptScenario(["approve-once"], {
+      env: { [APPROVAL_WIDGET_MODE_ENV_VAR]: "papyrus" },
+      response: commandApprovalAskResponse(),
+    });
+
+    expect(result.grants).toEqual([
+      {
+        toolName: "terminal.run",
+        riskClass: "destructive-local",
+        targetKey: "npm install left-pad",
+        targetSummary: "npm install left-pad",
+        scope: "once",
+      },
+    ]);
+    expect(result.handleInputs).toEqual(["write file", "write file"]);
+    expect(result.rendered).toContain("[Approval] Approval required: terminal.run");
+    expect(result.rendered).toContain("Approval granted (once). Retrying now.");
+  });
+
+  it("routes promptable file approvals through Papyrus adapter only behind the explicit flag", async () => {
+    const result = await runApprovalPromptScenario(["reject"], {
+      env: { [APPROVAL_WIDGET_MODE_ENV_VAR]: "papyrus" },
+      response: approvalAskResponse(),
+    });
+
+    expect(result.grants).toEqual([]);
+    expect(result.handleInputs).toEqual(["write file"]);
+    expect(result.rendered).toContain("[Approval] Approval required: workspace.write");
+    expect(result.rendered).toContain("Permission denied.");
+  });
+
+  it("maps Papyrus approval scope answers through existing grant handling", async () => {
+    for (const [answer, scope] of [
+      ["approve-once", "once"],
+      ["session", "session"],
+      ["always", "always"],
+    ] as const) {
+      const result = await runApprovalPromptScenario([answer], {
+        env: { [APPROVAL_WIDGET_MODE_ENV_VAR]: "papyrus" },
+        response: approvalAskResponse(),
+      });
+
+      expect(result.grants).toHaveLength(1);
+      expect(result.grants[0]).toMatchObject({
+        toolName: "workspace.write",
+        riskClass: "workspace-write",
+        targetKey: "src/app.ts",
+        targetSummary: "src/app.ts",
+        scope,
+      });
+      expect(result.handleInputs).toEqual(["write file", "write file"]);
+    }
+  });
+
+  it("keeps Papyrus cancel and unsupported rich answers on the existing invalid-answer path", async () => {
+    const result = await runApprovalPromptScenario(["cancel", "feedback", "approve-once"], {
+      env: { [APPROVAL_WIDGET_MODE_ENV_VAR]: "papyrus" },
+      response: approvalAskResponse(),
+    });
+
+    expect(result.grants).toHaveLength(1);
+    expect(result.grants[0]?.scope).toBe("once");
+    expect(result.handleInputs).toEqual(["write file", "write file"]);
+    expect(result.rendered.split("Enter one of: once, session, always, deny.")).toHaveLength(3);
+  });
+
+  it("prefers an injected approval prompt adapter over the Papyrus approval widget flag", async () => {
+    const adapter = vi.fn<ApprovalPromptAdapter>(async () => "deny");
+    const result = await runApprovalPromptScenario([], {
+      env: { [APPROVAL_WIDGET_MODE_ENV_VAR]: "papyrus" },
+      approvalPromptAdapter: adapter,
+      response: approvalAskResponse(),
+    });
+
+    expect(adapter).toHaveBeenCalledTimes(1);
+    expect(result.adapterCalls).toBe(1);
+    expect(result.grants).toEqual([]);
+    expect(result.handleInputs).toEqual(["write file"]);
+    expect(result.rendered).toContain("Permission denied.");
+    expect(result.rendered).not.toContain("[Approval] Approval required:");
+  });
+
+  it("routes promptable command approvals through the adapter and keeps grant scope in core approval code", async () => {
+    const adapter = vi.fn<ApprovalPromptAdapter>(async (input) => {
+      expect(input.execution).toMatchObject({
+        tool: { name: "terminal.run" },
+        input: { command: "npm install left-pad" },
+        decision: "ask",
+        riskClass: "destructive-local",
+        targetKey: "npm install left-pad",
+        targetSummary: "npm install left-pad",
+      });
+      return "session";
+    });
+
+    const result = await runApprovalPromptScenario([], {
+      approvalPromptAdapter: adapter,
+      response: commandApprovalAskResponse(),
+    });
+
+    expect(adapter).toHaveBeenCalledTimes(1);
+    expect(result.adapterCalls).toBe(1);
+    expect(result.grants).toEqual([
+      {
+        toolName: "terminal.run",
+        riskClass: "destructive-local",
+        targetKey: "npm install left-pad",
+        targetSummary: "npm install left-pad",
+        scope: "session",
+      },
+    ]);
+    expect(result.handleInputs).toEqual(["write file", "write file"]);
+    expect(result.rendered).toContain("Approval granted (session). Retrying now.");
+  });
+
+  it("maps fake adapter deny and cancel-like answers through existing approval semantics", async () => {
+    const deny = await runApprovalPromptScenario([], {
+      approvalPromptAdapter: async () => "deny",
+    });
+    expect(deny.adapterCalls).toBe(1);
+    expect(deny.grants).toEqual([]);
+    expect(deny.handleInputs).toEqual(["write file"]);
+    expect(deny.rendered).toContain("Permission denied.");
+
+    const cancelLike = await runApprovalPromptScenario([], {
+      approvalPromptAdapter: vi.fn()
+        .mockResolvedValueOnce("cancel")
+        .mockResolvedValueOnce("once"),
+    });
+    expect(cancelLike.adapterCalls).toBe(2);
+    expect(cancelLike.grants).toHaveLength(1);
+    expect(cancelLike.grants[0]?.scope).toBe("once");
+    expect(cancelLike.rendered).toContain("Enter one of: once, session, always, deny.");
+  });
+
+  it("maps file adapter deny and invalid answers through existing approval semantics", async () => {
+    const deny = await runApprovalPromptScenario([], {
+      approvalPromptAdapter: async () => "reject",
+      response: approvalAskResponse(),
+    });
+    expect(deny.adapterCalls).toBe(1);
+    expect(deny.grants).toEqual([]);
+    expect(deny.handleInputs).toEqual(["write file"]);
+    expect(deny.rendered).toContain("Permission denied.");
+
+    const invalidThenApprove = await runApprovalPromptScenario([], {
+      approvalPromptAdapter: vi.fn()
+        .mockResolvedValueOnce("cancel")
+        .mockResolvedValueOnce("session"),
+      response: approvalAskResponse(),
+    });
+    expect(invalidThenApprove.adapterCalls).toBe(2);
+    expect(invalidThenApprove.grants).toHaveLength(1);
+    expect(invalidThenApprove.grants[0]).toMatchObject({
+      toolName: "workspace.write",
+      scope: "session",
+    });
+    expect(invalidThenApprove.rendered).toContain("Enter one of: once, session, always, deny.");
+  });
+
+  it("maps command adapter deny and invalid answers through existing approval semantics", async () => {
+    const deny = await runApprovalPromptScenario([], {
+      approvalPromptAdapter: async () => "reject",
+      response: commandApprovalAskResponse(),
+    });
+    expect(deny.adapterCalls).toBe(1);
+    expect(deny.grants).toEqual([]);
+    expect(deny.handleInputs).toEqual(["write file"]);
+    expect(deny.rendered).toContain("Permission denied.");
+
+    const invalidThenApprove = await runApprovalPromptScenario([], {
+      approvalPromptAdapter: vi.fn()
+        .mockResolvedValueOnce("cancel")
+        .mockResolvedValueOnce("/approve once"),
+      response: commandApprovalAskResponse(),
+    });
+    expect(invalidThenApprove.adapterCalls).toBe(2);
+    expect(invalidThenApprove.grants).toHaveLength(1);
+    expect(invalidThenApprove.grants[0]).toMatchObject({
+      toolName: "terminal.run",
+      scope: "once",
+    });
+    expect(invalidThenApprove.rendered).toContain("Enter one of: once, session, always, deny.");
+  });
+
+  it("does not call the approval prompt adapter for policy-denied tool executions", async () => {
+    const adapter = vi.fn<ApprovalPromptAdapter>(async () => "once");
+    const result = await runApprovalPromptScenario([], {
+      approvalPromptAdapter: adapter,
+      response: approvalDenyResponse(),
+    });
+
+    expect(adapter).not.toHaveBeenCalled();
+    expect(result.adapterCalls).toBe(0);
+    expect(result.grants).toEqual([]);
+    expect(result.handleInputs).toEqual(["write file"]);
+  });
+
+  it("does not call the approval prompt adapter for policy-denied file executions", async () => {
+    const adapter = vi.fn<ApprovalPromptAdapter>(async () => "once");
+    const result = await runApprovalPromptScenario([], {
+      approvalPromptAdapter: adapter,
+      response: approvalDenyResponse(),
+    });
+
+    expect(adapter).not.toHaveBeenCalled();
+    expect(result.adapterCalls).toBe(0);
+    expect(result.grants).toEqual([]);
+    expect(result.handleInputs).toEqual(["write file"]);
+  });
+
+  it("does not call the Papyrus approval adapter for policy-denied file executions when the flag is enabled", async () => {
+    const result = await runApprovalPromptScenario([], {
+      env: { [APPROVAL_WIDGET_MODE_ENV_VAR]: "papyrus" },
+      response: approvalDenyResponse(),
+    });
+
+    expect(result.grants).toEqual([]);
+    expect(result.handleInputs).toEqual(["write file"]);
+    expect(result.rendered).not.toContain("[Approval] Approval required:");
+  });
+
+  it("does not call the Papyrus approval adapter for hardline or policy-denied command executions when the flag is enabled", async () => {
+    const result = await runApprovalPromptScenario([], {
+      env: { [APPROVAL_WIDGET_MODE_ENV_VAR]: "papyrus" },
+      response: commandApprovalDenyResponse(),
+    });
+
+    expect(result.grants).toEqual([]);
+    expect(result.handleInputs).toEqual(["write file"]);
+    expect(result.rendered).not.toContain("[Approval] Approval required:");
+  });
+
+  it("does not call the approval prompt adapter for hardline or policy-denied command executions", async () => {
+    const adapter = vi.fn<ApprovalPromptAdapter>(async () => "once");
+    const result = await runApprovalPromptScenario([], {
+      approvalPromptAdapter: adapter,
+      response: commandApprovalDenyResponse(),
+    });
+
+    expect(adapter).not.toHaveBeenCalled();
+    expect(result.adapterCalls).toBe(0);
+    expect(result.grants).toEqual([]);
+    expect(result.handleInputs).toEqual(["write file"]);
+  });
+
+  it("keeps the session loop free of direct Papyrus widget imports", async () => {
+    const sessionLoopSource = await readFile(new URL("./session-loop.ts", import.meta.url), "utf8");
+
+    expect(sessionLoopSource).not.toContain("papyrus/widgets");
+    expect(sessionLoopSource).not.toContain("papyrus-widgets");
   });
 
   it("renders agent-cancelled as durable message in chrome mode", async () => {
