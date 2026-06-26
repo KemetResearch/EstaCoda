@@ -11,7 +11,17 @@ import {
 import { renderPlain } from "../ui/renderers/plain-renderer.js";
 import type { SlashMenuViewModel, ViewModel } from "../contracts/view-model.js";
 import type { UiLocale } from "../ui/cli-ui-copy.js";
-import { chromeCopy } from "../ui/cli-ui-copy.js";
+import {
+  isImplementedSlashCommand,
+  listSlashCompletionCommands,
+  normalizeSlashFilter,
+  slashCompletionDescription,
+} from "../ui/slashCompletionSource.js";
+
+export {
+  isImplementedSlashCommand,
+  slashCompletionDescription as completionDescription,
+};
 
 // ─────────────────────────────────────────────────────────────
 // ViewModel builders (pure data, no rendering)
@@ -19,64 +29,6 @@ import { chromeCopy } from "../ui/cli-ui-copy.js";
 
 const DEFAULT_COMPLETION_LIMIT = 6;
 const MENU_DESCRIPTION_MAX_WIDTH = 88;
-
-const implementedSlashCommands = new Set([
-  "help",
-  "status",
-  "model",
-  "reset",
-  "tools",
-  "browser",
-  "memory",
-  "skills",
-  "reload-mcp",
-  "resume",
-  "approvals",
-  "security",
-  "yolo",
-  "cron",
-  "revoke",
-  "sessions",
-  "search",
-  "compact",
-  "switch",
-  "trust",
-  "untrust",
-  "workspace.trust.status",
-  "doctor",
-  "workflow",
-  "handoff",
-  "clear",
-  "exit",
-  "interrupt",
-  "steer",
-]);
-
-export function isImplementedSlashCommand(commandName: string): boolean {
-  return implementedSlashCommands.has(commandName);
-}
-
-const completionPriority = new Map([
-  ["help", 0],
-  ["status", 1],
-  ["model", 2],
-  ["tools", 3],
-  ["skills", 4],
-  ["exit", 5],
-  ["interrupt", 6],
-  ["steer", 7],
-]);
-
-const activeTurnCompletionPriority = new Map([
-  ["interrupt", 0],
-  ["steer", 1],
-  ["help", 2],
-  ["status", 3],
-  ["model", 4],
-  ["tools", 5],
-  ["skills", 6],
-  ["exit", 7],
-]);
 
 export function buildSlashCompletionViewModel(
   runtime: Runtime,
@@ -88,25 +40,11 @@ export function buildSlashCompletionViewModel(
     readonly includeActiveTurnCommands?: boolean;
   } = {}
 ): SlashMenuViewModel {
-  const normalizedFilter = normalizeFilter(query);
+  const normalizedFilter = normalizeSlashFilter(query);
   const visibleRows = Math.max(1, options.visibleRows ?? options.limit ?? DEFAULT_COMPLETION_LIMIT);
-  const commands = commandRegistry
-    .list({
-      scope: "slash",
-      visibility: "public",
-      filter: normalizedFilter || undefined,
-    })
-    .filter((command) => implementedSlashCommands.has(command.name))
-    .filter((command) => options.includeActiveTurnCommands === true || command.availability !== "active-turn")
-    .sort((a, b) => {
-      const priorityMap = options.includeActiveTurnCommands === true
-        ? activeTurnCompletionPriority
-        : completionPriority;
-      const aPriority = priorityMap.get(a.name) ?? 100;
-      const bPriority = priorityMap.get(b.name) ?? 100;
-      if (aPriority !== bPriority) return aPriority - bPriority;
-      return a.name.localeCompare(b.name);
-    });
+  const commands = listSlashCompletionCommands(commandRegistry, query, {
+    includeActiveTurnCommands: options.includeActiveTurnCommands,
+  });
   const totalOptions = commands.length;
   const absoluteSelectedIndex = totalOptions === 0
     ? 0
@@ -125,7 +63,7 @@ export function buildSlashCompletionViewModel(
     query: query.startsWith("/") ? query : `/${query}`,
     options: visibleCommands.map((command) =>
       slashMenuOption(command.name, `/${command.name}`, {
-        description: completionDescription(command.name, "en") ?? command.usage ?? command.description,
+        description: slashCompletionDescription(command.name, "en") ?? command.usage ?? command.description,
       })
     ),
     selectedIndex,
@@ -136,7 +74,7 @@ export function buildSlashCompletionViewModel(
 }
 
 export function buildSlashMenuViewModel(runtime: Runtime, filter = ""): ViewModel {
-  const normalizedFilter = normalizeFilter(filter);
+  const normalizedFilter = normalizeSlashFilter(filter);
   const commands = commandRegistry.list({
     scope: "slash",
     filter: normalizedFilter || undefined,
@@ -205,7 +143,7 @@ export function buildSlashMenuViewModel(runtime: Runtime, filter = ""): ViewMode
 }
 
 export function buildToolsMenuViewModel(runtime: Runtime, filter = ""): ViewModel {
-  const normalizedFilter = normalizeFilter(filter);
+  const normalizedFilter = normalizeSlashFilter(filter);
   const rows = runtime
     .tools()
     .filter((tool) => matches(normalizedFilter, tool.name, tool.description, ...tool.toolsets))
@@ -244,7 +182,7 @@ export function buildToolsMenuViewModel(runtime: Runtime, filter = ""): ViewMode
 }
 
 export function buildSkillsMenuViewModel(runtime: Runtime, filter = ""): ViewModel {
-  const normalizedFilter = normalizeFilter(filter);
+  const normalizedFilter = normalizeSlashFilter(filter);
   const rows = runtime
     .skills()
     .filter((skill) =>
@@ -320,10 +258,6 @@ function matches(filter: string, ...values: string[]): boolean {
   return values.some((value) => value.toLowerCase().includes(filter));
 }
 
-function normalizeFilter(value: string): string {
-  return value.trim().replace(/^\//u, "").toLowerCase();
-}
-
 function truncateMenuDescription(value: string): string {
   if (value.length <= MENU_DESCRIPTION_MAX_WIDTH) {
     return value;
@@ -347,24 +281,4 @@ function computeVisibleStartIndex(input: {
   const maxStartIndex = input.totalOptions - input.visibleRows;
   const centeredStartIndex = input.selectedIndex - Math.floor(input.visibleRows / 2);
   return Math.min(Math.max(0, centeredStartIndex), maxStartIndex);
-}
-
-export function completionDescription(commandName: string, locale: UiLocale): string | undefined {
-  const copy = chromeCopy(locale);
-  switch (commandName) {
-    case "help":
-      return copy.slashCommandHelpDescription;
-    case "status":
-      return copy.slashCommandStatusDescription;
-    case "model":
-      return copy.slashCommandModelDescription;
-    case "tools":
-      return copy.slashCommandToolsDescription;
-    case "skills":
-      return copy.slashCommandSkillsDescription;
-    case "exit":
-      return copy.slashCommandExitDescription;
-    default:
-      return undefined;
-  }
 }
