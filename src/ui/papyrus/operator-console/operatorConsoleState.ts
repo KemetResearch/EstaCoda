@@ -2,6 +2,7 @@ import {
   createInitialFocusState,
   type FocusState,
 } from "./focusModel.js";
+import type { OperatorConsoleLocale } from "./activeWorkCopy.js";
 
 export type TranscriptBlock = {
   readonly id: string;
@@ -49,19 +50,33 @@ export type AttachmentCardState = {
   };
 };
 
-export type ToolActivityEvent = {
+export type ActiveWorkItemStatus =
+  | "queued"
+  | "running"
+  | "succeeded"
+  | "failed"
+  | "cancelled"
+  | "awaitingApproval";
+
+export type ActiveWorkItem = {
   readonly id: string;
-  readonly label: string;
-  readonly state: "queued" | "running" | "completed" | "failed" | "canceled";
-  readonly detail?: string;
-  readonly elapsedMs?: number;
+  readonly toolName: string;
+  readonly status: ActiveWorkItemStatus;
+  readonly summary: string;
+  readonly target?: string;
+  readonly startedAtMs?: number;
+  readonly endedAtMs?: number;
+  readonly durationMs?: number;
+  readonly detailsRef?: string;
+  readonly riskLevel?: "low" | "medium" | "high";
+  readonly approvalRef?: string;
+  readonly fileChangeInspected?: boolean;
 };
 
 export type ToolActivityState = {
-  readonly events: readonly ToolActivityEvent[];
+  readonly items: readonly ActiveWorkItem[];
   readonly scrollOffset: number;
   readonly expanded: boolean;
-  readonly turnSummary?: string;
 };
 
 export type ApprovalCardState = {
@@ -101,6 +116,7 @@ export type TerminalMetrics = {
 };
 
 export type OperatorConsoleState = {
+  readonly locale: OperatorConsoleLocale;
   readonly transcript: readonly TranscriptBlock[];
   readonly prompt: PromptSurfaceState;
   readonly status: StatusRailState;
@@ -133,6 +149,7 @@ export const OPERATOR_CONSOLE_SURFACE_ORDER: readonly OperatorConsoleSurface[] =
 ] as const;
 
 export type CreateInitialOperatorConsoleStateInput = {
+  readonly locale?: OperatorConsoleLocale;
   readonly transcript?: readonly TranscriptBlock[];
   readonly prompt?: PromptSurfaceState;
   readonly status?: StatusRailState;
@@ -153,6 +170,7 @@ export function createInitialOperatorConsoleState(
   input: CreateInitialOperatorConsoleStateInput = {}
 ): OperatorConsoleState {
   return {
+    locale: input.locale ?? "en",
     transcript: input.transcript ?? [],
     prompt: input.prompt ?? createDefaultPromptSurfaceState(),
     status: input.status ?? createDefaultStatusRailState(),
@@ -193,7 +211,7 @@ export function createDefaultStatusRailState(): StatusRailState {
 
 export function createDefaultToolActivityState(): ToolActivityState {
   return {
-    events: [],
+    items: [],
     scrollOffset: 0,
     expanded: false,
   };

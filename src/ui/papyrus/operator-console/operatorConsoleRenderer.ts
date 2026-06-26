@@ -5,6 +5,7 @@ import type {
 import type {
   OperatorConsoleState,
 } from "./operatorConsoleState.js";
+import { renderActiveWorkSurface } from "./activeWorkSurface.js";
 import { renderAttachmentSurface } from "./attachmentSurface.js";
 import { renderPromptSurface } from "./promptSurface.js";
 import { renderStatusRailSurface } from "./statusRailSurface.js";
@@ -46,6 +47,13 @@ function renderRegionLines(
       height: region.height,
     }).map((text) => ({ region: region.kind, text }));
   }
+  if (region.kind === "activeWork") {
+    return renderActiveWorkSurface(state.activeWork, {
+      width: region.width,
+      height: region.height,
+      locale: state.locale,
+    }).map((text) => ({ region: region.kind, text }));
+  }
   if (region.kind === "statusRail") {
     return [{ region: region.kind, text: renderStatusRailSurface(state.status, { width: region.width }) }];
   }
@@ -68,8 +76,6 @@ function regionLabel(
   switch (region.kind) {
     case "transcript":
       return `Transcript: ${state.transcript.length} block${plural(state.transcript.length)}`;
-    case "activeWork":
-      return `Active work: ${state.activeWork.events.length} event${plural(state.activeWork.events.length)}`;
     case "queuedSteer":
       return `Queued steer: ${state.steer?.queued?.text ?? ""}`;
     case "attachments":
@@ -80,6 +86,8 @@ function regionLabel(
       return `Slash menu: ${state.slash?.query ?? ""}`;
     case "statusRail":
       return renderStatusRailSurface(state.status, { width: region.width });
+    case "activeWork":
+      return "";
   }
 }
 

@@ -100,7 +100,11 @@ describe("Papyrus operator console renderer", () => {
     const output = renderOperatorConsoleTextLines(state, layout);
 
     expect(output[0]).toBe("Transcript: 1 block");
+    expect(output).toContainEqual(expect.stringContaining("Active work"));
     expect(output).toContain("Attachments");
+    expect(output.findIndex((line) => line.includes("Active work"))).toBeLessThan(
+      output.findIndex((line) => line === "Attachments")
+    );
     expect(output.findIndex((line) => line === "Attachments")).toBeLessThan(
       output.findIndex((line) => line.includes("Prompt"))
     );
@@ -196,7 +200,14 @@ function createFullState(): OperatorConsoleState {
       sessionTimer: { elapsedMs: 72_000 },
     },
     activeWork: {
-      events: [{ id: "tool-1", label: "read_file", state: "running" }],
+      items: [{
+        id: "tool-1",
+        toolName: "read_file",
+        status: "running",
+        summary: "src/cli/session-loop.ts",
+        target: "src/cli/session-loop.ts",
+        durationMs: 1_000,
+      }],
       scrollOffset: 0,
       expanded: true,
     },

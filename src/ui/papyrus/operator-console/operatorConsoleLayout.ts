@@ -3,6 +3,10 @@ import type {
   OperatorConsoleSurface,
   TerminalMetrics,
 } from "./operatorConsoleState.js";
+import {
+  getActiveWorkSurfaceDesiredHeight,
+  hasActiveWork,
+} from "./activeWorkSurface.js";
 import { getAttachmentSurfaceDesiredHeight } from "./attachmentSurface.js";
 import { getPromptSurfaceDesiredHeight } from "./promptSurface.js";
 
@@ -83,12 +87,12 @@ function createRegionDescriptors(
     });
   }
 
-  if (state.activeWork.events.length > 0 || state.activeWork.turnSummary !== undefined) {
+  if (hasActiveWork(state.activeWork)) {
     descriptors.push({
       kind: "activeWork",
       priority: ACTIVE_WORK_PRIORITY,
       minHeight: 1,
-      desiredHeight: Math.min(4, Math.max(1, state.activeWork.events.length + 1)),
+      desiredHeight: getActiveWorkSurfaceDesiredHeight(state.activeWork),
     });
   }
 

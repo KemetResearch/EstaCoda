@@ -37,7 +37,7 @@ describe("Papyrus operator console layout", () => {
 
     const layout = createOperatorConsoleLayout(createState({
       activeWork: {
-        events: [{ id: "tool-1", label: "read_file", state: "running" }],
+        items: [toolItem("tool-1", "running")],
         scrollOffset: 0,
         expanded: true,
       },
@@ -178,7 +178,7 @@ function createFullState(): OperatorConsoleState {
   return createState({
     transcript: [{ id: "t1", role: "assistant", text: "Ready." }],
     activeWork: {
-      events: [{ id: "tool-1", label: "read_file", state: "running" }],
+      items: [toolItem("tool-1", "running")],
       scrollOffset: 0,
       expanded: true,
     },
@@ -219,5 +219,16 @@ function pastedAttachment(id: string) {
     preview: "MVP known issue",
     content: "MVP known issue details",
     metadata: { chars: 2_481 },
+  };
+}
+
+function toolItem(id: string, status: "queued" | "running" | "succeeded" | "failed" | "cancelled" | "awaitingApproval") {
+  return {
+    id,
+    toolName: "read_file",
+    status,
+    summary: "src/cli/session-loop.ts",
+    target: "src/cli/session-loop.ts",
+    durationMs: 1_000,
   };
 }

@@ -112,8 +112,13 @@ describe("Papyrus operator console state model", () => {
         type: "toolEvent",
         event: {
           id: "tool-1",
-          label: "read_file",
-          state: "running",
+          toolName: "read_file",
+          status: "running",
+          summary: "src/cli/session-loop.ts",
+          target: "src/cli/session-loop.ts",
+          detailsRef: "tool://tool-1",
+          approvalRef: "approval://tool-1",
+          riskLevel: "low",
         },
       },
       {
@@ -146,7 +151,7 @@ describe("Papyrus operator console state model", () => {
 
     expect(state.attachments).toEqual([]);
     expect(state.activeWork).toEqual({
-      events: [],
+      items: [],
       scrollOffset: 0,
       expanded: false,
     });
