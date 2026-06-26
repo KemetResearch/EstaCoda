@@ -34,8 +34,7 @@ import {
   buildSecurityAuditViewModel,
   buildSetupNeededViewModel,
 } from "./tool-activity-view-models.js";
-import { approvalPromptAdapterForMode, type ApprovalPromptAdapter } from "./approval-prompt-adapter.js";
-import { resolveCoreSessionApprovalWidgetMode } from "./approval-widget-mode.js";
+import { papyrusApprovalPromptAdapter, type ApprovalPromptAdapter } from "./approval-prompt-adapter.js";
 import {
   buildActiveTurnSpinnerViewModel,
   buildAssistantResponseViewModel,
@@ -54,7 +53,6 @@ import type { TerminalCapabilities } from "../contracts/ui.js";
 import { centerVisibleBlock, measureVisibleWidth, truncateVisible, wrapText } from "../ui/renderers/layout.js";
 import { chromeCopy } from "../ui/cli-ui-copy.js";
 import { resolveUiRendererMode } from "../ui/renderer-mode.js";
-import { resolveCoreSessionUiInputMode } from "../ui/input-mode.js";
 import { resolveShellHistoryMode } from "./shell-history-mode.js";
 import { resolveClipboardMode } from "./clipboard-mode.js";
 import { resolveMcpSuggestionsMode } from "./mcp-suggestions-mode.js";
@@ -343,16 +341,7 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
   const renderer = createSessionRenderer({ output, locale: options.locale, capabilities: options.capabilities });
   const rendererMode = resolveUiRendererMode({ env: options.env });
   const cliInput = (options.input as NodeJS.ReadStream | undefined) ?? defaultInput;
-  const inputMode = resolveCoreSessionUiInputMode({
-    env: options.env,
-    isInteractiveTty: cliInput.isTTY === true && renderer.capabilities.isTTY,
-  });
-  const approvalWidgetMode = resolveCoreSessionApprovalWidgetMode({
-    env: options.env,
-    inputMode,
-    rendererMode,
-  });
-  const approvalPromptAdapter = options.approvalPromptAdapter ?? approvalPromptAdapterForMode(approvalWidgetMode);
+  const approvalPromptAdapter = options.approvalPromptAdapter ?? papyrusApprovalPromptAdapter;
   let runtime = options.runtime;
   const now = options.now ?? (() => Date.now());
   const sessionStartedAtMs = now();

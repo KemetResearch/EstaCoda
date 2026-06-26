@@ -1,6 +1,6 @@
 export const APPROVAL_WIDGET_MODE_ENV_VAR = "ESTACODA_APPROVAL_WIDGETS";
 
-export const APPROVAL_WIDGET_MODES = ["legacy", "papyrus"] as const;
+export const APPROVAL_WIDGET_MODES = ["papyrus"] as const;
 
 export type ApprovalWidgetMode = typeof APPROVAL_WIDGET_MODES[number];
 
@@ -16,10 +16,9 @@ export type ResolveCoreSessionApprovalWidgetModeOptions = Omit<ResolveApprovalWi
 
 export function parseApprovalWidgetMode(
   value: string | undefined,
-  defaultMode: ApprovalWidgetMode = "legacy"
+  defaultMode: ApprovalWidgetMode = "papyrus"
 ): ApprovalWidgetMode {
   const normalized = value?.trim().toLowerCase();
-  if (normalized === "legacy") return "legacy";
   if (normalized === "papyrus") return "papyrus";
   return defaultMode;
 }
@@ -30,14 +29,7 @@ export function resolveApprovalWidgetMode(options?: ResolveApprovalWidgetModeOpt
 }
 
 export function resolveCoreSessionApprovalWidgetMode(
-  options: ResolveCoreSessionApprovalWidgetModeOptions
+  _options: ResolveCoreSessionApprovalWidgetModeOptions
 ): ApprovalWidgetMode {
-  if (options.inputMode !== "raw" || options.rendererMode !== "papyrus") {
-    return "legacy";
-  }
-
-  return resolveApprovalWidgetMode({
-    env: options.env,
-    defaultMode: "papyrus",
-  });
+  return "papyrus";
 }
