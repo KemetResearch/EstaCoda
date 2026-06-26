@@ -257,9 +257,11 @@ describe("runCliCommand model setup codex dispatch", () => {
 
 describe("runCliCommand setup prompt factory dispatch", () => {
   let tempDir: string;
+  let originalStdinIsTty: boolean | undefined;
 
   beforeEach(async () => {
     tempDir = await mkdtemp(join(tmpdir(), "estacoda-cli-setup-factory-"));
+    originalStdinIsTty = process.stdin.isTTY;
     setupFlowMock.collectSetupRoute.mockReset();
     setupFlowMock.collectSetupRoute.mockResolvedValue({ kind: "first-run-onboarding" });
     setupFlowMock.runFirstRunSetup.mockReset();
@@ -277,12 +279,40 @@ describe("runCliCommand setup prompt factory dispatch", () => {
   });
 
   afterEach(async () => {
+    Object.defineProperty(process.stdin, "isTTY", {
+      configurable: true,
+      value: originalStdinIsTty,
+    });
     await rm(tempDir, { recursive: true, force: true });
   });
 
   it("routes setup --interactive prompt creation through the Papyrus-capable factory", async () => {
     const result = await runCliCommand({
       argv: ["setup", "--interactive"],
+      workspaceRoot: tempDir,
+      homeDir: tempDir,
+    });
+
+    expect(result).toMatchObject({
+      handled: true,
+      exitCode: 0,
+      output: "setup ok",
+    });
+    expect(interactivePromptMock.createInteractivePrompt).toHaveBeenCalledOnce();
+    expect(setupFlowMock.runFirstRunSetup).toHaveBeenCalledWith(expect.objectContaining({
+      prompt: interactivePromptMock.prompt,
+    }));
+    expect(interactivePromptMock.close).toHaveBeenCalledOnce();
+  });
+
+  it("routes bare interactive setup through the Papyrus-capable factory when TTY input is available", async () => {
+    Object.defineProperty(process.stdin, "isTTY", {
+      configurable: true,
+      value: true,
+    });
+
+    const result = await runCliCommand({
+      argv: ["setup"],
       workspaceRoot: tempDir,
       homeDir: tempDir,
     });

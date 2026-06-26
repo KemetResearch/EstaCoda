@@ -87,6 +87,27 @@ describe("interactive-select prompt card surface", () => {
     expect(stripAnsi(output.getText())).toContain("Selected: Back");
   });
 
+  it("preserves setup-style cancel navigation through the Papyrus select keymap", async () => {
+    clearCiEnv();
+    const { input, output } = makeTtyStreams();
+    const pending = selectOption(input, output, {
+      ...promptCardSelection(),
+      options: [
+        { value: "trust", label: "Trust workspace" },
+        { value: "back", label: "Back", group: "navigation" },
+        { value: "cancel", label: "Cancel", group: "navigation" },
+      ],
+    });
+
+    await Promise.resolve();
+    input.emit("keypress", "", { name: "down" });
+    input.emit("keypress", "", { name: "down" });
+    input.emit("keypress", "", { name: "return" });
+
+    await expect(pending).resolves.toBe("cancel");
+    expect(stripAnsi(output.getText())).toContain("Selected: Cancel");
+  });
+
   it("supports Papyrus home and end navigation in TTY mode", async () => {
     clearCiEnv();
     const { input, output } = makeTtyStreams();
