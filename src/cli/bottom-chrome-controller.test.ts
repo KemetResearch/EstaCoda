@@ -3,6 +3,7 @@ import { BottomChromeController } from "./bottom-chrome-controller.js";
 import { buildActiveTurnSpinnerViewModel, buildSessionStatusRailViewModel, buildSlashMenuViewModel, slashMenuOption } from "../ui/view-models/builders.js";
 import type { TerminalCapabilities } from "../contracts/ui.js";
 import type { ViewModel } from "../contracts/view-model.js";
+import type { PapyrusSurfaceFrame } from "../ui/papyrus/papyrus-surface-controller.js";
 
 function makeCaps(partial: Partial<TerminalCapabilities> = {}): TerminalCapabilities {
   return {
@@ -50,12 +51,72 @@ function status(text = "model") {
   return buildSessionStatusRailViewModel({ modelLabel: text, turnState: "idle" });
 }
 
+function expectManagedRegionSafeOutput(output: string): void {
+  expect(output).not.toContain("\x1b[3J");
+  expect(output).not.toContain("\x1b[2J");
+  expect(output).not.toContain("\x1b[H");
+  expect(output).not.toMatch(/\x1b\[\d+;\d+H/u);
+}
+
 function slashMenu() {
   return buildSlashMenuViewModel({
     query: "/h",
     options: [slashMenuOption("help", "/help", { description: "Show command help" })],
     selectedIndex: 0,
   });
+}
+
+function fakePapyrusFactory(options: {
+  renderRows?: (frame: PapyrusSurfaceFrame) => readonly string[];
+} = {}) {
+  const calls: {
+    created: Array<{ rendererMode: "legacy" | "papyrus"; size: { width: number; height: number } }>;
+    initialized: Array<{ width: number; height: number }>;
+    rendered: PapyrusSurfaceFrame[];
+    resetCount: number;
+  } = {
+    created: [],
+    initialized: [],
+    rendered: [],
+    resetCount: 0,
+  };
+  let size = { width: 0, height: 0 };
+  return {
+    calls,
+    factory: (rendererMode: "legacy" | "papyrus", requestedSize: { width: number; height: number }) => {
+      calls.created.push({ rendererMode, size: requestedSize });
+      size = requestedSize;
+      return {
+        initialize: (width: number, height: number) => {
+          calls.initialized.push({ width, height });
+          size = { width, height };
+          return { frame: undefined as never, diff: [], output: "" };
+        },
+        getSize: () => size,
+        render: (frame: PapyrusSurfaceFrame) => {
+          calls.rendered.push(frame);
+          return {
+            frame: undefined as never,
+            diff: [{ type: "stdout" as const, content: "fake" }],
+            output: `papyrus:${frame.surfaces.map((surface) => surface.text).join("|")}`,
+          };
+        },
+        renderRows: (frame: PapyrusSurfaceFrame) => {
+          calls.rendered.push(frame);
+          return {
+            frame: undefined as never,
+            diff: [],
+            output: "",
+            rows: options.renderRows?.(frame) ?? frame.surfaces.map((surface) => surface.text),
+          };
+        },
+        reset: () => {
+          calls.resetCount += 1;
+          return { frame: undefined as never, diff: [], output: "" };
+        },
+      };
+    },
+  };
 }
 
 describe("BottomChromeController", () => {
@@ -78,6 +139,286 @@ describe("BottomChromeController", () => {
     expect(chunks).toEqual([
       `deepseek | idle\n\x1b[38;2;176;176;176m${"─".repeat(40)}\x1b[0m\n`,
     ]);
+  });
+
+  it("keeps default bottom chrome on the legacy path without constructing Papyrus", () => {
+    const { chunks, stream } = mockOutput();
+    const papyrus = fakePapyrusFactory();
+    const ctrl = new BottomChromeController({
+      output: stream,
+      capabilities: makeCaps(),
+      renderViewModel,
+      createPapyrusSurfaceControllerForMode: papyrus.factory,
+    });
+
+    ctrl.updateState({ statusRail: status("legacy") });
+
+    expect(papyrus.calls.created).toEqual([]);
+    expect(chunks).toEqual(["legacy | idle\n────────────────────────────────────────\n"]);
+  });
+
+  it("keeps explicit legacy mode on the existing bottom chrome path", () => {
+    const { chunks, stream } = mockOutput();
+    const papyrus = fakePapyrusFactory();
+    const ctrl = new BottomChromeController({
+      output: stream,
+      capabilities: makeCaps(),
+      renderViewModel,
+      rendererMode: "legacy",
+      createPapyrusSurfaceControllerForMode: papyrus.factory,
+    });
+
+    ctrl.updateState({ statusRail: status("legacy") });
+
+    expect(papyrus.calls.created).toEqual([]);
+    expect(chunks).toEqual(["legacy | idle\n────────────────────────────────────────\n"]);
+  });
+
+  it("routes status rail chrome through Papyrus in papyrus mode", () => {
+    const { chunks, stream } = mockOutput();
+    const ctrl = new BottomChromeController({
+      output: stream,
+      capabilities: makeCaps(),
+      renderViewModel,
+      rendererMode: "papyrus",
+    });
+
+    ctrl.updateState({ statusRail: status("papyrus") });
+
+    expect(chunks).toEqual(["papyrus | idle\n────────────────────────────────────────\n"]);
+    expect(chunks.join("")).not.toMatch(/\x1b\[\d+;\d+H/u);
+  });
+
+  it("uses Papyrus managed rows for in-place status updates", () => {
+    const { chunks, stream } = mockOutput();
+    const ctrl = new BottomChromeController({
+      output: stream,
+      capabilities: makeCaps(),
+      renderViewModel,
+      rendererMode: "papyrus",
+    });
+
+    ctrl.updateState({ statusRail: status("before") });
+    chunks.length = 0;
+    ctrl.updateStateInPlace({ statusRail: status("after") });
+
+    expect(chunks).toEqual([
+      `\x1b7\x1b[2A\x1b[2K\rafter | idle\x1b[1B\x1b[2K\r${"─".repeat(40)}\x1b8`,
+    ]);
+    expectManagedRegionSafeOutput(chunks.join(""));
+  });
+
+  it("keeps Papyrus bottom chrome managed-region output scrollback safe", () => {
+    const { chunks, stream } = mockOutput();
+    const ctrl = new BottomChromeController({
+      output: stream,
+      capabilities: makeCaps(),
+      renderViewModel,
+      rendererMode: "papyrus",
+    });
+
+    ctrl.updateState({ statusRail: status("safe") });
+    ctrl.updateStateInPlace({ statusRail: status("still-safe") });
+
+    const rendered = chunks.join("");
+    expect(rendered).toContain("safe | idle");
+    expect(rendered).toContain("still-safe | idle");
+    expectManagedRegionSafeOutput(rendered);
+  });
+
+  it("reflows Papyrus bottom chrome when terminal width changes", () => {
+    const { chunks, stream } = mockOutput();
+    const caps = makeCaps({ terminalWidth: 18 });
+    const ctrl = new BottomChromeController({
+      output: stream,
+      capabilities: caps,
+      renderViewModel,
+      rendererMode: "papyrus",
+    });
+
+    ctrl.updateState({ statusRail: status("very-long-model-name") });
+    expect(chunks.join("").split("\n").filter(Boolean)).toEqual([
+      "very-long-model...",
+      "──────────────────",
+    ]);
+
+    chunks.length = 0;
+    caps.terminalWidth = 8;
+    ctrl.updateState({ statusRail: status("very-long-model-name") });
+
+    const rendered = chunks.join("");
+    expect(rendered).toContain("very-...");
+    expect(rendered).toContain("────────");
+    expect(rendered).not.toContain("model-name");
+    expectManagedRegionSafeOutput(rendered);
+  });
+
+  it("clears stale Papyrus bottom chrome rows when the managed region shrinks", () => {
+    const { chunks, stream } = mockOutput();
+    const papyrus = fakePapyrusFactory({
+      renderRows: (frame) => frame.surfaces.map((surface) => `papyrus:${surface.text}`),
+    });
+    const ctrl = new BottomChromeController({
+      output: stream,
+      capabilities: makeCaps(),
+      renderViewModel,
+      rendererMode: "papyrus",
+      createPapyrusSurfaceControllerForMode: papyrus.factory,
+    });
+
+    ctrl.updateManagedRegionAboveReadline({
+      state: { statusRail: status("status"), slashMenu: slashMenu(), slashMenuMinRows: 4 },
+      transientLines: ["paste preview"],
+      promptLineCount: 1,
+    });
+    chunks.length = 0;
+
+    ctrl.updateManagedRegionAboveReadline({
+      state: { statusRail: status("status") },
+      transientLines: [],
+      promptLineCount: 1,
+    });
+
+    const rendered = chunks.join("");
+    expect(papyrus.calls.rendered).toHaveLength(2);
+    expect(papyrus.calls.rendered[1]?.surfaces.map((surface) => surface.text)).toEqual([
+      "status | idle",
+      "────────────────────────────────────────",
+    ]);
+    expect(rendered).toContain("\x1b[5M");
+    expect(rendered).toContain("papyrus:status | idle");
+    expect(rendered).not.toContain("/help Show command help");
+    expect(rendered).not.toContain("paste preview");
+    expectManagedRegionSafeOutput(rendered);
+  });
+
+  it("routes readline-managed status chrome through Papyrus in papyrus mode", () => {
+    const { chunks, stream } = mockOutput();
+    const papyrus = fakePapyrusFactory({
+      renderRows: (frame) => frame.surfaces.map((surface) => `papyrus:${surface.text}`),
+    });
+    const ctrl = new BottomChromeController({
+      output: stream,
+      capabilities: makeCaps(),
+      renderViewModel,
+      rendererMode: "papyrus",
+      createPapyrusSurfaceControllerForMode: papyrus.factory,
+    });
+
+    ctrl.updateManagedRegionAboveReadline({
+      state: { statusRail: status("status") },
+      transientLines: [],
+      promptLineCount: 1,
+    });
+
+    const rendered = chunks.join("");
+    expect(papyrus.calls.created).toHaveLength(1);
+    expect(papyrus.calls.rendered).toHaveLength(1);
+    expect(papyrus.calls.rendered[0]?.surfaces.map((surface) => surface.text)).toEqual([
+      "status | idle",
+      "────────────────────────────────────────",
+    ]);
+    expect(rendered).toContain("papyrus:status | idle");
+    expect(rendered).toContain(`papyrus:${"─".repeat(40)}`);
+    expectManagedRegionSafeOutput(rendered);
+  });
+
+  it("keeps legacy readline-managed status chrome unchanged without constructing Papyrus", () => {
+    const { chunks, stream } = mockOutput();
+    const papyrus = fakePapyrusFactory();
+    const ctrl = new BottomChromeController({
+      output: stream,
+      capabilities: makeCaps(),
+      renderViewModel,
+      rendererMode: "legacy",
+      createPapyrusSurfaceControllerForMode: papyrus.factory,
+    });
+
+    ctrl.updateManagedRegionAboveReadline({
+      state: { statusRail: status("status") },
+      transientLines: [],
+      promptLineCount: 1,
+    });
+
+    expect(papyrus.calls.created).toEqual([]);
+    expect(chunks).toEqual([
+      `\x1b7\x1b[2L\x1b[2K\rstatus | idle\x1b[1B\x1b[2K\r${"─".repeat(40)}\x1b8\x1b[2B`,
+    ]);
+  });
+
+  it("does not route spinner-only chrome through Papyrus", () => {
+    const { chunks, stream } = mockOutput();
+    const papyrus = fakePapyrusFactory();
+    const ctrl = new BottomChromeController({
+      output: stream,
+      capabilities: makeCaps(),
+      renderViewModel,
+      rendererMode: "papyrus",
+      createPapyrusSurfaceControllerForMode: papyrus.factory,
+    });
+
+    ctrl.updateState({ activeSpinner: buildActiveTurnSpinnerViewModel({ phase: "thinking" }) });
+
+    expect(papyrus.calls.rendered).toEqual([]);
+    expect(chunks).toEqual(["spinner:thinking\n"]);
+  });
+
+  it("keeps Papyrus status and spinner updates managed-region safe when rewriting rows", () => {
+    const { chunks, stream } = mockOutput();
+    const ctrl = new BottomChromeController({
+      output: stream,
+      capabilities: makeCaps(),
+      renderViewModel,
+      rendererMode: "papyrus",
+    });
+
+    ctrl.updateState({
+      statusRail: status("status"),
+      activeSpinner: buildActiveTurnSpinnerViewModel({ phase: "thinking" }),
+    });
+    chunks.length = 0;
+
+    ctrl.updateStateInPlace({
+      statusRail: status("status"),
+      activeSpinner: buildActiveTurnSpinnerViewModel({ phase: "tool" }),
+    });
+
+    const rendered = chunks.join("");
+    expect(chunks).toHaveLength(1);
+    expect(rendered).toBe(
+      `\x1b7\x1b[3A\x1b[2K\rstatus | idle\x1b[1B\x1b[2K\rspinner:tool\x1b[1B\x1b[2K\r${"─".repeat(40)}\x1b8`,
+    );
+    expect(rendered).toContain("status | idle");
+    expect(rendered).toContain("spinner:tool");
+    expect(rendered).not.toContain("spinner:thinking");
+    expect(rendered).not.toContain("\x1b[1G\x1b[0J");
+    expectManagedRegionSafeOutput(rendered);
+  });
+
+  it("keeps legacy status and spinner updates unchanged without constructing Papyrus", () => {
+    const { chunks, stream } = mockOutput();
+    const papyrus = fakePapyrusFactory();
+    const ctrl = new BottomChromeController({
+      output: stream,
+      capabilities: makeCaps(),
+      renderViewModel,
+      rendererMode: "legacy",
+      createPapyrusSurfaceControllerForMode: papyrus.factory,
+    });
+
+    ctrl.updateState({
+      statusRail: status("status"),
+      activeSpinner: buildActiveTurnSpinnerViewModel({ phase: "thinking" }),
+    });
+    chunks.length = 0;
+
+    ctrl.updateStateInPlace({
+      statusRail: status("status"),
+      activeSpinner: buildActiveTurnSpinnerViewModel({ phase: "tool" }),
+    });
+
+    expect(papyrus.calls.created).toEqual([]);
+    expect(chunks).toEqual(["\x1b7\x1b[3A\x1b[1B\x1b[2K\rspinner:tool\x1b[1B\x1b8"]);
   });
 
   it("bounds rendered chrome lines to terminal width", () => {

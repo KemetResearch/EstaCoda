@@ -50,6 +50,7 @@ import type { SessionStatusRailViewModel, ShortcutHintRailViewModel, SlashMenuVi
 import type { TerminalCapabilities } from "../contracts/ui.js";
 import { centerVisibleBlock, measureVisibleWidth, truncateVisible, wrapText } from "../ui/renderers/layout.js";
 import { chromeCopy } from "../ui/cli-ui-copy.js";
+import { resolveUiRendererMode } from "../ui/renderer-mode.js";
 import { promptUiContextForLocale } from "../contracts/ui.js";
 import { resolveHomeDir } from "../config/home-dir.js";
 import { resolveGlobalStateHome, resolveProfileStateHome } from "../config/profile-home.js";
@@ -84,6 +85,7 @@ export type SessionLoopOptions = {
   locale?: import("../contracts/ui.js").UiLocale;
   showResponseProgress?: boolean;
   capabilities?: TerminalCapabilities;
+  env?: Record<string, string | undefined>;
   cliVoice?: {
     recorder?: CliVoiceRecorder;
     envOptions?: CliVoiceEnvironmentOptions;
@@ -329,6 +331,7 @@ function formatStartupScreenText(input: {
 export async function runSessionLoop(options: SessionLoopOptions): Promise<void> {
   const output = options.output ?? defaultOutput;
   const renderer = createSessionRenderer({ output, locale: options.locale, capabilities: options.capabilities });
+  const rendererMode = resolveUiRendererMode({ env: options.env });
   let runtime = options.runtime;
   const now = options.now ?? (() => Date.now());
   const sessionStartedAtMs = now();
@@ -355,6 +358,7 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
       renderer.capabilities.supportsUnicode,
       width
     ),
+    rendererMode,
     enabled: renderer.capabilities.isTTY && !renderer.capabilities.isCI && !renderer.capabilities.isDumb,
   });
   const chrome = new PromptChromeController({
