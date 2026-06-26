@@ -1110,6 +1110,60 @@ describe("StandardRenderer — dark theme", () => {
     expect(channelLine).toContain(isolateLtr("WhatsApp"));
   });
 
+  it("keeps narrow Arabic setup-editor rows bounded with technical tokens and Unicode clusters", () => {
+    const caps = { ...fullCaps(), supportsColor: false, supportsTrueColor: false, terminalWidth: 56 };
+    const r = new StandardRenderer({ tokens: resolveTokens("standard", "dark", "kemetBlue"), capabilities: caps, locale: "ar" });
+    const plain = stripAnsi(r.renderOnboardingPromptCard(buildOnboardingPromptCardViewModel({
+      title: "محرّر الإعدادات",
+      bodyLines: ["راجع القيم قبل الحفظ."],
+      showColumnHeaders: false,
+      tableDirection: "rtl",
+      tableWidth: "content",
+      tableMaxWidth: 50,
+      tableAlign: "right",
+      columns: [
+        { key: "description", header: "التفاصيل", align: "right" },
+        { key: "name", header: "الاسم", align: "right" },
+      ],
+      options: [
+        {
+          id: "route",
+          label: "المزوّد الأساسي",
+          description: `استخدم ${isolateLtr("OPENAI_API_KEY")} مع ${isolateLtr("openrouter/kimi-k2.6")}.`,
+        },
+        {
+          id: "endpoint",
+          label: "نقطة النهاية",
+          description: `اختبر ${isolateLtr("https://api.example.test/v1")} قبل الحفظ.`,
+        },
+        {
+          id: "unicode",
+          label: "فحص Unicode",
+          description: `يعرض 👩🏽‍💻 و${isolateLtr("表")} وCafe\u0301 بدون كسر القياس.`,
+        },
+      ],
+      selectedOptionIndex: 2,
+      locale: "ar",
+      direction: "rtl",
+    })));
+
+    expect(plain).toContain(isolateLtr("OPENAI_API_KEY"));
+    expect(plain).toContain("open...");
+    expect(plain).not.toContain(isolateLtr("openrouter/kimi-k2.6"));
+    expect(plain).toContain("https://api.example.tes...");
+    expect(plain).toContain("👩🏽‍💻");
+    expect(plain).toContain(isolateLtr("表"));
+    expect(plain).toContain("Cafe\u0301");
+    const selectedLine = plain.split("\n").find((line) => line.includes("فحص Unicode"));
+    expect(selectedLine).toBeDefined();
+    expect(selectedLine).toContain("👩🏽‍💻");
+    expect(stripTrailingBidiControls(selectedLine!.trimEnd()).endsWith("◂")).toBe(true);
+    expectBalancedBidiIsolates(plain);
+    for (const line of plain.split("\n")) {
+      expect(measureVisibleWidth(line)).toBeLessThanOrEqual(caps.terminalWidth);
+    }
+  });
+
   it("keeps explicit RTL structured prompt-card rows bounded with no Unicode fallback", () => {
     const r = renderer("dark", { ...narrowCaps(), supportsUnicode: false });
     const plain = stripAnsi(r.renderOnboardingPromptCard(buildOnboardingPromptCardViewModel({

@@ -109,7 +109,8 @@ function isZeroWidth(codePoint: number): boolean {
   if ((codePoint >= 0x0300 && codePoint <= 0x036f) || (codePoint >= 0x1ab0 && codePoint <= 0x1aff)) return true;
   if ((codePoint >= 0x1dc0 && codePoint <= 0x1dff) || (codePoint >= 0x20d0 && codePoint <= 0x20ff)) return true;
   if ((codePoint >= 0xfe00 && codePoint <= 0xfe0f) || (codePoint >= 0xfe20 && codePoint <= 0xfe2f)) return true;
-  if ((codePoint >= 0x200b && codePoint <= 0x200f) || (codePoint >= 0x2060 && codePoint <= 0x2064)) return true;
+  if ((codePoint >= 0x200b && codePoint <= 0x200f) || (codePoint >= 0x202a && codePoint <= 0x202e)) return true;
+  if ((codePoint >= 0x2060 && codePoint <= 0x2064) || (codePoint >= 0x2066 && codePoint <= 0x2069)) return true;
   if (codePoint === 0xfeff) return true;
   if (codePoint >= 0xe0000 && codePoint <= 0xe007f) return true;
   return false;

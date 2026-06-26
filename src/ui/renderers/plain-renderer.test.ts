@@ -90,6 +90,19 @@ function countBidiControl(line: string, control: string): number {
   return [...line].filter((char) => char === control).length;
 }
 
+function expectBalancedBidiIsolates(text: string): void {
+  let depth = 0;
+  for (const char of text) {
+    if (char === LRI || char === RLI) {
+      depth += 1;
+    } else if (char === PDI) {
+      depth -= 1;
+    }
+    expect(depth).toBeGreaterThanOrEqual(0);
+  }
+  expect(depth).toBe(0);
+}
+
 function onboardingTrustCard(overrides: Partial<Parameters<typeof buildOnboardingPromptCardViewModel>[0]> = {}) {
   return buildOnboardingPromptCardViewModel({
     title: "Workspace trust",
@@ -831,6 +844,64 @@ describe("PlainRenderer — renderOnboardingPromptCard", () => {
     const channelLine = renderedFor(2).split("\n").find((line) => line.includes("Telegram"));
     expect(channelLine).toContain(isolateLtr("Telegram"));
     expect(channelLine).toContain(isolateLtr("WhatsApp"));
+  });
+
+  it("keeps Arabic setup-editor rows bounded with technical tokens and Unicode clusters", () => {
+    const out = renderOnboardingPromptCard(buildOnboardingPromptCardViewModel({
+      title: "محرّر الإعدادات",
+      bodyLines: ["راجع القيم قبل الحفظ."],
+      showColumnHeaders: false,
+      tableDirection: "rtl",
+      tableWidth: "content",
+      tableMaxWidth: 64,
+      tableAlign: "right",
+      columns: [
+        { key: "description", header: "التفاصيل", align: "right" },
+        { key: "name", header: "الاسم", align: "right" },
+      ],
+      options: [
+        {
+          id: "route",
+          label: "المزوّد الأساسي",
+          description: `استخدم ${isolateLtr("OPENAI_API_KEY")} مع ${isolateLtr("openrouter/kimi-k2.6")}.`,
+        },
+        {
+          id: "endpoint",
+          label: "نقطة النهاية",
+          description: `اختبر ${isolateLtr("https://api.example.test/v1")} قبل الحفظ.`,
+        },
+        {
+          id: "unicode",
+          label: "فحص Unicode",
+          description: `يعرض 👩🏽‍💻 و${isolateLtr("表")} وCafe\u0301 بدون كسر القياس.`,
+        },
+      ],
+      selectedOptionIndex: 2,
+      locale: "ar",
+      direction: "rtl",
+    }), "ar");
+
+    expect(out).toContain(isolateLtr("OPENAI_API_KEY"));
+    expect(out).toContain(isolateLtr("openrouter/kimi-k2.6"));
+    expect(out).toContain(isolateLtr("https://api.example.test/v1"));
+    expect(out).toContain("👩🏽‍💻");
+    expect(out).toContain(isolateLtr("表"));
+    expect(out).toContain("Cafe\u0301");
+
+    const selectedLine = out.split("\n").find((line) => line.includes("فحص Unicode"));
+    expect(selectedLine).toBeDefined();
+    expect(selectedLine).toContain("👩🏽‍💻");
+    expect(stripTrailingBidiControls(selectedLine!.trimEnd()).endsWith("<")).toBe(true);
+    expectBalancedBidiIsolates(out);
+    const routeLine = out.split("\n").find((line) => line.includes("OPENAI_API_KEY"));
+    const endpointLine = out.split("\n").find((line) => line.includes("api.example"));
+    expect(routeLine).toBeDefined();
+    expect(endpointLine).toBeDefined();
+    expect(visibleTextEndColumn(routeLine!, "المزوّد الأساسي")).toBe(visibleTextEndColumn(selectedLine!, "فحص Unicode"));
+    expect(visibleTextEndColumn(endpointLine!, "نقطة النهاية")).toBe(visibleTextEndColumn(selectedLine!, "فحص Unicode"));
+    for (const line of out.split("\n")) {
+      expect(measureVisibleWidth(line)).toBeLessThanOrEqual(88);
+    }
   });
 
   it("renders Arabic prompt-card hints as LTR technical text", () => {

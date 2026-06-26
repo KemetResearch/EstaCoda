@@ -37,6 +37,10 @@ describe("measureTextWidth", () => {
     expect(measureTextWidth("Hello World")).toBe(11);
   });
 
+  it("does not count ANSI escape sequences", () => {
+    expect(measureTextWidth("\x1b[31mred\x1b[0m")).toBe(3);
+  });
+
   it("measures empty string as 0", () => {
     expect(measureTextWidth("")).toBe(0);
   });
@@ -59,9 +63,19 @@ describe("measureTextWidth", () => {
     expect(measureTextWidth("⚠")).toBe(2);
   });
 
+  it("measures emoji variation selector cases with grapheme width", () => {
+    expect(measureTextWidth("❤️")).toBe(2);
+    expect(measureTextWidth("1️")).toBe(1);
+  });
+
   it("measures mixed-script text", () => {
     const text = "Hello العربية";
     expect(measureTextWidth(text)).toBe(13); // Hello(5) + space(1) + Arabic(7)
+  });
+
+  it("does not count bidi isolate controls", () => {
+    expect(measureTextWidth("\u2067العربية\u2069")).toBe(7);
+    expect(measureTextWidth("\u2066/model\u2069")).toBe(6);
   });
 
   it("handles surrogate pairs correctly", () => {
@@ -83,6 +97,16 @@ describe("measureVisibleWidth", () => {
   it("handles colored Unicode", () => {
     const text = "\x1b[38;2;90;172;255m💎\x1b[0m";
     expect(measureVisibleWidth(text)).toBe(2);
+  });
+
+  it("measures Arabic text through the visible width helper", () => {
+    expect(measureVisibleWidth("\x1b[32mالعربية\x1b[0m")).toBe(7);
+  });
+
+  it("keeps mixed-token status-rail-like strings deterministic", () => {
+    const rail = "\u2067النموذج\u2069: \x1b[36m/model\x1b[0m ❤️ 表 ok";
+    expect(measureVisibleWidth(rail)).toBe(24);
+    expect(measureVisibleWidth(rail)).toBe(measureVisibleWidth(rail));
   });
 });
 
@@ -117,6 +141,24 @@ describe("wrapText", () => {
     const lines = wrapText("a   b   c", 5);
     expect(lines).toEqual(["a b c"]);
   });
+
+  it("wraps ANSI-styled text without corrupting escape sequences", () => {
+    const lines = wrapText("\x1b[31mred\x1b[0m blue", 5);
+    expect(lines).toEqual(["\x1b[31mred\x1b[0m", "blue"]);
+    for (const line of lines) {
+      expect(measureVisibleWidth(line)).toBeLessThanOrEqual(5);
+    }
+    expect(lines[0]).toContain("\x1b[31m");
+    expect(lines[0]).toContain("\x1b[0m");
+  });
+
+  it("wraps mixed CJK and ASCII using visible cell width", () => {
+    const lines = wrapText("表abc 表de", 5);
+    expect(lines).toEqual(["表abc", "表de"]);
+    for (const line of lines) {
+      expect(measureVisibleWidth(line)).toBeLessThanOrEqual(5);
+    }
+  });
 });
 
 describe("truncateText", () => {
@@ -141,12 +183,44 @@ describe("truncateText", () => {
     expect(truncateText(text, 6)).toBe("中..."); // 2 + 3 = 5, fits in 6
   });
 
+  it("preserves CJK text at exact visible width boundaries", () => {
+    expect(truncateText("中文", 4)).toBe("中文");
+    expect(truncateText("中文a", 5)).toBe("中文a");
+    expect(truncateText("中文a", 4)).toBe("...");
+  });
+
   it("handles emoji in truncation", () => {
     const text = "😀😀😀"; // 3 emojis = 6 width
     // With maxWidth=4, even one emoji (2) + ellipsis (3) = 5 > 4,
     // so only ellipsis (3) fits.
     expect(truncateText(text, 4)).toBe("...");
     expect(measureTextWidth(truncateText(text, 4))).toBeLessThanOrEqual(4);
+  });
+
+  it("does not split emoji variation-selector clusters in truncation", () => {
+    const truncated = truncateText("❤️❤️ ok", 5);
+    expect(truncated).toBe("❤️...");
+    expect(Array.from(truncated)).toContain("\ufe0f");
+    expect(measureTextWidth(truncated)).toBeLessThanOrEqual(5);
+  });
+
+  it("does not split combining marks away from their base character", () => {
+    const truncated = truncateText("e\u0301e\u0301e\u0301e\u0301e\u0301", 4);
+    expect(truncated).toBe("e\u0301...");
+    expect(measureTextWidth(truncated)).toBeLessThanOrEqual(4);
+  });
+
+  it("treats bidi isolate controls as zero width while truncating Arabic text", () => {
+    const truncated = truncateText("\u2067العربية\u2069 token", 10);
+    expect(truncated).toBe("\u2067العربية\u2069...");
+    expect(measureTextWidth(truncated)).toBeLessThanOrEqual(10);
+  });
+
+  it("truncates mixed Arabic, English, and emoji deterministically", () => {
+    const text = "\u2067مرحبا\u2069 status ❤️ running";
+    const truncated = truncateText(text, 15);
+    expect(truncated).toBe("\u2067مرحبا\u2069 status...");
+    expect(measureTextWidth(truncated)).toBeLessThanOrEqual(15);
   });
 
   it("returns empty string for maxWidth 0", () => {
@@ -190,6 +264,29 @@ describe("truncateVisible", () => {
     const truncated = truncateVisible(text, 6);
     expect(stripAnsi(truncated)).toBe("bol...");
     expect(measureVisibleWidth(truncated)).toBeLessThanOrEqual(6);
+  });
+
+  it("does not split ANSI sequences while truncating styled CJK text", () => {
+    const truncated = truncateVisible("\x1b[32m中文测试\x1b[0m", 7);
+    expect(truncated).toBe("\x1b[32m中文...");
+    expect(stripAnsi(truncated)).toBe("中文...");
+    expect(measureVisibleWidth(truncated)).toBeLessThanOrEqual(7);
+  });
+
+  it("preserves complete OSC hyperlink sequences while truncating visible text", () => {
+    const link = "\x1b]8;;https://example.com\x07click here\x1b]8;;\x07";
+    const truncated = truncateVisible(link, 8);
+    expect(truncated).toBe("\x1b]8;;https://example.com\x07click...");
+    expect(stripAnsi(truncated)).toBe("click...");
+    expect(measureVisibleWidth(truncated)).toBeLessThanOrEqual(8);
+  });
+
+  it("keeps mixed Arabic, LTR, ANSI, and emoji tokens within visible width", () => {
+    const text = "\u2067مرحبا\u2069 \x1b[36m/model\x1b[0m ❤️";
+    const truncated = truncateVisible(text, 14);
+    expect(truncated).toContain("\x1b[36m");
+    expect(stripAnsi(truncated)).not.toContain("\x1b");
+    expect(measureVisibleWidth(truncated)).toBeLessThanOrEqual(14);
   });
 });
 
