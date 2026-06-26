@@ -2,7 +2,10 @@ import { stdin as defaultInput, stdout as defaultOutput } from "node:process";
 import type { Readable, Writable } from "node:stream";
 import type { PromptUiContext } from "../contracts/ui.js";
 import { promptUiContextForLocale } from "../contracts/ui.js";
+import { resolveGhostTextMode } from "./ghost-text-mode.js";
+import { resolveInputKeymapMode } from "./input-keymap-mode.js";
 import {
+  createDefaultRawPromptTypeahead,
   createRawPrompt,
   type RawPromptControllerOptions,
   type RawPromptInput,
@@ -28,6 +31,9 @@ export function createPapyrusPrompt(options: CreatePapyrusPromptOptions = {}): P
     input: input as RawPromptInput,
     output: output as RawPromptOutput,
     uiContext,
+    typeahead: createDefaultRawPromptTypeahead(),
+    ghostText: resolveGhostTextMode({ env: options.env }) === "on" ? { enabled: true } : undefined,
+    keymap: resolveInputKeymapMode({ env: options.env }) === "vim" ? { mode: "vim" } : undefined,
   });
   const secretPrompt = (options.createSecretPrompt ?? createReadlinePrompt)({
     input: input as Readable,

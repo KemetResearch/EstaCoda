@@ -23,7 +23,7 @@ import { WorkspaceTrustStore } from "../security/workspace-trust-store.js";
 import { storeCapabilitySecret, type SetupNeededMetadata } from "../capabilities/capability-setup.js";
 import { defaultImageModel } from "../contracts/image-generation.js";
 import type { Prompt, PromptOptions, PromptSpecialKeyControl } from "./prompt-contract.js";
-import { createPromptForInputMode } from "./rawPromptController.js";
+import { createInteractivePrompt } from "./create-interactive-prompt.js";
 import type { ToolExecutionRecord } from "../tools/tool-executor.js";
 import { renderSlashMenu, renderToolsMenu, buildSlashMenuViewModel, buildSlashCompletionViewModel, buildToolsMenuViewModel, buildSkillsMenuViewModel, isImplementedSlashCommand } from "./slash-menu.js";
 import { renderSessionHelp, buildSessionHelpViewModel } from "./session-help.js";
@@ -362,8 +362,7 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
   let activeTurn: AbortController | undefined;
   let currentAnimator: ToolActivityAnimator | undefined;
   let clearActiveTurnChrome: () => void = () => undefined;
-  const prompt = options.prompt ?? createPromptForInputMode({
-    mode: inputMode,
+  const prompt = options.prompt ?? createInteractivePrompt({
     input: cliInput,
     output: output as NodeJS.WriteStream,
     env: options.env,

@@ -18,6 +18,7 @@ import type {
   PromptSpecialKeyControl,
   PromptSpecialKeyController,
 } from "./prompt-contract.js";
+import { applyPromptUiContext } from "./prompt-contract.js";
 
 export type CreateReadlinePromptOptions = {
   readonly input?: Readable;
@@ -59,34 +60,6 @@ export function createReadlinePrompt(
       close: () => undefined
     }
   );
-}
-
-export function withPromptUiContext(prompt: Prompt, uiContext: PromptUiContext): Prompt {
-  return Object.assign(
-    async (question: string, options?: PromptOptions) => prompt(question, options),
-    {
-      uiContext,
-      select: prompt.select === undefined
-        ? undefined
-        : async <T>(selection: SelectPromptInput<T>) => prompt.select!(applyPromptUiContext(selection, uiContext)),
-      onboardingCard: prompt.onboardingCard === undefined
-        ? undefined
-        : (card: BuildOnboardingPromptCardInput) => prompt.onboardingCard!(applyPromptUiContext(card, uiContext)),
-      close: () => prompt.close?.(),
-    }
-  );
-}
-
-function applyPromptUiContext<T extends { readonly locale?: PromptUiContext["locale"]; readonly direction?: PromptUiContext["direction"] }>(
-  input: T,
-  uiContext: PromptUiContext
-): T & PromptUiContext {
-  const locale = input.locale ?? uiContext.locale;
-  return {
-    ...input,
-    locale,
-    direction: input.direction ?? (input.locale === undefined ? uiContext.direction : promptUiContextForLocale(locale).direction),
-  };
 }
 
 function isCreateReadlinePromptOptions(value: Readable | CreateReadlinePromptOptions): value is CreateReadlinePromptOptions {

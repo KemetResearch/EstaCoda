@@ -1,10 +1,18 @@
 import { EventEmitter } from "node:events";
 import { describe, expect, it, vi } from "vitest";
+import { GHOST_TEXT_ENV_VAR } from "./ghost-text-mode.js";
+import { INPUT_KEYMAP_MODE_ENV_VAR } from "./input-keymap-mode.js";
 import { createPapyrusPrompt } from "./papyrus-prompt.js";
-import { createRawPrompt, type RawPromptInput, type RawPromptOutput } from "./rawPromptController.js";
+import {
+  createRawPrompt,
+  type RawPromptControllerOptions,
+  type RawPromptInput,
+  type RawPromptOutput,
+} from "./rawPromptController.js";
 import type { Prompt, PromptOptions } from "./prompt-contract.js";
 import type { TerminalLifecycle } from "../ui/input/terminalLifecycle.js";
 import { promptUiContextForLocale } from "../contracts/ui.js";
+import { SLASH_COMMAND_SUGGESTION_PROVIDER_ID } from "../ui/papyrus/input/providers/slashCommandProvider.js";
 
 class FakeInput extends EventEmitter implements RawPromptInput {
   isTTY = true;
@@ -144,6 +152,115 @@ describe("createPapyrusPrompt", () => {
     expect(seenInput).toEqual(["a", "ab"]);
     expect(seenRows.length).toBeGreaterThan(0);
     expect(seenRows.at(-1)).toBe(1);
+  });
+
+  it("provides Papyrus slash autocomplete to the raw prompt path by default", async () => {
+    let rawOptions: RawPromptControllerOptions | undefined;
+    const prompt = createPapyrusPrompt({
+      input: new FakeInput(),
+      output: fakeOutput(),
+      createRaw: (options) => {
+        rawOptions = options;
+        return Object.assign(vi.fn(async () => "raw"), { close: vi.fn() });
+      },
+      createSecretPrompt: () => fakeSecretPrompt().prompt,
+    });
+
+    await prompt("> ");
+    const routed = rawOptions?.typeahead?.router.route({
+      input: "/",
+      cursorOffset: 1,
+    });
+
+    expect(routed?.provider.id).toBe(SLASH_COMMAND_SUGGESTION_PROVIDER_ID);
+    expect(rawOptions?.ghostText).toBeUndefined();
+    expect(rawOptions?.keymap).toBeUndefined();
+  });
+
+  it("keeps optional providers out of the default raw slash autocomplete path", async () => {
+    let rawOptions: RawPromptControllerOptions | undefined;
+    const prompt = createPapyrusPrompt({
+      input: new FakeInput(),
+      output: fakeOutput(),
+      env: {
+        ESTACODA_SHELL_HISTORY: "1",
+        ESTACODA_MCP_SUGGESTIONS: "1",
+        ESTACODA_SKILL_SUGGESTIONS: "1",
+      },
+      createRaw: (options) => {
+        rawOptions = options;
+        return Object.assign(vi.fn(async () => "raw"), { close: vi.fn() });
+      },
+      createSecretPrompt: () => fakeSecretPrompt().prompt,
+    });
+
+    await prompt("> ");
+    const routed = rawOptions?.typeahead?.router.route({
+      input: "/",
+      cursorOffset: 1,
+    });
+
+    expect(routed?.provider.id).toBe(SLASH_COMMAND_SUGGESTION_PROVIDER_ID);
+  });
+
+  it("passes ghost text options to the raw prompt only when the flag is on", async () => {
+    const rawOptions: RawPromptControllerOptions[] = [];
+    const createRaw = vi.fn((options: RawPromptControllerOptions) => {
+      rawOptions.push(options);
+      return Object.assign(vi.fn(async () => "raw"), { close: vi.fn() });
+    });
+
+    await createPapyrusPrompt({
+      input: new FakeInput(),
+      output: fakeOutput(),
+      env: {},
+      createRaw,
+      createSecretPrompt: () => fakeSecretPrompt().prompt,
+    })("> ");
+    await createPapyrusPrompt({
+      input: new FakeInput(),
+      output: fakeOutput(),
+      env: { [GHOST_TEXT_ENV_VAR]: "true" },
+      createRaw,
+      createSecretPrompt: () => fakeSecretPrompt().prompt,
+    })("> ");
+
+    expect(rawOptions[0]?.ghostText).toBeUndefined();
+    expect(rawOptions[1]?.ghostText).toEqual({ enabled: true });
+  });
+
+  it("passes Vim keymap options to raw prompt only when explicitly selected", async () => {
+    const rawOptions: RawPromptControllerOptions[] = [];
+    const createRaw = vi.fn((options: RawPromptControllerOptions) => {
+      rawOptions.push(options);
+      return Object.assign(vi.fn(async () => "raw"), { close: vi.fn() });
+    });
+
+    await createPapyrusPrompt({
+      input: new FakeInput(),
+      output: fakeOutput(),
+      env: {},
+      createRaw,
+      createSecretPrompt: () => fakeSecretPrompt().prompt,
+    })("> ");
+    await createPapyrusPrompt({
+      input: new FakeInput(),
+      output: fakeOutput(),
+      env: { [INPUT_KEYMAP_MODE_ENV_VAR]: "invalid" },
+      createRaw,
+      createSecretPrompt: () => fakeSecretPrompt().prompt,
+    })("> ");
+    await createPapyrusPrompt({
+      input: new FakeInput(),
+      output: fakeOutput(),
+      env: { [INPUT_KEYMAP_MODE_ENV_VAR]: "vim" },
+      createRaw,
+      createSecretPrompt: () => fakeSecretPrompt().prompt,
+    })("> ");
+
+    expect(rawOptions[0]?.keymap).toBeUndefined();
+    expect(rawOptions[1]?.keymap).toBeUndefined();
+    expect(rawOptions[2]?.keymap).toEqual({ mode: "vim" });
   });
 
   it("runs raw prompt cleanup on cancel", async () => {
