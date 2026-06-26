@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   parseUiInputMode,
+  resolveCoreSessionUiInputMode,
   resolveUiInputMode,
   UI_INPUT_MODE_ENV_VAR,
   UI_INPUT_MODES,
@@ -8,6 +9,21 @@ import {
 } from "./input-mode.js";
 
 describe("UI input mode", () => {
+  it("covers the rollout matrix for core TTY, readline override, and non-TTY sessions", () => {
+    expect(resolveCoreSessionUiInputMode({
+      env: {},
+      isInteractiveTty: true,
+    })).toBe("raw");
+    expect(resolveCoreSessionUiInputMode({
+      env: { [UI_INPUT_MODE_ENV_VAR]: "readline" },
+      isInteractiveTty: true,
+    })).toBe("readline");
+    expect(resolveCoreSessionUiInputMode({
+      env: {},
+      isInteractiveTty: false,
+    })).toBe("readline");
+  });
+
   it("defaults unset values to readline", () => {
     expect(resolveUiInputMode({ env: {} })).toBe("readline");
     expect(parseUiInputMode(undefined)).toBe("readline");
@@ -39,6 +55,41 @@ describe("UI input mode", () => {
   it("falls back to readline for invalid values", () => {
     expect(parseUiInputMode("papyrus")).toBe("readline");
     expect(parseUiInputMode("raw-beta")).toBe("readline");
+  });
+
+  it("can use raw as an injected default for TTY core sessions", () => {
+    expect(resolveUiInputMode({ env: {}, defaultMode: "raw" })).toBe("raw");
+    expect(parseUiInputMode(undefined, "raw")).toBe("raw");
+    expect(parseUiInputMode("", "raw")).toBe("raw");
+    expect(parseUiInputMode("invalid", "raw")).toBe("raw");
+  });
+
+  it("keeps explicit readline as an escape hatch when raw is the default", () => {
+    expect(resolveUiInputMode({
+      env: { [UI_INPUT_MODE_ENV_VAR]: "readline" },
+      defaultMode: "raw",
+    })).toBe("readline");
+  });
+
+  it("defaults core TTY sessions to raw", () => {
+    expect(resolveCoreSessionUiInputMode({
+      env: {},
+      isInteractiveTty: true,
+    })).toBe("raw");
+  });
+
+  it("preserves readline for non-TTY core sessions", () => {
+    expect(resolveCoreSessionUiInputMode({
+      env: {},
+      isInteractiveTty: false,
+    })).toBe("readline");
+  });
+
+  it("keeps explicit readline as the core session soak escape hatch", () => {
+    expect(resolveCoreSessionUiInputMode({
+      env: { [UI_INPUT_MODE_ENV_VAR]: "readline" },
+      isInteractiveTty: true,
+    })).toBe("readline");
   });
 
   it("resolves ESTACODA_INPUT_MODE from a passed env object", () => {

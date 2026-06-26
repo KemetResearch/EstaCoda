@@ -122,7 +122,42 @@ else:
 
 ## 2. Environment Fallback QA
 
-### 2.1 NO_COLOR=1
+### 2.1 Papyrus Default Rollout Matrix
+
+Run these checks in a real interactive TTY after changing session rendering,
+prompt input, slash autocomplete, approvals, paste handling, resize behavior, or
+terminal lifecycle cleanup.
+
+| Scenario | Command | Verify |
+|----------|---------|--------|
+| Default launch | `estacoda` | Startup and bottom chrome use the Papyrus session surface. Input uses the raw prompt path. `/status` shows shell history, clipboard, MCP suggestions, skill suggestions, and Vim keymap as `off` unless explicitly enabled. |
+| Legacy renderer escape hatch | `ESTACODA_UI_RENDERER=legacy estacoda` | Session output uses the legacy renderer/bottom-chrome path. Raw input may still be active unless `ESTACODA_INPUT_MODE=readline` is also set. |
+| Readline escape hatch | `ESTACODA_INPUT_MODE=readline estacoda` | The prompt uses the legacy readline path. Readline slash behavior remains available only in this fallback path. |
+| Slash autocomplete | `estacoda` then type `/` | The Papyrus slash autocomplete overlay appears in the raw prompt. Arrow keys and `Ctrl-N`/`Ctrl-P` move focus. `Escape` dismisses the overlay without cancelling the prompt. |
+| Approval ask | `estacoda` then run a prompt that triggers a command or file approval | Promptable approvals render as Papyrus approval cards. `ESTACODA_APPROVAL_WIDGETS=legacy estacoda` uses the plain text approval prompt. Hardline/policy-denied actions do not render approval cards. |
+| Paste | `estacoda` then paste single-line and multiline text | Small single-line paste remains inline. Multiline/large paste uses the existing compact paste reference behavior and submits the original pasted content. |
+| Resize | `estacoda` then resize narrower and wider while idle, during slash autocomplete, and during active-turn chrome | Prompt rows, slash overlay rows, and bottom chrome reflow without full-screen clear, scrollback clear, or overlapping text. Focused slash rows remain visible. |
+| Cancel/EOF | `estacoda`, then press `Ctrl-C`; relaunch and press `Ctrl-D` on an empty prompt | `Ctrl-C` cancels/cleans up the raw prompt. `Ctrl-D` exits cleanly from an empty prompt. Terminal raw mode is restored after each exit path. |
+
+The rollout fallback flags are temporary and expected to be removed in PR6B:
+
+```bash
+ESTACODA_UI_RENDERER=legacy estacoda
+ESTACODA_INPUT_MODE=readline estacoda
+ESTACODA_APPROVAL_WIDGETS=legacy estacoda
+```
+
+Optional Papyrus helpers remain disabled unless explicitly configured:
+
+```bash
+ESTACODA_INPUT_KEYMAP=vim estacoda
+ESTACODA_SHELL_HISTORY=1 estacoda
+ESTACODA_CLIPBOARD=1 estacoda
+ESTACODA_MCP_SUGGESTIONS=1 estacoda
+ESTACODA_SKILL_SUGGESTIONS=1 estacoda
+```
+
+### 2.2 NO_COLOR=1
 
 ```bash
 NO_COLOR=1 pnpm run dev
@@ -134,7 +169,7 @@ NO_COLOR=1 pnpm run dev
 - No spinner animation on tool activity.
 - Status rail uses ASCII labels (`sess`, `task`).
 
-### 2.2 TERM=dumb
+### 2.3 TERM=dumb
 
 ```bash
 TERM=dumb pnpm run dev
@@ -145,7 +180,7 @@ TERM=dumb pnpm run dev
 - No ANSI cursor codes.
 - `/clear` does not emit `c`.
 
-### 2.3 Non-TTY Fallback
+### 2.4 Non-TTY Fallback
 
 ```bash
 pnpm run dev | cat
@@ -156,7 +191,7 @@ pnpm run dev | cat
 - Interactive picker degrades to a numbered list (no ANSI cursor controls).
 - No spinner animation.
 
-### 2.4 Narrow Terminal
+### 2.5 Narrow Terminal
 
 ```bash
 COLUMNS=40 pnpm run dev

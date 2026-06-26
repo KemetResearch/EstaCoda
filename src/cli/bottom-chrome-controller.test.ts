@@ -133,6 +133,7 @@ describe("BottomChromeController", () => {
       output: stream,
       capabilities: makeCaps(),
       renderViewModel,
+      rendererMode: "legacy",
       renderHorizontalRule: (width) => `\x1b[38;2;176;176;176m${"─".repeat(width)}\x1b[0m`,
     });
     ctrl.updateState({ statusRail: status("deepseek") });
@@ -141,9 +142,11 @@ describe("BottomChromeController", () => {
     ]);
   });
 
-  it("keeps default bottom chrome on the legacy path without constructing Papyrus", () => {
+  it("defaults bottom chrome to the Papyrus path", () => {
     const { chunks, stream } = mockOutput();
-    const papyrus = fakePapyrusFactory();
+    const papyrus = fakePapyrusFactory({
+      renderRows: (frame) => frame.surfaces.map((surface) => `papyrus:${surface.text}`),
+    });
     const ctrl = new BottomChromeController({
       output: stream,
       capabilities: makeCaps(),
@@ -153,8 +156,10 @@ describe("BottomChromeController", () => {
 
     ctrl.updateState({ statusRail: status("legacy") });
 
-    expect(papyrus.calls.created).toEqual([]);
-    expect(chunks).toEqual(["legacy | idle\n────────────────────────────────────────\n"]);
+    expect(papyrus.calls.created).toEqual([
+      { rendererMode: "papyrus", size: { width: 40, height: 0 } },
+    ]);
+    expect(chunks).toEqual([`papyrus:legacy | idle\npapyrus:${"─".repeat(40)}\n`]);
   });
 
   it("keeps explicit legacy mode on the existing bottom chrome path", () => {
@@ -171,6 +176,29 @@ describe("BottomChromeController", () => {
     ctrl.updateState({ statusRail: status("legacy") });
 
     expect(papyrus.calls.created).toEqual([]);
+    expect(chunks).toEqual(["legacy | idle\n────────────────────────────────────────\n"]);
+  });
+
+  it("reports an explicit fallback reason when Papyrus cannot be constructed", () => {
+    const { chunks, stream } = mockOutput();
+    const diagnostics: unknown[] = [];
+    const ctrl = new BottomChromeController({
+      output: stream,
+      capabilities: makeCaps(),
+      renderViewModel,
+      createPapyrusSurfaceControllerForMode: () => undefined,
+      onRendererFallback: (diagnostic) => diagnostics.push(diagnostic),
+    });
+
+    ctrl.updateState({ statusRail: status("legacy") });
+
+    expect(diagnostics).toEqual([
+      {
+        requestedMode: "papyrus",
+        fallbackMode: "legacy",
+        reason: "papyrus-surface-controller-unavailable",
+      },
+    ]);
     expect(chunks).toEqual(["legacy | idle\n────────────────────────────────────────\n"]);
   });
 
@@ -746,7 +774,12 @@ describe("BottomChromeController", () => {
 
   it("patches chrome state in place below transient lines", () => {
     const { chunks, stream } = mockOutput();
-    const ctrl = makeController(stream);
+    const ctrl = new BottomChromeController({
+      output: stream,
+      capabilities: makeCaps(),
+      renderViewModel,
+      rendererMode: "legacy",
+    });
     ctrl.updateState({ statusRail: status("status") });
     ctrl.updateTransientLines(["spinner:thinking"]);
 
