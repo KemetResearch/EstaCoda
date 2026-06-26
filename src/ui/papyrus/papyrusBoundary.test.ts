@@ -52,10 +52,18 @@ const bannedImplementationPatterns = [
 ];
 
 describe("Papyrus substrate boundaries", () => {
-  it("keeps the root namespace and empty future namespaces intentionally inert", () => {
+  it("keeps root and input namespaces inert while admitting intended widget exports", () => {
     expect(read("index.ts").trim()).toBe("export {};");
     expect(read("input/index.ts").trim()).toBe("export {};");
-    expect(read("widgets/index.ts").trim()).toBe("export {};");
+    expect(exportedModules(read("widgets/index.ts"))).toEqual([
+      "./dialogModel.js",
+      "./multiSelectModel.js",
+      "./optionMap.js",
+      "./overlayStack.js",
+      "./selectKeymap.js",
+      "./selectModel.js",
+      "./selectRenderRows.js",
+    ]);
   });
 
   it("exports only the intended nested substrate modules", () => {
