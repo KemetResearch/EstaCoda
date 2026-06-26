@@ -31,6 +31,7 @@ import { resolveProfileStateHome } from "../config/profile-home.js";
 import { writeCliVoiceMode } from "./voice-mode.js";
 import { CronStore } from "../cron/cron-store.js";
 import type { ProviderExecutionResult } from "../providers/provider-executor.js";
+import { createOperatorConsoleRuntimeHost } from "../ui/papyrus/operator-console/index.js";
 
 const STARTUP_VISIBLE_SCREEN_CLEAR = "\x1b[2J\x1b[H";
 const MANAGED_REGION_CLEAR_PATTERN = /\x1b\[\d+A\x1b\[1G\x1b\[0J/u;
@@ -2075,6 +2076,7 @@ describe("runSessionLoop — active turn spinner", () => {
     });
 
     const strippedChunks = outputChunks.map((chunk) => stripAnsi(chunk));
+    expect(strippedChunks.join("")).not.toContain("Active work");
     const liveStartChunk = strippedChunks.find((chunk) =>
       chunk.includes("preparing") &&
       chunk.includes("old-start-only") &&
@@ -2138,6 +2140,95 @@ describe("runSessionLoop — active turn spinner", () => {
     expect(betweenDurableFlushAndResponse).not.toContain("mock-model");
     expect(betweenDurableFlushAndResponse).not.toContain("context");
     expect(rendered.slice(responseIndex)).toContain("mock-model");
+  });
+
+  it("routes live tool activity into the Operator Console active-work surface when gated", async () => {
+    const outputChunks: string[] = [];
+    const output = {
+      write(chunk: string | Uint8Array): boolean {
+        outputChunks.push(String(chunk));
+        return true;
+      },
+      isTTY: true,
+      columns: 100,
+    } as unknown as NodeJS.WritableStream;
+    const host = createOperatorConsoleRuntimeHost({
+      terminal: { width: 100, height: 16, isTty: true },
+    });
+    const setActiveWorkSpy = vi.spyOn(host, "setActiveWork");
+    const events: RuntimeEvent[] = [
+      { kind: "agent-start", sessionId: "test-session", input: "hello" },
+      ...Array.from({ length: 10 }, (_, index): RuntimeEvent => ({
+        kind: "tool-start",
+        tool: "read_file",
+        stepId: `s${index}`,
+        targetSummary: `src/file-${index}.ts`,
+        activityId: `activity-${index}`,
+      })),
+      {
+        kind: "tool-result",
+        tool: "write_file",
+        ok: true,
+        chars: 30,
+        sentChars: 30,
+        targetSummary: "src/generated.ts",
+        activityId: "activity-10",
+        fileChangePreview: {
+          kind: "fileChangePreview",
+          path: "src/generated.ts",
+          changeType: "modified",
+          summary: ["Modified 2 line(s)."],
+          diff: "+ one\n+ two",
+        },
+      },
+      { kind: "agent-final", text: "Mock response" },
+    ];
+    const runtime = createEventEmittingMockRuntime(events);
+
+    let promptIndex = 0;
+    await runSessionLoop({
+      runtime,
+      output,
+      capabilities: interactiveCaps({ terminalWidth: 100, supportsAnimation: false }),
+      operatorConsole: { enabled: true, runtimeHost: host },
+      prompt: Object.assign(
+        async () => {
+          const values = ["hello", "/exit"];
+          return values[promptIndex++] ?? "/exit";
+        },
+        { close: () => {} }
+      ),
+      close: () => {},
+    });
+
+    const maxActiveWorkItems = Math.max(
+      ...setActiveWorkSpy.mock.calls.map(([state]) => state.items.length)
+    );
+    expect(maxActiveWorkItems).toBeGreaterThan(8);
+
+    const strippedChunks = outputChunks.map((chunk) => stripAnsi(chunk));
+    const activeWorkChunk = strippedChunks.reduce<string | undefined>((latest, chunk) =>
+      chunk.includes("Active work") &&
+      chunk.includes("read_file") &&
+      chunk.includes("mock-model")
+        ? chunk
+        : latest,
+      undefined
+    );
+    expect(activeWorkChunk).toBeDefined();
+    expect(activeWorkChunk).toContain("more completed this turn");
+
+    const activeWorkIndex = activeWorkChunk?.indexOf("Active work") ?? -1;
+    const statusRailIndex = activeWorkChunk?.indexOf("mock-model") ?? -1;
+    expect(activeWorkIndex).toBeGreaterThanOrEqual(0);
+    expect(statusRailIndex).toBeGreaterThan(activeWorkIndex);
+
+    const statusRailLine = activeWorkChunk
+      ?.split("\n")
+      .find((line) => line.includes("mock-model"));
+    expect(statusRailLine).toBeDefined();
+    expect(statusRailLine).not.toContain("read_file");
+    expect(statusRailLine).not.toContain("Active work");
   });
 
   it("renders provider spinner below the most recent tool row in bottom chrome mode", async () => {

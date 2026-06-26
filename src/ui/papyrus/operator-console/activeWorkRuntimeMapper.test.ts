@@ -1,0 +1,108 @@
+import { describe, expect, it } from "vitest";
+import { stringWidth } from "../screen/stringWidth.js";
+import {
+  applyActiveWorkRuntimeEvent,
+  createActiveWorkRuntimeState,
+} from "./activeWorkRuntimeMapper.js";
+import { formatActiveWorkSummary, renderActiveWorkSurface } from "./activeWorkSurface.js";
+
+describe("active work runtime mapper", () => {
+  it("keeps the active work model uncapped while rendering remains viewport-limited", () => {
+    let state = createActiveWorkRuntimeState();
+    for (let index = 0; index < 12; index += 1) {
+      state = applyActiveWorkRuntimeEvent(state, {
+        id: `tool-${index}`,
+        toolName: "read_file",
+        status: index < 2 ? "running" : "done",
+        summary: "completed",
+        target: `src/file-${index}.ts`,
+        durationMs: index * 1000,
+      });
+    }
+
+    expect(state.items).toHaveLength(12);
+
+    const lines = renderActiveWorkSurface(state, { width: 80, height: 8 });
+    expect(lines).toHaveLength(8);
+    expect(lines.join("\n")).toContain("Active work");
+    expect(lines.join("\n")).toContain("... 7 more completed this turn");
+    expect(lines.every((line) => stringWidth(line) <= 80)).toBe(true);
+  });
+
+  it("upserts paired start/result events and preserves file-change inspection metadata", () => {
+    let state = createActiveWorkRuntimeState();
+
+    state = applyActiveWorkRuntimeEvent(state, {
+      id: "write-1",
+      toolName: "write_file",
+      status: "running",
+      summary: "preparing",
+      target: "src/app.ts",
+    });
+    state = applyActiveWorkRuntimeEvent(state, {
+      id: "write-1",
+      toolName: "write_file",
+      status: "done",
+      summary: "write_file",
+      target: "src/app.ts",
+      durationMs: 1800,
+      fileChangeInspected: true,
+    });
+
+    expect(state.items).toEqual([
+      expect.objectContaining({
+        id: "write-1",
+        toolName: "write_file",
+        status: "succeeded",
+        target: "src/app.ts",
+        durationMs: 1800,
+        fileChangeInspected: true,
+      }),
+    ]);
+    expect(formatActiveWorkSummary(state)).toBe(
+      "Completed tool work: 0 running steps resolved, 1 total tool events, 1 file change inspected."
+    );
+  });
+
+  it("maps queued, running, awaiting approval, and terminal statuses for active-work sorting", () => {
+    let state = createActiveWorkRuntimeState();
+    state = applyActiveWorkRuntimeEvent(state, { id: "done", toolName: "typecheck", status: "done" });
+    state = applyActiveWorkRuntimeEvent(state, { id: "queued", toolName: "read_file", status: "pending" });
+    state = applyActiveWorkRuntimeEvent(state, { id: "approval", toolName: "shell", status: "gated" });
+    state = applyActiveWorkRuntimeEvent(state, { id: "running", toolName: "rg", status: "running" });
+    state = applyActiveWorkRuntimeEvent(state, { id: "failed", toolName: "test", status: "failed" });
+    state = applyActiveWorkRuntimeEvent(state, { id: "cancelled", toolName: "browser", status: "cancelled" });
+
+    expect(state.items.map((item) => item.status)).toEqual([
+      "succeeded",
+      "queued",
+      "awaitingApproval",
+      "running",
+      "failed",
+      "cancelled",
+    ]);
+
+    const rendered = renderActiveWorkSurface(state, { width: 88, height: 8 }).join("\n");
+    expect(rendered.indexOf("rg")).toBeLessThan(rendered.indexOf("read_file"));
+    expect(rendered.indexOf("read_file")).toBeLessThan(rendered.indexOf("shell"));
+    expect(rendered.indexOf("shell")).toBeLessThan(rendered.indexOf("typecheck"));
+  });
+
+  it("keeps technical tokens unchanged in Arabic renders", () => {
+    const state = applyActiveWorkRuntimeEvent(createActiveWorkRuntimeState(), {
+      id: "read-output",
+      toolName: "read_file",
+      status: "running",
+      summary: "preparing",
+      target: "src/ui/papyrus/screen/output.ts",
+      durationMs: 3000,
+    });
+
+    const rendered = renderActiveWorkSurface(state, { width: 80, height: 5, locale: "ar" }).join("\n");
+    expect(rendered).toContain("العمل النشط");
+    expect(rendered).toContain("read_file");
+    expect(rendered).toContain("src/ui/papyrus/screen/output.ts");
+    expect(rendered).toContain("00:03");
+    expect(rendered.split("\n").every((line) => stringWidth(line) <= 80)).toBe(true);
+  });
+});

@@ -49,6 +49,14 @@ import type { ResolvedTokens } from "../contracts/ui-tokens.js";
 import { BottomChromeController, type BottomChromeState } from "./bottom-chrome-controller.js";
 import type { SessionStatusRailViewModel, ShortcutHintRailViewModel, SlashMenuViewModel, StatusViewModel, ToolActivityRailEvent, ViewModel } from "../contracts/view-model.js";
 import type { TerminalCapabilities } from "../contracts/ui.js";
+import {
+  applyActiveWorkRuntimeEvent,
+  createActiveWorkRuntimeState,
+  createOperatorConsoleRuntimeHost,
+  type ActiveWorkRuntimeEvent,
+  type OperatorConsoleRuntimeHost,
+  type ToolActivityState,
+} from "../ui/papyrus/operator-console/index.js";
 import { centerVisibleBlock, measureVisibleWidth, truncateVisible, wrapText } from "../ui/renderers/layout.js";
 import { chromeCopy } from "../ui/cli-ui-copy.js";
 import { resolveShellHistoryMode } from "./shell-history-mode.js";
@@ -92,6 +100,10 @@ export type SessionLoopOptions = {
   capabilities?: TerminalCapabilities;
   env?: Record<string, string | undefined>;
   approvalPromptAdapter?: ApprovalPromptAdapter;
+  operatorConsole?: {
+    readonly enabled?: boolean;
+    readonly runtimeHost?: OperatorConsoleRuntimeHost;
+  };
   cliVoice?: {
     recorder?: CliVoiceRecorder;
     envOptions?: CliVoiceEnvironmentOptions;
@@ -102,6 +114,7 @@ export type SessionLoopOptions = {
 const PROMPT_REGION_SLASH_PANEL_ROWS = 10;
 const MAX_ACTIVE_TURN_PREVIEW_LINES = 4;
 const MAX_ACTIVE_TURN_QUEUED_LINES = 3;
+const OPERATOR_CONSOLE_ACTIVE_WORK_TERMINAL_HEIGHT = 16;
 
 type ContextUsageSnapshot = NonNullable<SessionStatusRailViewModel["contextUsage"]>;
 type ContextUsageSource = Extract<RuntimeEvent, { kind: "context-usage" }>["source"];
@@ -348,6 +361,16 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
   let activeTurn: AbortController | undefined;
   let currentAnimator: ToolActivityAnimator | undefined;
   let clearActiveTurnChrome: () => void = () => undefined;
+  const operatorConsoleRuntimeHost = options.operatorConsole?.enabled === true
+    ? options.operatorConsole.runtimeHost ?? createOperatorConsoleRuntimeHost({
+      locale: renderer.locale === "ar" ? "ar" : "en",
+      terminal: {
+        width: renderer.capabilities.terminalWidth,
+        height: OPERATOR_CONSOLE_ACTIVE_WORK_TERMINAL_HEIGHT,
+        isTty: renderer.capabilities.isTTY,
+      },
+    })
+    : undefined;
   const prompt = options.prompt ?? createInteractivePrompt({
     input: cliInput,
     output: output as NodeJS.WriteStream,
@@ -585,6 +608,8 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
         let bottomChromeTransientSpinnerLines: readonly string[] = [];
         let bottomChromeToolActivityActive = false;
         let bottomChromeToolActivityLines: string[] = [];
+        let operatorConsoleActiveWorkState = createActiveWorkRuntimeState();
+        let operatorConsoleActiveWorkLines: string[] = [];
         const completedBottomChromeToolRows: string[] = [];
         let completedToolRowsFlushed = false;
         let skippedPreResponseBottomChromeStateUpdate = false;
@@ -657,10 +682,36 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
           ];
         }
 
+        function renderOperatorConsoleActiveWorkLines(state: ToolActivityState): string[] {
+          if (operatorConsoleRuntimeHost === undefined || !bottomChrome.enabled || state.items.length === 0) {
+            return [];
+          }
+          operatorConsoleRuntimeHost.clear();
+          operatorConsoleRuntimeHost.setTerminal({
+            width: termWidth,
+            height: OPERATOR_CONSOLE_ACTIVE_WORK_TERMINAL_HEIGHT,
+            isTty: renderer.capabilities.isTTY,
+          });
+          operatorConsoleRuntimeHost.setPrompt({
+            text: "",
+            cursorOffset: 0,
+            multiline: false,
+            scrollOffset: 0,
+            mode: "prompt",
+          });
+          operatorConsoleRuntimeHost.setActiveWork(state);
+
+          const frame = operatorConsoleRuntimeHost.render();
+          const activeWorkRegion = frame.layout.regions.find((region) => region.kind === "activeWork");
+          if (activeWorkRegion === undefined || !activeWorkRegion.visible) return [];
+          return frame.lines.slice(0, activeWorkRegion.height);
+        }
+
         const updateActiveTurnTransientLines = () => {
           if (!bottomChrome.enabled) return;
           bottomChrome.updateTransientLines([
             ...activeTurnTransientLines(),
+            ...operatorConsoleActiveWorkLines,
             ...fixedToolActivitySlots(),
             ...bottomChromeTransientSpinnerLines,
           ]);
@@ -670,6 +721,23 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
           return renderer.render(buildToolActivityRailViewModel({ events: [event] }))
             .split("\n")
             .filter((line) => line.length > 0);
+        }
+
+        function activeWorkEventFromToolRail(
+          railEvent: ToolActivityRailEvent,
+          runtimeEvent: Extract<RuntimeEvent, { kind: "tool-start" | "tool-result" }>
+        ): ActiveWorkRuntimeEvent {
+          return {
+            id: railEvent.activityId,
+            toolName: railEvent.tool,
+            status: railEvent.status,
+            summary: railEvent.label,
+            target: railEvent.target,
+            durationMs: railEvent.elapsedMs,
+            detailsRef: railEvent.activityId,
+            riskClass: railEvent.riskClass,
+            fileChangeInspected: runtimeEvent.kind === "tool-result" && runtimeEvent.fileChangePreview !== undefined,
+          };
         }
 
         function appendRenderedRows(rows: string[], rendered: string): void {
@@ -973,16 +1041,24 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
                 runtimeEventBottomChrome.clearInlineSpinner();
 
                 const railEvent = activityBuilder.buildToolActivityRailEvent(event);
-                const lines = renderToolActivityLines(railEvent);
+                if (operatorConsoleRuntimeHost !== undefined) {
+                  operatorConsoleActiveWorkState = applyActiveWorkRuntimeEvent(
+                    operatorConsoleActiveWorkState,
+                    activeWorkEventFromToolRail(railEvent, event)
+                  );
+                  operatorConsoleActiveWorkLines = renderOperatorConsoleActiveWorkLines(operatorConsoleActiveWorkState);
+                } else {
+                  const lines = renderToolActivityLines(railEvent);
 
-                bottomChromeToolActivityActive = true;
-                bottomChromeToolActivityLines.push(...lines);
-                bottomChromeToolActivityLines = bottomChromeToolActivityLines.slice(-TOOL_SLOT_COUNT);
+                  bottomChromeToolActivityActive = true;
+                  bottomChromeToolActivityLines.push(...lines);
+                  bottomChromeToolActivityLines = bottomChromeToolActivityLines.slice(-TOOL_SLOT_COUNT);
 
-                if (event.kind === "tool-result") {
-                  completedBottomChromeToolRows.push(...lines);
-                  if (event.fileChangePreview !== undefined) {
-                    appendRenderedRows(completedBottomChromeToolRows, renderer.render(event.fileChangePreview));
+                  if (event.kind === "tool-result") {
+                    completedBottomChromeToolRows.push(...lines);
+                    if (event.fileChangePreview !== undefined) {
+                      appendRenderedRows(completedBottomChromeToolRows, renderer.render(event.fileChangePreview));
+                    }
                   }
                 }
 
@@ -1014,6 +1090,9 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
             activeTurnSlashCompletion = undefined;
             bottomChromeToolActivityActive = false;
             bottomChromeToolActivityLines = [];
+            operatorConsoleActiveWorkState = createActiveWorkRuntimeState();
+            operatorConsoleActiveWorkLines = [];
+            operatorConsoleRuntimeHost?.setActiveWork(operatorConsoleActiveWorkState);
             if (bottomChrome.enabled) {
               stopBottomChromeActiveChromeTicker();
               resetBottomChromeTransientSpinnerState();
