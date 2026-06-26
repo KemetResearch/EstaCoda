@@ -5072,6 +5072,7 @@ describe("runSessionLoop — active turn spinner", () => {
     expect(result.rendered).not.toContain("Feedback");
     expect(result.rendered).not.toContain("Amend");
     expect(result.rendered).toContain("Approval granted (once). Retrying now.");
+    expect(result.rendered.match(/Approval granted \(once\)\. Retrying now\./gu)).toHaveLength(1);
     const statusRailLine = result.rendered.split("\n").find((line) => line.includes("mock-model"));
     expect(statusRailLine).toBeDefined();
     expect(statusRailLine).not.toMatch(/\b(approval|tool|workspace|trust|setup|steer|channel)\b/iu);
@@ -5096,6 +5097,23 @@ describe("runSessionLoop — active turn spinner", () => {
     expect(result.rendered).toContain("Enter one of: once, session, always, deny.");
   });
 
+  it("proves Operator Console inspect does not call grantApproval before a later decision", async () => {
+    const host = createOperatorConsoleRuntimeHost({
+      terminal: { width: 96, height: 16, isTty: true },
+    });
+
+    const result = await runApprovalPromptScenario(["inspect", "reject"], {
+      response: approvalAskResponse(),
+      operatorConsoleHost: host,
+      ttyCoreSession: true,
+    });
+
+    expect(result.grants).toEqual([]);
+    expect(result.handleInputs).toEqual(["write file"]);
+    expect(result.rendered).toContain("Enter one of: once, session, always, deny.");
+    expect(result.rendered).toContain("Permission denied.");
+  });
+
   it("does not render actionable Operator Console cards for hardline or policy denials", async () => {
     const host = createOperatorConsoleRuntimeHost({
       terminal: { width: 96, height: 16, isTty: true },
@@ -5112,6 +5130,7 @@ describe("runSessionLoop — active turn spinner", () => {
       expect.objectContaining({ status: "pending" }),
     ]);
     expect(result.grants).toEqual([]);
+    expect(result.handleInputs).toEqual(["write file"]);
     expect(result.rendered).not.toContain("Approve once");
     expect(result.rendered).not.toContain("Approval required");
   });

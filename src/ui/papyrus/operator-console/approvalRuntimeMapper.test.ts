@@ -32,9 +32,12 @@ describe("approval runtime mapper", () => {
   });
 
   it("does not turn non-ask executions into actionable pending approval controls", () => {
-    expect(approvalCardStateFromToolExecution(execution({ decision: "deny" }))).toMatchObject({
+    const card = approvalCardStateFromToolExecution(execution({ decision: "deny" }), { focused: true });
+
+    expect(card).toMatchObject({
       status: "rejected",
     });
+    expect(card).not.toHaveProperty("focusedControl");
   });
 });
 

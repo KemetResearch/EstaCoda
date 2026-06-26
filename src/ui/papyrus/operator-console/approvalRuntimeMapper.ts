@@ -7,14 +7,15 @@ export function approvalCardStateFromToolExecution(
   input: { readonly id?: string; readonly focused?: boolean } = {}
 ): ApprovalCardState {
   const diffStats = diffStatsFromExecution(execution);
+  const status = execution.decision === "ask" ? "pending" : "rejected";
   return {
     id: input.id ?? approvalIdFromExecution(execution),
-    status: execution.decision === "ask" ? "pending" : "rejected",
+    status,
     action: execution.tool.name,
     target: execution.targetSummary ?? execution.targetKey ?? execution.tool.description ?? execution.tool.name,
     risk: execution.riskClass,
     ...(diffStats === undefined ? {} : { diffStats }),
-    ...(input.focused === true ? { focusedControl: "approve" } : {}),
+    ...(input.focused === true && status === "pending" ? { focusedControl: "approve" } : {}),
   };
 }
 

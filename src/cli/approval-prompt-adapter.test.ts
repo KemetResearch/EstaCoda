@@ -26,7 +26,10 @@ function approvalExecution(overrides: Partial<ToolExecutionRecord> = {}): ToolEx
   };
 }
 
-function adapterInput(answer: string, options: { allowPersistentApproval?: boolean } = {}): {
+function adapterInput(answer: string, options: {
+  allowPersistentApproval?: boolean;
+  execution?: ToolExecutionRecord;
+} = {}): {
   input: ApprovalPromptAdapterInput;
   outputChunks: string[];
 } {
@@ -47,9 +50,9 @@ function adapterInput(answer: string, options: { allowPersistentApproval?: boole
       chrome: {
         enabled: false,
         clearInlineSpinner: vi.fn(),
-        suspendChromeForTranscript: async (fn) => await fn(),
+        suspendChromeForTranscript: vi.fn(async (fn) => await fn()),
       },
-      execution: approvalExecution(),
+      execution: options.execution ?? approvalExecution(),
       allowPersistentApproval: options.allowPersistentApproval ?? true,
     },
   };
@@ -127,8 +130,58 @@ describe("approval prompt adapter routing", () => {
     expect(rendered).not.toContain("Always allow");
     expect(rendered).not.toContain("Feedback");
     expect(rendered).not.toContain("Amend");
+    expect(rendered).not.toContain("Ask user");
+    expect(rendered).not.toContain("Don't ask again");
     expect(host.getState().approvals).toHaveLength(1);
     expect(host.getState().status).not.toHaveProperty("approvals");
+  });
+
+  it("renders inline Operator Console file diff stats without bottom chrome suspension", async () => {
+    const { input, outputChunks } = adapterInput("approve once", {
+      execution: approvalExecution({
+        tool: {
+          name: "workspace.write",
+          description: "Write a workspace file",
+          inputSchema: {},
+          riskClass: "workspace-write",
+          toolsets: ["workspace-write"],
+          progressLabel: "writing",
+          maxResultSizeChars: 1000,
+        },
+        input: { path: "src/runtime/provider-turn-loop.ts" },
+        riskClass: "workspace-write",
+        targetKey: "src/runtime/provider-turn-loop.ts",
+        targetSummary: "src/runtime/provider-turn-loop.ts",
+        result: {
+          ok: true,
+          content: "",
+          metadata: {
+            fileChangePreview: {
+              kind: "fileChangePreview",
+              path: "src/runtime/provider-turn-loop.ts",
+              changeType: "modified",
+              diff: "+++ b/src/runtime/provider-turn-loop.ts\n--- a/src/runtime/provider-turn-loop.ts\n+one\n+two\n-old",
+            },
+          },
+        },
+      }),
+    });
+    const host = createOperatorConsoleRuntimeHost({
+      terminal: { width: 88, height: 14, isTty: true },
+    });
+
+    await expect(papyrusApprovalPromptAdapter({
+      ...input,
+      operatorConsoleHost: host,
+    })).resolves.toBe("once");
+
+    const rendered = outputChunks.join("");
+    expect(rendered).toContain("Action: workspace.write");
+    expect(rendered).toContain("Target: src/runtime/provider-turn-loop.ts");
+    expect(rendered).toContain("Risk: workspace-write");
+    expect(rendered).toContain("+2 lines  -1 lines");
+    expect(input.chrome.clearInlineSpinner).not.toHaveBeenCalled();
+    expect(input.chrome.suspendChromeForTranscript).not.toHaveBeenCalled();
   });
 
   it("maps Operator Console reject, escape, and inspect intents without adding approval scope semantics", async () => {
