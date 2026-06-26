@@ -8,4 +8,5 @@ export * from "./operatorConsoleLayout.js";
 export * from "./operatorConsoleRenderer.js";
 export * from "./operatorConsoleState.js";
 export * from "./promptSurface.js";
+export * from "./steerSurface.js";
 export * from "./statusRailSurface.js";

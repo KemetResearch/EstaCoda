@@ -10,6 +10,12 @@ import {
 import { getApprovalSurfaceDesiredHeight } from "./approvalSurface.js";
 import { getAttachmentSurfaceDesiredHeight } from "./attachmentSurface.js";
 import { getPromptSurfaceDesiredHeight } from "./promptSurface.js";
+import {
+  getQueuedSteerSurfaceDesiredHeight,
+  getSteerInputSurfaceDesiredHeight,
+  hasQueuedSteer,
+  isSteerInputActive,
+} from "./steerSurface.js";
 
 export type OperatorConsoleRegionKind = OperatorConsoleSurface;
 
@@ -107,12 +113,12 @@ function createRegionDescriptors(
     });
   }
 
-  if (state.steer?.queued !== undefined) {
+  if (hasQueuedSteer(state.steer) && state.steer?.queued !== undefined) {
     descriptors.push({
       kind: "queuedSteer",
       priority: INTERACTIVE_OPTIONAL_PRIORITY,
       minHeight: 1,
-      desiredHeight: 2,
+      desiredHeight: getQueuedSteerSurfaceDesiredHeight(state.steer.queued),
     });
   }
 
@@ -129,7 +135,9 @@ function createRegionDescriptors(
     kind: "prompt",
     priority: PROMPT_PRIORITY,
     minHeight: 1,
-    desiredHeight: getPromptSurfaceDesiredHeight(state.prompt, terminal),
+    desiredHeight: isSteerInputActive(state.steer) && state.steer !== undefined
+      ? getSteerInputSurfaceDesiredHeight(state.steer)
+      : getPromptSurfaceDesiredHeight(state.prompt, terminal),
   });
 
   if (state.slash !== undefined) {

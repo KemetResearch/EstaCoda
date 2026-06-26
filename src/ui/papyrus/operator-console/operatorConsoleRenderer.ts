@@ -9,6 +9,11 @@ import { renderActiveWorkSurface } from "./activeWorkSurface.js";
 import { renderApprovalSurface } from "./approvalSurface.js";
 import { renderAttachmentSurface } from "./attachmentSurface.js";
 import { renderPromptSurface } from "./promptSurface.js";
+import {
+  isSteerInputActive,
+  renderQueuedSteerSurface,
+  renderSteerInputSurface,
+} from "./steerSurface.js";
 import { renderStatusRailSurface } from "./statusRailSurface.js";
 
 export type OperatorConsoleRenderedLine = {
@@ -36,6 +41,12 @@ function renderRegionLines(
 ): readonly OperatorConsoleRenderedLine[] {
   if (!region.visible || region.height <= 0 || region.width <= 0) return [];
   if (region.kind === "prompt") {
+    if (isSteerInputActive(state.steer) && state.steer !== undefined) {
+      return renderSteerInputSurface(state.steer, {
+        width: region.width,
+        height: region.height,
+      }).map((text) => ({ region: region.kind, text }));
+    }
     return renderPromptSurface(state.prompt, {
       width: region.width,
       height: region.height,
@@ -57,6 +68,12 @@ function renderRegionLines(
   }
   if (region.kind === "approvals") {
     return renderApprovalSurface(state.approvals, {
+      width: region.width,
+      height: region.height,
+    }).map((text) => ({ region: region.kind, text }));
+  }
+  if (region.kind === "queuedSteer" && state.steer?.queued !== undefined) {
+    return renderQueuedSteerSurface(state.steer.queued, {
       width: region.width,
       height: region.height,
     }).map((text) => ({ region: region.kind, text }));

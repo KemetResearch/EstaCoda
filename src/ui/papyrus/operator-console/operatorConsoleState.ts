@@ -111,10 +111,15 @@ export type SlashMenuState = {
 export type SteerState = {
   readonly draft: string;
   readonly cursorOffset: number;
-  readonly queued?: {
-    readonly text: string;
-    readonly submittedAtMs?: number;
-  };
+  readonly mode: "idle" | "drafting" | "queued";
+  readonly queued?: QueuedSteerState;
+};
+
+export type QueuedSteerState = {
+  readonly id: string;
+  readonly text: string;
+  readonly status: "queued" | "applied" | "cancelled";
+  readonly submittedAtMs?: number;
 };
 
 export type TerminalMetrics = {

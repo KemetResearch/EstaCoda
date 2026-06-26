@@ -55,17 +55,36 @@ describe("Papyrus operator console layout", () => {
     expect(regionKinds(layout)).toContain("approvals");
   });
 
-  it("includes queued steer only when queued steer state exists", () => {
+  it("includes queued steer only when queued steer state is active", () => {
     expect(regionKinds(createOperatorConsoleLayout(createState()))).not.toContain("queuedSteer");
 
     const layout = createOperatorConsoleLayout(createState({
       steer: {
         draft: "",
         cursorOffset: 0,
-        queued: { text: "focus on approvals" },
+        mode: "queued",
+        queued: {
+          id: "steer-1",
+          text: "focus on approvals",
+          status: "queued",
+        },
       },
     }));
     expect(regionKinds(layout)).toContain("queuedSteer");
+
+    const applied = createOperatorConsoleLayout(createState({
+      steer: {
+        draft: "",
+        cursorOffset: 0,
+        mode: "queued",
+        queued: {
+          id: "steer-1",
+          text: "focus on approvals",
+          status: "applied",
+        },
+      },
+    }));
+    expect(regionKinds(applied)).not.toContain("queuedSteer");
   });
 
   it("includes attachments only when attachments exist", () => {
@@ -197,7 +216,12 @@ function createFullState(): OperatorConsoleState {
     steer: {
       draft: "",
       cursorOffset: 0,
-      queued: { text: "focus on approvals" },
+      mode: "queued",
+      queued: {
+        id: "steer-1",
+        text: "focus on approvals",
+        status: "queued",
+      },
     },
     attachments: [pastedAttachment("paste-1")],
     slash: {

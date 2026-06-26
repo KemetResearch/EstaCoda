@@ -94,7 +94,7 @@ describe("Papyrus operator console renderer", () => {
     expect(output.every((line) => stringWidth(line) <= 72)).toBe(true);
   });
 
-  it("renders attachments above prompt and status rail", () => {
+  it("renders attachments above steer input and status rail", () => {
     const state = createFullState();
     const layout = createOperatorConsoleLayout(state, { width: 120, height: 20, isTty: true });
     const output = renderOperatorConsoleTextLines(state, layout);
@@ -106,7 +106,7 @@ describe("Papyrus operator console renderer", () => {
       output.findIndex((line) => line === "Attachments")
     );
     expect(output.findIndex((line) => line === "Attachments")).toBeLessThan(
-      output.findIndex((line) => line.includes("Prompt"))
+      output.findIndex((line) => line.includes("Steer current turn"))
     );
     expect(output.at(-1)).toContain("session 01:12");
     expect(output.every((line) => stringWidth(line) <= 120)).toBe(true);
@@ -189,19 +189,49 @@ describe("Papyrus operator console renderer", () => {
     expect(JSON.stringify(state)).toBe(before);
   });
 
-  it("places active work above attachments, prompt, and status rail when present", () => {
+  it("places active work above queued steer, attachments, steer input, and status rail when present", () => {
     const state = createFullState();
     const layout = createOperatorConsoleLayout(state, { width: 120, height: 20, isTty: true });
     const output = renderOperatorConsoleTextLines(state, layout);
     const activeWorkIndex = output.findIndex((line) => line.includes("Active work"));
+    const queuedSteerIndex = output.findIndex((line) => line.includes("Queued steer"));
     const attachmentsIndex = output.findIndex((line) => line === "Attachments");
-    const promptIndex = output.findIndex((line) => line.includes("Prompt"));
+    const steerInputIndex = output.findIndex((line) => line.includes("Steer current turn"));
     const statusIndex = output.findIndex((line) => line.includes("session 01:12"));
 
     expect(activeWorkIndex).toBeGreaterThanOrEqual(0);
+    expect(queuedSteerIndex).toBeGreaterThan(activeWorkIndex);
+    expect(queuedSteerIndex).toBeLessThan(attachmentsIndex);
     expect(activeWorkIndex).toBeLessThan(attachmentsIndex);
-    expect(activeWorkIndex).toBeLessThan(promptIndex);
+    expect(activeWorkIndex).toBeLessThan(steerInputIndex);
     expect(activeWorkIndex).toBeLessThan(statusIndex);
+  });
+
+  it("renders steer draft instead of prompt when steering is active", () => {
+    const state = createState({
+      steer: {
+        draft: "focus only on approval cards and pasted attachments",
+        cursorOffset: 51,
+        mode: "drafting",
+      },
+      status: {
+        model: { label: "kimi-k2.7-code", state: "working" },
+        context: { usedTokens: 18400, totalTokens: 262000, percent: 7 },
+        sessionTimer: { elapsedMs: 31_000 },
+      },
+    });
+    const output = renderOperatorConsoleTextLines(
+      state,
+      createOperatorConsoleLayout(state, { width: 72, height: 8, isTty: true })
+    );
+    const steerInputIndex = output.findIndex((line) => line.includes("Steer current turn"));
+    const statusIndex = output.findIndex((line) => line.includes("session 00:31"));
+
+    expect(steerInputIndex).toBeGreaterThanOrEqual(0);
+    expect(output).not.toContainEqual(expect.stringContaining("Prompt"));
+    expect(output).toContainEqual(expect.stringContaining("› focus only on approval cards"));
+    expect(statusIndex).toBeGreaterThan(steerInputIndex);
+    expect(output.every((line) => stringWidth(line) <= 72)).toBe(true);
   });
 
   it("does not reserve active work rows when active work is empty", () => {
@@ -236,7 +266,7 @@ describe("Papyrus operator console renderer", () => {
     const layout = createOperatorConsoleLayout(state, { width: 80, height: 2, isTty: true });
 
     expect(renderOperatorConsoleTextLines(state, layout)).toEqual([
-      "Prompt: tell EstaCoda what to do",
+      "Steer: >",
       "kimi-k2.7-code ● │ ctx [▰▱▱▱▱▱▱▱▱▱] 18.4k/262k 7% │ session 01:12",
     ]);
   });
@@ -247,7 +277,7 @@ describe("Papyrus operator console renderer", () => {
     const output = renderOperatorConsoleTextLines(state, layout);
 
     expect(output).toHaveLength(2);
-    expect(output[0]).toContain("Prompt:");
+    expect(output[0]).toContain("Steer:");
     expect(output[1]).toContain("session 01:12");
   });
 
@@ -257,12 +287,14 @@ describe("Papyrus operator console renderer", () => {
     const withoutOptional = createOperatorConsoleLayout(createState({
       prompt: state.prompt,
       status: state.status,
+      steer: state.steer,
     }), { width: 80, height: 2, isTty: true });
 
     expect(renderOperatorConsoleTextLines(state, constrained)).toEqual(
       renderOperatorConsoleTextLines(createState({
         prompt: state.prompt,
         status: state.status,
+        steer: state.steer,
       }), withoutOptional)
     );
   });
@@ -315,7 +347,12 @@ function createFullState(): OperatorConsoleState {
     steer: {
       draft: "",
       cursorOffset: 0,
-      queued: { text: "focus on approvals" },
+      mode: "queued",
+      queued: {
+        id: "steer-1",
+        text: "focus on approvals",
+        status: "queued",
+      },
     },
     attachments: [{
       id: "paste-1",

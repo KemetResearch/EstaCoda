@@ -76,6 +76,30 @@ describe("Papyrus operator console state model", () => {
     expect(isPromptFocused(next)).toBe(false);
   });
 
+  it("supports steer focus and queued steer state without runtime coupling", () => {
+    const focus = setFocus(createInitialFocusState(), { kind: "steer" });
+    const state = createInitialOperatorConsoleState({
+      steer: {
+        draft: "focus on approvals",
+        cursorOffset: 18,
+        mode: "queued",
+        queued: {
+          id: "steer-1",
+          text: "focus on approvals",
+          status: "queued",
+        },
+      },
+      focus,
+    });
+
+    expect(state.focus.target).toEqual({ kind: "steer" });
+    expect(state.steer?.queued).toEqual({
+      id: "steer-1",
+      text: "focus on approvals",
+      status: "queued",
+    });
+  });
+
   it("restores previous focus", () => {
     const attachment = setFocus(createInitialFocusState(), { kind: "attachment", attachmentId: "paste-1" });
     const restored = restorePreviousFocus(attachment);
