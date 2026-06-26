@@ -139,6 +139,12 @@ export function routeAttachmentKey(
 
   const focused = getFocusedAttachment(state);
   if (key.key === "enter") {
+    if (state.focus.target.kind !== "prompt" && focused === undefined) {
+      return {
+        state,
+        intent: { type: "none" },
+      };
+    }
     return {
       state,
       intent: focused === undefined

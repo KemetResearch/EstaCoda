@@ -95,6 +95,40 @@ describe("Papyrus operator console attachment surface", () => {
     expect(output.at(-1)).toBe("+4 more attachments · Enter open attachment tray");
   });
 
+  it("keeps overflow lines within terminal width", () => {
+    const output = renderAttachmentSurface(manyAttachments(7), { width: 40, height: 10 });
+
+    expect(output.at(-1)).toContain("+5 more attachments");
+    expect(output.every((line) => stringWidth(line) <= 40)).toBe(true);
+  });
+
+  it("truncates long pasted previews without rendering full content", () => {
+    const attachment = createPastedTextAttachment({
+      id: "paste-long",
+      content: "FULL_PAYLOAD ".repeat(20),
+      preview: "This preview is intentionally much longer than a narrow attachment card can show",
+    });
+    const output = renderAttachmentSurface([attachment], { width: 36 });
+    const text = output.join("\n");
+
+    expect(output.every((line) => stringWidth(line) <= 36)).toBe(true);
+    expect(text).toContain("This preview is");
+    expect(text).not.toContain("FULL_PAYLOAD");
+    expect(text).toContain(`${attachment.content.length} chars`);
+  });
+
+  it("truncates long file paths safely", () => {
+    const output = renderAttachmentSurface([
+      fileAttachment("file-long", "src/runtime/deeply/nested/provider-turn-loop-with-a-very-long-name.ts", 184),
+    ], { width: 40 });
+    const text = output.join("\n");
+
+    expect(output.every((line) => stringWidth(line) <= 40)).toBe(true);
+    expect(text).toContain("src/runtime/deeply");
+    expect(text).not.toContain("provider-turn-loop-with-a-very-long-name.ts");
+    expect(text).toContain("184 lines");
+  });
+
   it("moves focus from prompt to attachments and back", () => {
     const state = createState({ attachments: sampleAttachments() });
     const first = focusNextAttachment(state);
@@ -127,6 +161,39 @@ describe("Papyrus operator console attachment surface", () => {
     expect(prompt.state.focus.target).toEqual({ kind: "prompt" });
   });
 
+  it("handles empty attachment arrays safely while routing focus", () => {
+    const state = createState({ attachments: [] });
+
+    expect(focusNextAttachment(state)).toBe(state);
+    expect(focusPreviousAttachment(state)).toBe(state);
+    expect(routeAttachmentKey(state, { type: "key", key: "tab" })).toEqual({
+      state,
+      intent: { type: "none" },
+    });
+  });
+
+  it("keeps focus routing stable after a focused attachment is removed", () => {
+    const state = createState({
+      attachments: sampleAttachments(),
+      focus: {
+        target: { kind: "attachment", attachmentId: "file-1" },
+      },
+    });
+    const removedFocusedAttachment = {
+      ...state,
+      attachments: state.attachments.filter((attachment) => attachment.id !== "file-1"),
+    };
+
+    expect(getFocusedAttachment(removedFocusedAttachment)).toBeUndefined();
+    expect(routeAttachmentKey(removedFocusedAttachment, { type: "key", key: "enter" }).intent).toEqual({
+      type: "none",
+    });
+    expect(routeAttachmentKey(removedFocusedAttachment, { type: "key", key: "tab" }).state.focus.target).toEqual({
+      kind: "attachment",
+      attachmentId: "paste-1",
+    });
+  });
+
   it("submits prompt with Enter when prompt is focused", () => {
     const result = routeAttachmentKey(createState({ attachments: sampleAttachments() }), { type: "key", key: "enter" });
 
@@ -146,6 +213,29 @@ describe("Papyrus operator console attachment surface", () => {
     const result = routeAttachmentKey(state, { type: "key", key: "escape" });
 
     expect(result.intent).toEqual({ type: "remove", attachmentId: "paste-1" });
+  });
+
+  it("does not remove anything with Escape when prompt is focused", () => {
+    const state = createState({ attachments: sampleAttachments() });
+    const result = routeAttachmentKey(state, { type: "key", key: "escape" });
+
+    expect(result.intent).toEqual({ type: "none" });
+    expect(result.state).toBe(state);
+  });
+
+  it("returns preview and remove intents without side effects", () => {
+    const state = focusNextAttachment(createState({ attachments: sampleAttachments() }));
+    const before = JSON.stringify(state);
+
+    expect(routeAttachmentKey(state, { type: "key", key: "enter" }).intent).toEqual({
+      type: "openPreview",
+      attachmentId: "paste-1",
+    });
+    expect(routeAttachmentKey(state, { type: "key", key: "escape" }).intent).toEqual({
+      type: "remove",
+      attachmentId: "paste-1",
+    });
+    expect(JSON.stringify(state)).toBe(before);
   });
 
   it("formats submitted transcript attachment references without full payloads", () => {
@@ -168,6 +258,23 @@ describe("Papyrus operator console attachment surface", () => {
       "- file excerpt · src/cli/session-loop.ts · 184 lines",
     ].join("\n"));
     expect(transcript).not.toContain("SECRET full pasted payload");
+  });
+
+  it("formats collapsed transcript references with pasted counts and file metadata", () => {
+    const transcript = formatSubmittedPromptWithAttachmentReferences(
+      "summarize this and turn it into a regression test",
+      [
+        pastedAttachment("paste-1", { preview: "MVP known issue...", chars: 2_481 }),
+        fileAttachment("file-1", "src/cli/session-loop.ts", 184),
+      ]
+    );
+
+    expect(transcript).toBe([
+      "summarize this and turn it into a regression test",
+      "Attachments:",
+      "- pasted text · 2,481 chars",
+      "- file excerpt · src/cli/session-loop.ts · 184 lines",
+    ].join("\n"));
   });
 
   it("emits no ANSI escape sequences or cursor-control strings", () => {

@@ -15,6 +15,13 @@ describe("Papyrus operator console renderer", () => {
     expect(renderOperatorConsoleTextLines(state, layout)).toEqual(renderOperatorConsoleTextLines(state, layout));
   });
 
+  it("returns deterministic output for attachment renders", () => {
+    const state = createFullState();
+    const layout = createOperatorConsoleLayout(state, { width: 120, height: 20, isTty: true });
+
+    expect(renderOperatorConsoleTextLines(state, layout)).toEqual(renderOperatorConsoleTextLines(state, layout));
+  });
+
   it("emits no ANSI escape sequences", () => {
     const output = renderOperatorConsoleTextLines(
       createFullState(),
