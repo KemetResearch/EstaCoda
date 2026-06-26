@@ -11,6 +11,8 @@ export type PromptSurfaceMetrics = {
   readonly logicalRows: number;
   readonly visibleRows: number;
   readonly overflow: boolean;
+  readonly scrollOffset: number;
+  readonly cursorRow: number;
 };
 
 export const PREFERRED_PROMPT_INPUT_ROWS = 8;
@@ -43,7 +45,8 @@ export function renderPromptSurface(
   const inputRows = Math.max(1, height - 2);
   const logicalRows = getPromptLogicalRows(state);
   const overflow = logicalRows.length > inputRows;
-  const visibleRows = getVisiblePromptRows(logicalRows, state.scrollOffset, inputRows, overflow);
+  const scrollOffset = getCursorVisibleScrollOffset(state, logicalRows.length, inputRows, overflow);
+  const visibleRows = getVisiblePromptRows(logicalRows, scrollOffset, inputRows, overflow);
   const title = state.multiline || logicalRows.length > 1 ? "Prompt · multiline" : "Prompt";
 
   return [
@@ -62,10 +65,13 @@ export function getPromptSurfaceMetrics(
   }));
   const logicalRows = getPromptLogicalRows(state).length;
   const visibleRows = Math.max(1, Math.max(0, height - 2));
+  const overflow = logicalRows > visibleRows;
   return {
     logicalRows,
     visibleRows: Math.min(logicalRows, visibleRows),
-    overflow: logicalRows > visibleRows,
+    overflow,
+    scrollOffset: getCursorVisibleScrollOffset(state, logicalRows, visibleRows, overflow),
+    cursorRow: getPromptCursorRow(state),
   };
 }
 
@@ -93,6 +99,31 @@ function getVisiblePromptRows(
     ...visible,
     `${logicalRows.length} lines · ↑↓ scroll within prompt`,
   ], inputRows);
+}
+
+function getCursorVisibleScrollOffset(
+  state: PromptSurfaceState,
+  logicalRowCount: number,
+  inputRows: number,
+  overflow: boolean
+): number {
+  if (!overflow) return clampInteger(state.scrollOffset, 0, Math.max(0, logicalRowCount - inputRows));
+
+  const indicatorRows = 1;
+  const contentRows = Math.max(1, inputRows - indicatorRows);
+  const maxOffset = Math.max(0, logicalRowCount - contentRows);
+  const cursorRow = clampInteger(getPromptCursorRow(state), 0, Math.max(0, logicalRowCount - 1));
+  const scrollOffset = clampInteger(state.scrollOffset, 0, maxOffset);
+
+  if (cursorRow < scrollOffset) return cursorRow;
+  if (cursorRow >= scrollOffset + contentRows) return Math.min(maxOffset, cursorRow - contentRows + 1);
+  return scrollOffset;
+}
+
+function getPromptCursorRow(state: PromptSurfaceState): number {
+  if (state.value.length === 0) return 0;
+  const cursor = clampInteger(state.cursorOffset, 0, state.value.length);
+  return state.value.slice(0, cursor).split(/\r\n|\n|\r/u).length - 1;
 }
 
 function padRows(rows: readonly string[], count: number): readonly string[] {

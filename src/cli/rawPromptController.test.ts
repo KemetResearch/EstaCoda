@@ -214,6 +214,12 @@ describe("raw prompt controller", () => {
     expect(await read.pending).toEqual({ type: "submit", text: "hello\nworld" });
   });
 
+  it("submits an existing multiline buffer once with normal Enter", async () => {
+    const { result } = await readWithFakeInput("one\x1b\rtwo\x1b\rthree\r");
+
+    expect(result).toEqual({ type: "submit", text: "one\ntwo\nthree" });
+  });
+
   it("keeps Alt+Enter newline insertion editable before submit", async () => {
     const { result } = await readWithFakeInput("abcd\x1b[D\x1b[D\x1b\ref\r");
 

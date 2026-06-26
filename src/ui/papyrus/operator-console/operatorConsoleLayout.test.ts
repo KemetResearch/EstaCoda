@@ -110,6 +110,36 @@ describe("Papyrus operator console layout", () => {
     expect(region(layout, "prompt")?.height).toBe(6);
   });
 
+  it("caps multiline prompt allocation at 8 input rows plus border", () => {
+    const value = numberedLines(14);
+    const layout = createOperatorConsoleLayout(createState({
+      prompt: {
+        value,
+        cursorOffset: value.length,
+        multiline: true,
+        scrollOffset: 0,
+        mode: "prompt",
+      },
+    }), { width: 80, height: 80, isTty: true });
+
+    expect(region(layout, "prompt")?.height).toBe(10);
+  });
+
+  it("caps multiline prompt allocation at 30 percent of terminal height when constrained", () => {
+    const value = numberedLines(14);
+    const layout = createOperatorConsoleLayout(createState({
+      prompt: {
+        value,
+        cursorOffset: value.length,
+        multiline: true,
+        scrollOffset: 0,
+        mode: "prompt",
+      },
+    }), { width: 80, height: 20, isTty: true });
+
+    expect(region(layout, "prompt")?.height).toBe(6);
+  });
+
   it("hides optional regions before prompt and status rail under constrained height", () => {
     const layout = createOperatorConsoleLayout(createFullState(), { width: 60, height: 2, isTty: true });
 
@@ -185,4 +215,8 @@ function visibleRegionKinds(layout: OperatorConsoleLayout): readonly OperatorCon
 
 function region(layout: OperatorConsoleLayout, kind: OperatorConsoleRegion["kind"]): OperatorConsoleRegion | undefined {
   return layout.regions.find((item) => item.kind === kind);
+}
+
+function numberedLines(count: number): string {
+  return Array.from({ length: count }, (_, index) => `line ${index + 1}`).join("\n");
 }

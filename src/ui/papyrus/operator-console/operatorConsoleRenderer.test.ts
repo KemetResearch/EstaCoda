@@ -57,6 +57,36 @@ describe("Papyrus operator console renderer", () => {
     expect(output[3]).toBe("model pending ○ │ ctx [▱▱▱▱▱▱▱▱▱▱] 0 0% │ session 00:00");
   });
 
+  it("renders multiline prompt expansion with status rail below", () => {
+    const state = createState({
+      prompt: {
+        value: [
+          "write a migration plan for:",
+          "- approval cards",
+          "- pasted attachments",
+          "- tool activity",
+        ].join("\n"),
+        cursorOffset: "write a migration plan for:\n- approval cards\n- pasted attachments\n- tool activity".length,
+        multiline: true,
+        scrollOffset: 0,
+        mode: "prompt",
+      },
+      status: {
+        model: { label: "kimi-k2.7-code", state: "working" },
+        context: { usedTokens: 18400, totalTokens: 262000, percent: 7 },
+        sessionTimer: { elapsedMs: 72_000 },
+      },
+    });
+    const layout = createOperatorConsoleLayout(state, { width: 72, height: 20, isTty: true });
+
+    const output = renderOperatorConsoleTextLines(state, layout);
+    expect(output[0]).toContain("Prompt · multiline");
+    expect(output).toContainEqual(expect.stringContaining("› write a migration plan for:"));
+    expect(output).toContainEqual(expect.stringContaining("  - approval cards"));
+    expect(output.at(-1)).toBe("kimi-k2.7-code ● │ ctx [▰▱▱▱▱▱▱▱▱▱] 18.4k/262k 7% │ session 01:12");
+    expect(output.every((line) => stringWidth(line) <= 72)).toBe(true);
+  });
+
   it("keeps rendered line widths within the terminal width", () => {
     const state = createFullState();
     const layout = createOperatorConsoleLayout(state, { width: 20, height: 20, isTty: true });

@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 import { stringWidth } from "../screen/stringWidth.js";
 import {
   createDefaultPromptSurfaceState,
+  getPromptSurfaceDesiredHeight,
+  getPromptSurfaceMetrics,
   renderPromptSurface,
   type PromptSurfaceState,
 } from "./index.js";
@@ -52,6 +54,28 @@ describe("Papyrus operator console prompt surface", () => {
     expect(output[3]).toContain("  - pasted attachments");
   });
 
+  it("caps prompt expansion at the preferred maximum of 8 input rows", () => {
+    const state = prompt({
+      multiline: true,
+      value: numberedLines(12),
+      cursorOffset: numberedLines(12).length,
+    });
+
+    expect(getPromptSurfaceDesiredHeight(state, { height: 80 })).toBe(10);
+    expect(renderPromptSurface(state, { width: 72, terminalHeight: 80 })).toHaveLength(10);
+  });
+
+  it("caps prompt expansion at 30 percent of terminal height when smaller than the preferred maximum", () => {
+    const state = prompt({
+      multiline: true,
+      value: numberedLines(12),
+      cursorOffset: numberedLines(12).length,
+    });
+
+    expect(getPromptSurfaceDesiredHeight(state, { height: 20 })).toBe(6);
+    expect(renderPromptSurface(state, { width: 72, terminalHeight: 20 })).toHaveLength(6);
+  });
+
   it("renders an internal scroll indicator for long multiline prompts", () => {
     const output = renderPromptSurface(prompt({
       multiline: true,
@@ -73,6 +97,51 @@ describe("Papyrus operator console prompt surface", () => {
 
     expect(output).toHaveLength(10);
     expect(output.at(-2)).toContain("12 lines · ↑↓ scroll within prompt");
+  });
+
+  it("keeps the cursor row visible when newline insertion pushes content beyond visible rows", () => {
+    const value = numberedLines(9);
+    const output = renderPromptSurface(prompt({
+      multiline: true,
+      value,
+      cursorOffset: value.length,
+      scrollOffset: 0,
+    }), { width: 72, height: 6 });
+
+    expect(output.join("\n")).not.toContain("› line 1");
+    expect(output.join("\n")).toContain("line 7");
+    expect(output.join("\n")).toContain("line 9");
+    expect(output.at(-2)).toContain("9 lines · ↑↓ scroll within prompt");
+  });
+
+  it("keeps the cursor row visible after resize to a shorter terminal height", () => {
+    const value = numberedLines(8);
+    const state = prompt({
+      multiline: true,
+      value,
+      cursorOffset: value.length,
+      scrollOffset: 0,
+    });
+    const output = renderPromptSurface(state, { width: 72, height: 5 });
+    const metrics = getPromptSurfaceMetrics(state, { width: 72, height: 5 });
+
+    expect(metrics.scrollOffset).toBe(6);
+    expect(metrics.cursorRow).toBe(7);
+    expect(output.join("\n")).toContain("line 7");
+    expect(output.join("\n")).toContain("line 8");
+  });
+
+  it("keeps the cursor row visible after resize to a narrower terminal width", () => {
+    const value = numberedLines(8);
+    const output = renderPromptSurface(prompt({
+      multiline: true,
+      value,
+      cursorOffset: value.length,
+      scrollOffset: 0,
+    }), { width: 24, height: 5 });
+
+    expect(output.every((line) => stringWidth(line) <= 24)).toBe(true);
+    expect(output.join("\n")).toContain("line 8");
   });
 
   it("keeps prompt render widths within the terminal width", () => {
@@ -113,4 +182,8 @@ function prompt(input: Partial<PromptSurfaceState>): PromptSurfaceState {
     ...createDefaultPromptSurfaceState(),
     ...input,
   };
+}
+
+function numberedLines(count: number): string {
+  return Array.from({ length: count }, (_, index) => `line ${index + 1}`).join("\n");
 }
