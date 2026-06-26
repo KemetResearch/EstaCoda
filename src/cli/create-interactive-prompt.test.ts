@@ -22,6 +22,27 @@ describe("createInteractivePrompt", () => {
     expect(createPapyrus).toHaveBeenCalledOnce();
   });
 
+  it("keeps non-TTY prompt construction on the Papyrus prompt seam", async () => {
+    const input = { isTTY: false } as NodeJS.ReadStream;
+    const output = { isTTY: false, write: vi.fn() } as unknown as NodeJS.WriteStream;
+    const papyrusPrompt = fakePrompt("plain");
+    const createPapyrus = vi.fn(() => papyrusPrompt);
+
+    const prompt = createInteractivePrompt({
+      input,
+      output,
+      createPapyrus,
+    });
+
+    await expect(prompt("> ")).resolves.toBe("plain");
+    expect(createPapyrus).toHaveBeenCalledWith({
+      input,
+      output,
+      env: undefined,
+      uiContext: undefined,
+    });
+  });
+
   it("keeps removed input mode fallback flags on the Papyrus prompt path", async () => {
     const createPapyrus = vi.fn(() => fakePrompt("papyrus"));
 

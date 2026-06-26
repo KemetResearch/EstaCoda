@@ -72,8 +72,8 @@ function makeTtyInput(): NodeJS.ReadStream & {
     input.rawModes.push(mode);
     return input;
   };
-  input.press = (chunk, key = {}) => {
-    input.emit("keypress", chunk, key);
+  input.press = (chunk) => {
+    input.emit("data", chunk);
   };
   return input;
 }
@@ -2248,13 +2248,13 @@ describe("runSessionLoop — active turn spinner", () => {
     while (resolvePrompt === undefined) {
       await new Promise((resolve) => setTimeout(resolve, 0));
     }
-    expect(input.listenerCount("keypress")).toBe(0);
+    expect(input.listenerCount("data")).toBe(0);
     resolvePrompt("hello");
     await handleStartedPromise;
-    expect(input.listenerCount("keypress")).toBe(1);
+    expect(input.listenerCount("data")).toBe(1);
     releaseTurn?.();
     await loop;
-    expect(input.listenerCount("keypress")).toBe(0);
+    expect(input.listenerCount("data")).toBe(0);
     expect(input.rawModes).toEqual([true, false]);
   });
 
@@ -2860,7 +2860,7 @@ describe("runSessionLoop — active turn spinner", () => {
     input.press("/steerx", { name: "text", sequence: "/steerx" });
     expect(stripAnsi(outputChunks.join(""))).toContain("⌘ active command: /steerx");
     expect(stripAnsi(outputChunks.join(""))).not.toContain("↯ Steer: /steerx");
-    input.press("", { name: "escape" });
+    input.press("\x1b", { name: "escape" });
     const afterEscapeIndex = outputChunks.length;
     input.press("/interrupt now", { name: "text", sequence: "/interrupt now" });
     const afterInterruptNow = stripAnsi(outputChunks.slice(afterEscapeIndex).join(""));
@@ -2919,7 +2919,7 @@ describe("runSessionLoop — active turn spinner", () => {
       input.press(char, { name: char, sequence: char });
     }
     expect(stripAnsi(outputChunks.join(""))).toContain("x Interrupt");
-    input.press("", { name: "escape" });
+    input.press("\x1b", { name: "escape" });
     const afterEscapeIndex = outputChunks.length;
     for (const char of "queued follow up") {
       input.press(char, { name: char, sequence: char });
