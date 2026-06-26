@@ -1,0 +1,173 @@
+import { readdirSync, readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
+import { describe, expect, it } from "vitest";
+import * as operatorConsole from "./index.js";
+import {
+  APPROVAL_FOCUS_CONTROLS,
+  createApprovalFocusTarget,
+  createDefaultStatusRailState,
+  createInitialFocusState,
+  createInitialOperatorConsoleState,
+  getOperatorConsoleSurfaceOrder,
+  isApprovalFocusControl,
+  isPromptFocused,
+  restorePreviousFocus,
+  setFocus,
+  type OperatorConsoleEvent,
+} from "./index.js";
+
+const thisDir = dirname(fileURLToPath(import.meta.url));
+
+describe("Papyrus operator console state model", () => {
+  it("creates initial state with prompt focus", () => {
+    const state = createInitialOperatorConsoleState();
+
+    expect(state.focus).toEqual({ target: { kind: "prompt" } });
+    expect(isPromptFocused(state.focus)).toBe(true);
+  });
+
+  it("keeps the canonical surface order stable", () => {
+    expect(getOperatorConsoleSurfaceOrder()).toEqual([
+      "transcript",
+      "activeWork",
+      "queuedSteer",
+      "attachments",
+      "prompt",
+      "slashMenu",
+      "statusRail",
+    ]);
+  });
+
+  it("keeps status rail state limited to model, context, and session timer", () => {
+    const status = createDefaultStatusRailState();
+
+    expect(Object.keys(status)).toEqual(["model", "context", "sessionTimer"]);
+    expect(status).toEqual({
+      model: {
+        label: "",
+        state: "idle",
+      },
+      context: {
+        usedTokens: 0,
+      },
+      sessionTimer: {
+        elapsedMs: 0,
+      },
+    });
+    expect(status).not.toHaveProperty("tools");
+    expect(status).not.toHaveProperty("approvals");
+    expect(status).not.toHaveProperty("attachments");
+    expect(status).not.toHaveProperty("steering");
+    expect(status).not.toHaveProperty("workspace");
+    expect(status).not.toHaveProperty("trust");
+    expect(status).not.toHaveProperty("setup");
+    expect(status).not.toHaveProperty("channels");
+  });
+
+  it("moves focus from prompt to attachment while preserving previous focus", () => {
+    const focus = createInitialFocusState();
+    const next = setFocus(focus, { kind: "attachment", attachmentId: "paste-1" });
+
+    expect(next).toEqual({
+      target: { kind: "attachment", attachmentId: "paste-1" },
+      previous: { kind: "prompt" },
+    });
+    expect(isPromptFocused(next)).toBe(false);
+  });
+
+  it("restores previous focus", () => {
+    const attachment = setFocus(createInitialFocusState(), { kind: "attachment", attachmentId: "paste-1" });
+    const restored = restorePreviousFocus(attachment);
+
+    expect(restored).toEqual({
+      target: { kind: "prompt" },
+      previous: { kind: "attachment", attachmentId: "paste-1" },
+    });
+  });
+
+  it("limits approval focus controls to approve, reject, and inspect", () => {
+    expect(APPROVAL_FOCUS_CONTROLS).toEqual(["approve", "reject", "inspect"]);
+    expect(isApprovalFocusControl("approve")).toBe(true);
+    expect(isApprovalFocusControl("reject")).toBe(true);
+    expect(isApprovalFocusControl("inspect")).toBe(true);
+    expect(isApprovalFocusControl("always")).toBe(false);
+    expect(isApprovalFocusControl("feedback")).toBe(false);
+    expect(createApprovalFocusTarget("approval-1", "inspect")).toEqual({
+      kind: "approval",
+      approvalId: "approval-1",
+      control: "inspect",
+    });
+    expect(() => createApprovalFocusTarget("approval-1", "always" as never)).toThrow(
+      "Unsupported approval focus control: always"
+    );
+  });
+
+  it("constructs operator console events without terminal dependencies", () => {
+    const status = createDefaultStatusRailState();
+    const events: readonly OperatorConsoleEvent[] = [
+      { type: "key", key: { type: "key", key: "enter" } },
+      { type: "paste", text: "line one\nline two" },
+      { type: "resize", width: 100, height: 30 },
+      {
+        type: "toolEvent",
+        event: {
+          id: "tool-1",
+          label: "read_file",
+          state: "running",
+        },
+      },
+      {
+        type: "approvalRequested",
+        request: {
+          id: "approval-1",
+          title: "Approval required",
+          action: "write file",
+        },
+      },
+      { type: "turnStarted" },
+      { type: "turnCompleted" },
+      { type: "statusChanged", status },
+    ];
+
+    expect(events.map((event) => event.type)).toEqual([
+      "key",
+      "paste",
+      "resize",
+      "toolEvent",
+      "approvalRequested",
+      "turnStarted",
+      "turnCompleted",
+      "statusChanged",
+    ]);
+  });
+
+  it("starts with inert optional surface state", () => {
+    const state = createInitialOperatorConsoleState();
+
+    expect(state.attachments).toEqual([]);
+    expect(state.activeWork).toEqual({
+      events: [],
+      scrollOffset: 0,
+      expanded: false,
+    });
+    expect(state.approvals).toEqual([]);
+    expect(state.slash).toBeUndefined();
+    expect(state.steer).toBeUndefined();
+  });
+
+  it("does not introduce rendering exports or ANSI strings in the model layer", () => {
+    expect(Object.keys(operatorConsole).filter((name) => /render|layout/i.test(name))).toEqual([]);
+
+    const sourceFiles = readdirSync(thisDir)
+      .filter((file) => file.endsWith(".ts") && !file.endsWith(".test.ts"));
+    const source = sourceFiles
+      .map((file) => readFileSync(join(thisDir, file), "utf8"))
+      .join("\n");
+
+    expect(source).not.toContain("\\x1b");
+    expect(source).not.toContain("\\u001b");
+    expect(source).not.toContain("\\033");
+    expect(source).not.toContain("\u001b");
+  });
+});
