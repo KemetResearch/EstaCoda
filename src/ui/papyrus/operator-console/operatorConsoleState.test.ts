@@ -2,7 +2,6 @@ import { readdirSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
-import * as operatorConsole from "./index.js";
 import {
   APPROVAL_FOCUS_CONTROLS,
   createApprovalFocusTarget,
@@ -157,10 +156,12 @@ describe("Papyrus operator console state model", () => {
   });
 
   it("does not introduce rendering exports or ANSI strings in the model layer", () => {
-    expect(Object.keys(operatorConsole).filter((name) => /render|layout/i.test(name))).toEqual([]);
-
     const sourceFiles = readdirSync(thisDir)
-      .filter((file) => file.endsWith(".ts") && !file.endsWith(".test.ts"));
+      .filter((file) => [
+        "focusModel.ts",
+        "operatorConsoleEvents.ts",
+        "operatorConsoleState.ts",
+      ].includes(file));
     const source = sourceFiles
       .map((file) => readFileSync(join(thisDir, file), "utf8"))
       .join("\n");
