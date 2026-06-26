@@ -2,7 +2,7 @@ import { EventEmitter } from "node:events";
 import { describe, expect, it, vi } from "vitest";
 import { GHOST_TEXT_ENV_VAR } from "./ghost-text-mode.js";
 import { INPUT_KEYMAP_MODE_ENV_VAR } from "./input-keymap-mode.js";
-import { createPapyrusPrompt } from "./papyrus-prompt.js";
+import { createPapyrusPrompt, createPapyrusSecretPrompt } from "./papyrus-prompt.js";
 import {
   createRawPrompt,
   type RawPromptControllerOptions,
@@ -109,28 +109,74 @@ describe("createPapyrusPrompt", () => {
     await expect(pending).resolves.toBe("y");
   });
 
-  it("routes secret input through the no-echo legacy secret path without paste previews", async () => {
+  it("routes secret input through the Papyrus-native no-echo path without paste previews", async () => {
     const input = new FakeInput();
     const output = fakeOutput();
-    const secret = fakeSecretPrompt("top-secret");
     const pastePreview = vi.fn();
+    const onInputChange = vi.fn();
     const prompt = createPapyrusPrompt({
       input,
       output,
       createRaw: () => Object.assign(vi.fn(async () => "raw"), { close: vi.fn() }),
-      createSecretPrompt: () => secret.prompt,
     });
 
-    await expect(prompt("Secret: ", {
+    const pending = prompt("Secret: ", {
       secret: true,
       onPastePreview: pastePreview,
-      onInputChange: vi.fn(),
+      onInputChange,
       onRowsChange: vi.fn(),
-    })).resolves.toBe("top-secret");
+    });
+    input.send("\x1b[200~top-secret\x1b[201~");
+    input.send("\r");
 
-    expect(secret.calls).toEqual([{ question: "Secret: ", options: { secret: true } }]);
+    await expect(pending).resolves.toBe("top-secret");
     expect(pastePreview).not.toHaveBeenCalled();
+    expect(onInputChange).not.toHaveBeenCalled();
     expect(output.writes.join("")).not.toContain("top-secret");
+    expect(output.writes.join("")).toContain("**********");
+  });
+
+  it("clears Papyrus-native secret input on cancel", async () => {
+    const input = new FakeInput();
+    const output = fakeOutput();
+    const prompt = createPapyrusPrompt({
+      input,
+      output,
+      createRaw: () => Object.assign(vi.fn(async () => "raw"), { close: vi.fn() }),
+    });
+
+    const canceled = prompt("Secret: ", { secret: true });
+    input.send("cancel-secret");
+    input.send("\x1b");
+
+    await expect(canceled).resolves.toBe("/exit");
+    expect(output.writes.join("")).not.toContain("cancel-secret");
+
+    const submitted = prompt("Secret: ", { secret: true });
+    input.send("\r");
+    await expect(submitted).resolves.toBe("");
+  });
+
+  it("runs Papyrus-native secret cleanup when startup errors", async () => {
+    const input = new FakeInput();
+    const output = fakeOutput();
+    const error = new Error("secret start failed");
+    const lifecycle = fakeLifecycle({
+      start: vi.fn(() => {
+        lifecycle.calls.push("start");
+        throw error;
+      }),
+    });
+    const prompt = createPapyrusPrompt({
+      input,
+      output,
+      createRaw: () => Object.assign(vi.fn(async () => "raw"), { close: vi.fn() }),
+      createSecretPrompt: (options) => createPapyrusSecretPrompt({ ...options, lifecycle: lifecycle.lifecycle }),
+    });
+
+    await expect(prompt("Secret: ", { secret: true })).rejects.toThrow("secret start failed");
+    expect(lifecycle.calls).toEqual(["start", "stop"]);
+    expect(output.writes.join("")).not.toContain("secret");
   });
 
   it("passes input and row callbacks to the raw prompt path", async () => {
@@ -311,8 +357,8 @@ describe("createPapyrusPrompt", () => {
     });
 
     expect(prompt.uiContext).toEqual(uiContext);
-    expect(prompt.select).toBe(secret.prompt.select);
-    expect(prompt.onboardingCard).toBe(secret.prompt.onboardingCard);
+    expect(prompt.select).toEqual(expect.any(Function));
+    expect(prompt.onboardingCard).toEqual(expect.any(Function));
 
     prompt.close?.();
     expect(rawClose).toHaveBeenCalledOnce();
