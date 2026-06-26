@@ -122,7 +122,7 @@ else:
 
 ## 2. Environment Fallback QA
 
-### 2.1 Papyrus Default Rollout Matrix
+### 2.1 Papyrus Full Interactive Migration Matrix
 
 Run these checks in a real interactive TTY after changing session rendering,
 prompt input, slash autocomplete, approvals, paste handling, resize behavior, or
@@ -134,7 +134,7 @@ terminal lifecycle cleanup.
 | Removed renderer flag | `ESTACODA_UI_RENDERER=legacy estacoda` | The flag is ignored. Session output still uses the Papyrus renderer/bottom-chrome path. |
 | Removed input flag | `ESTACODA_INPUT_MODE=readline estacoda` | The flag is ignored for interactive sessions. The prompt still uses the raw Papyrus input path. |
 | Slash autocomplete | `estacoda` then type `/` | The Papyrus slash autocomplete overlay appears in the raw prompt. Arrow keys and `Ctrl-N`/`Ctrl-P` move focus. `Escape` dismisses the overlay without cancelling the prompt. |
-| Approval ask | `estacoda` then run a prompt that triggers a command or file approval | Promptable approvals render as Papyrus approval cards. `ESTACODA_APPROVAL_WIDGETS=legacy estacoda` uses the plain text approval prompt. Hardline/policy-denied actions do not render approval cards. |
+| Approval ask | `estacoda` then run a prompt that triggers a command or file approval | Promptable approvals render as Papyrus approval cards. Hardline/policy-denied actions do not render approval cards. |
 | Paste | `estacoda` then paste single-line and multiline text | Small single-line paste remains inline. Multiline/large paste uses the existing compact paste reference behavior and submits the original pasted content. |
 | Resize | `estacoda` then resize narrower and wider while idle, during slash autocomplete, and during active-turn chrome | Prompt rows, slash overlay rows, and bottom chrome reflow without full-screen clear, scrollback clear, or overlapping text. Focused slash rows remain visible. |
 | Cancel/EOF | `estacoda`, then press `Ctrl-C`; relaunch and press `Ctrl-D` on an empty prompt | `Ctrl-C` cancels/cleans up the raw prompt. `Ctrl-D` exits cleanly from an empty prompt. Terminal raw mode is restored after each exit path. |
@@ -147,13 +147,6 @@ ESTACODA_UI_RENDERER=legacy estacoda
 ESTACODA_INPUT_MODE=readline estacoda
 ```
 
-The plain approval prompt fallback remains temporary until its later PR6B
-cleanup:
-
-```bash
-ESTACODA_APPROVAL_WIDGETS=legacy estacoda
-```
-
 Optional Papyrus helpers remain disabled unless explicitly configured:
 
 ```bash
@@ -163,6 +156,21 @@ ESTACODA_CLIPBOARD=1 estacoda
 ESTACODA_MCP_SUGGESTIONS=1 estacoda
 ESTACODA_SKILL_SUGGESTIONS=1 estacoda
 ```
+
+No Slack suggestion provider is enabled by default.
+
+### 2.1.1 Terminal Recovery
+
+Use these recovery steps if a local terminal is left in an odd state after a
+crash, forced kill, or interrupted manual test:
+
+| Symptom | Recovery |
+|---------|----------|
+| Screen contains stale cursor control output or prompt rows | Run `reset`, then relaunch `estacoda`. |
+| Input is not echoing, line editing is broken, or raw mode appears stuck | Run `stty sane`, then press `Enter`. |
+| Cursor remains hidden | Run `printf '\033[?25h\n'` or `reset`. |
+| Bracketed paste mode appears stuck | Run `printf '\033[?2004l\n'`, then `stty sane`. |
+| Prompt does not echo after `Ctrl-C`/`Ctrl-D` testing | Run `stty sane`; if needed, close and reopen the terminal tab. |
 
 ### 2.2 NO_COLOR=1
 
@@ -825,12 +833,6 @@ ESTACODA_UI_RENDERER=legacy estacoda setup --interactive
 ESTACODA_INPUT_MODE=readline estacoda setup --interactive
 ```
 
-The approval fallback remains available until its later PR6B cleanup:
-
-```bash
-ESTACODA_APPROVAL_WIDGETS=legacy estacoda
-```
-
 Optional Papyrus helpers remain opt-in during this migration:
 
 ```bash
@@ -840,6 +842,8 @@ ESTACODA_CLIPBOARD=1 estacoda
 ESTACODA_MCP_SUGGESTIONS=1 estacoda
 ESTACODA_SKILL_SUGGESTIONS=1 estacoda
 ```
+
+No Slack suggestion provider is enabled by default.
 
 ---
 
