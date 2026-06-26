@@ -112,6 +112,60 @@ describe("Papyrus operator console renderer", () => {
     expect(output.every((line) => stringWidth(line) <= 120)).toBe(true);
   });
 
+  it("renders approval cards above active work, attachments, prompt, and status rail", () => {
+    const state = createState({
+      approvals: [{
+        id: "approval-1",
+        status: "pending",
+        action: "write file",
+        target: "src/runtime/provider-turn-loop.ts",
+        risk: "runtime behavior change",
+      }],
+      activeWork: {
+        items: [{
+          id: "tool-1",
+          toolName: "read_file",
+          status: "running",
+          summary: "src/cli/session-loop.ts",
+          target: "src/cli/session-loop.ts",
+          durationMs: 1_000,
+        }],
+        scrollOffset: 0,
+        expanded: false,
+      },
+      attachments: [{
+        id: "paste-1",
+        kind: "pastedText",
+        title: "pasted text",
+        preview: "MVP known issue",
+        content: "MVP known issue details",
+        metadata: { chars: 2_481 },
+      }],
+      status: {
+        model: { label: "kimi-k2.7-code", state: "working" },
+        context: { usedTokens: 18400, totalTokens: 262000, percent: 7 },
+        sessionTimer: { elapsedMs: 72_000 },
+      },
+    });
+    const output = renderOperatorConsoleTextLines(
+      state,
+      createOperatorConsoleLayout(state, { width: 120, height: 24, isTty: true })
+    );
+    const approvalIndex = output.findIndex((line) => line.includes("Approval required"));
+    const activeWorkIndex = output.findIndex((line) => line.includes("Active work"));
+    const attachmentsIndex = output.findIndex((line) => line === "Attachments");
+    const promptIndex = output.findIndex((line) => line.includes("Prompt"));
+    const statusIndex = output.findIndex((line) => line.includes("session 01:12"));
+
+    expect(approvalIndex).toBeGreaterThanOrEqual(0);
+    expect(approvalIndex).toBeLessThan(activeWorkIndex);
+    expect(approvalIndex).toBeLessThan(attachmentsIndex);
+    expect(approvalIndex).toBeLessThan(promptIndex);
+    expect(approvalIndex).toBeLessThan(statusIndex);
+    expect(output).toContainEqual(expect.stringContaining("[Approve once]"));
+    expect(output.every((line) => stringWidth(line) <= 120)).toBe(true);
+  });
+
   it("places active work above attachments, prompt, and status rail when present", () => {
     const state = createFullState();
     const layout = createOperatorConsoleLayout(state, { width: 120, height: 20, isTty: true });

@@ -29,6 +29,7 @@ describe("Papyrus operator console state model", () => {
   it("keeps the canonical surface order stable", () => {
     expect(getOperatorConsoleSurfaceOrder()).toEqual([
       "transcript",
+      "approvals",
       "activeWork",
       "queuedSteer",
       "attachments",

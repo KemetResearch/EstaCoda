@@ -6,6 +6,7 @@ import type {
   OperatorConsoleState,
 } from "./operatorConsoleState.js";
 import { renderActiveWorkSurface } from "./activeWorkSurface.js";
+import { renderApprovalSurface } from "./approvalSurface.js";
 import { renderAttachmentSurface } from "./attachmentSurface.js";
 import { renderPromptSurface } from "./promptSurface.js";
 import { renderStatusRailSurface } from "./statusRailSurface.js";
@@ -54,6 +55,12 @@ function renderRegionLines(
       locale: state.locale,
     }).map((text) => ({ region: region.kind, text }));
   }
+  if (region.kind === "approvals") {
+    return renderApprovalSurface(state.approvals, {
+      width: region.width,
+      height: region.height,
+    }).map((text) => ({ region: region.kind, text }));
+  }
   if (region.kind === "statusRail") {
     return [{ region: region.kind, text: renderStatusRailSurface(state.status, { width: region.width }) }];
   }
@@ -76,6 +83,8 @@ function regionLabel(
   switch (region.kind) {
     case "transcript":
       return `Transcript: ${state.transcript.length} block${plural(state.transcript.length)}`;
+    case "approvals":
+      return `Approvals: ${state.approvals.length}`;
     case "queuedSteer":
       return `Queued steer: ${state.steer?.queued?.text ?? ""}`;
     case "attachments":

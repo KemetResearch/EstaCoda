@@ -1,5 +1,6 @@
 import {
   createInitialFocusState,
+  type ApprovalFocusControl,
   type FocusState,
 } from "./focusModel.js";
 import type { OperatorConsoleLocale } from "./activeWorkCopy.js";
@@ -79,13 +80,20 @@ export type ToolActivityState = {
   readonly expanded: boolean;
 };
 
+export type ApprovalControl = ApprovalFocusControl;
+
 export type ApprovalCardState = {
   readonly id: string;
-  readonly title: string;
+  readonly status: "pending" | "approved" | "rejected" | "expired" | "superseded";
   readonly action: string;
-  readonly target?: string;
+  readonly target: string;
   readonly risk?: string;
-  readonly controls: readonly ("approve" | "reject" | "inspect")[];
+  readonly summary?: string;
+  readonly diffStats?: {
+    readonly added?: number;
+    readonly removed?: number;
+  };
+  readonly focusedControl?: ApprovalControl;
 };
 
 export type SlashMenuItemState = {
@@ -131,6 +139,7 @@ export type OperatorConsoleState = {
 
 export type OperatorConsoleSurface =
   | "transcript"
+  | "approvals"
   | "activeWork"
   | "queuedSteer"
   | "attachments"
@@ -140,6 +149,7 @@ export type OperatorConsoleSurface =
 
 export const OPERATOR_CONSOLE_SURFACE_ORDER: readonly OperatorConsoleSurface[] = [
   "transcript",
+  "approvals",
   "activeWork",
   "queuedSteer",
   "attachments",

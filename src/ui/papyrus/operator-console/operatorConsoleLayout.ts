@@ -7,6 +7,7 @@ import {
   getActiveWorkSurfaceDesiredHeight,
   hasActiveWork,
 } from "./activeWorkSurface.js";
+import { getApprovalSurfaceDesiredHeight } from "./approvalSurface.js";
 import { getAttachmentSurfaceDesiredHeight } from "./attachmentSurface.js";
 import { getPromptSurfaceDesiredHeight } from "./promptSurface.js";
 
@@ -37,6 +38,7 @@ type RegionDescriptor = {
 const PROMPT_PRIORITY = 1;
 const STATUS_PRIORITY = 2;
 const INTERACTIVE_OPTIONAL_PRIORITY = 3;
+const APPROVAL_PRIORITY = 3;
 const ACTIVE_WORK_PRIORITY = 4;
 const ATTACHMENTS_PRIORITY = 5;
 const TRANSCRIPT_PRIORITY = 6;
@@ -84,6 +86,15 @@ function createRegionDescriptors(
       priority: TRANSCRIPT_PRIORITY,
       minHeight: 1,
       desiredHeight: Math.min(6, Math.max(1, state.transcript.length)),
+    });
+  }
+
+  if (state.approvals.length > 0) {
+    descriptors.push({
+      kind: "approvals",
+      priority: APPROVAL_PRIORITY,
+      minHeight: 1,
+      desiredHeight: getApprovalSurfaceDesiredHeight(state.approvals),
     });
   }
 
@@ -178,18 +189,20 @@ function surfaceOrderIndex(kind: OperatorConsoleRegionKind): number {
   switch (kind) {
     case "transcript":
       return 0;
-    case "activeWork":
+    case "approvals":
       return 1;
-    case "queuedSteer":
+    case "activeWork":
       return 2;
-    case "attachments":
+    case "queuedSteer":
       return 3;
-    case "prompt":
+    case "attachments":
       return 4;
-    case "slashMenu":
+    case "prompt":
       return 5;
-    case "statusRail":
+    case "slashMenu":
       return 6;
+    case "statusRail":
+      return 7;
   }
 }
 

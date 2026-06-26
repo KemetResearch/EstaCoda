@@ -1,5 +1,6 @@
 export * from "./activeWorkCopy.js";
 export * from "./activeWorkSurface.js";
+export * from "./approvalSurface.js";
 export * from "./attachmentSurface.js";
 export * from "./focusModel.js";
 export * from "./operatorConsoleEvents.js";

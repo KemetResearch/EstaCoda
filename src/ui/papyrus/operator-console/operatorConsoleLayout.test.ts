@@ -22,6 +22,7 @@ describe("Papyrus operator console layout", () => {
 
     expect(regionKinds(layout)).toEqual([
       "transcript",
+      "approvals",
       "activeWork",
       "queuedSteer",
       "attachments",
@@ -43,6 +44,15 @@ describe("Papyrus operator console layout", () => {
       },
     }));
     expect(regionKinds(layout)).toContain("activeWork");
+  });
+
+  it("includes approvals only when approval state is non-empty", () => {
+    expect(regionKinds(createOperatorConsoleLayout(createState()))).not.toContain("approvals");
+
+    const layout = createOperatorConsoleLayout(createState({
+      approvals: [approval("approval-1")],
+    }));
+    expect(regionKinds(layout)).toContain("approvals");
   });
 
   it("includes queued steer only when queued steer state exists", () => {
@@ -140,6 +150,7 @@ describe("Papyrus operator console layout", () => {
 
     expect(visibleRegionKinds(layout)).toEqual(["prompt", "statusRail"]);
     expect(region(layout, "activeWork")).toMatchObject({ height: 0, visible: false });
+    expect(region(layout, "approvals")).toMatchObject({ height: 0, visible: false });
     expect(region(layout, "attachments")).toMatchObject({ height: 0, visible: false });
     expect(region(layout, "transcript")).toMatchObject({ height: 0, visible: false });
   });
@@ -177,6 +188,7 @@ function createState(input: Partial<OperatorConsoleState> = {}): OperatorConsole
 function createFullState(): OperatorConsoleState {
   return createState({
     transcript: [{ id: "t1", role: "assistant", text: "Ready." }],
+    approvals: [approval("approval-1")],
     activeWork: {
       items: [toolItem("tool-1", "running")],
       scrollOffset: 0,
@@ -219,6 +231,16 @@ function pastedAttachment(id: string) {
     preview: "MVP known issue",
     content: "MVP known issue details",
     metadata: { chars: 2_481 },
+  };
+}
+
+function approval(id: string) {
+  return {
+    id,
+    status: "pending" as const,
+    action: "write file",
+    target: "src/runtime/provider-turn-loop.ts",
+    risk: "runtime behavior change",
   };
 }
 
