@@ -55,11 +55,15 @@ describe("Papyrus operator console steer surface", () => {
     expect(queued).not.toContain(longText);
   });
 
-  it("emits submit intent for non-empty draft and none for empty draft", () => {
+  it("emits submit intent for non-empty draft and trims surrounding whitespace", () => {
     expect(routeSteerKey(steerDraft(" focus only on approvals "), { type: "key", key: "enter" })).toEqual({
       type: "submit",
       text: "focus only on approvals",
     });
+  });
+
+  it("emits none for empty and whitespace-only steer drafts", () => {
+    expect(routeSteerKey(steerDraft(""), { type: "key", key: "enter" })).toEqual({ type: "none" });
     expect(routeSteerKey(steerDraft("   "), { type: "key", key: "enter" })).toEqual({ type: "none" });
   });
 
@@ -75,6 +79,14 @@ describe("Papyrus operator console steer surface", () => {
 
   it("does not model Ctrl+C as steer submission or cancellation", () => {
     expect(routeSteerKey(steerDraft("focus"), { type: "key", key: "c", ctrl: true })).toEqual({ type: "none" });
+  });
+
+  it("keeps Ctrl+C outside the steer model and separate from interrupt behavior", () => {
+    const intent = routeSteerKey(steerQueued(), { type: "key", key: "c", ctrl: true });
+
+    expect(intent).toEqual({ type: "none" });
+    expect(intent).not.toHaveProperty("interrupt");
+    expect(intent).not.toHaveProperty("abort");
   });
 
   it("represents queued, applied, and cancelled steer states without mutation", () => {
@@ -101,6 +113,22 @@ describe("Papyrus operator console steer surface", () => {
     expect(Array.isArray(state.queued)).toBe(false);
     expect(state.queued?.id).toBe("steer-1");
     expect(hasQueuedSteer(state)).toBe(true);
+  });
+
+  it("does not silently model replacement of an existing queued steer", () => {
+    const intent = routeSteerKey(steerQueued({ id: "existing-steer" }), { type: "key", key: "enter" });
+
+    expect(intent).toEqual({ type: "none" });
+    expect(intent).not.toHaveProperty("previousQueuedSteerId");
+    expect(intent).not.toHaveProperty("replaceQueued");
+  });
+
+  it("keeps queued steer visible while status is queued", () => {
+    const output = renderQueuedSteerSurface(queuedSteer({ status: "queued" }), { width: 72 });
+
+    expect(getQueuedSteerSurfaceDesiredHeight(queuedSteer({ status: "queued" }))).toBe(4);
+    expect(output).toHaveLength(4);
+    expect(output.join("\n")).toContain("Queued steer");
   });
 
   it("does not render applied or cancelled queued steer cards", () => {
@@ -137,6 +165,18 @@ describe("Papyrus operator console steer surface", () => {
       createdAtMs: 123,
     });
     expect(block.text).not.toMatch(/Understood|Assistant:/u);
+  });
+
+  it("does not model runtime safe-boundary application in the pure surface", () => {
+    const submit = routeSteerKey(steerDraft("focus only on approvals"), { type: "key", key: "enter" });
+    const cancelQueued = routeSteerKey(steerQueued(), { type: "key", key: "escape" });
+
+    expect(submit).toEqual({ type: "submit", text: "focus only on approvals" });
+    expect(cancelQueued).toEqual({ type: "cancelQueued", queuedSteerId: "steer-1" });
+    expect(submit).not.toHaveProperty("applied");
+    expect(submit).not.toHaveProperty("safeBoundary");
+    expect(cancelQueued).not.toHaveProperty("applied");
+    expect(cancelQueued).not.toHaveProperty("safeBoundary");
   });
 });
 

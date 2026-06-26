@@ -85,6 +85,20 @@ describe("Papyrus operator console layout", () => {
       },
     }));
     expect(regionKinds(applied)).not.toContain("queuedSteer");
+
+    const cancelled = createOperatorConsoleLayout(createState({
+      steer: {
+        draft: "",
+        cursorOffset: 0,
+        mode: "queued",
+        queued: {
+          id: "steer-1",
+          text: "focus on approvals",
+          status: "cancelled",
+        },
+      },
+    }));
+    expect(regionKinds(cancelled)).not.toContain("queuedSteer");
   });
 
   it("includes attachments only when attachments exist", () => {

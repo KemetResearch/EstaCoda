@@ -207,6 +207,63 @@ describe("Papyrus operator console renderer", () => {
     expect(activeWorkIndex).toBeLessThan(statusIndex);
   });
 
+  it("renders queued steer above steer input and keeps status rail below it", () => {
+    const state = createState({
+      steer: {
+        draft: "",
+        cursorOffset: 0,
+        mode: "queued",
+        queued: {
+          id: "steer-1",
+          text: "focus only on approval cards and pasted attachments",
+          status: "queued",
+        },
+      },
+      status: {
+        model: { label: "kimi-k2.7-code", state: "working" },
+        context: { usedTokens: 18400, totalTokens: 262000, percent: 7 },
+        sessionTimer: { elapsedMs: 31_000 },
+      },
+    });
+    const output = renderOperatorConsoleTextLines(
+      state,
+      createOperatorConsoleLayout(state, { width: 72, height: 12, isTty: true })
+    );
+    const queuedSteerIndex = output.findIndex((line) => line.includes("Queued steer"));
+    const steerInputIndex = output.findIndex((line) => line.includes("Steer current turn"));
+    const statusIndex = output.findIndex((line) => line.includes("session 00:31"));
+
+    expect(queuedSteerIndex).toBeGreaterThanOrEqual(0);
+    expect(queuedSteerIndex).toBeLessThan(steerInputIndex);
+    expect(steerInputIndex).toBeLessThan(statusIndex);
+    expect(output).toContainEqual(expect.stringContaining("Will apply at next safe boundary · Esc cancel"));
+    expect(output).not.toContainEqual(expect.stringContaining("Prompt"));
+    expect(output.every((line) => stringWidth(line) <= 72)).toBe(true);
+  });
+
+  it("keeps status rail limited to model, context, and timer while steer is active", () => {
+    const state = createState({
+      steer: {
+        draft: "focus only on approvals",
+        cursorOffset: 23,
+        mode: "drafting",
+      },
+      status: {
+        model: { label: "kimi-k2.7-code", state: "working" },
+        context: { usedTokens: 18400, totalTokens: 262000, percent: 7 },
+        sessionTimer: { elapsedMs: 31_000 },
+      },
+    });
+    const output = renderOperatorConsoleTextLines(
+      state,
+      createOperatorConsoleLayout(state, { width: 72, height: 8, isTty: true })
+    );
+    const status = output.at(-1) ?? "";
+
+    expect(status).toBe("kimi-k2.7-code ● │ ctx [▰▱▱▱▱▱▱▱▱▱] 18.4k/262k 7% │ session 00:31");
+    expect(status).not.toMatch(/\b(steer|approval|attachment|tool|workspace|trust|setup|channel)\b/iu);
+  });
+
   it("renders steer draft instead of prompt when steering is active", () => {
     const state = createState({
       steer: {
