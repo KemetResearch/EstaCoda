@@ -8,6 +8,7 @@ import {
 } from "./rawPromptRenderLoop.js";
 import { createOperatorConsoleRuntimeHost } from "../ui/papyrus/operator-console/operatorConsoleRuntimeHost.js";
 import type { StatusRailState } from "../ui/papyrus/operator-console/operatorConsoleState.js";
+import { createPastedTextAttachment } from "../ui/papyrus/operator-console/index.js";
 
 const forbiddenManagedRegionOutput = /\x1b\[3J|\x1b\[2J|\x1b\[H|\x1b\[\d+;\d+H/u;
 
@@ -175,6 +176,40 @@ describe("raw prompt render loop", () => {
     expect(text.indexOf("╭─ Prompt")).toBeLessThan(text.indexOf("> /help - Show help"));
     expect(text.indexOf("> /help - Show help")).toBeLessThan(text.indexOf("session 00:00"));
     expect(text).not.toMatch(forbiddenManagedRegionOutput);
+  });
+
+  it("renders Operator Console attachments above the prompt and below no status pollution", () => {
+    const output = fakeOutput();
+    const host = createOperatorConsoleRuntimeHost();
+    const loop = new RawPromptRenderLoop(output, {
+      operatorConsoleHostFactory: () => host,
+    });
+
+    const rows = loop.render({
+      prompt: "> ",
+      state: createLineEditorState("summarize this"),
+      operatorConsole: {
+        enabled: true,
+        terminal: { width: 96, height: 18, isTty: true },
+        status: status({ usedTokens: 18000, elapsedMs: 72000 }),
+        attachments: [
+          createPastedTextAttachment({
+            id: "paste-1",
+            content: "MVP known issue with enough detail to store outside the prompt.",
+            preview: "MVP known issue...",
+          }),
+        ],
+      },
+    });
+    const text = output.text();
+
+    expect(rows).toBeGreaterThan(4);
+    expect(text.indexOf("Attachments")).toBeLessThan(text.indexOf("╭─ Prompt"));
+    expect(text).toContain("MVP known issue...");
+    expect(text).toContain("│ › summarize this");
+    expect(text).toContain("kimi-k2.7-code ● │ ctx");
+    expect(text).not.toMatch(/\b(attachment|pasted text)\b.*session/iu);
+    expect(host.getState().attachments[0]?.content).toContain("store outside the prompt");
   });
 
   it("redraws after edits without full-screen or scrollback clear sequences", () => {

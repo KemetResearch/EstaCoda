@@ -277,6 +277,20 @@ describe("Papyrus operator console attachment surface", () => {
     ].join("\n"));
   });
 
+  it("formats attachment-only submitted references without a leading blank line", () => {
+    const transcript = formatSubmittedPromptWithAttachmentReferences("", [
+      createPastedTextAttachment({
+        id: "paste-1",
+        content: "line one\nline two",
+      }),
+    ]);
+
+    expect(transcript).toBe([
+      "Attachments:",
+      "- pasted text · 17 chars",
+    ].join("\n"));
+  });
+
   it("emits no ANSI escape sequences or cursor-control strings", () => {
     const output = renderAttachmentSurface(sampleAttachments(), { width: 120 }).join("\n");
 

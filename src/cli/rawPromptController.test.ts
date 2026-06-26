@@ -20,6 +20,7 @@ import type {
   TypeaheadProviderRouter,
   TypeaheadProviderSelection,
 } from "../ui/papyrus/input/typeaheadProviderRouter.js";
+import type { AttachmentCardState } from "../ui/papyrus/operator-console/index.js";
 
 const PASTE_START = "\x1b[200~";
 const PASTE_END = "\x1b[201~";
@@ -315,6 +316,94 @@ describe("raw prompt controller", () => {
     expect(read.lifecycle.calls).toEqual(["start", "stop"]);
   });
 
+  it("routes Operator Console bracketed paste into attachment cards instead of prompt text", async () => {
+    const read = startPendingOperatorConsoleRead();
+    const pasted = `${"MVP known issue ".repeat(20)}\nSECRET full pasted payload should stay out of prompt chrome`;
+
+    read.input.send("summarize this");
+    read.input.send(`${PASTE_START}${pasted}${PASTE_END}`);
+    await Promise.resolve();
+
+    const rendered = read.output.writes.join("");
+    expect(read.isResolved()).toBe(false);
+    expect(rendered).toContain("Attachments");
+    expect(rendered).toContain("pasted text");
+    expect(rendered).not.toContain("SECRET full pasted payload");
+    expect(rendered).toContain("│ › summarize this");
+
+    read.input.send("\r");
+    expect(await read.pending).toEqual({
+      type: "submit",
+      text: [
+        "summarize this",
+        "Attachments:",
+        `- pasted text · ${pasted.length.toLocaleString("en-US")} chars`,
+      ].join("\n"),
+    });
+  });
+
+  it("stores full Operator Console pasted content in attachment state with preserved newlines", async () => {
+    const attachmentsSeen: Array<readonly AttachmentCardState[]> = [];
+    const read = startPendingOperatorConsoleRead({
+      operatorConsole: {
+        enabled: true,
+        terminal: { width: 72, height: 16, isTty: true },
+        onAttachmentsChange: (attachments) => {
+          attachmentsSeen.push(attachments);
+        },
+      },
+    });
+
+    read.input.send(`${PASTE_START}line one\nline two${PASTE_END}`);
+    await Promise.resolve();
+    read.input.send("\r");
+
+    expect(await read.pending).toEqual({
+      type: "submit",
+      text: ["Attachments:", "- pasted text · 17 chars"].join("\n"),
+    });
+    expect(attachmentsSeen.at(-1)).toHaveLength(1);
+    expect(attachmentsSeen.at(-1)?.[0]).toMatchObject({
+      kind: "pastedText",
+      title: "pasted text",
+      content: "line one\nline two",
+      metadata: { chars: 17 },
+    });
+  });
+
+  it("allows multiple Operator Console paste attachments and does not dump payloads into the result", async () => {
+    const attachmentsSeen: Array<readonly AttachmentCardState[]> = [];
+    const read = startPendingOperatorConsoleRead({
+      operatorConsole: {
+        enabled: true,
+        terminal: { width: 72, height: 16, isTty: true },
+        onAttachmentsChange: (attachments) => {
+          attachmentsSeen.push(attachments);
+        },
+      },
+    });
+
+    read.input.send("summarize");
+    read.input.send(`${PASTE_START}first pasted payload${PASTE_END}`);
+    read.input.send(`${PASTE_START}second pasted payload${PASTE_END}`);
+    await Promise.resolve();
+    read.input.send("\r");
+
+    expect(attachmentsSeen.at(-1)?.map((attachment) => attachment.content)).toEqual([
+      "first pasted payload",
+      "second pasted payload",
+    ]);
+    expect(await read.pending).toEqual({
+      type: "submit",
+      text: [
+        "summarize",
+        "Attachments:",
+        "- pasted text · 20 chars",
+        "- pasted text · 21 chars",
+      ].join("\n"),
+    });
+  });
+
   it("returns cancel for Ctrl-C and Escape", async () => {
     expect((await readWithFakeInput("\x03")).result).toEqual({ type: "cancel" });
     expect((await readWithFakeInput("\x1b")).result).toEqual({ type: "cancel" });
@@ -490,19 +579,24 @@ describe("raw prompt controller", () => {
     expect(await read.pending).toEqual({ type: "submit", text: "hello\nworld" });
   });
 
-  it("preserves multiline paste under Operator Console routing", async () => {
+  it("routes multiline paste into attachments under Operator Console routing", async () => {
     const read = startPendingOperatorConsoleRead();
 
     read.input.send(`${PASTE_START}line one\nline two${PASTE_END}`);
     await flushPromises();
 
     expect(read.isResolved()).toBe(false);
-    expect(read.output.writes.join("")).toContain("Prompt · multiline");
-    expect(read.output.writes.join("")).toContain("│ › line one");
-    expect(read.output.writes.join("")).toContain("│   line two");
+    expect(read.output.writes.join("")).toContain("Attachments");
+    expect(read.output.writes.join("")).toContain("pasted text");
+    expect(read.output.writes.join("")).toContain("17 chars");
+    expect(read.output.writes.join("")).not.toContain("Prompt · multiline");
+    expect(read.output.writes.join("")).not.toContain("│ › line one");
 
     read.input.send("\r");
-    expect(await read.pending).toEqual({ type: "submit", text: "line one\nline two" });
+    expect(await read.pending).toEqual({
+      type: "submit",
+      text: ["Attachments:", "- pasted text · 17 chars"].join("\n"),
+    });
   });
 
   it("keeps Escape cancel behavior unchanged under Operator Console routing", async () => {

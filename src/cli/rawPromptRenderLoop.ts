@@ -8,6 +8,7 @@ import {
   createOperatorConsoleRuntimeHost,
   type OperatorConsoleRuntimeHost,
 } from "../ui/papyrus/operator-console/operatorConsoleRuntimeHost.js";
+import type { AttachmentCardState } from "../ui/papyrus/operator-console/operatorConsoleState.js";
 
 export type RawPromptRenderOutput = {
   write(chunk: string): unknown;
@@ -35,6 +36,7 @@ export type RawPromptRenderSnapshot = {
 
 export type RawPromptOperatorConsoleOptions = Omit<OperatorConsoleRawPromptSnapshot, "prompt" | "state" | "overlayRows"> & {
   readonly enabled: boolean;
+  readonly onAttachmentsChange?: (attachments: readonly AttachmentCardState[]) => void;
 };
 
 export class RawPromptOverlayHost {
@@ -74,6 +76,7 @@ export class RawPromptRenderLoop {
         state: snapshot.state,
         status: snapshot.operatorConsole.status,
         terminal: snapshot.operatorConsole.terminal,
+        attachments: snapshot.operatorConsole.attachments,
         overlayRows: snapshot.overlayRows,
       })
       : buildRawPromptFrame(snapshot);

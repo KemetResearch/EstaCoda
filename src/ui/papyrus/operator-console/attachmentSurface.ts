@@ -169,8 +169,9 @@ export function formatSubmittedPromptWithAttachmentReferences(
 ): string {
   const trimmedPrompt = prompt.trimEnd();
   if (attachments.length === 0) return trimmedPrompt;
+  const promptRows = trimmedPrompt.length === 0 ? [] : [trimmedPrompt];
   return [
-    trimmedPrompt,
+    ...promptRows,
     "Attachments:",
     ...attachments.map((attachment) => `- ${formatSubmittedAttachmentReference(attachment)}`),
   ].join("\n");

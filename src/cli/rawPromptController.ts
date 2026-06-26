@@ -28,6 +28,11 @@ import {
   createPapyrusVimKeymapState,
   type PapyrusVimKeymapState,
 } from "../ui/papyrus/input/vim/vimKeymap.js";
+import {
+  createPastedTextAttachment,
+  formatSubmittedPromptWithAttachmentReferences,
+  type AttachmentCardState,
+} from "../ui/papyrus/operator-console/index.js";
 
 type RawPromptDataListener = (chunk: string | Buffer | Uint8Array) => void;
 
@@ -111,6 +116,8 @@ export class RawPromptController {
   async read(question: string, options?: PromptOptions): Promise<RawPromptResult> {
     const renderLoop = new RawPromptRenderLoop(this.#output);
     let state = createLineEditorState();
+    let attachmentSequence = 0;
+    let attachments: readonly AttachmentCardState[] = [];
     let vimKeymapState: PapyrusVimKeymapState | undefined =
       this.#keymap?.mode === "vim" ? createPapyrusVimKeymapState() : undefined;
     let typeaheadState: TypeaheadState<SlashCommandSuggestionMetadata> = createTypeaheadControllerState();
@@ -129,6 +136,7 @@ export class RawPromptController {
               height: this.#operatorConsole.terminal?.height ?? this.#output.rows ?? 24,
               isTty: this.#operatorConsole.terminal?.isTty ?? this.#output.isTTY ?? true,
             },
+            attachments,
           }
           : undefined,
       });
@@ -285,10 +293,33 @@ export class RawPromptController {
         render();
       };
 
+      const addPasteAttachment = (text: string) => {
+        attachmentSequence += 1;
+        attachments = [
+          ...attachments,
+          createPastedTextAttachment({
+            id: `paste-${attachmentSequence}`,
+            content: text,
+          }),
+        ];
+        this.#operatorConsole?.onAttachmentsChange?.(attachments);
+        render();
+      };
+
+      const formatSubmittedText = (text: string) => {
+        return this.#operatorConsole?.enabled === true && attachments.length > 0
+          ? formatSubmittedPromptWithAttachmentReferences(text, attachments)
+          : text;
+      };
+
       const onData = (chunk: string | Buffer | Uint8Array) => {
         if (settled) return;
         const text = typeof chunk === "string" ? chunk : Buffer.from(chunk).toString("utf8");
         for (const event of parseKeypress(text)) {
+          if (this.#operatorConsole?.enabled === true && event.type === "paste") {
+            addPasteAttachment(event.text);
+            continue;
+          }
           if (handleTypeaheadKeypress(event)) continue;
           if (vimKeymapState !== undefined) {
             const vimResult = applyPapyrusVimKeymap(vimKeymapState, state, event);
@@ -300,7 +331,7 @@ export class RawPromptController {
           }
           const result = applyKeypress(state, event);
           if (result.intent?.type === "submit") {
-            finish({ type: "submit", text: result.intent.text });
+            finish({ type: "submit", text: formatSubmittedText(result.intent.text) });
             return;
           }
           if (result.intent?.type === "cancel") {

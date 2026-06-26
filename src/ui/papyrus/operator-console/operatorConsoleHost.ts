@@ -2,6 +2,7 @@ import type { LineEditorState } from "../../input/lineEditor.js";
 import { stringWidth } from "../screen/stringWidth.js";
 import {
   createInitialOperatorConsoleState,
+  type AttachmentCardState,
   type OperatorConsoleState,
   type StatusRailState,
   type TerminalMetrics,
@@ -24,6 +25,7 @@ export type OperatorConsoleRawPromptSnapshot = {
   readonly status?: StatusRailState;
   readonly terminal?: Partial<TerminalMetrics>;
   readonly overlayRows?: readonly OperatorConsoleRawPromptOverlayRow[];
+  readonly attachments?: readonly AttachmentCardState[];
 };
 
 export type OperatorConsoleRawPromptFrame = {
@@ -53,6 +55,7 @@ export function buildOperatorConsoleStateFromRawPrompt(
       mode: "prompt",
     },
     status: snapshot.status ?? createDefaultOperatorConsoleRawPromptStatus(),
+    attachments: snapshot.attachments ?? [],
   });
 }
 
@@ -83,6 +86,7 @@ export function buildOperatorConsoleRawPromptFrameWithRuntimeHost(
   host.clear();
   host.setTerminal(terminal);
   host.setStatus(snapshot.status ?? createDefaultOperatorConsoleRawPromptStatus());
+  host.setAttachments(snapshot.attachments ?? []);
   host.setPrompt({
     text: snapshot.state.text,
     cursorOffset: snapshot.state.cursor,
