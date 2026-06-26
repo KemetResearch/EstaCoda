@@ -353,6 +353,7 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
     mode: inputMode,
     input: cliInput,
     output: output as NodeJS.WriteStream,
+    env: options.env,
     uiContext: promptUiContextForLocale(renderer.locale),
   });
   const close = options.close ?? (() => prompt.close?.());

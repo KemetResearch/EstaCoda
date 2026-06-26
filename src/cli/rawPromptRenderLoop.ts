@@ -10,9 +10,14 @@ export type RawPromptOverlayRow = {
   readonly text: string;
 };
 
+export type RawPromptGhostText = {
+  readonly text: string;
+};
+
 export type RawPromptRenderSnapshot = {
   readonly prompt: string;
   readonly state: LineEditorState;
+  readonly ghostText?: RawPromptGhostText;
   readonly overlayRows?: readonly RawPromptOverlayRow[];
 };
 
@@ -88,10 +93,17 @@ export function buildRawPromptFrame(snapshot: RawPromptRenderSnapshot): {
   const textBeforeCursor = snapshot.state.text.slice(0, snapshot.state.cursor);
   const beforeCursorLines = textBeforeCursor.split("\n");
   const textLines = snapshot.state.text.split("\n");
-  const promptRows = textLines.map((line, index) => index === 0 ? `${snapshot.prompt}${line}` : line);
+  const cursorLineIndex = beforeCursorLines.length - 1;
+  const cursorOffsetInLine = beforeCursorLines[beforeCursorLines.length - 1]?.length ?? 0;
+  const promptRows = textLines.map((line, index) => {
+    const renderedLine = index === cursorLineIndex && snapshot.ghostText?.text
+      ? `${line.slice(0, cursorOffsetInLine)}${snapshot.ghostText.text}${line.slice(cursorOffsetInLine)}`
+      : line;
+    return index === 0 ? `${snapshot.prompt}${renderedLine}` : renderedLine;
+  });
   const overlayRows = (snapshot.overlayRows ?? []).map((row) => row.text);
   const rows = [...promptRows, ...overlayRows];
-  const cursorRow = beforeCursorLines.length - 1;
+  const cursorRow = cursorLineIndex;
   const cursorLinePrefix = beforeCursorLines[beforeCursorLines.length - 1] ?? "";
   const cursorColumn = (cursorRow === 0 ? stringWidth(snapshot.prompt) : 0) + stringWidth(cursorLinePrefix);
 

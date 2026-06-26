@@ -21,8 +21,10 @@ import {
   type TypeaheadProviderRouter,
 } from "../ui/papyrus/input/typeaheadProviderRouter.js";
 import { RawPromptOverlayHost, RawPromptRenderLoop } from "./rawPromptRenderLoop.js";
+import { resolveGhostTextMode } from "./ghost-text-mode.js";
 import { buildRawPromptSlashAutocompleteRows } from "./rawPromptSlashAutocomplete.js";
 import { createReadlinePrompt, type CreateReadlinePromptOptions, type Prompt, type PromptOptions } from "./readline-prompt.js";
+import { type GhostTextState, isGhostTextVisible } from "../ui/papyrus/input/ghostTextController.js";
 
 type RawPromptDataListener = (chunk: string | Buffer | Uint8Array) => void;
 
@@ -58,6 +60,7 @@ export type RawPromptControllerOptions = {
   lifecycle?: TerminalLifecycle;
   overlayHost?: RawPromptOverlayHost;
   typeahead?: RawPromptTypeaheadOptions;
+  ghostText?: RawPromptGhostTextOptions;
 };
 
 export type RawPromptTypeaheadOptions = {
@@ -65,10 +68,16 @@ export type RawPromptTypeaheadOptions = {
   readonly onStateChange?: (state: TypeaheadState<SlashCommandSuggestionMetadata>) => void;
 };
 
+export type RawPromptGhostTextOptions = {
+  readonly enabled: boolean;
+  readonly getState?: (state: LineEditorState) => GhostTextState | undefined;
+};
+
 export type CreatePromptForInputModeOptions = Omit<CreateReadlinePromptOptions, "input" | "output"> & {
   mode: UiInputMode;
   input?: Readable | RawPromptInput;
   output?: Writable | RawPromptOutput;
+  env?: Record<string, string | undefined>;
   createReadline?: (options: CreateReadlinePromptOptions) => Prompt;
   createRaw?: (options: RawPromptControllerOptions & { uiContext?: PromptUiContext }) => Prompt;
 };
@@ -79,12 +88,14 @@ export class RawPromptController {
   readonly #lifecycle: TerminalLifecycle;
   readonly #overlayHost: RawPromptOverlayHost;
   readonly #typeahead: RawPromptTypeaheadOptions | undefined;
+  readonly #ghostText: RawPromptGhostTextOptions | undefined;
 
   constructor(options: RawPromptControllerOptions) {
     this.#input = options.input;
     this.#output = options.output;
     this.#overlayHost = options.overlayHost ?? new RawPromptOverlayHost();
     this.#typeahead = options.typeahead;
+    this.#ghostText = options.ghostText;
     this.#lifecycle = options.lifecycle ?? createTerminalLifecycle({
       stdin: options.input,
       stdout: options.output,
@@ -96,10 +107,12 @@ export class RawPromptController {
     let state = createLineEditorState();
     let typeaheadState: TypeaheadState<SlashCommandSuggestionMetadata> = createTypeaheadControllerState();
     const render = () => {
+      const overlayRows = this.#overlayHost.getRows();
       const rows = renderLoop.render({
         prompt: question,
         state,
-        overlayRows: this.#overlayHost.getRows(),
+        ghostText: overlayRows.length === 0 ? ghostTextForRender(this.#ghostText, state) : undefined,
+        overlayRows,
       });
       options?.onRowsChange?.(rows);
     };
@@ -300,7 +313,7 @@ export function createRawPrompt(options: RawPromptControllerOptions & { uiContex
 }
 
 export function createPromptForInputMode(options: CreatePromptForInputModeOptions): Prompt {
-  const { mode, createReadline = createReadlinePrompt, createRaw = createRawPrompt, ...promptOptions } = options;
+  const { mode, env, createReadline = createReadlinePrompt, createRaw = createRawPrompt, ...promptOptions } = options;
   if (mode !== "raw") {
     return createReadline({
       ...promptOptions,
@@ -324,6 +337,7 @@ export function createPromptForInputMode(options: CreatePromptForInputModeOption
     output: output as RawPromptOutput,
     uiContext: promptOptions.uiContext,
     typeahead: createDefaultRawPromptTypeahead(),
+    ghostText: resolveGhostTextMode({ env }) === "on" ? { enabled: true } : undefined,
   });
 }
 
@@ -345,4 +359,20 @@ function detachDataListener(input: RawPromptInput, listener: RawPromptDataListen
     return;
   }
   input.removeListener?.("data", listener);
+}
+
+function ghostTextForRender(
+  options: RawPromptGhostTextOptions | undefined,
+  state: LineEditorState
+): { readonly text: string } | undefined {
+  if (options?.enabled !== true || options.getState === undefined) return undefined;
+  const ghost = options.getState(state);
+  if (ghost === undefined || !isGhostTextVisible(ghost)) return undefined;
+  if (ghost.input !== state.text || ghost.cursorOffset !== state.cursor) return undefined;
+  if (ghost.suggestionText === undefined || ghost.replacementRange === undefined) return undefined;
+  const currentText = state.text.slice(ghost.replacementRange.start, ghost.replacementRange.end);
+  const text = ghost.suggestionText.startsWith(currentText)
+    ? ghost.suggestionText.slice(currentText.length)
+    : ghost.suggestionText;
+  return text.length === 0 ? undefined : { text };
 }

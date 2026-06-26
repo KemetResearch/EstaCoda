@@ -55,9 +55,12 @@ describe("Papyrus substrate boundaries", () => {
   it("keeps root inert while admitting intended input and widget exports", () => {
     expect(read("index.ts").trim()).toBe("export {};");
     expect(exportedModules(read("input/index.ts"))).toEqual([
+      "./clipboardHelper.js",
       "./providers/directoryProvider.js",
       "./providers/fileProvider.js",
       "./providers/slashCommandProvider.js",
+      "./providers/shellHistoryProvider.js",
+      "./ghostTextController.js",
       "./suggestionTypes.js",
       "./typeaheadController.js",
       "./typeaheadProviderRouter.js",

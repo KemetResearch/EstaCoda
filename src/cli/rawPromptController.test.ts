@@ -1,8 +1,10 @@
 import { EventEmitter } from "node:events";
 import { describe, expect, it, vi } from "vitest";
+import { GHOST_TEXT_ENV_VAR } from "./ghost-text-mode.js";
 import { createPromptForInputMode, createRawPrompt, RawPromptController, type RawPromptControllerOptions, type RawPromptInput, type RawPromptOutput } from "./rawPromptController.js";
 import { RawPromptOverlayHost } from "./rawPromptRenderLoop.js";
 import type { TerminalLifecycle } from "../ui/input/terminalLifecycle.js";
+import { createGhostTextState, setGhostTextSuggestion } from "../ui/papyrus/input/ghostTextController.js";
 import {
   SLASH_COMMAND_SUGGESTION_PROVIDER_ID,
   type SlashCommandSuggestionMetadata,
@@ -166,6 +168,27 @@ describe("raw prompt controller", () => {
     expect(createRaw).not.toHaveBeenCalled();
   });
 
+  it("keeps readline mode unaffected when ghost text is enabled", async () => {
+    const input = new FakeInput();
+    const output = fakeOutput();
+    const readlinePrompt = Object.assign(vi.fn(async () => "legacy"), { close: vi.fn() });
+    const createReadline = vi.fn(() => readlinePrompt);
+    const createRaw = vi.fn(() => Object.assign(vi.fn(async () => "raw"), { close: vi.fn() }));
+
+    const prompt = createPromptForInputMode({
+      mode: "readline",
+      input,
+      output,
+      env: { [GHOST_TEXT_ENV_VAR]: "1" },
+      createReadline,
+      createRaw,
+    });
+
+    expect(await prompt("> ")).toBe("legacy");
+    expect(createReadline).toHaveBeenCalledOnce();
+    expect(createRaw).not.toHaveBeenCalled();
+  });
+
   it("constructs and uses the raw prompt in raw mode", async () => {
     const input = new FakeInput();
     const output = fakeOutput();
@@ -188,6 +211,31 @@ describe("raw prompt controller", () => {
     expect(await prompt("> ")).toBe("raw");
     expect(createRaw).toHaveBeenCalledOnce();
     expect(rawOptions?.typeahead).toBeDefined();
+    expect(rawOptions?.ghostText).toBeUndefined();
+    expect(createReadline).not.toHaveBeenCalled();
+  });
+
+  it("passes ghost text options to the raw prompt only when the flag is on", async () => {
+    const input = new FakeInput();
+    const output = fakeOutput();
+    const rawPrompt = Object.assign(vi.fn(async () => "raw"), { close: vi.fn() });
+    const createReadline = vi.fn(() => Object.assign(vi.fn(async () => "legacy"), { close: vi.fn() }));
+    let rawOptions: RawPromptControllerOptions | undefined;
+    const createRaw = vi.fn((options: RawPromptControllerOptions) => {
+      rawOptions = options;
+      return rawPrompt;
+    });
+
+    await createPromptForInputMode({
+      mode: "raw",
+      input,
+      output,
+      env: { [GHOST_TEXT_ENV_VAR]: "true" },
+      createReadline,
+      createRaw,
+    })("> ");
+
+    expect(rawOptions?.ghostText).toEqual({ enabled: true });
     expect(createReadline).not.toHaveBeenCalled();
   });
 
@@ -335,6 +383,124 @@ describe("raw prompt controller", () => {
     expect(output.writes.join("")).toContain("future overlay row");
     expect(overlayHost.getRows()).toEqual([]);
     expect(output.writes.join("")).not.toMatch(forbiddenManagedRegionOutput);
+  });
+
+  it("renders injected ghost text when enabled", async () => {
+    const input = new FakeInput();
+    const output = fakeOutput();
+    const lifecycle = fakeLifecycle();
+    const ghost = setGhostTextSuggestion(
+      createGhostTextState({ input: "", cursorOffset: 0 }),
+      {
+        suggestionText: "hello",
+        replacementRange: { start: 0, end: 0 },
+      }
+    );
+    const controller = new RawPromptController({
+      input,
+      output,
+      lifecycle: lifecycle.lifecycle,
+      ghostText: {
+        enabled: true,
+        getState: () => ghost,
+      },
+    });
+    const pending = controller.read("> ");
+
+    expect(output.writes.join("")).toContain("> hello");
+    expect(output.writes.join("")).not.toMatch(forbiddenManagedRegionOutput);
+
+    input.send("\x03");
+    expect(await pending).toEqual({ type: "cancel" });
+  });
+
+  it("does not render injected ghost text when disabled", async () => {
+    const input = new FakeInput();
+    const output = fakeOutput();
+    const lifecycle = fakeLifecycle();
+    const ghost = setGhostTextSuggestion(
+      createGhostTextState({ input: "", cursorOffset: 0 }),
+      {
+        suggestionText: "hello",
+        replacementRange: { start: 0, end: 0 },
+      }
+    );
+    const controller = new RawPromptController({
+      input,
+      output,
+      lifecycle: lifecycle.lifecycle,
+      ghostText: {
+        enabled: false,
+        getState: () => ghost,
+      },
+    });
+    const pending = controller.read("> ");
+
+    expect(output.writes.join("")).not.toContain("> hello");
+
+    input.send("\x03");
+    expect(await pending).toEqual({ type: "cancel" });
+  });
+
+  it("keeps ghost text render-only and does not accept it on submit", async () => {
+    const input = new FakeInput();
+    const output = fakeOutput();
+    const lifecycle = fakeLifecycle();
+    const ghost = setGhostTextSuggestion(
+      createGhostTextState({ input: "", cursorOffset: 0 }),
+      {
+        suggestionText: "hello",
+        replacementRange: { start: 0, end: 0 },
+      }
+    );
+    const controller = new RawPromptController({
+      input,
+      output,
+      lifecycle: lifecycle.lifecycle,
+      ghostText: {
+        enabled: true,
+        getState: () => ghost,
+      },
+    });
+    const pending = controller.read("> ");
+
+    input.send("\r");
+
+    expect(await pending).toEqual({ type: "submit", text: "" });
+    expect(output.writes.join("")).toContain("> hello");
+  });
+
+  it("hides ghost text while slash autocomplete overlay rows are active", async () => {
+    const input = new FakeInput();
+    const output = fakeOutput();
+    const lifecycle = fakeLifecycle();
+    const overlayHost = new RawPromptOverlayHost();
+    overlayHost.setRows([{ text: "> /help - Show help" }]);
+    const ghost = setGhostTextSuggestion(
+      createGhostTextState({ input: "", cursorOffset: 0 }),
+      {
+        suggestionText: "hello",
+        replacementRange: { start: 0, end: 0 },
+      }
+    );
+    const controller = new RawPromptController({
+      input,
+      output,
+      lifecycle: lifecycle.lifecycle,
+      overlayHost,
+      ghostText: {
+        enabled: true,
+        getState: () => ghost,
+      },
+    });
+    const pending = controller.read("> ");
+
+    expect(output.writes.join("")).toContain("> /help - Show help");
+    expect(output.writes.join("")).not.toContain("> hello");
+    expect(output.writes.join("")).not.toMatch(forbiddenManagedRegionOutput);
+
+    input.send("\x03");
+    expect(await pending).toEqual({ type: "cancel" });
   });
 
   it("does not render overlay rows when none are attached", async () => {
