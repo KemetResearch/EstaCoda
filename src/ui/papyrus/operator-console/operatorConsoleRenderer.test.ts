@@ -287,6 +287,36 @@ describe("Papyrus operator console renderer", () => {
     expect(output.every((line) => stringWidth(line) <= 72)).toBe(true);
   });
 
+  it("does not render applied or cancelled queued steer cards", () => {
+    for (const statusValue of ["applied", "cancelled"] as const) {
+      const state = createState({
+        steer: {
+          draft: "",
+          cursorOffset: 0,
+          mode: "queued",
+          queued: {
+            id: `steer-${statusValue}`,
+            text: "focus only on approvals",
+            status: statusValue,
+          },
+        },
+        status: {
+          model: { label: "kimi-k2.7-code", state: "working" },
+          context: { usedTokens: 18400, totalTokens: 262000, percent: 7 },
+          sessionTimer: { elapsedMs: 31_000 },
+        },
+      });
+      const output = renderOperatorConsoleTextLines(
+        state,
+        createOperatorConsoleLayout(state, { width: 72, height: 10, isTty: true })
+      );
+
+      expect(output).not.toContainEqual(expect.stringContaining("Queued steer"));
+      expect(output.at(-1)).toBe("kimi-k2.7-code ● │ ctx [▰▱▱▱▱▱▱▱▱▱] 18.4k/262k 7% │ session 00:31");
+      expect(output.every((line) => stringWidth(line) <= 72)).toBe(true);
+    }
+  });
+
   it("keeps status rail limited to model, context, and timer while steer is active", () => {
     const state = createState({
       steer: {

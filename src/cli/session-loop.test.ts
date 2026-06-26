@@ -2763,7 +2763,10 @@ describe("runSessionLoop — active turn spinner", () => {
     const rendered = stripAnsi(outputChunks.join(""));
     expect(rendered).toContain("Queued steer");
     expect(rendered).toContain("User steer:\nfocus only on approval cards");
+    expect(rendered).not.toContain("Assistant:\nWaiting");
     expect(rendered).not.toContain("Waiting for approval");
+    expect(rendered).not.toContain("Applied steer");
+    expect(rendered).not.toContain("Cancelled steer");
   });
 
   it("does not submit whitespace-only Operator Console steer drafts", async () => {
@@ -3095,7 +3098,87 @@ describe("runSessionLoop — active turn spinner", () => {
 
     expect(abortReason).toBe("SIGINT");
     expect(stripAnsi(outputChunks.join(""))).toContain("Cancelling current turn");
+    expect(stripAnsi(outputChunks.join(""))).not.toContain("Queued steer");
     expect(stripAnsi(outputChunks.join(""))).not.toContain("User steer:");
+  });
+
+  it("keeps the legacy active-turn controller fallback when Operator Console routing is disabled", async () => {
+    const input = makeTtyInput();
+    const outputChunks: string[] = [];
+    const handleInputs: string[] = [];
+    const host = createOperatorConsoleRuntimeHost({
+      terminal: { width: 96, height: 16, isTty: true },
+    });
+    let abortReason: unknown;
+    let firstHandleStarted: (() => void) | undefined;
+    let secondHandleStarted: (() => void) | undefined;
+    const firstHandleStartedPromise = new Promise<void>((resolve) => {
+      firstHandleStarted = resolve;
+    });
+    const secondHandleStartedPromise = new Promise<void>((resolve) => {
+      secondHandleStarted = resolve;
+    });
+    const runtime = createMockRuntime({
+      handle: async ({ text, signal, onEvent }: { text: string; channel: string; signal?: AbortSignal; onEvent?: (event: RuntimeEvent) => void }) => {
+        handleInputs.push(text);
+        if (handleInputs.length === 1) {
+          onEvent?.({ kind: "agent-start", sessionId: "test-session", input: text });
+          firstHandleStarted?.();
+          await new Promise<void>((resolve) => {
+            signal?.addEventListener("abort", () => {
+              abortReason = signal.reason;
+              resolve();
+            }, { once: true });
+          });
+          onEvent?.({ kind: "agent-cancelled", reason: String(abortReason) });
+          return mockResponse();
+        }
+        secondHandleStarted?.();
+        return mockResponse();
+      },
+    });
+    let promptIndex = 0;
+    const loop = runSessionLoop({
+      runtime,
+      input,
+      output: {
+        write(chunk: string | Uint8Array): boolean {
+          outputChunks.push(String(chunk));
+          return true;
+        },
+        isTTY: true,
+        columns: 96,
+      } as unknown as NodeJS.WritableStream,
+      capabilities: interactiveCaps({ terminalWidth: 96, supportsAnimation: false }),
+      operatorConsole: { enabled: false, runtimeHost: host },
+      prompt: Object.assign(
+        async () => {
+          const values = ["build feature", "/exit"];
+          return values[promptIndex++] ?? "/exit";
+        },
+        { close: () => {} }
+      ),
+      close: () => {},
+    });
+
+    await firstHandleStartedPromise;
+    for (const char of "/steer use legacy fallback") {
+      input.press(char, { name: char, sequence: char });
+    }
+    input.press("\r", { name: "return" });
+    await secondHandleStartedPromise;
+    await loop;
+
+    expect(host.getState().steer).toBeUndefined();
+    expect(abortReason).toBe("CLI steer");
+    expect(handleInputs).toEqual([
+      "build feature",
+      "build feature\n\n[Steering note while previous turn was interrupted]\nuse legacy fallback",
+    ]);
+    const rendered = stripAnsi(outputChunks.join(""));
+    expect(rendered).toContain("↯ Steer: Steering note queued; interrupting turn.");
+    expect(rendered).not.toContain("Steer current turn");
+    expect(rendered).not.toContain("Queued steer");
   });
 
   it("empty /steer shows usage and does not abort", async () => {

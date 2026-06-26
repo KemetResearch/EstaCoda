@@ -130,6 +130,42 @@ describe("OperatorConsoleRuntimeHost", () => {
     expect(statusIndex).toBeGreaterThan(steerInputIndex);
   });
 
+  it("does not render applied or cancelled queued steer cards after runtime acknowledgement", () => {
+    for (const statusValue of ["applied", "cancelled"] as const) {
+      const host = createHost({ height: 16 });
+      host.setSteer(steer({
+        queued: {
+          id: `steer-${statusValue}`,
+          text: "focus only on approval cards",
+          status: statusValue,
+        },
+      }));
+
+      const lines = host.render().lines;
+      expect(lines.join("\n")).not.toContain("Queued steer");
+      expect(lines.at(-1)).toContain("session");
+    }
+  });
+
+  it("keeps steer state out of the persistent status rail", () => {
+    const host = createHost();
+    host.setSteer(steer());
+    host.setStatus({
+      ...status(),
+      steer: "queued",
+      activeTurn: "steering",
+      approvals: ["approval-1"],
+      tools: ["rg"],
+    } as unknown as StatusRailState);
+
+    const rail = host.render().lines.at(-1) ?? "";
+
+    expect(rail).toContain("kimi-k2.7-code");
+    expect(rail).toContain("ctx");
+    expect(rail).toContain("session");
+    expect(rail).not.toMatch(/\b(steer|active|approval|tool|workspace|trust|setup|channel)\b/iu);
+  });
+
   it("renders approvals above active work", () => {
     const host = createHost({ height: 24 });
     host.setApprovals([approval()]);
