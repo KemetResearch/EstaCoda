@@ -10,6 +10,8 @@ import {
 import { getApprovalSurfaceDesiredHeight } from "./approvalSurface.js";
 import { getAttachmentSurfaceDesiredHeight } from "./attachmentSurface.js";
 import { getPromptSurfaceDesiredHeight } from "./promptSurface.js";
+import { getSetupPanelSurfaceDesiredHeight } from "./setupPanelSurface.js";
+import { getStartupDashboardSurfaceDesiredHeight } from "./startupDashboardSurface.js";
 import {
   getQueuedSteerSurfaceDesiredHeight,
   getSteerInputSurfaceDesiredHeight,
@@ -48,6 +50,7 @@ const APPROVAL_PRIORITY = 3;
 const ACTIVE_WORK_PRIORITY = 4;
 const ATTACHMENTS_PRIORITY = 5;
 const TRANSCRIPT_PRIORITY = 6;
+const STARTUP_PRIORITY = 7;
 
 export function createOperatorConsoleLayout(
   state: OperatorConsoleState,
@@ -85,6 +88,24 @@ function createRegionDescriptors(
   terminal: TerminalMetrics
 ): readonly RegionDescriptor[] {
   const descriptors: RegionDescriptor[] = [];
+
+  if (state.startup !== undefined) {
+    descriptors.push({
+      kind: "startupDashboard",
+      priority: STARTUP_PRIORITY,
+      minHeight: 1,
+      desiredHeight: getStartupDashboardSurfaceDesiredHeight(state.startup, terminal.width),
+    });
+  }
+
+  if (state.setupPanel !== undefined) {
+    descriptors.push({
+      kind: "setupPanel",
+      priority: STARTUP_PRIORITY,
+      minHeight: 1,
+      desiredHeight: getSetupPanelSurfaceDesiredHeight(state.setupPanel, terminal.width),
+    });
+  }
 
   if (state.transcript.length > 0) {
     descriptors.push({
@@ -195,22 +216,26 @@ function compareRegionPriority(a: RegionDescriptor, b: RegionDescriptor): number
 
 function surfaceOrderIndex(kind: OperatorConsoleRegionKind): number {
   switch (kind) {
-    case "transcript":
+    case "startupDashboard":
       return 0;
-    case "approvals":
+    case "setupPanel":
       return 1;
-    case "activeWork":
+    case "transcript":
       return 2;
-    case "queuedSteer":
+    case "approvals":
       return 3;
-    case "attachments":
+    case "activeWork":
       return 4;
-    case "prompt":
+    case "queuedSteer":
       return 5;
-    case "slashMenu":
+    case "attachments":
       return 6;
-    case "statusRail":
+    case "prompt":
       return 7;
+    case "slashMenu":
+      return 8;
+    case "statusRail":
+      return 9;
   }
 }
 

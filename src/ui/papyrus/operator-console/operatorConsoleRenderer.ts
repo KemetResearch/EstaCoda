@@ -9,11 +9,13 @@ import { renderActiveWorkSurface } from "./activeWorkSurface.js";
 import { renderApprovalSurface } from "./approvalSurface.js";
 import { renderAttachmentSurface } from "./attachmentSurface.js";
 import { renderPromptSurface } from "./promptSurface.js";
+import { renderSetupPanelSurface } from "./setupPanelSurface.js";
 import {
   isSteerInputActive,
   renderQueuedSteerSurface,
   renderSteerInputSurface,
 } from "./steerSurface.js";
+import { renderStartupDashboardSurface } from "./startupDashboardSurface.js";
 import { renderStatusRailSurface } from "./statusRailSurface.js";
 
 export type OperatorConsoleRenderedLine = {
@@ -40,6 +42,18 @@ function renderRegionLines(
   region: OperatorConsoleRegion
 ): readonly OperatorConsoleRenderedLine[] {
   if (!region.visible || region.height <= 0 || region.width <= 0) return [];
+  if (region.kind === "startupDashboard") {
+    return renderStartupDashboardSurface(state.startup, {
+      width: region.width,
+      height: region.height,
+    }).map((text) => ({ region: region.kind, text }));
+  }
+  if (region.kind === "setupPanel" && state.setupPanel !== undefined) {
+    return renderSetupPanelSurface(state.setupPanel, {
+      width: region.width,
+      height: region.height,
+    }).map((text) => ({ region: region.kind, text }));
+  }
   if (region.kind === "prompt") {
     if (isSteerInputActive(state.steer) && state.steer !== undefined) {
       return renderSteerInputSurface(state.steer, {
@@ -98,6 +112,10 @@ function regionLabel(
 ): string {
   if (row > 0) return `${region.kind}`;
   switch (region.kind) {
+    case "startupDashboard":
+      return `Startup: ${state.startup?.productName ?? "EstaCoda"}`;
+    case "setupPanel":
+      return `Setup: ${state.setupPanel?.title ?? ""}`;
     case "transcript":
       return `Transcript: ${state.transcript.length} block${plural(state.transcript.length)}`;
     case "approvals":

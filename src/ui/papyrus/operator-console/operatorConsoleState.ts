@@ -38,6 +38,28 @@ export type StatusRailState = {
   };
 };
 
+export type StartupDashboardState = {
+  readonly productName: string;
+  readonly orgName: string;
+  readonly tagline: string;
+  readonly version: string;
+  readonly sessionId: string;
+  readonly session: {
+    readonly model: string;
+    readonly context: string;
+    readonly workspace: string;
+    readonly security: string;
+    readonly autonomy: string;
+  };
+  readonly commands: readonly StartupCommandState[];
+  readonly tips: readonly string[];
+};
+
+export type StartupCommandState = {
+  readonly command: string;
+  readonly description: string;
+};
+
 export type AttachmentCardState = {
   readonly id: string;
   readonly kind: "pastedText" | "fileExcerpt";
@@ -122,6 +144,38 @@ export type QueuedSteerState = {
   readonly submittedAtMs?: number;
 };
 
+export type SetupSurfaceState = SetupPanelState | SecretEntryPanelState;
+
+export type SetupPanelState = {
+  readonly kind: "table";
+  readonly title: string;
+  readonly description?: string;
+  readonly locale?: OperatorConsoleLocale;
+  readonly rows: readonly SetupTableRow[];
+  readonly selectedRowId?: string;
+  readonly footer?: string;
+};
+
+export type SetupTableRow = {
+  readonly id: string;
+  readonly provider: string;
+  readonly model: string;
+  readonly status: string;
+  readonly notes: string;
+};
+
+export type SecretEntryPanelState = {
+  readonly kind: "secret";
+  readonly title: string;
+  readonly description: string;
+  readonly maskedValue?: string;
+  readonly rawValue?: string;
+  readonly envVar?: string;
+  readonly optional?: boolean;
+  readonly emptyLabel?: string;
+  readonly footer: string;
+};
+
 export type TerminalMetrics = {
   readonly width: number;
   readonly height: number;
@@ -130,6 +184,8 @@ export type TerminalMetrics = {
 
 export type OperatorConsoleState = {
   readonly locale: OperatorConsoleLocale;
+  readonly startup?: StartupDashboardState;
+  readonly setupPanel?: SetupSurfaceState;
   readonly transcript: readonly TranscriptBlock[];
   readonly prompt: PromptSurfaceState;
   readonly status: StatusRailState;
@@ -143,6 +199,8 @@ export type OperatorConsoleState = {
 };
 
 export type OperatorConsoleSurface =
+  | "startupDashboard"
+  | "setupPanel"
   | "transcript"
   | "approvals"
   | "activeWork"
@@ -153,6 +211,8 @@ export type OperatorConsoleSurface =
   | "statusRail";
 
 export const OPERATOR_CONSOLE_SURFACE_ORDER: readonly OperatorConsoleSurface[] = [
+  "startupDashboard",
+  "setupPanel",
   "transcript",
   "approvals",
   "activeWork",
@@ -165,6 +225,8 @@ export const OPERATOR_CONSOLE_SURFACE_ORDER: readonly OperatorConsoleSurface[] =
 
 export type CreateInitialOperatorConsoleStateInput = {
   readonly locale?: OperatorConsoleLocale;
+  readonly startup?: StartupDashboardState;
+  readonly setupPanel?: SetupSurfaceState;
   readonly transcript?: readonly TranscriptBlock[];
   readonly prompt?: PromptSurfaceState;
   readonly status?: StatusRailState;
@@ -186,6 +248,8 @@ export function createInitialOperatorConsoleState(
 ): OperatorConsoleState {
   return {
     locale: input.locale ?? "en",
+    ...(input.startup === undefined ? {} : { startup: input.startup }),
+    ...(input.setupPanel === undefined ? {} : { setupPanel: input.setupPanel }),
     transcript: input.transcript ?? [],
     prompt: input.prompt ?? createDefaultPromptSurfaceState(),
     status: input.status ?? createDefaultStatusRailState(),

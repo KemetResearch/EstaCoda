@@ -21,6 +21,8 @@ describe("Papyrus operator console layout", () => {
     const layout = createOperatorConsoleLayout(createFullState(), { width: 80, height: 24, isTty: true });
 
     expect(regionKinds(layout)).toEqual([
+      "startupDashboard",
+      "setupPanel",
       "transcript",
       "approvals",
       "activeWork",
@@ -31,6 +33,24 @@ describe("Papyrus operator console layout", () => {
       "statusRail",
     ]);
     expect(layout.regions.map((item) => item.y)).toEqual([...layout.regions.map((item) => item.y)].sort((a, b) => a - b));
+  });
+
+  it("includes startup dashboard only when startup state exists", () => {
+    expect(regionKinds(createOperatorConsoleLayout(createState()))).not.toContain("startupDashboard");
+
+    const layout = createOperatorConsoleLayout(createState({
+      startup: startupDashboard(),
+    }));
+    expect(regionKinds(layout)).toContain("startupDashboard");
+  });
+
+  it("includes setup panel only when setup state exists", () => {
+    expect(regionKinds(createOperatorConsoleLayout(createState()))).not.toContain("setupPanel");
+
+    const layout = createOperatorConsoleLayout(createState({
+      setupPanel: setupPanel(),
+    }));
+    expect(regionKinds(layout)).toContain("setupPanel");
   });
 
   it("includes active work only when active work state is non-empty", () => {
@@ -185,6 +205,8 @@ describe("Papyrus operator console layout", () => {
     expect(region(layout, "activeWork")).toMatchObject({ height: 0, visible: false });
     expect(region(layout, "approvals")).toMatchObject({ height: 0, visible: false });
     expect(region(layout, "attachments")).toMatchObject({ height: 0, visible: false });
+    expect(region(layout, "startupDashboard")).toMatchObject({ height: 0, visible: false });
+    expect(region(layout, "setupPanel")).toMatchObject({ height: 0, visible: false });
     expect(region(layout, "transcript")).toMatchObject({ height: 0, visible: false });
   });
 
@@ -220,6 +242,8 @@ function createState(input: Partial<OperatorConsoleState> = {}): OperatorConsole
 
 function createFullState(): OperatorConsoleState {
   return createState({
+    startup: startupDashboard(),
+    setupPanel: setupPanel(),
     transcript: [{ id: "t1", role: "assistant", text: "Ready." }],
     approvals: [approval("approval-1")],
     activeWork: {
@@ -243,6 +267,47 @@ function createFullState(): OperatorConsoleState {
       items: [{ id: "model", label: "/model" }],
     },
   });
+}
+
+function startupDashboard() {
+  return {
+    productName: "EstaCoda",
+    orgName: "Kemet Research",
+    tagline: "sovereign agentic infrastructure",
+    version: "v0.1.0",
+    sessionId: "20ea8195",
+    session: {
+      model: "kimi-k2.6 ◐",
+      context: "0 / 262k",
+      workspace: "verified",
+      security: "open",
+      autonomy: "autonomous",
+    },
+    commands: [
+      { command: "/tools", description: "inspect tools" },
+      { command: "/skills", description: "loaded skills" },
+      { command: "/model", description: "active model route" },
+      { command: "/status", description: "runtime state" },
+      { command: "/setup", description: "setup editor" },
+    ],
+    tips: [
+      "Paste large context as attachments.",
+      "Approvals appear inline when an action needs permission.",
+    ],
+  };
+}
+
+function setupPanel() {
+  return {
+    kind: "table" as const,
+    title: "Model route",
+    description: "Choose the active provider and model route.",
+    rows: [
+      { id: "openai", provider: "OpenAI", model: "gpt-5.5", status: "ready", notes: "API key set" },
+      { id: "local", provider: "Local", model: "qwen3-coder", status: "offline", notes: "endpoint unset" },
+    ],
+    selectedRowId: "openai",
+  };
 }
 
 function regionKinds(layout: OperatorConsoleLayout): readonly OperatorConsoleRegion["kind"][] {

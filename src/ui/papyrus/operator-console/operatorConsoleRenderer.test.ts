@@ -94,6 +94,52 @@ describe("Papyrus operator console renderer", () => {
     expect(output.every((line) => stringWidth(line) <= 72)).toBe(true);
   });
 
+  it("renders startup dashboard above the prompt and status rail when present", () => {
+    const state = createState({
+      startup: startupDashboard(),
+      status: {
+        model: { label: "kimi-k2.7-code", state: "working" },
+        context: { usedTokens: 18400, totalTokens: 262000, percent: 7 },
+        sessionTimer: { elapsedMs: 72_000 },
+      },
+    });
+    const output = renderOperatorConsoleTextLines(
+      state,
+      createOperatorConsoleLayout(state, { width: 80, height: 24, isTty: true })
+    );
+    const startupIndex = output.findIndex((line) => line.includes("EstaCoda"));
+    const promptIndex = output.findIndex((line) => line.includes("Prompt"));
+    const statusIndex = output.findIndex((line) => line.includes("session 01:12"));
+
+    expect(startupIndex).toBeGreaterThanOrEqual(0);
+    expect(output).toContainEqual(expect.stringContaining("𓋹 Kemet Research 𓋹"));
+    expect(output).toContainEqual(expect.stringContaining("Session"));
+    expect(output).toContainEqual(expect.stringContaining("Commands"));
+    expect(output).toContainEqual(expect.stringContaining("/setup"));
+    expect(promptIndex).toBeGreaterThan(startupIndex);
+    expect(statusIndex).toBeGreaterThan(promptIndex);
+    expect(output.every((line) => stringWidth(line) <= 80)).toBe(true);
+  });
+
+  it("renders setup panel shell above the prompt deterministically", () => {
+    const state = createState({
+      setupPanel: setupPanel(),
+    });
+    const layout = createOperatorConsoleLayout(state, { width: 72, height: 18, isTty: true });
+    const first = renderOperatorConsoleTextLines(state, layout);
+    const second = renderOperatorConsoleTextLines(state, layout);
+    const setupIndex = first.findIndex((line) => line.includes("Model route"));
+    const promptIndex = first.findIndex((line) => line.includes("Prompt"));
+
+    expect(first).toEqual(second);
+    expect(setupIndex).toBeGreaterThanOrEqual(0);
+    expect(first).toContainEqual(expect.stringContaining("Provider"));
+    expect(first).toContainEqual(expect.stringContaining("gpt-5.5"));
+    expect(first).toContainEqual(expect.stringContaining("↑↓ navigate"));
+    expect(promptIndex).toBeGreaterThan(setupIndex);
+    expect(first.every((line) => stringWidth(line) <= 72)).toBe(true);
+  });
+
   it("renders attachments above steer input and status rail", () => {
     const state = createFullState();
     const layout = createOperatorConsoleLayout(state, { width: 120, height: 20, isTty: true });
@@ -424,4 +470,46 @@ function createFullState(): OperatorConsoleState {
       items: [{ id: "model", label: "/model" }],
     },
   });
+}
+
+function startupDashboard() {
+  return {
+    productName: "EstaCoda",
+    orgName: "Kemet Research",
+    tagline: "sovereign agentic infrastructure",
+    version: "v0.1.0",
+    sessionId: "20ea8195",
+    session: {
+      model: "kimi-k2.6 ◐",
+      context: "0 / 262k",
+      workspace: "verified",
+      security: "open",
+      autonomy: "autonomous",
+    },
+    commands: [
+      { command: "/tools", description: "inspect tools" },
+      { command: "/skills", description: "loaded skills" },
+      { command: "/model", description: "active model route" },
+      { command: "/status", description: "runtime state" },
+      { command: "/setup", description: "setup editor" },
+    ],
+    tips: [
+      "Paste large context as attachments.",
+      "Approvals appear inline when an action needs permission.",
+    ],
+  };
+}
+
+function setupPanel() {
+  return {
+    kind: "table" as const,
+    title: "Model route",
+    description: "Choose the active provider and model route.",
+    rows: [
+      { id: "openai", provider: "OpenAI", model: "gpt-5.5", status: "ready", notes: "API key set" },
+      { id: "anthropic", provider: "Anthropic", model: "claude-sonnet-4.5", status: "ready", notes: "API key set" },
+      { id: "local", provider: "Local", model: "qwen3-coder", status: "offline", notes: "endpoint unset" },
+    ],
+    selectedRowId: "openai",
+  };
 }

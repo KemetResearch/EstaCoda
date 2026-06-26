@@ -28,6 +28,8 @@ describe("Papyrus operator console state model", () => {
 
   it("keeps the canonical surface order stable", () => {
     expect(getOperatorConsoleSurfaceOrder()).toEqual([
+      "startupDashboard",
+      "setupPanel",
       "transcript",
       "approvals",
       "activeWork",
@@ -183,6 +185,49 @@ describe("Papyrus operator console state model", () => {
     expect(state.approvals).toEqual([]);
     expect(state.slash).toBeUndefined();
     expect(state.steer).toBeUndefined();
+    expect(state.startup).toBeUndefined();
+    expect(state.setupPanel).toBeUndefined();
+  });
+
+  it("constructs startup dashboard and setup panel state without runtime coupling", () => {
+    const state = createInitialOperatorConsoleState({
+      startup: {
+        productName: "EstaCoda",
+        orgName: "Kemet Research",
+        tagline: "sovereign agentic infrastructure",
+        version: "v0.1.0",
+        sessionId: "20ea8195",
+        session: {
+          model: "kimi-k2.6 ◐",
+          context: "0 / 262k",
+          workspace: "verified",
+          security: "open",
+          autonomy: "autonomous",
+        },
+        commands: [{ command: "/tools", description: "inspect tools" }],
+        tips: ["Paste large context as attachments."],
+      },
+      setupPanel: {
+        kind: "table",
+        title: "Model route",
+        rows: [{
+          id: "openai",
+          provider: "OpenAI",
+          model: "gpt-5.5",
+          status: "ready",
+          notes: "API key set",
+        }],
+        selectedRowId: "openai",
+      },
+    });
+
+    expect(state.startup?.productName).toBe("EstaCoda");
+    expect(state.startup?.commands).toEqual([{ command: "/tools", description: "inspect tools" }]);
+    expect(state.setupPanel).toMatchObject({
+      kind: "table",
+      title: "Model route",
+      selectedRowId: "openai",
+    });
   });
 
   it("does not introduce rendering exports or ANSI strings in the model layer", () => {
