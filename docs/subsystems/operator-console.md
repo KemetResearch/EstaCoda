@@ -549,7 +549,7 @@ or heavily reduce:
 - fixed tool slot padding such as `TOOL_SLOT_COUNT = 5`
 - bottom chrome transient spinner tickers
 - bottom chrome active chrome tickers
-- `writeAboveChrome` / `writeAboveChromeNoRestore` plumbing
+- `writeAboveChromeSync` / `writeAboveChromeNoRestore` plumbing
 - `suspendChromeForTranscript` style prompt-region plumbing
 - manual active-turn transient line arrays
 - terminal row clearing helpers that only exist for live chrome patches
