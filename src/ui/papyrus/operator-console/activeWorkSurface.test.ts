@@ -1,3 +1,6 @@
+import { readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { stringWidth } from "../screen/stringWidth.js";
 import {
@@ -12,6 +15,8 @@ import {
   type ActiveWorkItemStatus,
   type ToolActivityState,
 } from "./index.js";
+
+const thisDir = dirname(fileURLToPath(import.meta.url));
 
 describe("Papyrus operator console active work surface", () => {
   it("starts with an empty inert active work model", () => {
@@ -31,6 +36,17 @@ describe("Papyrus operator console active work surface", () => {
 
     expect(state.items).toHaveLength(12);
     expect(renderActiveWorkSurface(state, { width: 80, height: 14 }).filter((line) => line.includes("tool_"))).toHaveLength(12);
+  });
+
+  it("does not impose a fixed 5-slot or 8-slot render cap when viewport allows", () => {
+    const output = renderActiveWorkSurface(createState({
+      expanded: true,
+      items: manyItems(12, "running"),
+    }), { width: 90, height: 16 });
+    const renderedItemRows = output.filter((line) => line.includes("tool_"));
+
+    expect(renderedItemRows).toHaveLength(12);
+    expect(renderedItemRows.length).toBeGreaterThan(8);
   });
 
   it("sorts running, queued, and awaiting approval items above completed items", () => {
@@ -53,6 +69,38 @@ describe("Papyrus operator console active work surface", () => {
     ]);
   });
 
+  it("keeps each active status above completed terminal statuses", () => {
+    const state = createState({
+      items: [
+        item("succeeded", "succeeded"),
+        item("failed", "failed"),
+        item("cancelled", "cancelled"),
+        item("queued", "queued"),
+        item("approval", "awaitingApproval"),
+        item("running", "running"),
+      ],
+    });
+    const sortedIds = sortActiveWorkItems(state).map((entry) => entry.id);
+
+    expect(sortedIds.indexOf("running")).toBeLessThan(sortedIds.indexOf("succeeded"));
+    expect(sortedIds.indexOf("queued")).toBeLessThan(sortedIds.indexOf("failed"));
+    expect(sortedIds.indexOf("approval")).toBeLessThan(sortedIds.indexOf("cancelled"));
+  });
+
+  it("counts failed, cancelled, and succeeded items as completed in expanded headers", () => {
+    const output = renderActiveWorkSurface(createState({
+      expanded: true,
+      items: [
+        item("run", "running"),
+        item("ok", "succeeded"),
+        item("bad", "failed"),
+        item("stop", "cancelled"),
+      ],
+    }), { width: 80, height: 8 });
+
+    expect(output[0]).toContain("Active work · 1 running · 3 completed");
+  });
+
   it("renders completed items during an active turn", () => {
     const output = renderActiveWorkSurface(createLiveState(), { width: 80, height: 8 }).join("\n");
 
@@ -69,6 +117,25 @@ describe("Papyrus operator console active work surface", () => {
     expect(output).toContainEqual(expect.stringContaining("... 18 more completed this turn"));
     expect(output.at(-1)).toMatch(/^╰─+╯$/u);
     expect(output.every((line) => stringWidth(line) <= 80)).toBe(true);
+  });
+
+  it("limits collapsed rows to the requested viewport height", () => {
+    const output = renderActiveWorkSurface(createLiveState(), { width: 80, height: 5 });
+
+    expect(output).toHaveLength(5);
+    expect(output).toContainEqual(expect.stringContaining("more completed this turn"));
+  });
+
+  it("reports overflow by hidden completed items, not total model size", () => {
+    const output = renderActiveWorkSurface(createState({
+      items: [
+        item("run", "running"),
+        item("queue", "queued"),
+        ...manyItems(5, "succeeded"),
+      ],
+    }), { width: 80, height: 6 });
+
+    expect(output).toContainEqual(expect.stringContaining("... 4 more completed this turn"));
   });
 
   it("renders expanded active work with counts, viewport scrolling, and footer controls", () => {
@@ -89,6 +156,30 @@ describe("Papyrus operator console active work surface", () => {
     expect(output.join("\n")).toContain("rg");
     expect(output.at(-2)).toContain("↑↓ scroll · Enter inspect · Esc collapse");
     expect(output.every((line) => stringWidth(line) <= 80)).toBe(true);
+  });
+
+  it("limits expanded rows to the requested viewport height", () => {
+    const output = renderActiveWorkSurface(createState({
+      expanded: true,
+      items: manyItems(20, "running"),
+    }), { width: 80, height: 7 });
+
+    expect(output).toHaveLength(7);
+    expect(output.at(-2)).toContain("↑↓ scroll");
+  });
+
+  it("changes expanded visible rows when scrollOffset changes", () => {
+    const base = createState({
+      expanded: true,
+      items: manyItems(12, "running"),
+    });
+    const top = renderActiveWorkSurface({ ...base, scrollOffset: 0 }, { width: 80, height: 8 }).join("\n");
+    const scrolled = renderActiveWorkSurface({ ...base, scrollOffset: 4 }, { width: 80, height: 8 }).join("\n");
+
+    expect(top).toContain("tool_1");
+    expect(top).not.toContain("tool_7");
+    expect(scrolled).not.toContain("tool_1");
+    expect(scrolled).toContain("tool_7");
   });
 
   it("formats durations deterministically from explicit or start/end timing", () => {
@@ -168,6 +259,18 @@ describe("Papyrus operator console active work surface", () => {
     );
   });
 
+  it("counts all tool events in the collapsed summary even when rendering is viewport-limited", () => {
+    const state = createState({
+      items: [
+        item("run", "running"),
+        ...manyItems(11, "succeeded"),
+      ],
+    });
+
+    expect(renderActiveWorkSurface(state, { width: 80, height: 5 })).toHaveLength(5);
+    expect(formatActiveWorkSummary(state)).toContain("12 total tool events");
+  });
+
   it("formats Arabic turn-end tool summaries through active work copy", () => {
     const state = createState({
       items: [
@@ -185,6 +288,27 @@ describe("Papyrus operator console active work surface", () => {
     expect(resolveActiveWorkCopy().activeWork).toBe("Active work");
     expect(resolveActiveWorkCopy("ar").activeWork).toBe("العمل النشط");
     expect(resolveActiveWorkCopy("ar").awaitingApproval).toBe("بانتظار الموافقة");
+  });
+
+  it("keeps active work summary copy token-backed and local to operator console", () => {
+    const surfaceSource = readFileSync(join(thisDir, "activeWorkSurface.ts"), "utf8");
+    const copySource = readFileSync(join(thisDir, "activeWorkCopy.ts"), "utf8");
+
+    expect(surfaceSource).not.toContain("Completed tool work");
+    expect(surfaceSource).not.toContain("running steps resolved");
+    expect(surfaceSource).not.toContain("total tool events");
+    expect(surfaceSource).not.toContain("file change inspected");
+    expect(copySource).toContain("Completed tool work");
+    expect(copySource).toContain("running steps resolved");
+  });
+
+  it("does not depend on CLI or setup copy modules", () => {
+    const source = [
+      readFileSync(join(thisDir, "activeWorkSurface.ts"), "utf8"),
+      readFileSync(join(thisDir, "activeWorkCopy.ts"), "utf8"),
+    ].join("\n");
+
+    expect(source).not.toMatch(/from\s+["'][^"']*(?:cli|setup)[^"']*["']/u);
   });
 
   it("renders Arabic labels while preserving technical tool names, paths, and durations", () => {

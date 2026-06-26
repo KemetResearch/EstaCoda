@@ -112,6 +112,30 @@ describe("Papyrus operator console renderer", () => {
     expect(output.every((line) => stringWidth(line) <= 120)).toBe(true);
   });
 
+  it("places active work above attachments, prompt, and status rail when present", () => {
+    const state = createFullState();
+    const layout = createOperatorConsoleLayout(state, { width: 120, height: 20, isTty: true });
+    const output = renderOperatorConsoleTextLines(state, layout);
+    const activeWorkIndex = output.findIndex((line) => line.includes("Active work"));
+    const attachmentsIndex = output.findIndex((line) => line === "Attachments");
+    const promptIndex = output.findIndex((line) => line.includes("Prompt"));
+    const statusIndex = output.findIndex((line) => line.includes("session 01:12"));
+
+    expect(activeWorkIndex).toBeGreaterThanOrEqual(0);
+    expect(activeWorkIndex).toBeLessThan(attachmentsIndex);
+    expect(activeWorkIndex).toBeLessThan(promptIndex);
+    expect(activeWorkIndex).toBeLessThan(statusIndex);
+  });
+
+  it("does not reserve active work rows when active work is empty", () => {
+    const state = createState();
+    const layout = createOperatorConsoleLayout(state, { width: 80, height: 8, isTty: true });
+    const output = renderOperatorConsoleTextLines(state, layout);
+
+    expect(output).not.toContainEqual(expect.stringContaining("Active work"));
+    expect(output[0]).toContain("Prompt");
+  });
+
   it("does not reserve attachment rows when attachments are absent", () => {
     const state = createState();
     const layout = createOperatorConsoleLayout(state, { width: 80, height: 8, isTty: true });
