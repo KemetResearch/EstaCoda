@@ -25,6 +25,67 @@ describe("raw prompt render loop", () => {
     expect(output.text()).not.toMatch(forbiddenManagedRegionOutput);
   });
 
+  it("can render through the Operator Console host when explicitly enabled", () => {
+    const output = fakeOutput();
+    const loop = new RawPromptRenderLoop(output);
+
+    const rows = loop.render({
+      prompt: "> ",
+      state: createLineEditorState("review the Papyrus rollout plan"),
+      operatorConsole: {
+        enabled: true,
+        terminal: { width: 72, height: 12, isTty: true },
+        status: {
+          model: { label: "kimi-k2.7-code", state: "working" },
+          context: { usedTokens: 18400, totalTokens: 262000, percent: 7 },
+          sessionTimer: { elapsedMs: 72_000 },
+        },
+      },
+    });
+
+    expect(rows).toBe(4);
+    expect(output.text()).toContain("╭─ Prompt");
+    expect(output.text()).toContain("│ › review the Papyrus rollout plan");
+    expect(output.text()).toContain("kimi-k2.7-code ● │ ctx [▰▱▱▱▱▱▱▱▱▱] 18.4k/262k 7% │ session 01:12");
+    expect(output.text()).not.toMatch(forbiddenManagedRegionOutput);
+  });
+
+  it("keeps non-Operator Console raw rendering unchanged by default", () => {
+    const output = fakeOutput();
+    const loop = new RawPromptRenderLoop(output);
+
+    const rows = loop.render({
+      prompt: "> ",
+      state: createLineEditorState("plain"),
+    });
+
+    expect(rows).toBe(1);
+    expect(output.text()).toContain("> plain");
+    expect(output.text()).not.toContain("╭─ Prompt");
+    expect(output.text()).not.toContain("session 00:00");
+  });
+
+  it("places raw overlay rows between Operator Console prompt and status rail", () => {
+    const output = fakeOutput();
+    const loop = new RawPromptRenderLoop(output);
+
+    const rows = loop.render({
+      prompt: "> ",
+      state: createLineEditorState("/h"),
+      overlayRows: [{ text: "> /help - Show help" }],
+      operatorConsole: {
+        enabled: true,
+        terminal: { width: 72, height: 12, isTty: true },
+      },
+    });
+    const text = output.text();
+
+    expect(rows).toBe(5);
+    expect(text.indexOf("╭─ Prompt")).toBeLessThan(text.indexOf("> /help - Show help"));
+    expect(text.indexOf("> /help - Show help")).toBeLessThan(text.indexOf("session 00:00"));
+    expect(text).not.toMatch(forbiddenManagedRegionOutput);
+  });
+
   it("redraws after edits without full-screen or scrollback clear sequences", () => {
     const output = fakeOutput();
     const loop = new RawPromptRenderLoop(output);

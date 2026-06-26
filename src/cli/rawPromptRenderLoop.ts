@@ -1,8 +1,15 @@
 import { stringWidth } from "../ui/papyrus/screen/stringWidth.js";
 import type { LineEditorState } from "../ui/input/lineEditor.js";
+import {
+  buildOperatorConsoleRawPromptFrame,
+  type OperatorConsoleRawPromptSnapshot,
+} from "../ui/papyrus/operator-console/operatorConsoleHost.js";
 
 export type RawPromptRenderOutput = {
   write(chunk: string): unknown;
+  readonly columns?: number;
+  readonly rows?: number;
+  readonly isTTY?: boolean;
 };
 
 export type RawPromptOverlayRow = {
@@ -19,6 +26,11 @@ export type RawPromptRenderSnapshot = {
   readonly state: LineEditorState;
   readonly ghostText?: RawPromptGhostText;
   readonly overlayRows?: readonly RawPromptOverlayRow[];
+  readonly operatorConsole?: RawPromptOperatorConsoleOptions;
+};
+
+export type RawPromptOperatorConsoleOptions = Omit<OperatorConsoleRawPromptSnapshot, "prompt" | "state" | "overlayRows"> & {
+  readonly enabled: boolean;
 };
 
 export class RawPromptOverlayHost {
@@ -46,7 +58,15 @@ export class RawPromptRenderLoop {
   }
 
   render(snapshot: RawPromptRenderSnapshot): number {
-    const frame = buildRawPromptFrame(snapshot);
+    const frame = snapshot.operatorConsole?.enabled === true
+      ? buildOperatorConsoleRawPromptFrame({
+        prompt: snapshot.prompt,
+        state: snapshot.state,
+        status: snapshot.operatorConsole.status,
+        terminal: snapshot.operatorConsole.terminal,
+        overlayRows: snapshot.overlayRows,
+      })
+      : buildRawPromptFrame(snapshot);
     this.#moveToFirstRenderedRow();
 
     const physicalRows = Math.max(this.#renderedRows, frame.rows.length);

@@ -173,6 +173,42 @@ function startPendingRead() {
   };
 }
 
+function startPendingOperatorConsoleRead(options: Partial<RawPromptControllerOptions> = {}) {
+  const input = new FakeInput();
+  const output = fakeOutput();
+  output.columns = 72;
+  output.rows = 16;
+  const lifecycle = fakeLifecycle();
+  const controller = new RawPromptController({
+    input,
+    output,
+    lifecycle: lifecycle.lifecycle,
+    operatorConsole: {
+      enabled: true,
+      terminal: { width: 72, height: 16, isTty: true },
+      status: {
+        model: { label: "kimi-k2.7-code", state: "working" },
+        context: { usedTokens: 18400, totalTokens: 262000, percent: 7 },
+        sessionTimer: { elapsedMs: 72_000 },
+      },
+    },
+    ...options,
+  });
+  let resolved = false;
+  const pending = controller.read("> ").then((result) => {
+    resolved = true;
+    return result;
+  });
+
+  return {
+    input,
+    output,
+    lifecycle,
+    pending,
+    isResolved: () => resolved,
+  };
+}
+
 describe("raw prompt controller", () => {
   it("submits ASCII text", async () => {
     const { result, output, lifecycle } = await readWithFakeInput("hello\r");
@@ -414,6 +450,68 @@ describe("raw prompt controller", () => {
     expect(read.output.writes.join("")).toContain("> abXc");
     expect(read.output.writes.join("")).toContain("\x1b[4C");
     expect(read.output.writes.join("")).not.toMatch(forbiddenManagedRegionOutput);
+  });
+
+  it("renders through Operator Console host when explicitly enabled", async () => {
+    const read = startPendingOperatorConsoleRead();
+
+    read.input.send("review the Papyrus rollout plan\r");
+
+    expect(await read.pending).toEqual({ type: "submit", text: "review the Papyrus rollout plan" });
+    const output = read.output.writes.join("");
+    expect(output).toContain("╭─ Prompt");
+    expect(output).toContain("│ › review the Papyrus rollout plan");
+    expect(output).toContain("kimi-k2.7-code ● │ ctx [▰▱▱▱▱▱▱▱▱▱] 18.4k/262k 7% │ session 01:12");
+    expect(output).not.toMatch(/\b(tool|approval|workspace|trust|steering|setup|channel)\b/iu);
+    expect(output).not.toMatch(forbiddenManagedRegionOutput);
+  });
+
+  it("submits an Operator Console prompt once without duplicate prompt text", async () => {
+    const read = startPendingOperatorConsoleRead();
+
+    read.input.send("hello\r");
+
+    expect(await read.pending).toEqual({ type: "submit", text: "hello" });
+    expect(countOccurrences(read.output.writes.join(""), "│ › hello")).toBe(1);
+  });
+
+  it("keeps Alt+Enter multiline insertion under Operator Console routing", async () => {
+    const read = startPendingOperatorConsoleRead();
+
+    read.input.send("hello\x1b\rworld");
+    await flushPromises();
+
+    expect(read.isResolved()).toBe(false);
+    expect(read.output.writes.join("")).toContain("Prompt · multiline");
+    expect(read.output.writes.join("")).toContain("│ › hello");
+    expect(read.output.writes.join("")).toContain("│   world");
+
+    read.input.send("\r");
+    expect(await read.pending).toEqual({ type: "submit", text: "hello\nworld" });
+  });
+
+  it("preserves multiline paste under Operator Console routing", async () => {
+    const read = startPendingOperatorConsoleRead();
+
+    read.input.send(`${PASTE_START}line one\nline two${PASTE_END}`);
+    await flushPromises();
+
+    expect(read.isResolved()).toBe(false);
+    expect(read.output.writes.join("")).toContain("Prompt · multiline");
+    expect(read.output.writes.join("")).toContain("│ › line one");
+    expect(read.output.writes.join("")).toContain("│   line two");
+
+    read.input.send("\r");
+    expect(await read.pending).toEqual({ type: "submit", text: "line one\nline two" });
+  });
+
+  it("keeps Escape cancel behavior unchanged under Operator Console routing", async () => {
+    const read = startPendingOperatorConsoleRead();
+
+    read.input.send("\x1b");
+
+    expect(await read.pending).toEqual({ type: "cancel" });
+    expect(read.lifecycle.calls).toEqual(["start", "stop"]);
   });
 
   it("renders inert overlay rows and clears them on submit", async () => {
@@ -807,6 +905,28 @@ describe("raw prompt controller", () => {
     expect(output.writes.join("")).not.toMatch(forbiddenManagedRegionOutput);
   });
 
+  it("accepts the focused slash suggestion with Enter under Operator Console routing", async () => {
+    const provider = providerFor(SLASH_COMMAND_SUGGESTION_PROVIDER_ID, [slashSuggestion]);
+    const typeahead = fakeTypeahead(provider);
+    const read = startPendingOperatorConsoleRead({
+      typeahead: {
+        router: typeahead.router,
+      },
+    });
+
+    read.input.send("/h");
+    await flushPromises();
+    read.input.send("\r");
+    await flushPromises();
+
+    expect(read.output.writes.join("")).toContain("> /help - Show help");
+    expect(read.output.writes.join("")).toContain("│ › /help");
+    expect(read.isResolved()).toBe(false);
+
+    read.input.send("\r");
+    expect(await read.pending).toEqual({ type: "submit", text: "/help" });
+  });
+
   it("inserts Alt+Enter instead of accepting an open slash suggestion", async () => {
     const provider = providerFor(SLASH_COMMAND_SUGGESTION_PROVIDER_ID, [slashSuggestion]);
     const typeahead = fakeTypeahead(provider);
@@ -841,6 +961,31 @@ describe("raw prompt controller", () => {
     input.send("\r");
     expect(await pending).toEqual({ type: "submit", text: "/h\n" });
     expect(output.writes.join("")).not.toMatch(forbiddenManagedRegionOutput);
+  });
+
+  it("inserts Alt+Enter instead of accepting an open slash suggestion under Operator Console routing", async () => {
+    const provider = providerFor(SLASH_COMMAND_SUGGESTION_PROVIDER_ID, [slashSuggestion]);
+    const typeahead = fakeTypeahead(provider);
+    const overlayHost = new RawPromptOverlayHost();
+    const read = startPendingOperatorConsoleRead({
+      overlayHost,
+      typeahead: {
+        router: typeahead.router,
+      },
+    });
+
+    read.input.send("/h");
+    await flushPromises();
+    read.input.send("\x1b\r");
+    await flushPromises();
+
+    expect(read.isResolved()).toBe(false);
+    expect(read.output.writes.join("")).toContain("Prompt · multiline");
+    expect(read.output.writes.join("")).toContain("│ › /h");
+    expect(overlayHost.getRows()).toEqual([]);
+
+    read.input.send("\r");
+    expect(await read.pending).toEqual({ type: "submit", text: "/h\n" });
   });
 
   it("accepts the focused slash suggestion with Tab", async () => {
@@ -1300,4 +1445,9 @@ function fakeTypeahead(provider: SuggestionProvider<SlashCommandSuggestionMetada
 async function flushPromises(): Promise<void> {
   await Promise.resolve();
   await Promise.resolve();
+}
+
+function countOccurrences(value: string, needle: string): number {
+  if (needle.length === 0) return 0;
+  return value.split(needle).length - 1;
 }
