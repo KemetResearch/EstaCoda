@@ -166,6 +166,29 @@ describe("Papyrus operator console renderer", () => {
     expect(output.every((line) => stringWidth(line) <= 120)).toBe(true);
   });
 
+  it("includes approval card output deterministically without mutating state", () => {
+    const state = createState({
+      approvals: [{
+        id: "approval-1",
+        status: "pending",
+        action: "write file",
+        target: "src/runtime/provider-turn-loop.ts",
+        risk: "runtime behavior change",
+        focusedControl: "reject",
+      }],
+    });
+    const before = JSON.stringify(state);
+    const layout = createOperatorConsoleLayout(state, { width: 72, height: 12, isTty: true });
+    const first = renderOperatorConsoleTextLines(state, layout);
+    const second = renderOperatorConsoleTextLines(state, layout);
+
+    expect(first).toEqual(second);
+    expect(first).toContainEqual(expect.stringContaining("Approval required"));
+    expect(first).toContainEqual(expect.stringContaining("Approve once        ❯ Reject        Inspect"));
+    expect(first.every((line) => stringWidth(line) <= 72)).toBe(true);
+    expect(JSON.stringify(state)).toBe(before);
+  });
+
   it("places active work above attachments, prompt, and status rail when present", () => {
     const state = createFullState();
     const layout = createOperatorConsoleLayout(state, { width: 120, height: 20, isTty: true });

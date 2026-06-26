@@ -49,7 +49,11 @@ describe("Papyrus operator console approval surface", () => {
     expect(text).toContain("[Approve once]");
     expect(text).toContain("[Reject]");
     expect(text).toContain("[Inspect]");
-    expect(text).not.toMatch(/feedback|amend|session|persistent|always|do not ask/iu);
+    expect(text).not.toMatch(/feedback|amend|session|persistent|always|do not ask|scope|forever/iu);
+    expect(text).not.toContain("[Add feedback]");
+    expect(text).not.toContain("[Amend]");
+    expect(text).not.toContain("[Approve session]");
+    expect(text).not.toContain("[Approve always]");
   });
 
   it("renders visual focus for the focused approval control", () => {
@@ -68,19 +72,23 @@ describe("Papyrus operator console approval surface", () => {
     const state = createState({ focusedControl: "approve" });
     const reject = routeApprovalKey(state, { type: "key", key: "tab" }).state;
     const inspect = routeApprovalKey(reject, { type: "key", key: "right" }).state;
+    const approve = routeApprovalKey(inspect, { type: "key", key: "tab" }).state;
     const back = routeApprovalKey(inspect, { type: "key", key: "left" }).state;
 
     expect(focusedApproval(back).focusedControl).toBe("reject");
     expect(reject.focus.target).toEqual({ kind: "approval", approvalId: "approval-1", control: "reject" });
     expect(focusedApproval(inspect).focusedControl).toBe("inspect");
+    expect(focusedApproval(approve).focusedControl).toBe("approve");
   });
 
-  it("cycles reverse focus from inspect to reject to approve", () => {
+  it("cycles reverse focus from inspect to reject to approve to inspect", () => {
     const reject = routeApprovalKey(createState({ focusedControl: "inspect" }), { type: "key", key: "tab", shift: true }).state;
     const approve = routeApprovalKey(reject, { type: "key", key: "left" }).state;
+    const inspect = routeApprovalKey(approve, { type: "key", key: "left" }).state;
 
     expect(focusedApproval(reject).focusedControl).toBe("reject");
     expect(focusedApproval(approve).focusedControl).toBe("approve");
+    expect(focusedApproval(inspect).focusedControl).toBe("inspect");
   });
 
   it("emits approve, reject, and inspect intents from focused controls", () => {
@@ -134,32 +142,56 @@ describe("Papyrus operator console approval surface", () => {
   });
 
   it("does not render actionable controls for hardline-like rejected approvals", () => {
-    const text = renderApprovalSurface([
-      approval({
+    const hardline = approval({
         status: "rejected",
         risk: "hardline policy denial",
         summary: "Blocked by command policy",
-      }),
-    ], { width: 64 }).join("\n");
+        focusedControl: "approve",
+    });
+    const text = renderApprovalSurface([hardline], { width: 64 }).join("\n");
+    const result = routeApprovalKey(createState(hardline), { type: "key", key: "enter" });
 
     expect(text).toContain("Blocked by command policy");
     expect(text).not.toContain("Approve once");
     expect(text).not.toContain("Inspect");
+    expect(result.intent).toEqual({ type: "none" });
   });
 
   it("truncates long action, target, and risk text safely", () => {
+    const longAction = "write file with a very long generated migration and runtime policy change";
+    const longTarget = "src/runtime/deeply/nested/provider-turn-loop-with-a-very-long-name.ts";
+    const longRisk = "runtime behavior change with persistence and approval implications";
     const output = renderApprovalSurface([
       approval({
-        action: "write file with a very long generated migration and runtime policy change",
-        target: "src/runtime/deeply/nested/provider-turn-loop-with-a-very-long-name.ts",
-        risk: "runtime behavior change with persistence and approval implications",
+        action: longAction,
+        target: longTarget,
+        risk: longRisk,
       }),
     ], { width: 44 });
     const text = output.join("\n");
 
     expect(text).toContain("write file");
+    expect(text).not.toContain(longAction);
+    expect(text).not.toContain(longTarget);
+    expect(text).not.toContain(longRisk);
     expect(text).not.toContain("provider-turn-loop-with-a-very-long-name.ts");
     expect(output.every((line) => stringWidth(line) <= 44)).toBe(true);
+  });
+
+  it("keeps every approval card line within the terminal width", () => {
+    for (const width of [1, 2, 3, 12, 24, 48, 72]) {
+      const output = renderApprovalSurface([
+        approval({
+          action: "write file with long runtime action",
+          target: "src/runtime/provider-turn-loop.ts",
+          risk: "runtime behavior change",
+          diffStats: { added: 42, removed: 17 },
+          focusedControl: "inspect",
+        }),
+      ], { width });
+
+      expect(output.every((line) => stringWidth(line) <= width)).toBe(true);
+    }
   });
 
   it("emits no ANSI escape sequences or cursor-control strings", () => {
@@ -184,6 +216,19 @@ describe("Papyrus operator console approval surface", () => {
 
   it("keeps approval focus controls limited to approve, reject, and inspect", () => {
     expect(APPROVAL_FOCUS_CONTROLS).toEqual(["approve", "reject", "inspect"]);
+  });
+
+  it("returns only approval UI intents without policy or grant metadata", () => {
+    const result = routeApprovalKey(createState({ focusedControl: "approve" }), { type: "key", key: "enter" });
+
+    expect(Object.keys(result.intent).sort()).toEqual(["approvalId", "type"]);
+    expect(result.intent).toEqual({
+      type: "approve",
+      approvalId: "approval-1",
+    });
+    expect(result.intent).not.toHaveProperty("scope");
+    expect(result.intent).not.toHaveProperty("persistent");
+    expect(result.intent).not.toHaveProperty("grant");
   });
 
   it("keeps approval policy outside the UI surface", () => {
