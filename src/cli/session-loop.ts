@@ -50,10 +50,12 @@ import type { TerminalCapabilities } from "../contracts/ui.js";
 import {
   createSubmittedSteerTranscriptBlock,
   createOperatorConsoleRuntimeHost,
+  createOperatorConsoleStyle,
   mapStartupDashboardViewModelToOperatorConsoleState,
   renderOperatorConsoleLines,
   routeSteerKey,
   type ActiveWorkRuntimeEvent,
+  type OperatorConsoleStyle,
   type OperatorConsoleRuntimeHost,
   type QueuedSteerState,
   type SteerState,
@@ -191,6 +193,7 @@ function renderStartupScreenText(input: {
   capabilities: TerminalCapabilities;
   operatorConsoleRuntimeHost?: OperatorConsoleRuntimeHost;
   contextWindow?: number;
+  style?: OperatorConsoleStyle;
 }): string {
   if (!canRenderStartupThroughOperatorConsole(input)) {
     return formatStartupScreenText({
@@ -205,6 +208,7 @@ function renderStartupScreenText(input: {
     contextWindow: input.contextWindow,
     capabilities: input.capabilities,
     operatorConsoleRuntimeHost: input.operatorConsoleRuntimeHost,
+    style: input.style,
   });
   return `\x1b[2J\x1b[H${startupText}`;
 }
@@ -213,10 +217,12 @@ function canRenderStartupThroughOperatorConsole(input: {
   viewModel: ViewModel;
   capabilities: TerminalCapabilities;
   operatorConsoleRuntimeHost?: OperatorConsoleRuntimeHost;
+  style?: OperatorConsoleStyle;
 }): input is {
   viewModel: StartupDashboardViewModel;
   capabilities: TerminalCapabilities;
   operatorConsoleRuntimeHost: OperatorConsoleRuntimeHost;
+  style?: OperatorConsoleStyle;
 } {
   return input.operatorConsoleRuntimeHost !== undefined &&
     input.viewModel.kind === "startupDashboard" &&
@@ -231,6 +237,7 @@ function renderOperatorConsoleStartupDashboard(input: {
   contextWindow?: number;
   capabilities: TerminalCapabilities;
   operatorConsoleRuntimeHost: OperatorConsoleRuntimeHost;
+  style?: OperatorConsoleStyle;
 }): string {
   const host = input.operatorConsoleRuntimeHost;
   host.clear();
@@ -239,6 +246,7 @@ function renderOperatorConsoleStartupDashboard(input: {
     height: 40,
     isTty: input.capabilities.isTTY,
   });
+  host.setStyle(input.style);
   host.setStartupDashboard(mapStartupDashboardViewModelToOperatorConsoleState({
     viewModel: input.viewModel,
     contextWindow: input.contextWindow,
@@ -269,6 +277,10 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
     && renderer.capabilities.isTTY
     && !renderer.capabilities.isCI
     && !renderer.capabilities.isDumb;
+  const operatorConsoleStyle = createOperatorConsoleStyle({
+    tokens: renderer.tokens,
+    capabilities: renderer.capabilities,
+  });
   const operatorConsoleRuntimeHost = operatorConsoleEnabled
     ? options.operatorConsole?.runtimeHost ?? createOperatorConsoleRuntimeHost({
       locale: renderer.locale === "ar" ? "ar" : "en",
@@ -277,8 +289,10 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
         height: OPERATOR_CONSOLE_ACTIVE_WORK_TERMINAL_HEIGHT,
         isTty: renderer.capabilities.isTTY,
       },
+      style: operatorConsoleStyle,
     })
     : undefined;
+  operatorConsoleRuntimeHost?.setStyle(operatorConsoleStyle);
   let latestContextUsage: ContextUsageSnapshot | undefined;
   let activeTurnContextUsageSource: ContextUsageSource | undefined;
   let timerMode: StatusRailTimerMode = "idle";
@@ -318,6 +332,7 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
             isTty: renderer.capabilities.isTTY,
           },
           getStatus: getOperatorConsoleStatus,
+          style: operatorConsoleStyle,
         },
       }),
   });
@@ -363,6 +378,7 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
       capabilities: renderer.capabilities,
       operatorConsoleRuntimeHost,
       contextWindow: modelContextWindow(runtime),
+      style: operatorConsoleStyle,
     });
     const promptPrefix = renderer.tokens.contract.branding.promptPrefix ?? `${renderer.tokens.contract.glyph.prompt} `;
     const useColor = renderer.capabilities.supportsColor && renderer.tokens.contract.behavior.allowAnsiColor;
@@ -391,7 +407,7 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
     }
     while (true) {
       const inputPlaceholder = managedTty
-        ? promptInputPlaceholder(renderer, promptPrefix, useColor, termWidth)
+        ? promptInputPlaceholder(renderer, operatorConsoleEnabled ? "" : promptPrefix, useColor, termWidth)
         : undefined;
       let submittedInput: SubmittedCliInput;
       let turnVoiceMode: CliVoiceMode = "off";
@@ -484,9 +500,7 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
       // Render submitted non-slash user prompts as lightweight transcript rails
       const userPromptRail = buildUserPromptRailViewModel({ text });
       const userPromptRailText = renderer.render(userPromptRail);
-      if (!operatorConsoleEnabled) {
-        output.write(`${userPromptRailText}\n`);
-      }
+      output.write(`${userPromptRailText}\n`);
 
       let retryText: string | undefined = text;
       let wroteUserPromptRail = false;

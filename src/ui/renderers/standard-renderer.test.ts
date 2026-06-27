@@ -2557,7 +2557,7 @@ describe("StandardRenderer — prompt chrome rails", () => {
     expect(status).toContain("deepseek-reasoner");
     expect(status).toContain("idle");
     expect(status.split("\n")).toHaveLength(1);
-    expect(shortcuts).toContain("/help · /tools · /model · /status · Ctrl+C exit");
+    expect(shortcuts).toContain("/help · /tools · /model · /status · /compact · Ctrl+C exit");
     expect(shortcuts.split("\n")).toHaveLength(1);
     expect(hasAnsi(status)).toBe(true);
     expect(hasAnsi(shortcuts)).toBe(true);
@@ -2588,7 +2588,7 @@ describe("StandardRenderer — prompt chrome rails", () => {
     const r = renderer("dark", fullCaps());
     const vm = buildShortcutHintRailViewModel({ hints: [] });
     const out = r.render(vm);
-    expect(out).toContain("/help · /tools · /model · /status · Ctrl+C exit");
+    expect(out).toContain("/help · /tools · /model · /status · /compact · Ctrl+C exit");
     expect(out.split("\n")).toHaveLength(1);
   });
 

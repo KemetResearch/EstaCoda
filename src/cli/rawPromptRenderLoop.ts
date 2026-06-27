@@ -96,6 +96,8 @@ export class RawPromptRenderLoop {
         activeWork: snapshot.operatorConsole.activeWork,
         steer: snapshot.operatorConsole.steer,
         promptMode: snapshot.operatorConsole.promptMode,
+        placeholder: snapshot.operatorConsole.placeholder,
+        style: snapshot.operatorConsole.style,
         focus: snapshot.operatorConsole.focus,
       })
       : buildFallbackRawPromptFrame(snapshot);

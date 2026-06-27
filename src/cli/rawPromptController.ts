@@ -154,6 +154,7 @@ export class RawPromptController {
             },
             attachments,
             slash: slashMenu,
+            placeholder: options?.placeholder,
             focus: attachmentFocus,
           }
           : undefined,

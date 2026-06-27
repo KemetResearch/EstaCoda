@@ -19,6 +19,7 @@ import {
   type OperatorConsoleRuntimeFrame,
   type OperatorConsoleRuntimeHost,
 } from "./operatorConsoleRuntimeHost.js";
+import type { OperatorConsoleStyle } from "./operatorConsoleStyle.js";
 
 export type OperatorConsoleRawPromptSnapshot = {
   readonly prompt: string;
@@ -30,6 +31,8 @@ export type OperatorConsoleRawPromptSnapshot = {
   readonly activeWork?: ToolActivityState;
   readonly steer?: SteerState;
   readonly promptMode?: PromptSurfaceState["mode"];
+  readonly placeholder?: string;
+  readonly style?: OperatorConsoleStyle;
   readonly focus?: FocusState;
 };
 
@@ -58,12 +61,14 @@ export function buildOperatorConsoleStateFromRawPrompt(
       multiline: snapshot.state.text.includes("\n"),
       scrollOffset: 0,
       mode: snapshot.promptMode ?? "prompt",
+      ...(snapshot.placeholder === undefined ? {} : { placeholder: snapshot.placeholder }),
     },
     status: snapshot.status ?? createDefaultOperatorConsoleRawPromptStatus(),
     attachments: snapshot.attachments ?? [],
     activeWork: snapshot.activeWork,
     steer: snapshot.steer,
     focus: snapshot.focus,
+    style: snapshot.style,
     ...(snapshot.slash === undefined ? {} : { slash: snapshot.slash }),
   });
 }
@@ -100,12 +105,16 @@ export function buildOperatorConsoleRawPromptFrameWithRuntimeHost(
   host.setActiveWork(snapshot.activeWork ?? createInitialOperatorConsoleState().activeWork);
   host.setSteer(snapshot.steer);
   host.setFocus(snapshot.focus ?? createInitialOperatorConsoleState().focus);
+  if (snapshot.style !== undefined) {
+    host.setStyle(snapshot.style);
+  }
   host.setPrompt({
     text: snapshot.state.text,
     cursorOffset: snapshot.state.cursor,
     multiline: snapshot.state.text.includes("\n"),
     scrollOffset: 0,
     mode: snapshot.promptMode ?? "prompt",
+    placeholder: snapshot.placeholder,
   });
   return rawPromptFrameFromRuntimeFrame(host.render());
 }
@@ -115,6 +124,7 @@ export function createDefaultOperatorConsoleRawPromptStatus(): StatusRailState {
     model: {
       label: "",
       state: "idle",
+      route: "primary",
     },
     context: {
       usedTokens: 0,
@@ -153,7 +163,7 @@ function getPromptCursorPosition(
   const visibleCursorRow = Math.max(0, metrics.cursorRow - metrics.scrollOffset);
   return {
     row: promptRegionY + 1 + visibleCursorRow,
-    column: 2 + promptLogicalCursorColumn(state.prompt.value, state.prompt.cursorOffset),
+    column: promptLogicalCursorColumn(state.prompt.value, state.prompt.cursorOffset),
   };
 }
 

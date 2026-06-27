@@ -1,9 +1,13 @@
 import { describe, expect, it } from "vitest";
+import { resolveTokens } from "../../../theme/token-resolver.js";
 import { createLineEditorState } from "../../input/lineEditor.js";
 import { stringWidth } from "../screen/stringWidth.js";
 import {
   buildOperatorConsoleRawPromptFrame,
+  buildOperatorConsoleRawPromptFrameWithRuntimeHost,
   buildOperatorConsoleStateFromRawPrompt,
+  createOperatorConsoleRuntimeHost,
+  createOperatorConsoleStyle,
   createPastedTextAttachment,
 } from "./index.js";
 
@@ -73,7 +77,7 @@ describe("Papyrus operator console raw prompt host", () => {
 
     expect(frame.rows[0]).toContain("Prompt");
     expect(frame.rows).toContainEqual(expect.stringContaining("› review the Papyrus rollout plan"));
-    expect(frame.rows.at(-1)).toBe("kimi-k2.7-code ● │ ctx [▰▱▱▱▱▱▱▱▱▱] 18.4k/262k 7% │ session 01:12");
+    expect(frame.rows.at(-1)).toBe("kimi-k2.7-code ● │ ctx [▰▱▱▱▱▱▱▱▱▱] 18.4k/262k 7% │ ◷ 01:12");
     expect(frame.rows.every((line) => stringWidth(line) <= 72)).toBe(true);
   });
 
@@ -97,7 +101,7 @@ describe("Papyrus operator console raw prompt host", () => {
     expect(frame.rows[0]).toContain("Prompt · multiline");
     expect(frame.rows).toContainEqual(expect.stringContaining("› write a migration plan for:"));
     expect(frame.rows).toContainEqual(expect.stringContaining("  - approval cards"));
-    expect(frame.rows.at(-1)).toContain("session 01:12");
+    expect(frame.rows.at(-1)).toContain("◷ 01:12");
   });
 
   it("maps raw prompt slash state into a boxed slash menu above the status rail", () => {
@@ -116,7 +120,7 @@ describe("Papyrus operator console raw prompt host", () => {
     });
     const promptIndex = frame.rows.findIndex((line) => line.includes("Prompt"));
     const slashIndex = frame.rows.findIndex((line) => line.includes("Commands"));
-    const statusIndex = frame.rows.findIndex((line) => line.includes("session 00:00"));
+    const statusIndex = frame.rows.findIndex((line) => line.includes("◷ 00:00"));
 
     expect(frame.state.slash?.query).toBe("/mo");
     expect(frame.state.slash?.items).toHaveLength(2);
@@ -177,4 +181,39 @@ describe("Papyrus operator console raw prompt host", () => {
     expect(output).not.toMatch(/\b(moveCursor|clearLine|clearScreenDown|cursorTo|setRawMode)\b/u);
     expect(first.rows.every((line) => stringWidth(line) <= 40)).toBe(true);
   });
+
+  it("preserves a shared runtime host style when a refresh snapshot omits style", () => {
+    const tokens = resolveTokens("standard", "dark", "kemetBlue");
+    const style = createOperatorConsoleStyle({
+      tokens,
+      capabilities: { supportsColor: true, supportsTrueColor: true },
+    });
+    const host = createOperatorConsoleRuntimeHost({
+      style,
+      terminal: { width: 72, height: 12, isTty: true },
+    });
+
+    const frame = buildOperatorConsoleRawPromptFrameWithRuntimeHost(host, {
+      prompt: "> ",
+      state: createLineEditorState("draft"),
+      terminal: { width: 72, height: 12, isTty: true },
+      status: {
+        model: { label: "kimi-k2.7-code", state: "idle", route: "fallback" },
+        context: { usedTokens: 18400, totalTokens: 262000, percent: 7 },
+        sessionTimer: { elapsedMs: 72_000 },
+      },
+    });
+
+    expect(frame.state.style).toBe(style);
+    expect(frame.rows.join("\n")).toContain(`${ansiFg(tokens.contract.palette.caution)}○\x1b[0m`);
+  });
 });
+
+function ansiFg(hex: string): string {
+  const clean = hex.replace("#", "");
+  const value = Number.parseInt(clean, 16);
+  const r = (value >> 16) & 255;
+  const g = (value >> 8) & 255;
+  const b = value & 255;
+  return `\x1b[38;2;${r};${g};${b}m`;
+}

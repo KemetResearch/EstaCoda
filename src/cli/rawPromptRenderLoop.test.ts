@@ -48,8 +48,8 @@ describe("raw prompt render loop", () => {
 
     expect(rows).toBe(4);
     expect(output.text()).toContain("╭─ Prompt");
-    expect(output.text()).toContain("│ › review the Papyrus rollout plan");
-    expect(output.text()).toContain("kimi-k2.7-code ● │ ctx [▰▱▱▱▱▱▱▱▱▱] 18.4k/262k 7% │ session 01:12");
+    expect(output.text()).toContain("› review the Papyrus rollout plan");
+    expect(output.text()).toContain("kimi-k2.7-code ● │ ctx [▰▱▱▱▱▱▱▱▱▱] 18.4k/262k 7% │ ◷ 01:12");
     expect(output.text()).not.toMatch(forbiddenManagedRegionOutput);
   });
 
@@ -210,8 +210,8 @@ describe("raw prompt render loop", () => {
       draft: "focus approvals",
     }));
     expect(text.indexOf("╭─ Active work")).toBeLessThan(text.indexOf("╭─ Steer current turn"));
-    expect(text.indexOf("╭─ Steer current turn")).toBeLessThan(text.indexOf("session 00:13"));
-    expect(text).toContain("│ › focus approvals");
+    expect(text.indexOf("╭─ Steer current turn")).toBeLessThan(text.indexOf("◷ 00:13"));
+    expect(text).toContain("› focus approvals");
     expect(text).not.toMatch(forbiddenManagedRegionOutput);
   });
 
@@ -263,7 +263,7 @@ describe("raw prompt render loop", () => {
     expect(rows).toBe(1);
     expect(output.text()).toContain("> plain");
     expect(output.text()).not.toContain("╭─ Prompt");
-    expect(output.text()).not.toContain("session 00:00");
+    expect(output.text()).not.toContain("◷ 00:00");
     expect(factory).not.toHaveBeenCalled();
   });
 
@@ -285,7 +285,7 @@ describe("raw prompt render loop", () => {
     expect(rows).toBe(4);
     expect(text).toContain("╭─ Prompt");
     expect(text).not.toContain("> /help - Show help");
-    expect(text.indexOf("╭─ Prompt")).toBeLessThan(text.indexOf("session 00:00"));
+    expect(text.indexOf("╭─ Prompt")).toBeLessThan(text.indexOf("◷ 00:00"));
     expect(text).not.toMatch(forbiddenManagedRegionOutput);
   });
 
@@ -320,7 +320,7 @@ describe("raw prompt render loop", () => {
     expect(setSlash).toHaveBeenCalledWith(expect.objectContaining({ query: "/mo" }));
     expect(host.getState().slash?.activeItemId).toBe("slash.model");
     expect(text.indexOf("╭─ Prompt")).toBeLessThan(text.indexOf("╭─ Commands"));
-    expect(text.indexOf("╭─ Commands")).toBeLessThan(text.indexOf("session 00:13"));
+    expect(text.indexOf("╭─ Commands")).toBeLessThan(text.indexOf("◷ 00:13"));
     expect(text).toContain("❯ /model  show or change active model route");
     expect(text).not.toMatch(/\b(command palette|slash|model setup)\b.*session/iu);
   });
@@ -353,7 +353,7 @@ describe("raw prompt render loop", () => {
     expect(rows).toBeGreaterThan(4);
     expect(text.indexOf("Attachments")).toBeLessThan(text.indexOf("╭─ Prompt"));
     expect(text).toContain("MVP known issue...");
-    expect(text).toContain("│ › summarize this");
+    expect(text).toContain("› summarize this");
     expect(text).toContain("kimi-k2.7-code ● │ ctx");
     expect(text).not.toMatch(/\b(attachment|pasted text)\b.*session/iu);
     expect(host.getState().attachments[0]?.content).toContain("store outside the prompt");

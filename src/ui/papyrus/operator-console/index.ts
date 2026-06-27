@@ -10,6 +10,7 @@ export * from "./operatorConsoleHost.js";
 export * from "./operatorConsoleLayout.js";
 export * from "./operatorConsoleRenderer.js";
 export * from "./operatorConsoleRuntimeHost.js";
+export * from "./operatorConsoleStyle.js";
 export * from "./operatorConsoleState.js";
 export * from "./promptSurface.js";
 export * from "./setupPanelSurface.js";

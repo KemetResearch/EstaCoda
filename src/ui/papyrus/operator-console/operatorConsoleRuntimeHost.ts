@@ -1,6 +1,7 @@
 import { createOperatorConsoleLayout, type OperatorConsoleLayout } from "./operatorConsoleLayout.js";
 import { renderOperatorConsoleTextLines } from "./operatorConsoleRenderer.js";
 import type { FocusState, FocusTarget } from "./focusModel.js";
+import type { OperatorConsoleStyle } from "./operatorConsoleStyle.js";
 import {
   createDefaultPromptSurfaceState,
   createDefaultStatusRailState,
@@ -80,6 +81,14 @@ export class OperatorConsoleRuntimeHost {
     this.#state = {
       ...this.#state,
       terminal: normalizeTerminalMetrics({ ...current, ...terminal }),
+    };
+  }
+
+  setStyle(style: OperatorConsoleStyle | undefined): void {
+    if (this.#disposed) return;
+    this.#state = {
+      ...this.#state,
+      ...(style === undefined ? { style: undefined } : { style }),
     };
   }
 
@@ -170,6 +179,7 @@ export class OperatorConsoleRuntimeHost {
       locale: this.#state.locale,
       terminal: this.#state.terminal,
       status: this.#state.status,
+      style: this.#state.style,
     });
   }
 
@@ -199,6 +209,7 @@ function cloneOperatorConsoleState(state: OperatorConsoleState): OperatorConsole
     steer: state.steer === undefined ? undefined : cloneSteerState(state.steer),
     focus: cloneFocusState(state.focus),
     terminal: cloneTerminalMetrics(state.terminal),
+    style: state.style,
   });
 }
 
@@ -226,6 +237,7 @@ function cloneStatusRailState(status: StatusRailState): StatusRailState {
     model: {
       label: status.model?.label ?? fallback.model.label,
       state: isStatusModelState(status.model?.state) ? status.model.state : fallback.model.state,
+      ...(isStatusModelRoute(status.model?.route) ? { route: status.model.route } : {}),
     },
     context: {
       usedTokens: normalizeNonNegativeNumber(status.context?.usedTokens ?? fallback.context.usedTokens),
@@ -324,6 +336,10 @@ function cloneSetupSurfaceState(setup: SetupSurfaceState): SetupSurfaceState {
 
 function isStatusModelState(value: string | undefined): value is StatusRailState["model"]["state"] {
   return value === "idle" || value === "working" || value === "degraded";
+}
+
+function isStatusModelRoute(value: string | undefined): value is NonNullable<StatusRailState["model"]["route"]> {
+  return value === "primary" || value === "fallback" || value === "failed";
 }
 
 function normalizeCursorOffset(value: number, text: string): number {

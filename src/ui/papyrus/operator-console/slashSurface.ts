@@ -1,9 +1,12 @@
 import { stringWidth } from "../screen/stringWidth.js";
+import { truncateVisible } from "../../renderers/layout.js";
 import type { SlashMenuState } from "./operatorConsoleState.js";
+import { styleColor, type OperatorConsoleStyle } from "./operatorConsoleStyle.js";
 
 export type SlashSurfaceRenderOptions = {
   readonly width: number;
   readonly height?: number;
+  readonly style?: OperatorConsoleStyle;
 };
 
 export function renderSlashSurface(
@@ -23,7 +26,7 @@ export function renderSlashSurface(
   const visibleItems = state.items.slice(0, itemRows);
   const rows = [
     renderTopBorder(titleForSlashMenu(state), width),
-    ...visibleItems.map((item) => renderContentRow(formatSlashItemRow(state, item), contentWidth, width)),
+    ...visibleItems.map((item) => renderContentRow(formatSlashItemRow(state, item, options.style), contentWidth, width)),
     renderBottomBorder(width),
   ];
 
@@ -36,11 +39,16 @@ function titleForSlashMenu(state: SlashMenuState): string {
 
 function formatSlashItemRow(
   state: SlashMenuState,
-  item: SlashMenuState["items"][number]
+  item: SlashMenuState["items"][number],
+  style: OperatorConsoleStyle | undefined
 ): string {
-  const marker = item.id === state.activeItemId ? "❯" : " ";
+  const selected = item.id === state.activeItemId;
+  const marker = selected ? "❯" : " ";
   const detail = item.detail === undefined || item.detail.length === 0 ? "" : `  ${item.detail}`;
-  return `${marker} ${item.label}${detail}`;
+  const row = `${marker} ${item.label}${detail}`;
+  return selected && style !== undefined
+    ? styleColor(style, row, style.tokens.contract.palette.action)
+    : row;
 }
 
 function renderFallbackLine(state: SlashMenuState): string {
@@ -75,14 +83,7 @@ function padVisibleEnd(value: string, width: number): string {
 function truncateVisibleCells(value: string, maxCells: number): string {
   const width = normalizeDimension(maxCells);
   if (width <= 0) return "";
-  if (stringWidth(value) <= width) return value;
-
-  let output = "";
-  for (const char of value) {
-    if (stringWidth(output + char) > width) break;
-    output += char;
-  }
-  return output;
+  return truncateVisible(value, width, "");
 }
 
 function normalizeDimension(value: number): number {

@@ -4,6 +4,7 @@ import {
   type FocusState,
 } from "./focusModel.js";
 import type { OperatorConsoleLocale } from "./activeWorkCopy.js";
+import type { OperatorConsoleStyle } from "./operatorConsoleStyle.js";
 
 export type TranscriptBlock = {
   readonly id: string;
@@ -26,6 +27,7 @@ export type StatusRailState = {
   readonly model: {
     readonly label: string;
     readonly state: "idle" | "working" | "degraded";
+    readonly route?: "primary" | "fallback" | "failed";
   };
   readonly context: {
     readonly usedTokens: number;
@@ -46,6 +48,7 @@ export type StartupDashboardState = {
   readonly sessionId: string;
   readonly session: {
     readonly model: string;
+    readonly modelRoute?: "primary" | "fallback" | "failed";
     readonly context: string;
     readonly workspace: string;
     readonly security: string;
@@ -196,6 +199,7 @@ export type OperatorConsoleState = {
   readonly steer?: SteerState;
   readonly focus: FocusState;
   readonly terminal: TerminalMetrics;
+  readonly style?: OperatorConsoleStyle;
 };
 
 export type OperatorConsoleSurface =
@@ -237,6 +241,7 @@ export type CreateInitialOperatorConsoleStateInput = {
   readonly steer?: SteerState;
   readonly focus?: FocusState;
   readonly terminal?: TerminalMetrics;
+  readonly style?: OperatorConsoleStyle;
 };
 
 export function getOperatorConsoleSurfaceOrder(): readonly OperatorConsoleSurface[] {
@@ -260,6 +265,7 @@ export function createInitialOperatorConsoleState(
     ...(input.steer === undefined ? {} : { steer: input.steer }),
     focus: input.focus ?? createInitialFocusState(),
     terminal: input.terminal ?? createDefaultTerminalMetrics(),
+    ...(input.style === undefined ? {} : { style: input.style }),
   };
 }
 

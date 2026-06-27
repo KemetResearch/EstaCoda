@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { stringWidth } from "../screen/stringWidth.js";
+import { resolveTokens } from "../../../theme/token-resolver.js";
 import type { SlashMenuState } from "./operatorConsoleState.js";
-import { renderSlashSurface } from "./slashSurface.js";
+import { createOperatorConsoleStyle, renderSlashSurface } from "./index.js";
 
 describe("Papyrus operator console slash surface", () => {
   it("renders focused slash commands in a boxed menu", () => {
@@ -53,6 +54,19 @@ describe("Papyrus operator console slash surface", () => {
     expect(output).not.toContain("\\x1b");
     expect(output).not.toMatch(/\b(moveCursor|clearLine|clearScreenDown|cursorTo|setRawMode)\b/u);
   });
+
+  it("colors the selected command with the action token when styled", () => {
+    const tokens = resolveTokens("standard", "dark", "kemetBlue");
+    const output = renderSlashSurface(slashMenu(), {
+      width: 72,
+      style: createOperatorConsoleStyle({
+        tokens,
+        capabilities: { supportsColor: true, supportsTrueColor: true },
+      }),
+    }).join("\n");
+
+    expect(output).toContain(`${ansiFg(tokens.contract.palette.action)}❯ /model`);
+  });
 });
 
 function slashMenu(input: Partial<SlashMenuState> = {}): SlashMenuState {
@@ -78,4 +92,13 @@ function slashMenu(input: Partial<SlashMenuState> = {}): SlashMenuState {
     ],
     ...input,
   };
+}
+
+function ansiFg(hex: string): string {
+  const clean = hex.replace("#", "");
+  const bigint = Number.parseInt(clean, 16);
+  const r = (bigint >> 16) & 255;
+  const g = (bigint >> 8) & 255;
+  const b = bigint & 255;
+  return `\x1b[38;2;${r};${g};${b}m`;
 }

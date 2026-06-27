@@ -45,7 +45,7 @@ describe("OperatorConsoleRuntimeHost", () => {
 
     expect(lines.join("\n")).toContain("Prompt");
     expect(lines.join("\n")).toContain("ctx");
-    expect(lines.at(-1)).toContain("session");
+    expect(lines.at(-1)).toContain("◷");
   });
 
   it("updates prompt state and supports multiline prompts", () => {
@@ -129,7 +129,7 @@ describe("OperatorConsoleRuntimeHost", () => {
     expect(host.getState().attachments[0]?.preview).toContain("Authorization: Bearer [REDACTED]");
     expect(text).toContain("Authorization: Bearer [REDACTED]");
     expect(text).not.toContain("abcdefghijklmnopqrstuvwxyz123456");
-    expect(status).toContain("session");
+    expect(status).toContain("◷");
     expect(status).not.toMatch(/\b(Authorization|Bearer|attachment|pasted text)\b/iu);
   });
 
@@ -155,7 +155,7 @@ describe("OperatorConsoleRuntimeHost", () => {
     expect(promptIndex).toBeGreaterThanOrEqual(0);
     expect(slashIndex).toBeGreaterThan(promptIndex);
     expect(lines).toContainEqual(expect.stringContaining("❯ /model  show or change active model route"));
-    expect(status).toContain("session");
+    expect(status).toContain("◷");
     expect(status).not.toMatch(/\b(slash|Commands|model setup)\b/iu);
 
     host.setSlash(undefined);
@@ -195,7 +195,7 @@ describe("OperatorConsoleRuntimeHost", () => {
 
       const lines = host.render().lines;
       expect(lines.join("\n")).not.toContain("Queued steer");
-      expect(lines.at(-1)).toContain("session");
+      expect(lines.at(-1)).toContain("◷");
     }
   });
 
@@ -214,7 +214,7 @@ describe("OperatorConsoleRuntimeHost", () => {
 
     expect(rail).toContain("kimi-k2.7-code");
     expect(rail).toContain("ctx");
-    expect(rail).toContain("session");
+    expect(rail).toContain("◷");
     expect(rail).not.toMatch(/\b(steer|active|approval|tool|workspace|trust|setup|channel)\b/iu);
   });
 

@@ -18,6 +18,7 @@ export function mapStartupDashboardViewModelToOperatorConsoleState(
     sessionId: formatStartupSessionId(viewModel.sessionId ?? "pending"),
     session: {
       model: `${viewModel.model.id} ${readinessSymbol(viewModel.providerReadiness)}`,
+      modelRoute: readinessModelRoute(viewModel.providerReadiness),
       context: contextWindowText(input.contextWindow),
       workspace: workspaceStateText(viewModel),
       security: viewModel.securityMode,
@@ -44,9 +45,9 @@ function startupCommands(
   return [
     { command: "/tools", description: "inspect tools" },
     { command: "/skills", description: "loaded skills" },
-    { command: "/model", description: "active model route" },
+    { command: "/model", description: "switch primary model" },
     { command: "/status", description: "runtime state" },
-    { command: "/setup", description: "setup editor" },
+    { command: "/compact", description: "compact session context" },
   ];
 }
 
@@ -62,7 +63,24 @@ function readinessSymbol(readiness: StartupDashboardViewModel["providerReadiness
   }
 }
 
+function readinessModelRoute(
+  readiness: StartupDashboardViewModel["providerReadiness"]
+): NonNullable<StartupDashboardState["session"]["modelRoute"]> {
+  switch (readiness) {
+    case "ready":
+      return "primary";
+    case "degraded":
+      return "fallback";
+    case "missing-config":
+    case "unknown":
+      return "failed";
+  }
+}
+
 function workspaceStateText(viewModel: StartupDashboardViewModel): string {
+  if (viewModel.workspaceDirectory !== undefined && viewModel.workspaceDirectory.trim().length > 0) {
+    return viewModel.workspaceDirectory;
+  }
   if (viewModel.workspaceVerification !== "unknown") return viewModel.workspaceVerification;
   return viewModel.workspaceTrust;
 }

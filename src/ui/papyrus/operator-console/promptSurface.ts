@@ -1,10 +1,13 @@
 import { stringWidth } from "../screen/stringWidth.js";
+import { truncateVisible } from "../../renderers/layout.js";
 import type { PromptSurfaceState, TerminalMetrics } from "./operatorConsoleState.js";
+import { styleColor, type OperatorConsoleStyle } from "./operatorConsoleStyle.js";
 
 export type PromptSurfaceRenderOptions = {
   readonly width: number;
   readonly height?: number;
   readonly terminalHeight?: number;
+  readonly style?: OperatorConsoleStyle;
 };
 
 export type PromptSurfaceMetrics = {
@@ -41,7 +44,7 @@ export function renderPromptSurface(
   if (height <= 0) return [];
   if (height < 3) return [truncateVisibleCells(renderPromptFallbackLine(state), width)];
 
-  const contentWidth = Math.max(0, width - 4);
+  const contentWidth = width;
   const inputRows = Math.max(1, height - 2);
   const logicalRows = getPromptLogicalRows(state);
   const overflow = logicalRows.length > inputRows;
@@ -51,7 +54,12 @@ export function renderPromptSurface(
 
   return [
     renderTopBorder(title, width),
-    ...visibleRows.map((row) => renderContentRow(row, contentWidth, width)),
+    ...visibleRows.map((row, index) => renderContentRow(
+      row,
+      contentWidth,
+      width,
+      shouldStylePlaceholderRow(state, scrollOffset, index) ? options.style : undefined
+    )),
     renderBottomBorder(width),
   ];
 }
@@ -143,10 +151,18 @@ function renderBottomBorder(width: number): string {
   return `╰${"─".repeat(Math.max(0, width - 2))}╯`;
 }
 
-function renderContentRow(row: string, contentWidth: number, width: number): string {
-  if (width <= 1) return "│".slice(0, width);
+function renderContentRow(
+  row: string,
+  contentWidth: number,
+  width: number,
+  style: OperatorConsoleStyle | undefined
+): string {
+  if (width <= 0) return "";
   const content = padVisibleEnd(truncateVisibleCells(row, contentWidth), contentWidth);
-  return truncateVisibleCells(`│ ${content} │`, width);
+  const styled = style === undefined
+    ? content
+    : styleColor(style, content, style.tokens.contract.text.muted);
+  return truncateVisibleCells(styled, width);
 }
 
 function renderPromptFallbackLine(state: PromptSurfaceState): string {
@@ -162,6 +178,18 @@ function formatContinuationPromptRow(text: string): string {
   return `  ${text}`;
 }
 
+function shouldStylePlaceholderRow(
+  state: PromptSurfaceState,
+  scrollOffset: number,
+  visibleRowIndex: number
+): boolean {
+  return state.value.length === 0 &&
+    state.placeholder !== undefined &&
+    state.placeholder.length > 0 &&
+    scrollOffset === 0 &&
+    visibleRowIndex === 0;
+}
+
 function padVisibleEnd(value: string, width: number): string {
   const padCells = Math.max(0, width - stringWidth(value));
   return `${value}${" ".repeat(padCells)}`;
@@ -170,14 +198,7 @@ function padVisibleEnd(value: string, width: number): string {
 function truncateVisibleCells(value: string, maxCells: number): string {
   const width = normalizeDimension(maxCells);
   if (width <= 0) return "";
-  if (stringWidth(value) <= width) return value;
-
-  let output = "";
-  for (const char of value) {
-    if (stringWidth(output + char) > width) break;
-    output += char;
-  }
-  return output;
+  return truncateVisible(value, width, "");
 }
 
 function clampInteger(value: number, min: number, max: number): number {

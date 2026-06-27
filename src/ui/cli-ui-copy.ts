@@ -115,8 +115,8 @@ const en: CliUiChromeCopy = {
   blocked: "blocked",
   error: "error",
 
-  shortcuts: "/help · /tools · /model · /status · Ctrl+C exit",
-  inputPlaceholder: "/help · /tools · /model · /status · Ctrl+C exit",
+  shortcuts: "/help · /tools · /model · /status · /compact · Ctrl+C exit",
+  inputPlaceholder: "/help · /tools · /model · /status · /compact · Ctrl+C exit",
 
   thinking: "contemplating",
   routing: "plotting",
@@ -203,8 +203,8 @@ const ar: CliUiChromeCopy = {
   error: "خطأ",
 
   // Technical tokens inside Arabic shortcuts must stay LTR-stable
-  shortcuts: `${isolateLtr("/help")} · ${isolateLtr("/tools")} · ${isolateLtr("/model")} · ${isolateLtr("/status")} · ${isolateLtr("Ctrl+C")} خروج`,
-  inputPlaceholder: `${isolateLtr("/help")} · ${isolateLtr("/tools")} · ${isolateLtr("/model")} · ${isolateLtr("/status")} · ${isolateLtr("Ctrl+C")} خروج`,
+  shortcuts: `${isolateLtr("/help")} · ${isolateLtr("/tools")} · ${isolateLtr("/model")} · ${isolateLtr("/status")} · ${isolateLtr("/compact")} · ${isolateLtr("Ctrl+C")} خروج`,
+  inputPlaceholder: `${isolateLtr("/help")} · ${isolateLtr("/tools")} · ${isolateLtr("/model")} · ${isolateLtr("/status")} · ${isolateLtr("/compact")} · ${isolateLtr("Ctrl+C")} خروج`,
 
   thinking: "بفكر",
   routing: "بحدد",

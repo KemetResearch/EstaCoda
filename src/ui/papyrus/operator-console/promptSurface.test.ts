@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { stringWidth } from "../screen/stringWidth.js";
+import { resolveTokens } from "../../../theme/token-resolver.js";
 import {
+  createOperatorConsoleStyle,
   createDefaultPromptSurfaceState,
   getPromptSurfaceDesiredHeight,
   getPromptSurfaceMetrics,
@@ -16,7 +18,7 @@ describe("Papyrus operator console prompt surface", () => {
     });
 
     expect(output[0]).toMatch(/^╭─ Prompt ─+╮$/u);
-    expect(output[1]).toContain("│ › review the Papyrus rollout plan");
+    expect(output[1]).toContain("› review the Papyrus rollout plan");
     expect(output[2]).toMatch(/^╰─+╯$/u);
     expect(output).toHaveLength(3);
   });
@@ -24,13 +26,13 @@ describe("Papyrus operator console prompt surface", () => {
   it("renders an empty prompt marker", () => {
     const output = renderPromptSurface(prompt({ value: "" }), { width: 40, height: 3 });
 
-    expect(output[1]).toContain("│ ›");
+    expect(output[1]).toContain("›");
   });
 
   it("renders slash input as normal prompt content", () => {
     const output = renderPromptSurface(prompt({ value: "/mo" }), { width: 40, height: 3 });
 
-    expect(output[1]).toContain("│ › /mo");
+    expect(output[1]).toContain("› /mo");
   });
 
   it("uses multiline title for multiline prompt state", () => {
@@ -168,6 +170,26 @@ describe("Papyrus operator console prompt surface", () => {
     expect(output).not.toMatch(/\[[0-9;?]*[A-Za-z]/u);
   });
 
+  it("colors empty prompt tips with the muted token and hides them while typing", () => {
+    const tokens = resolveTokens("standard", "dark", "kemetBlue");
+    const style = createOperatorConsoleStyle({
+      tokens,
+      capabilities: { supportsColor: true, supportsTrueColor: true },
+    });
+    const empty = renderPromptSurface(prompt({
+      value: "",
+      placeholder: "/help · /tools · /model · /status · /compact · Ctrl+C exit",
+    }), { width: 72, height: 3, style }).join("\n");
+    const typed = renderPromptSurface(prompt({
+      value: "hello",
+      placeholder: "/help · /tools",
+    }), { width: 72, height: 3, style }).join("\n");
+
+    expect(empty).toContain(`${ansiFg(tokens.contract.text.muted)}› /help`);
+    expect(typed).not.toContain("/tools");
+    expect(typed).not.toContain(ansiFg(tokens.contract.text.muted));
+  });
+
   it("is deterministic and does not mutate state", () => {
     const state = prompt({ value: "review plan" });
     const snapshot = JSON.stringify(state);
@@ -182,6 +204,15 @@ function prompt(input: Partial<PromptSurfaceState>): PromptSurfaceState {
     ...createDefaultPromptSurfaceState(),
     ...input,
   };
+}
+
+function ansiFg(hex: string): string {
+  const clean = hex.replace("#", "");
+  const bigint = Number.parseInt(clean, 16);
+  const r = (bigint >> 16) & 255;
+  const g = (bigint >> 8) & 255;
+  const b = bigint & 255;
+  return `\x1b[38;2;${r};${g};${b}m`;
 }
 
 function numberedLines(count: number): string {

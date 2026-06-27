@@ -50,7 +50,7 @@ describe("Papyrus operator console renderer", () => {
     const output = renderOperatorConsoleTextLines(state, layout);
 
     expect(output[0]).toContain("Prompt");
-    expect(output.at(-1)).toContain("session 00:00");
+    expect(output.at(-1)).toContain("◷ 00:00");
   });
 
   it("renders boxed prompt and status rail for minimal state", () => {
@@ -59,9 +59,9 @@ describe("Papyrus operator console renderer", () => {
 
     const output = renderOperatorConsoleTextLines(state, layout);
     expect(output[0]).toMatch(/^╭─ Prompt ─+╮$/u);
-    expect(output[1]).toContain("│ ›");
+    expect(output[1]).toContain("›");
     expect(output[2]).toMatch(/^╰─+╯$/u);
-    expect(output[3]).toBe("model pending ○ │ ctx [▱▱▱▱▱▱▱▱▱▱] 0 0% │ session 00:00");
+    expect(output[3]).toBe("model pending ○ │ ctx [▱▱▱▱▱▱▱▱▱▱] 0 0% │ ◷ 00:00");
   });
 
   it("renders multiline prompt expansion with status rail below", () => {
@@ -90,7 +90,7 @@ describe("Papyrus operator console renderer", () => {
     expect(output[0]).toContain("Prompt · multiline");
     expect(output).toContainEqual(expect.stringContaining("› write a migration plan for:"));
     expect(output).toContainEqual(expect.stringContaining("  - approval cards"));
-    expect(output.at(-1)).toBe("kimi-k2.7-code ● │ ctx [▰▱▱▱▱▱▱▱▱▱] 18.4k/262k 7% │ session 01:12");
+    expect(output.at(-1)).toBe("kimi-k2.7-code ● │ ctx [▰▱▱▱▱▱▱▱▱▱] 18.4k/262k 7% │ ◷ 01:12");
     expect(output.every((line) => stringWidth(line) <= 72)).toBe(true);
   });
 
@@ -109,11 +109,11 @@ describe("Papyrus operator console renderer", () => {
     );
     const startupIndex = output.findIndex((line) => line.includes("EstaCoda"));
     const promptIndex = output.findIndex((line) => line.includes("Prompt"));
-    const statusIndex = output.findIndex((line) => line.includes("session 01:12"));
+    const statusIndex = output.findIndex((line) => line.includes("◷ 01:12"));
 
     expect(startupIndex).toBeGreaterThanOrEqual(0);
-    expect(output).toContainEqual(expect.stringContaining("𓋹 Kemet Research 𓋹"));
-    expect(output).toContainEqual(expect.stringContaining("Session"));
+    expect(output).toContainEqual(expect.stringContaining("☥ Kemet Research ☥"));
+    expect(output).toContainEqual(expect.stringContaining("Runtime"));
     expect(output).toContainEqual(expect.stringContaining("Commands"));
     expect(output).toContainEqual(expect.stringContaining("/setup"));
     expect(promptIndex).toBeGreaterThan(startupIndex);
@@ -154,7 +154,7 @@ describe("Papyrus operator console renderer", () => {
     expect(output.findIndex((line) => line === "Attachments")).toBeLessThan(
       output.findIndex((line) => line.includes("Steer current turn"))
     );
-    expect(output.at(-1)).toContain("session 01:12");
+    expect(output.at(-1)).toContain("◷ 01:12");
     expect(output.every((line) => stringWidth(line) <= 120)).toBe(true);
   });
 
@@ -201,7 +201,7 @@ describe("Papyrus operator console renderer", () => {
     const activeWorkIndex = output.findIndex((line) => line.includes("Active work"));
     const attachmentsIndex = output.findIndex((line) => line === "Attachments");
     const promptIndex = output.findIndex((line) => line.includes("Prompt"));
-    const statusIndex = output.findIndex((line) => line.includes("session 01:12"));
+    const statusIndex = output.findIndex((line) => line.includes("◷ 01:12"));
 
     expect(approvalIndex).toBeGreaterThanOrEqual(0);
     expect(approvalIndex).toBeLessThan(activeWorkIndex);
@@ -243,7 +243,7 @@ describe("Papyrus operator console renderer", () => {
     const queuedSteerIndex = output.findIndex((line) => line.includes("Queued steer"));
     const attachmentsIndex = output.findIndex((line) => line === "Attachments");
     const steerInputIndex = output.findIndex((line) => line.includes("Steer current turn"));
-    const statusIndex = output.findIndex((line) => line.includes("session 01:12"));
+    const statusIndex = output.findIndex((line) => line.includes("◷ 01:12"));
 
     expect(activeWorkIndex).toBeGreaterThanOrEqual(0);
     expect(queuedSteerIndex).toBeGreaterThan(activeWorkIndex);
@@ -277,7 +277,7 @@ describe("Papyrus operator console renderer", () => {
     );
     const queuedSteerIndex = output.findIndex((line) => line.includes("Queued steer"));
     const steerInputIndex = output.findIndex((line) => line.includes("Steer current turn"));
-    const statusIndex = output.findIndex((line) => line.includes("session 00:31"));
+    const statusIndex = output.findIndex((line) => line.includes("◷ 00:31"));
 
     expect(queuedSteerIndex).toBeGreaterThanOrEqual(0);
     expect(queuedSteerIndex).toBeLessThan(steerInputIndex);
@@ -312,7 +312,7 @@ describe("Papyrus operator console renderer", () => {
       );
 
       expect(output).not.toContainEqual(expect.stringContaining("Queued steer"));
-      expect(output.at(-1)).toBe("kimi-k2.7-code ● │ ctx [▰▱▱▱▱▱▱▱▱▱] 18.4k/262k 7% │ session 00:31");
+      expect(output.at(-1)).toBe("kimi-k2.7-code ● │ ctx [▰▱▱▱▱▱▱▱▱▱] 18.4k/262k 7% │ ◷ 00:31");
       expect(output.every((line) => stringWidth(line) <= 72)).toBe(true);
     }
   });
@@ -336,7 +336,7 @@ describe("Papyrus operator console renderer", () => {
     );
     const status = output.at(-1) ?? "";
 
-    expect(status).toBe("kimi-k2.7-code ● │ ctx [▰▱▱▱▱▱▱▱▱▱] 18.4k/262k 7% │ session 00:31");
+    expect(status).toBe("kimi-k2.7-code ● │ ctx [▰▱▱▱▱▱▱▱▱▱] 18.4k/262k 7% │ ◷ 00:31");
     expect(status).not.toMatch(/\b(steer|approval|attachment|tool|workspace|trust|setup|channel)\b/iu);
   });
 
@@ -358,7 +358,7 @@ describe("Papyrus operator console renderer", () => {
       createOperatorConsoleLayout(state, { width: 72, height: 8, isTty: true })
     );
     const steerInputIndex = output.findIndex((line) => line.includes("Steer current turn"));
-    const statusIndex = output.findIndex((line) => line.includes("session 00:31"));
+    const statusIndex = output.findIndex((line) => line.includes("◷ 00:31"));
 
     expect(steerInputIndex).toBeGreaterThanOrEqual(0);
     expect(output).not.toContainEqual(expect.stringContaining("Prompt"));
@@ -409,7 +409,7 @@ describe("Papyrus operator console renderer", () => {
     );
     const promptIndex = output.findIndex((line) => line.includes("Prompt"));
     const slashIndex = output.findIndex((line) => line.includes("Commands"));
-    const statusIndex = output.findIndex((line) => line.includes("session 00:00"));
+    const statusIndex = output.findIndex((line) => line.includes("◷ 00:00"));
 
     expect(promptIndex).toBeGreaterThanOrEqual(0);
     expect(slashIndex).toBeGreaterThan(promptIndex);
@@ -434,7 +434,7 @@ describe("Papyrus operator console renderer", () => {
 
     expect(renderOperatorConsoleTextLines(state, layout)).toEqual([
       "Steer: >",
-      "kimi-k2.7-code ● │ ctx [▰▱▱▱▱▱▱▱▱▱] 18.4k/262k 7% │ session 01:12",
+      "kimi-k2.7-code ● │ ctx [▰▱▱▱▱▱▱▱▱▱] 18.4k/262k 7% │ ◷ 01:12",
     ]);
   });
 
@@ -445,7 +445,7 @@ describe("Papyrus operator console renderer", () => {
 
     expect(output).toHaveLength(2);
     expect(output[0]).toContain("Steer:");
-    expect(output[1]).toContain("session 01:12");
+    expect(output[1]).toContain("◷ 01:12");
   });
 
   it("hidden optional regions do not affect prompt and status render", () => {

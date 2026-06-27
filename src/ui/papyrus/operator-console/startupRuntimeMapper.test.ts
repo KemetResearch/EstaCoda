@@ -17,8 +17,9 @@ describe("Operator Console startup runtime mapper", () => {
       sessionId: "20ea8195",
       session: {
         model: "kimi-k2.6 ◐",
+        modelRoute: "fallback",
         context: "0 / 262k",
-        workspace: "verified",
+        workspace: "/tmp/project",
         security: "open",
         autonomy: "autonomous",
       },
@@ -28,7 +29,7 @@ describe("Operator Console startup runtime mapper", () => {
       "/skills",
       "/model",
       "/status",
-      "/setup",
+      "/compact",
     ]);
     expect(state.tips).toContain("Paste large context as attachments.");
     expect(state.tips).toContain("Use /model to switch routes.");

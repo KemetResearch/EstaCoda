@@ -1,8 +1,11 @@
 import { stringWidth } from "../screen/stringWidth.js";
+import { truncateVisible } from "../../renderers/layout.js";
 import type { StatusRailState } from "./operatorConsoleState.js";
+import { styleColor, type OperatorConsoleStyle } from "./operatorConsoleStyle.js";
 
 export type StatusRailRenderOptions = {
   readonly width: number;
+  readonly style?: OperatorConsoleStyle;
 };
 
 const CONTEXT_BAR_CELLS = 10;
@@ -14,24 +17,26 @@ export function renderStatusRailSurface(
   const width = normalizeWidth(options.width);
   if (width <= 0) return "";
 
-  const model = formatModel(state);
+  const model = formatModel(state, options.style);
   const narrowModel = shortenModelLabel(state.model.label, 10);
   const minimalModel = shortenModelLabel(state.model.label, 4);
   const percent = formatPercent(resolveContextPercent(state));
   const timer = formatSessionTimer(state.sessionTimer.elapsedMs);
+  const sessionIcon = options.style?.tokens.contract.toolIcon.cronjob ?? "◷";
   const bar = renderContextBar(resolveContextPercent(state));
   const numbers = formatContextNumbers(state);
+  const symbol = modelStateSymbol(state.model.state, state.model.route, options.style);
 
-  const full = `${model} │ ctx ${bar} ${numbers} ${percent} │ session ${timer}`;
+  const full = `${model} │ ctx ${bar} ${numbers} ${percent} │ ${sessionIcon} ${timer}`;
   if (stringWidth(full) <= width) return full;
 
-  const compact = `${model} │ ctx ${bar} ${percent} │ session ${timer}`;
+  const compact = `${model} │ ctx ${bar} ${percent} │ ${sessionIcon} ${timer}`;
   if (stringWidth(compact) <= width) return compact;
 
-  const narrow = `${narrowModel} ${modelStateSymbol(state.model.state)} │ ctx ${percent} │ ${timer}`;
+  const narrow = `${narrowModel} ${symbol} │ ctx ${percent} │ ${timer}`;
   if (stringWidth(narrow) <= width) return narrow;
 
-  const minimal = `${minimalModel} ${modelStateSymbol(state.model.state)} ${percent} ${timer}`;
+  const minimal = `${minimalModel} ${symbol} ${percent} ${timer}`;
   return truncateVisibleCells(minimal, width);
 }
 
@@ -57,15 +62,28 @@ export function formatSessionTimer(elapsedMs: number): string {
   return `${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
 }
 
-function formatModel(state: StatusRailState): string {
-  return `${modelLabelOrFallback(state.model.label)} ${modelStateSymbol(state.model.state)}`;
+function formatModel(state: StatusRailState, style: OperatorConsoleStyle | undefined): string {
+  return `${modelLabelOrFallback(state.model.label)} ${modelStateSymbol(state.model.state, state.model.route, style)}`;
 }
 
 function modelLabelOrFallback(label: string): string {
   return label.trim().length === 0 ? "model pending" : label.trim();
 }
 
-function modelStateSymbol(state: StatusRailState["model"]["state"]): string {
+function modelStateSymbol(
+  state: StatusRailState["model"]["state"],
+  route: StatusRailState["model"]["route"],
+  style: OperatorConsoleStyle | undefined
+): string {
+  const symbol = rawModelStateSymbol(state);
+  const tokens = style?.tokens.contract;
+  if (tokens === undefined) return symbol;
+  if (route === "fallback") return styleColor(style, symbol, tokens.palette.caution);
+  if (route === "failed") return styleColor(style, symbol, tokens.severity.warn);
+  return styleColor(style, symbol, tokens.severity.ok);
+}
+
+function rawModelStateSymbol(state: StatusRailState["model"]["state"]): string {
   switch (state) {
     case "working":
       return "●";
@@ -103,14 +121,7 @@ function shortenModelLabel(label: string, maxCells: number): string {
 function truncateVisibleCells(value: string, maxCells: number): string {
   const width = normalizeWidth(maxCells);
   if (width <= 0) return "";
-  if (stringWidth(value) <= width) return value;
-
-  let output = "";
-  for (const char of value) {
-    if (stringWidth(output + char) > width) break;
-    output += char;
-  }
-  return output;
+  return truncateVisible(value, width, "");
 }
 
 function normalizeWidth(value: number): number {

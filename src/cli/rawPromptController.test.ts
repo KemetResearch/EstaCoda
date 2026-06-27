@@ -359,7 +359,7 @@ describe("raw prompt controller", () => {
     expect(rendered).toContain("Attachments");
     expect(rendered).toContain("pasted text");
     expect(rendered).not.toContain("SECRET full pasted payload");
-    expect(rendered).toContain("│ › summarize this");
+    expect(rendered).toContain("› summarize this");
 
     read.input.send("\r");
     expect(await read.pending).toEqual({
@@ -708,8 +708,8 @@ describe("raw prompt controller", () => {
     expect(await read.pending).toEqual({ type: "submit", text: "review the Papyrus rollout plan" });
     const output = read.output.writes.join("");
     expect(output).toContain("╭─ Prompt");
-    expect(output).toContain("│ › review the Papyrus rollout plan");
-    expect(output).toContain("kimi-k2.7-code ● │ ctx [▰▱▱▱▱▱▱▱▱▱] 18.4k/262k 7% │ session 01:12");
+    expect(output).toContain("› review the Papyrus rollout plan");
+    expect(output).toContain("kimi-k2.7-code ● │ ctx [▰▱▱▱▱▱▱▱▱▱] 18.4k/262k 7% │ ◷ 01:12");
     expect(output).not.toMatch(/\b(tool|approval|workspace|trust|steering|setup|channel)\b/iu);
     expect(output).not.toMatch(forbiddenManagedRegionOutput);
   });
@@ -720,7 +720,7 @@ describe("raw prompt controller", () => {
     read.input.send("hello\r");
 
     expect(await read.pending).toEqual({ type: "submit", text: "hello" });
-    expect(countOccurrences(read.output.writes.join(""), "│ › hello")).toBe(1);
+    expect(countOccurrences(read.output.writes.join(""), "› hello")).toBe(1);
   });
 
   it("keeps Alt+Enter multiline insertion under Operator Console routing", async () => {
@@ -731,8 +731,8 @@ describe("raw prompt controller", () => {
 
     expect(read.isResolved()).toBe(false);
     expect(read.output.writes.join("")).toContain("Prompt · multiline");
-    expect(read.output.writes.join("")).toContain("│ › hello");
-    expect(read.output.writes.join("")).toContain("│   world");
+    expect(read.output.writes.join("")).toContain("› hello");
+    expect(read.output.writes.join("")).toContain("  world");
 
     read.input.send("\r");
     expect(await read.pending).toEqual({ type: "submit", text: "hello\nworld" });
@@ -749,7 +749,7 @@ describe("raw prompt controller", () => {
     expect(read.output.writes.join("")).toContain("pasted text");
     expect(read.output.writes.join("")).toContain("17 chars");
     expect(read.output.writes.join("")).not.toContain("Prompt · multiline");
-    expect(read.output.writes.join("")).not.toContain("│ › line one");
+    expect(read.output.writes.join("")).not.toContain("› line one");
 
     read.input.send("\r");
     expect(await read.pending).toEqual({
@@ -1175,7 +1175,7 @@ describe("raw prompt controller", () => {
     expect(read.output.writes.join("")).toContain("Command palette");
     expect(read.output.writes.join("")).toContain("❯ /help  Show help");
     expect(read.output.writes.join("")).not.toContain("> /help - Show help");
-    expect(read.output.writes.join("")).toContain("│ › /help");
+    expect(read.output.writes.join("")).toContain("› /help");
     expect(read.isResolved()).toBe(false);
 
     read.input.send("\r");
@@ -1198,10 +1198,10 @@ describe("raw prompt controller", () => {
 
     const openRender = read.output.writes.join("");
     expect(openRender.indexOf("╭─ Prompt")).toBeLessThan(openRender.indexOf("╭─ Command palette"));
-    expect(openRender.indexOf("╭─ Command palette")).toBeLessThan(openRender.lastIndexOf("session"));
+    expect(openRender.indexOf("╭─ Command palette")).toBeLessThan(openRender.lastIndexOf("◷"));
     expect(openRender).toContain("❯ /help  Show help");
     expect(openRender).toContain("  /status  Show status");
-    expect(openRender).not.toMatch(/\b(slash|command palette|help)\b.*session/iu);
+    expect(openRender).not.toMatch(/\b(slash|command palette|help)\b.*◷/iu);
     expect(overlayHost.getRows()).toEqual([]);
 
     read.input.send("\x1b[B");
@@ -1272,7 +1272,7 @@ describe("raw prompt controller", () => {
     const multilineRender = read.output.writes.join("");
     const finalFrame = multilineRender.slice(multilineRender.lastIndexOf("╭─ Prompt · multiline"));
     expect(finalFrame).toContain("Prompt · multiline");
-    expect(finalFrame).toContain("│ › /h");
+    expect(finalFrame).toContain("› /h");
     expect(finalFrame).not.toContain("❯ /help");
     expect(overlayHost.getRows()).toEqual([]);
 

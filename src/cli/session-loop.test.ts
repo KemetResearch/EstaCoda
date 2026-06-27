@@ -994,27 +994,27 @@ describe("runSessionLoop — user prompt rail behavior", () => {
       session: {
         model: "kimi-k2.6 ◐",
         context: "0 / 262k",
-        workspace: "verified",
+        workspace: "/tmp",
         security: "open",
         autonomy: "autonomous",
       },
     });
     expect(plain).toContain("EstaCoda");
     expect(plain).toContain("Kemet Research");
-    expect(plain).toContain("sovereign agentic infrastructure");
+    expect(plain).not.toContain("sovereign agentic infrastructure");
     expect(plain).toContain("session 20ea8195");
-    expect(plain).toContain("╭─ Session");
+    expect(plain).toContain("╭─ Runtime");
     expect(plain).toContain("╭─ Commands");
     expect(plain).toContain("model      kimi-k2.6");
     expect(plain).toContain("context    0 / 262k");
-    expect(plain).toContain("workspace  verified");
-    expect(plain).toContain("security   open");
+    expect(plain).toContain("workspace  /tmp");
+    expect(plain).toContain("approval   open");
     expect(plain).toContain("autonomy   autonomous");
     expect(plain).toContain("/tools");
     expect(plain).toContain("/skills");
     expect(plain).toContain("/model");
     expect(plain).toContain("/status");
-    expect(plain).toContain("/setup");
+    expect(plain).toContain("/compact");
     expect(plain).toContain("Tips");
     expect(plain).not.toContain("╭─ Tips");
     expect(host.getState().startup).toBeUndefined();
@@ -1024,7 +1024,7 @@ describe("runSessionLoop — user prompt rail behavior", () => {
     expect(host.getState().status.model.label).not.toContain("autonomous");
   });
 
-  it("stacks Operator Console startup session and command boxes on narrow terminals", async () => {
+  it("stacks Operator Console startup runtime and command boxes on narrow terminals", async () => {
     const host = createOperatorConsoleRuntimeHost();
     const { raw } = await captureStartupSession({
       capabilities: interactiveCaps({ terminalWidth: 48, supportsAnimation: false }),
@@ -1032,7 +1032,7 @@ describe("runSessionLoop — user prompt rail behavior", () => {
     });
     const plain = stripAnsi(raw.slice(STARTUP_VISIBLE_SCREEN_CLEAR.length));
     const lines = plain.split("\n").filter((line) => line.length > 0);
-    const sessionIndex = lines.findIndex((line) => line.includes("╭─ Session"));
+    const sessionIndex = lines.findIndex((line) => line.includes("╭─ Runtime"));
     const commandsIndex = lines.findIndex((line) => line.includes("╭─ Commands"));
 
     expect(sessionIndex).toBeGreaterThanOrEqual(0);
@@ -2153,7 +2153,7 @@ describe("runSessionLoop — active turn spinner", () => {
     expect(rendered.slice(0, userRailIndex)).not.toContain("\x1b[1A\x1b[2K");
   });
 
-  it("renders active-turn status without a read-only prompt box", async () => {
+  it("renders active-turn status with persistent prompt chrome", async () => {
     const outputChunks: string[] = [];
     const output = {
       write(chunk: string | Uint8Array): boolean {
@@ -3288,9 +3288,9 @@ describe("runSessionLoop — active turn spinner", () => {
 
     const initial = stripAnsi(outputChunks.join(""));
     expect(promptQuestion).toBe("> ");
-    expect(promptOptions.placeholder).toContain("/help · /tools · /model · /status · Ctrl+C exit");
+    expect(promptOptions.placeholder).toContain("/help · /tools · /model · /status · /compact · Ctrl+C exit");
     expect(promptOptions.placeholder).not.toContain("›");
-    expect(initial).not.toContain("/help · /tools · /model · /status · Ctrl+C exit");
+    expect(initial).not.toContain("/help · /tools · /model · /status · /compact · Ctrl+C exit");
     expect(initial).not.toContain("Type a message.");
 
     resolvePrompt("/exit");

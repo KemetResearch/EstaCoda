@@ -47,6 +47,7 @@ function renderRegionLines(
     return renderStartupDashboardSurface(state.startup, {
       width: region.width,
       height: region.height,
+      style: state.style,
     }).map((text) => ({ region: region.kind, text }));
   }
   if (region.kind === "setupPanel" && state.setupPanel !== undefined) {
@@ -66,6 +67,7 @@ function renderRegionLines(
       width: region.width,
       height: region.height,
       terminalHeight: layoutHeightForRegion(region),
+      style: state.style,
     }).map((text) => ({ region: region.kind, text }));
   }
   if (region.kind === "attachments") {
@@ -98,10 +100,11 @@ function renderRegionLines(
     return renderSlashSurface(state.slash, {
       width: region.width,
       height: region.height,
+      style: state.style,
     }).map((text) => ({ region: region.kind, text }));
   }
   if (region.kind === "statusRail") {
-    return [{ region: region.kind, text: renderStatusRailSurface(state.status, { width: region.width }) }];
+    return [{ region: region.kind, text: renderStatusRailSurface(state.status, { width: region.width, style: state.style }) }];
   }
   const lines: OperatorConsoleRenderedLine[] = [];
   for (let row = 0; row < region.height; row += 1) {
@@ -137,7 +140,7 @@ function regionLabel(
     case "slashMenu":
       return `Slash menu: ${state.slash?.query ?? ""}`;
     case "statusRail":
-      return renderStatusRailSurface(state.status, { width: region.width });
+      return renderStatusRailSurface(state.status, { width: region.width, style: state.style });
     case "activeWork":
       return "";
   }

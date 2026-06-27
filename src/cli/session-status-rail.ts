@@ -54,6 +54,7 @@ export function operatorConsoleStatusRailState(input: {
     model: {
       label: providerRail.servingModelLabel ?? providerRail.modelLabel,
       state: providerRail.modelState === "failed" ? "degraded" : timing?.mode === "active-turn" ? "working" : "idle",
+      route: providerRailStatusRoute(providerRail.modelState),
     },
     context: {
       usedTokens: contextUsage?.filled ?? 0,
@@ -65,6 +66,20 @@ export function operatorConsoleStatusRailState(input: {
       startedAtMs: timing?.sessionStartedAtMs,
     },
   };
+}
+
+function providerRailStatusRoute(
+  modelState: NonNullable<SessionStatusRailViewModel["modelState"]>
+): NonNullable<StatusRailState["model"]["route"]> {
+  switch (modelState) {
+    case "fallback-serving":
+      return "fallback";
+    case "failed":
+      return "failed";
+    case "configured":
+    case "primary-serving":
+      return "primary";
+  }
 }
 
 export function sessionStatusRailViewModel(input: {

@@ -1972,7 +1972,7 @@ describe("PlainRenderer — prompt chrome rails", () => {
 
   it("renders deterministic shortcut rail without ANSI", () => {
     const out = renderShortcutHintRail(buildShortcutHintRailViewModel({ hints: [] }));
-    expect(out).toBe("> /help · /tools · /model · /status · Ctrl+C exit");
+    expect(out).toBe("> /help · /tools · /model · /status · /compact · Ctrl+C exit");
     assertNoAnsi(out);
   });
 
@@ -2008,7 +2008,7 @@ describe("PlainRenderer — prompt chrome rails", () => {
     expect(status).toContain(isolateLtr("deepseek-reasoner"));
     expect(shortcuts).toContain("\u2066/help\u2069");
     expect(shortcuts).toContain("\u2066Ctrl+C\u2069");
-    expect(shortcuts).toContain(isolateRtl(`${isolateLtr("/help")} · ${isolateLtr("/tools")} · ${isolateLtr("/model")} · ${isolateLtr("/status")} · ${isolateLtr("Ctrl+C")} خروج`));
+    expect(shortcuts).toContain(isolateRtl(`${isolateLtr("/help")} · ${isolateLtr("/tools")} · ${isolateLtr("/model")} · ${isolateLtr("/status")} · ${isolateLtr("/compact")} · ${isolateLtr("Ctrl+C")} خروج`));
   });
 
   it("renders user prompt rail with ASCII marker", () => {

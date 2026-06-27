@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { stringWidth } from "../screen/stringWidth.js";
+import { resolveTokens } from "../../../theme/token-resolver.js";
 import {
+  createOperatorConsoleStyle,
   createDefaultStartupDashboardState,
   renderStartupDashboardSurface,
   type StartupDashboardState,
@@ -13,36 +15,37 @@ describe("Papyrus operator console startup dashboard surface", () => {
 
     expect(output[0]).toContain("EstaCoda");
     expect(output[1]).toContain("Kemet Research");
-    expect(output[2]).toContain("sovereign agentic infrastructure");
+    expect(output[2]).toContain("v0.1.0  𓂀  session 20ea8195");
+    expect(text).not.toContain("sovereign agentic infrastructure");
     expect(text).toContain("v0.1.0");
     expect(text).toContain("session 20ea8195");
-    expect(text).toContain("╭─ Session");
+    expect(text).toContain("╭─ Runtime");
     expect(text).toContain("╭─ Commands");
     expect(text).toContain("model      kimi-k2.6 ◐");
     expect(text).toContain("context    0 / 262k");
     expect(text).toContain("workspace  verified");
-    expect(text).toContain("security   open");
+    expect(text).toContain("approval   open");
     expect(text).toContain("autonomy   autonomous");
     expect(text).toContain("/tools");
     expect(text).toContain("/skills");
     expect(text).toContain("/model");
     expect(text).toContain("/status");
-    expect(text).toContain("/setup");
+    expect(text).toContain("/compact");
     expect(text).toContain("Tips");
     expect(text).toContain("Paste large context as attachments.");
     expect(text).not.toContain("╭─ Tips");
     expect(output.every((line) => stringWidth(line) <= 80)).toBe(true);
   });
 
-  it("stacks Session and Commands boxes in narrow layout", () => {
+  it("stacks Runtime and Commands boxes in narrow layout", () => {
     const output = renderStartupDashboardSurface(startupState(), { width: 46 });
     const text = output.join("\n");
-    const sessionIndex = output.findIndex((line) => line.includes("Session"));
+    const sessionIndex = output.findIndex((line) => line.includes("Runtime"));
     const commandsIndex = output.findIndex((line) => line.includes("Commands"));
 
     expect(text).toContain("EstaCoda");
     expect(text).toContain("Kemet Research");
-    expect(text).toContain("v0.1.0 · session 20ea8195");
+    expect(text).toContain("v0.1.0  𓂀  session 20ea8195");
     expect(sessionIndex).toBeGreaterThanOrEqual(0);
     expect(commandsIndex).toBeGreaterThan(sessionIndex);
     expect(output.every((line) => stringWidth(line) <= 46)).toBe(true);
@@ -84,6 +87,26 @@ describe("Papyrus operator console startup dashboard surface", () => {
     expect(output).toContain("model pending");
     expect(output).toContain("/tools");
   });
+
+  it("uses token colors for brand title, section labels, and model route dot when styled", () => {
+    const tokens = resolveTokens("standard", "dark", "kemetBlue");
+    const style = createOperatorConsoleStyle({
+      tokens,
+      capabilities: { supportsColor: true, supportsTrueColor: true },
+    });
+    const output = renderStartupDashboardSurface({
+      ...startupState(),
+      session: {
+        ...startupState().session,
+        modelRoute: "fallback",
+      },
+    }, { width: 80, style }).join("\n");
+
+    expect(output).toContain(ansiFg(tokens.contract.palette.brand));
+    expect(output).toContain(`${ansiFg(tokens.contract.text.secondary)}Runtime\x1b[0m`);
+    expect(output).toContain(`${ansiFg(tokens.contract.text.secondary)}Commands\x1b[0m`);
+    expect(output).toContain(`${ansiFg(tokens.contract.palette.caution)}◐\x1b[0m`);
+  });
 });
 
 function startupState(): StartupDashboardState {
@@ -103,9 +126,9 @@ function startupState(): StartupDashboardState {
     commands: [
       { command: "/tools", description: "inspect tools" },
       { command: "/skills", description: "loaded skills" },
-      { command: "/model", description: "active model route" },
+      { command: "/model", description: "switch primary model" },
       { command: "/status", description: "runtime state" },
-      { command: "/setup", description: "setup editor" },
+      { command: "/compact", description: "compact session context" },
     ],
     tips: [
       "Paste large context as attachments.",
@@ -113,4 +136,13 @@ function startupState(): StartupDashboardState {
       "Approvals appear inline when an action needs permission.",
     ],
   };
+}
+
+function ansiFg(hex: string): string {
+  const clean = hex.replace("#", "");
+  const bigint = Number.parseInt(clean, 16);
+  const r = (bigint >> 16) & 255;
+  const g = (bigint >> 8) & 255;
+  const b = bigint & 255;
+  return `\x1b[38;2;${r};${g};${b}m`;
 }
