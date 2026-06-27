@@ -55,6 +55,7 @@ function renderRegionLines(
     return renderSetupPanelSurface(state.setupPanel, {
       width: region.width,
       height: region.height,
+      style: state.style,
     }).map((text) => ({ region: region.kind, text }));
   }
   if (region.kind === "prompt") {

@@ -17,6 +17,7 @@ import {
 import type { PapyrusOption } from "../ui/papyrus/widgets/optionMap.js";
 import { parseKeypress, type ParsedKeypress } from "../ui/input/parseKeypress.js";
 import {
+  createOperatorConsoleStyle,
   mapSetupSelectToSetupPanelState,
   renderSetupPanelSurface,
 } from "../ui/papyrus/operator-console/index.js";
@@ -207,7 +208,13 @@ function renderTtySelection<T>(
 ): string {
   const setupPanel = mapTtySetupSelection(selection, selectedIndex);
   if (setupPanel !== undefined) {
-    return renderSetupPanelSurface(setupPanel, { width: renderer.capabilities.terminalWidth }).join("\n");
+    return renderSetupPanelSurface(setupPanel, {
+      width: renderer.capabilities.terminalWidth,
+      style: createOperatorConsoleStyle({
+        tokens: renderer.tokens,
+        capabilities: renderer.capabilities,
+      }),
+    }).join("\n");
   }
   const vm = buildSelectionViewModel(selection, selectedIndex);
   return renderer.render(vm);

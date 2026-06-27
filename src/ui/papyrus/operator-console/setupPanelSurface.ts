@@ -1,13 +1,16 @@
 import { stringWidth } from "../screen/stringWidth.js";
+import { closeOpenBidiIsolates, isolateLtr, isolateRtl } from "../../../ui/bidi.js";
 import type {
   SecretEntryPanelState,
   SetupPanelState,
   SetupSurfaceState,
 } from "./operatorConsoleState.js";
+import { styleColor, type OperatorConsoleStyle } from "./operatorConsoleStyle.js";
 
 export type SetupPanelRenderOptions = {
   readonly width: number;
   readonly height?: number;
+  readonly style?: OperatorConsoleStyle;
 };
 
 const WIDE_TABLE_MIN_WIDTH = 72;
@@ -27,11 +30,15 @@ export function renderSetupPanelSurface(
   if (width <= 0) return [];
   const rows = state.kind === "secret"
     ? renderSecretEntryPanel(state, width)
-    : renderSetupTablePanel(state, width);
+    : renderSetupTablePanel(state, width, options.style);
   return options.height === undefined ? rows : rows.slice(0, normalizeDimension(options.height));
 }
 
-function renderSetupTablePanel(state: SetupPanelState, width: number): readonly string[] {
+function renderSetupTablePanel(
+  state: SetupPanelState,
+  width: number,
+  style: OperatorConsoleStyle | undefined
+): readonly string[] {
   const contentWidth = Math.max(0, width - 4);
   const copy = resolveSetupCopy(state.locale);
   const description = state.description ?? copy.modelDescription;
@@ -42,9 +49,9 @@ function renderSetupTablePanel(state: SetupPanelState, width: number): readonly 
     renderContentRow("", contentWidth, width),
     ...(width >= WIDE_TABLE_MIN_WIDTH
       ? state.layout === "choiceMenu"
-        ? renderChoiceMenuRows(state, contentWidth, width)
-        : renderWideTableRows(state, copy, contentWidth, width)
-      : renderNarrowTableRows(state, contentWidth, width)),
+        ? renderChoiceMenuRows(state, contentWidth, width, style)
+        : renderWideTableRows(state, copy, contentWidth, width, style)
+      : renderNarrowTableRows(state, contentWidth, width, style)),
     renderContentRow("", contentWidth, width),
     renderContentRow(footer, contentWidth, width),
     renderBottomBorder(width),
@@ -55,7 +62,8 @@ function renderSetupTablePanel(state: SetupPanelState, width: number): readonly 
 function renderChoiceMenuRows(
   state: SetupPanelState,
   contentWidth: number,
-  width: number
+  width: number,
+  style: OperatorConsoleStyle | undefined
 ): readonly string[] {
   const markerWidth = 2;
   const gap = 2;
@@ -75,15 +83,16 @@ function renderChoiceMenuRows(
       renderedNavigationSeparator = true;
     }
 
-    const marker = row.id === state.selectedRowId ? selectedMarker : "";
+    const selected = row.id === state.selectedRowId;
+    const marker = selected ? selectedMarker : "";
     const detail = choiceMenuDetail(row);
     const line = state.locale === "ar"
       ? [
-        padVisibleEnd(detail, detailWidth),
+        physicalChoiceCell(detail, detailWidth, "left", state.locale),
         " ".repeat(gap),
-        padVisibleStart(row.provider, labelWidth),
+        physicalChoiceCell(row.provider, labelWidth, "right", state.locale),
         " ".repeat(gap),
-        padVisibleEnd(marker, markerWidth),
+        physicalChoiceCell(marker, markerWidth, "left", state.locale),
       ].join("")
       : [
         padVisibleEnd(marker, markerWidth),
@@ -92,10 +101,62 @@ function renderChoiceMenuRows(
         " ".repeat(gap),
         padVisibleEnd(detail, detailWidth),
       ].join("");
-    rows.push(renderContentRow(line, contentWidth, width));
+    rows.push(renderSelectedContentRow(line, selected, style, contentWidth, width));
   }
 
   return rows;
+}
+
+function styleSelectedChoiceRow(
+  line: string,
+  selected: boolean,
+  style: OperatorConsoleStyle | undefined
+): string {
+  return selected && style !== undefined
+    ? styleColor(style, line, style.tokens.contract.palette.action)
+    : line;
+}
+
+function renderSelectedContentRow(
+  row: string,
+  selected: boolean,
+  style: OperatorConsoleStyle | undefined,
+  contentWidth: number,
+  width: number
+): string {
+  if (!selected || style === undefined || width <= 3) {
+    return renderContentRow(row, contentWidth, width);
+  }
+  const content = padVisibleEnd(truncateVisibleCells(row, contentWidth), contentWidth);
+  return `│ ${styleSelectedChoiceRow(content, selected, style)} │`;
+}
+
+function physicalChoiceCell(
+  value: string,
+  width: number,
+  align: "left" | "right",
+  locale: SetupPanelState["locale"]
+): string {
+  const truncated = closeOpenBidiIsolates(truncateVisibleCells(value, width));
+  const localized = locale === "ar" ? localizeChoiceCell(truncated) : truncated;
+  const padded = align === "right"
+    ? padVisibleStart(localized, width)
+    : padVisibleEnd(localized, width);
+  return locale === "ar" ? isolateLtr(padded) : padded;
+}
+
+function localizeChoiceCell(value: string): string {
+  if (value.length === 0) return value;
+  if (containsArabicScript(value)) {
+    return isolateRtl(closeOpenBidiIsolates(value));
+  }
+  return /[A-Za-z0-9]/u.test(value)
+    ? isolateLtr(value)
+    : isolateRtl(closeOpenBidiIsolates(value));
+}
+
+function containsArabicScript(value: string): boolean {
+  return /\p{Script=Arabic}/u.test(value);
 }
 
 function choiceMenuDetail(row: SetupPanelState["rows"][number]): string {
@@ -108,7 +169,8 @@ function renderWideTableRows(
   state: SetupPanelState,
   copy: SetupCopy,
   contentWidth: number,
-  width: number
+  width: number,
+  style: OperatorConsoleStyle | undefined
 ): readonly string[] {
   const markerWidth = 2;
   const providerWidth = Math.max(10, Math.floor(contentWidth * 0.2));
@@ -128,14 +190,16 @@ function renderWideTableRows(
     renderContentRow(header, contentWidth, width),
     renderContentRow(divider, contentWidth, width),
     ...state.rows.map((row) => {
-      const marker = row.id === state.selectedRowId ? "❯" : "";
-      return renderContentRow([
+      const selected = row.id === state.selectedRowId;
+      const marker = selected ? "❯" : "";
+      const line = [
         padVisibleEnd(marker, markerWidth),
         padVisibleEnd(row.provider, providerWidth),
         padVisibleEnd(row.model, modelWidth),
         padVisibleEnd(row.status, statusWidth),
         padVisibleEnd(row.notes, notesWidth),
-      ].join(" "), contentWidth, width);
+      ].join(" ");
+      return renderSelectedContentRow(line, selected, style, contentWidth, width);
     }),
   ];
 }
@@ -143,14 +207,16 @@ function renderWideTableRows(
 function renderNarrowTableRows(
   state: SetupPanelState,
   contentWidth: number,
-  width: number
+  width: number,
+  style: OperatorConsoleStyle | undefined
 ): readonly string[] {
   return state.rows.flatMap((row) => {
-    const marker = row.id === state.selectedRowId ? "❯ " : "  ";
+    const selected = row.id === state.selectedRowId;
+    const marker = selected ? "❯ " : "  ";
     return [
-      renderContentRow(`${marker}${row.provider}`, contentWidth, width),
-      renderContentRow(`  ${row.model}`, contentWidth, width),
-      renderContentRow(`  ${row.status} · ${row.notes}`, contentWidth, width),
+      renderSelectedContentRow(`${marker}${row.provider}`, selected, style, contentWidth, width),
+      renderSelectedContentRow(`  ${row.model}`, selected, style, contentWidth, width),
+      renderSelectedContentRow(`  ${row.status} · ${row.notes}`, selected, style, contentWidth, width),
       renderContentRow("", contentWidth, width),
     ];
   }).slice(0, Math.max(0, state.rows.length * 4 - 1));

@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 import { stringWidth } from "../screen/stringWidth.js";
+import { resolveTokens } from "../../../theme/token-resolver.js";
+import { LRI, RLI } from "../../../ui/bidi.js";
 import {
+  createOperatorConsoleStyle,
   renderSetupPanelSurface,
   type SecretEntryPanelState,
   type SetupPanelState,
@@ -137,6 +140,40 @@ describe("Papyrus operator console setup panel surface", () => {
     expect(output.every((line) => stringWidth(line) <= 120)).toBe(true);
   });
 
+  it("isolates and colors the selected Arabic setup choice when styled", () => {
+    const tokens = resolveTokens("standard", "dark", "kemetBlue");
+    const output = renderSetupPanelSurface(arabicChoiceMenu(), {
+      width: 120,
+      style: createOperatorConsoleStyle({
+        tokens,
+        capabilities: { supportsColor: true, supportsTrueColor: true },
+      }),
+    });
+    const selectedLine = output.find((line) => line.includes("نماذج احتياطية")) ?? "";
+
+    expect(selectedLine).toContain(ansiFg(tokens.contract.palette.action));
+    expect(selectedLine).toContain(`${RLI}نماذج احتياطية`);
+    expect(selectedLine).toMatch(/نماذج احتياطية.*◂.*\x1b\[0m/u);
+  });
+
+  it("colors the selected setup route row when styled", () => {
+    const tokens = resolveTokens("standard", "dark", "kemetBlue");
+    const output = renderSetupPanelSurface(modelRoutePanel(), {
+      width: 72,
+      style: createOperatorConsoleStyle({
+        tokens,
+        capabilities: { supportsColor: true, supportsTrueColor: true },
+      }),
+    });
+    const selectedLine = output.find((line) => line.includes("OpenAI")) ?? "";
+    const unselectedLine = output.find((line) => line.includes("Anthropic")) ?? "";
+
+    expect(selectedLine).toContain(ansiFg(tokens.contract.palette.action));
+    expect(selectedLine).toContain("❯");
+    expect(selectedLine).toMatch(/OpenAI.*gpt-5\.5.*\x1b\[0m/u);
+    expect(unselectedLine).not.toContain(ansiFg(tokens.contract.palette.action));
+  });
+
   it("renders required API key panel with masked value and env var only", () => {
     const output = renderSetupPanelSurface(requiredSecretPanel(), { width: 72 });
     const text = output.join("\n");
@@ -203,6 +240,42 @@ function visibleColumn(line: string, text: string): number {
 
 function visibleTextEndColumn(line: string, text: string): number {
   return visibleColumn(line, text) + stringWidth(text);
+}
+
+function arabicChoiceMenu(): SetupPanelState {
+  return {
+    kind: "table",
+    layout: "choiceMenu",
+    title: "محرّر الإعدادات",
+    description: "اختار اللي تحب تضبطه:",
+    locale: "ar",
+    rows: [
+      {
+        id: "primary",
+        provider: "النموذج الأساسي",
+        model: "",
+        status: "النموذج الافتراضي الذي يستخدمه الوكيل.",
+        notes: "",
+      },
+      {
+        id: "fallback",
+        provider: "النماذج الاحتياطية",
+        model: "",
+        status: "نماذج احتياطية تُستخدم إذا فشل النموذج الأساسي.",
+        notes: "",
+      },
+    ],
+    selectedRowId: "fallback",
+  };
+}
+
+function ansiFg(hex: string): string {
+  const clean = hex.replace("#", "");
+  const bigint = Number.parseInt(clean, 16);
+  const r = (bigint >> 16) & 255;
+  const g = (bigint >> 8) & 255;
+  const b = bigint & 255;
+  return `\x1b[38;2;${r};${g};${b}m`;
 }
 
 function modelRoutePanel(): SetupPanelState {
