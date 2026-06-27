@@ -540,8 +540,6 @@ This documentation-only commit does not:
 After the Operator Console owns more of the remaining interaction lanes, later
 implementation PRs may delete or heavily reduce:
 
-- `src/cli/active-turn-command-controller.ts`
-- `src/cli/active-turn-command-controller.test.ts`
 - `ToolActivityAnimator` inside `src/cli/session-loop.ts`
 - manual active-turn transient line arrays
 - terminal row clearing helpers that only exist for live chrome patches

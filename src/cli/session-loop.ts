@@ -25,7 +25,7 @@ import { defaultImageModel } from "../contracts/image-generation.js";
 import type { Prompt, PromptOptions } from "./prompt-contract.js";
 import { createInteractivePrompt } from "./create-interactive-prompt.js";
 import type { ToolExecutionRecord } from "../tools/tool-executor.js";
-import { buildSlashCompletionViewModel, buildToolsMenuViewModel, buildSkillsMenuViewModel } from "./slash-menu.js";
+import { buildToolsMenuViewModel, buildSkillsMenuViewModel } from "./slash-menu.js";
 import { renderSessionHelp, buildSessionHelpViewModel } from "./session-help.js";
 import { commandRegistry } from "./command-registry.js";
 import { toolIcon } from "./tool-activity-renderer.js";
@@ -64,7 +64,7 @@ import {
   type ToolActivityState,
 } from "../ui/papyrus/operator-console/index.js";
 import { parseKeypress, type ParsedKeypress } from "../ui/input/parseKeypress.js";
-import { centerVisibleBlock, measureVisibleWidth, truncateVisible, wrapText } from "../ui/renderers/layout.js";
+import { centerVisibleBlock, measureVisibleWidth, truncateVisible } from "../ui/renderers/layout.js";
 import { chromeCopy } from "../ui/cli-ui-copy.js";
 import { resolveShellHistoryMode } from "./shell-history-mode.js";
 import { resolveClipboardMode } from "./clipboard-mode.js";
@@ -84,7 +84,6 @@ import {
   type CliVoiceRecorder,
   type CliVoiceMode
 } from "./voice-mode.js";
-import { ActiveTurnCommandController } from "./active-turn-command-controller.js";
 import { createFilePasteReferenceStore } from "./paste-interceptor.js";
 import { beginExplicitWorkflowRun, beginSkillPlaybookWorkflowRun } from "../workflow/workflow-begin.js";
 import { summarizeProviderExecution } from "../runtime/provider-execution-summary.js";
@@ -119,8 +118,6 @@ export type SessionLoopOptions = {
 };
 
 const OPERATOR_CONSOLE_ACTIVE_WORK_TERMINAL_HEIGHT = 16;
-const MAX_ACTIVE_TURN_PREVIEW_LINES = 4;
-const MAX_ACTIVE_TURN_QUEUED_LINES = 3;
 
 type ContextUsageSnapshot = NonNullable<SessionStatusRailViewModel["contextUsage"]>;
 type ContextUsageSource = Extract<RuntimeEvent, { kind: "context-usage" }>["source"];
@@ -527,45 +524,40 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
     if (!managedTty) {
       output.write(`${chromeCopy(renderer.locale).startupPromptHint}\n\n`);
     }
-    let queuedSubmittedInput: SubmittedCliInput | undefined;
-
     while (true) {
       const inputPlaceholder = managedTty
         ? promptInputPlaceholder(renderer, promptPrefix, useColor, termWidth)
         : undefined;
-      let submittedInput = queuedSubmittedInput;
-      queuedSubmittedInput = undefined;
+      let submittedInput: SubmittedCliInput;
       let turnVoiceMode: CliVoiceMode = "off";
 
-      if (submittedInput === undefined) {
-        if (!operatorConsoleEnabled) {
-          const topRule = renderHorizontalRule(renderer.tokens, useColor, useUnicode, termWidth);
-          output.write(`${topRule}\n`);
-          writeSessionStatusRail();
-          if (managedTty && idleStatusTicker === undefined) {
-            idleStatusTicker = setInterval(writeSessionStatusRail, 1000);
-          }
+      if (!operatorConsoleEnabled) {
+        const topRule = renderHorizontalRule(renderer.tokens, useColor, useUnicode, termWidth);
+        output.write(`${topRule}\n`);
+        writeSessionStatusRail();
+        if (managedTty && idleStatusTicker === undefined) {
+          idleStatusTicker = setInterval(writeSessionStatusRail, 1000);
         }
-
-        turnVoiceMode = await currentCliVoiceMode({
-          runtime,
-          homeDir: options.homeDir
-        });
-        submittedInput = await readNextCliInput({
-          voiceMode: turnVoiceMode,
-          prompt,
-          promptPrefix,
-          renderer,
-          useColor,
-          runtime,
-          output,
-          homeDir: options.homeDir,
-          workspaceRoot: options.workspaceRoot,
-          cliVoice: options.cliVoice,
-          inputPlaceholder,
-        });
-        stopIdleStatusTicker();
       }
+
+      turnVoiceMode = await currentCliVoiceMode({
+        runtime,
+        homeDir: options.homeDir
+      });
+      submittedInput = await readNextCliInput({
+        voiceMode: turnVoiceMode,
+        prompt,
+        promptPrefix,
+        renderer,
+        useColor,
+        runtime,
+        output,
+        homeDir: options.homeDir,
+        workspaceRoot: options.workspaceRoot,
+        cliVoice: options.cliVoice,
+        inputPlaceholder,
+      });
+      stopIdleStatusTicker();
 
       const text = submittedInput.text;
 
@@ -651,7 +643,6 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
         let lastOperatorConsoleTransientFrame = "";
         let currentPhase: string | undefined;
         let turnWasCancelled = false;
-        let activeTurnCommandController: ActiveTurnCommandController | undefined;
 
         currentAnimator = new ToolActivityAnimator({
           output,
@@ -910,99 +901,7 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
         }
         renderSpinner("thinking");
 
-        if (operatorConsoleRuntimeHost !== undefined) {
-          disposeOperatorConsoleSteerInput = startOperatorConsoleSteerInput();
-        } else {
-	          activeTurnCommandController = new ActiveTurnCommandController({
-	            input: cliInput,
-	            enabled: renderer.capabilities.isTTY && !renderer.capabilities.isCI && !renderer.capabilities.isDumb,
-	            onActiveInputPreviewChange: (preview) => {
-	              if (preview?.kind === "message") {
-	                writeTurnBoundaryRows(renderActiveTurnLabeledLines({
-	                  label: "> Follow up:",
-	                  text: preview.text,
-	                  terminalWidth: termWidth,
-	                  maxLines: MAX_ACTIVE_TURN_PREVIEW_LINES,
-	                  overflow: "tail",
-	                }));
-	              } else if (preview?.kind === "command") {
-	                writeTurnBoundaryRows(renderActiveTurnCommandPreviewLines({
-	                  command: preview.text,
-	                  renderer,
-	                  terminalWidth: termWidth,
-	                }));
-	              }
-	            },
-	            onStatusMessage: (message) => {
-	              writeTurnBoundaryRows(renderActiveTurnLabeledLines({
-	                label: `${activeTurnGlyph(renderer, "command")} active command:`,
-	                text: message,
-	                terminalWidth: termWidth,
-	                maxLines: 2,
-	                overflow: "head",
-	              }));
-	            },
-	            onInputLineChange: (line) => {
-	              if (line?.startsWith("/") === true) {
-	                writeTurnBoundaryRows(
-	                  renderer.render(buildSlashCompletionViewModel(runtime, line, {
-	                    includeActiveTurnCommands: true,
-	                    visibleRows: 10,
-	                  })).split("\n").filter((candidate) => candidate.length > 0)
-	                );
-	              }
-	            },
-	            onQueueText: (queuedText) => {
-	              if (queuedSubmittedInput !== undefined) {
-	                writeTurnBoundaryRows(renderActiveTurnLabeledLines({
-	                  label: `${activeTurnGlyph(renderer, "queued")} Queued:`,
-	                  text: "A message is already queued for the next turn.",
-	                  terminalWidth: termWidth,
-	                  maxLines: 2,
-	                  overflow: "head",
-	                }));
-	                return;
-	              }
-	              queuedSubmittedInput = {
-                text: queuedText,
-                echoedPromptPrefix: "",
-	                echoedText: queuedText,
-	                clearSubmittedPrompt: false
-	              };
-	              writeTurnBoundaryRows(renderActiveTurnLabeledLines({
-	                label: `${activeTurnGlyph(renderer, "queued")} Queued:`,
-	                text: queuedText,
-	                terminalWidth: termWidth,
-	                maxLines: MAX_ACTIVE_TURN_QUEUED_LINES,
-	                overflow: "head",
-	              }));
-	            },
-            onInterrupt: () => {
-              activeTurn?.abort("CLI interrupt");
-            },
-	            onSteer: (note) => {
-	              if (steeringRetryUsed || pendingSteeringNote !== undefined) {
-	                writeTurnBoundaryRows(renderActiveTurnLabeledLines({
-	                  label: `${activeTurnGlyph(renderer, "command")} active command:`,
-	                  text: "Steering already queued for this turn.",
-	                  terminalWidth: termWidth,
-	                  maxLines: 2,
-	                  overflow: "head",
-	                }));
-	                return;
-	              }
-	              pendingSteeringNote = note;
-	              writeTurnBoundaryRows(renderActiveTurnLabeledLines({
-	                label: `${activeTurnGlyph(renderer, "steer")} Steer:`,
-	                text: "Steering note queued; interrupting turn.",
-	                terminalWidth: termWidth,
-	                maxLines: 2,
-	                overflow: "head",
-	              }));
-	              activeTurn?.abort("CLI steer");
-	            },
-          });
-        }
+        disposeOperatorConsoleSteerInput = startOperatorConsoleSteerInput();
         const responsePromise = runtime.handle({
             text: retryText,
             channel: "cli",
@@ -1053,9 +952,7 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
 	            activeTurn = undefined;
 	            activeTurnStartedAtMs = undefined;
 	            disposeOperatorConsoleSteerInput?.();
-	            activeTurnCommandController?.dispose();
 	            disposeOperatorConsoleSteerInput = undefined;
-	            activeTurnCommandController = undefined;
 	            operatorConsoleSteerState = undefined;
 	            operatorConsoleActiveWorkState = createActiveWorkRuntimeState();
 	            operatorConsoleRuntimeHost?.setActiveWork(operatorConsoleActiveWorkState);
@@ -1066,7 +963,6 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
 	            currentAnimator = undefined;
 	            clearActiveTurnChrome = () => undefined;
 	          });
-        activeTurnCommandController?.start();
         const response = await responsePromise;
         lastProviderExecutionSummary = response.providerExecution === undefined
           ? undefined
@@ -2860,76 +2756,6 @@ function promptInputPlaceholder(
   }
   const text = truncateVisible(chromeCopy(renderer.locale).inputPlaceholder, availableWidth);
   return colorPromptPlaceholder(text, renderer.tokens, useColor);
-}
-
-function renderActiveTurnCommandPreviewLines(input: {
-  command: string;
-  renderer: SessionRenderer;
-  terminalWidth: number;
-}): string[] {
-  if (input.command === "/interrupt") {
-    return renderActiveTurnLabeledLines({
-      label: `${activeTurnGlyph(input.renderer, "interrupt")} Interrupt`,
-      text: "",
-      terminalWidth: input.terminalWidth,
-      maxLines: 1,
-      overflow: "head",
-    });
-  }
-
-  if (input.command === "/steer" || input.command.startsWith("/steer ")) {
-    return renderActiveTurnLabeledLines({
-      label: `${activeTurnGlyph(input.renderer, "steer")} Steer:`,
-      text: input.command,
-      terminalWidth: input.terminalWidth,
-      maxLines: MAX_ACTIVE_TURN_PREVIEW_LINES,
-      overflow: "tail",
-    });
-  }
-
-  return renderActiveTurnLabeledLines({
-    label: `${activeTurnGlyph(input.renderer, "command")} active command:`,
-    text: input.command,
-    terminalWidth: input.terminalWidth,
-    maxLines: MAX_ACTIVE_TURN_PREVIEW_LINES,
-    overflow: "tail",
-  });
-}
-
-function renderActiveTurnLabeledLines(input: {
-  label: string;
-  text: string;
-  terminalWidth: number;
-  maxLines: number;
-  overflow: "head" | "tail";
-}): string[] {
-  const prefix = input.text.length > 0 ? `${input.label} ` : input.label;
-  const prefixWidth = measureVisibleWidth(prefix);
-  const width = Math.max(1, input.terminalWidth);
-  const continuationWidth = Math.max(1, width - prefixWidth);
-  const bodyLines = input.text.length === 0 ? [""] : wrapText(input.text, continuationWidth);
-  const lines = bodyLines.map((line, index) =>
-    index === 0 ? `${prefix}${line}` : `${" ".repeat(prefixWidth)}${line}`
-  );
-  return capActiveTurnLines(lines, input.maxLines, input.overflow);
-}
-
-function capActiveTurnLines(lines: string[], maxLines: number, overflow: "head" | "tail"): string[] {
-  const limit = Math.max(1, maxLines);
-  if (lines.length <= limit) return lines;
-  if (overflow === "head" || limit === 1) return lines.slice(0, limit);
-  return [lines[0], ...lines.slice(-(limit - 1))];
-}
-
-function activeTurnGlyph(
-  renderer: SessionRenderer,
-  kind: "queued" | "steer" | "interrupt" | "command"
-): string {
-  const unicode = renderer.capabilities.supportsUnicode;
-  if (kind === "queued") return unicode ? "↳" : "->";
-  if (kind === "steer") return unicode ? "↯" : "!";
-  if (kind === "interrupt") return unicode ? "✕" : "x";
-  return unicode ? "⌘" : "$";
 }
 
 function currentTurnSecondsForTiming(timing: StatusRailTiming | undefined): number | undefined {

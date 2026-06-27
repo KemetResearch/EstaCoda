@@ -216,7 +216,7 @@ messages. Tool activity rows route through the Operator Console active-work
 surface when available. Active-turn surfaces must not recreate the removed fake
 read-only prompt box.
 
-The active-turn input lane is CLI-local. `ActiveTurnCommandController` attaches only while `runtime.handle()` is active in an interactive TTY. Normal submitted text is visible and queued as the next user turn after the current response completes. `/interrupt` aborts the active turn. `/steer <note>` aborts and schedules one CLI-layer retry with an explicit steering note; it is not a runtime/provider in-flight steering primitive. `<note>` is documentation notation only; users type free-form note text after `/steer`.
+The active-turn input lane is Operator Console-owned in interactive TTY sessions. Normal typed text opens the `Steer current turn` surface, and non-empty submitted steer text aborts the current turn with `CLI steer` before scheduling one CLI-layer retry with an explicit steering note. `Ctrl+C` remains the hard interrupt path and is not modeled as steer submission or cancellation. Steering is not a runtime/provider in-flight steering primitive.
 
 ---
 

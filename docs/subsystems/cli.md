@@ -15,7 +15,6 @@ description: "CLI commands, interactive session loop, trace/eval inspection, and
 | `src/cli/one-shot.ts` | One-shot prompt execution |
 | `src/cli/papyrus-prompt.ts` | Papyrus-capable interactive prompt factory |
 | `src/cli/paste-interceptor.ts` | Bracketed paste interception and newline restoration |
-| `src/cli/active-turn-command-controller.ts` | CLI-local active-turn command lane |
 | `src/cli/slash-menu.ts` | Slash command menu rendering |
 | `src/cli/tool-activity-renderer.ts` | Tool activity display |
 | `src/cli/trace-commands.ts` | `estacoda trace` commands |
@@ -219,18 +218,11 @@ Arabic setup chrome is direction-aware for localized setup selectors, rails, onb
 
 Onboarding provider credential prompts and Telegram token prompts share the setup editor prompt copy. Arabic display strings isolate product names, provider names, `Telegram`, env vars, and other technical tokens. Stored config, env, auth, and state values remain raw; secret prompts remain masked.
 
-After a normal message is submitted, the idle prompt is gone. The active turn shows status, timing, spinner, durable tool activity, approval/setup output, and transient active-lane messages; it does not show a fake read-only prompt box containing the submitted user text. The submitted prompt remains visible in the transcript rail/history.
+After a normal message is submitted, the idle prompt is gone. The active turn shows status, timing, spinner, durable tool activity, approval/setup output, and Operator Console active-work/steer surfaces; it does not show a fake read-only prompt box containing the submitted user text. The submitted prompt remains visible in the transcript rail/history.
 
-While `runtime.handle()` is active in a local interactive CLI session, the active prompt lane accepts visible input. Normal text submitted mid-turn is queued for the next turn, does not interrupt the current turn, and is sent only after the current response completes. Slash commands in this lane remain control input and are not persisted as user transcript/history content.
+While `runtime.handle()` is active in a local interactive CLI session, visible typing routes through the Operator Console `Steer current turn` surface. Non-empty steer text is submitted as active-turn guidance, rendered as a `User steer:` transcript block, and applied by aborting the current turn with `CLI steer` before queueing one retry using the original submitted text plus an explicit steering note block. `Ctrl+C` remains the hard interrupt path and aborts the current turn with `SIGINT`; it is not modeled as steer submission or cancellation.
 
-Active-turn commands:
-
-| Command | Behavior |
-|---------|----------|
-| `/interrupt` | Aborts the current active turn with `CLI interrupt`. It does not retry. |
-| `/steer <note>` | Aborts the current active turn with `CLI steer`, then queues one retry using the original submitted text plus an explicit steering note block. |
-
-`/steer` V1 is abort-and-retry steering. It is not true in-flight provider steering, and it does not add a runtime/provider steering primitive. The retried text is inspectable:
+Steering V1 is abort-and-retry steering. It is not true in-flight provider steering, and it does not add a runtime/provider steering primitive. The retried text is inspectable:
 
 ```text
 <original user text>
@@ -239,15 +231,9 @@ Active-turn commands:
 <note>
 ```
 
-`<note>` is documentation notation only. The actual input is free-form text after the command:
+`<note>` is documentation notation only. The actual input is free-form text typed into `Steer current turn`. Empty or whitespace-only steer input does nothing. Repeated steering attempts for the same submitted turn are bounded; the same note is not reapplied indefinitely if the retry fails, is cancelled, or is interrupted.
 
-```text
-/steer try the safer approach instead
-```
-
-An empty `/steer` shows usage and does not abort. Repeated steering attempts for the same submitted turn are bounded; the same note is not reapplied indefinitely if the retry fails, is cancelled, or is interrupted.
-
-Cursor-control-heavy changes in this area need unit coverage and real terminal smoke. The test harness checks split paste markers, prompt wrapping, Operator Console region accounting, active-turn commands, and retry behavior, but manual smoke is still the way to catch terminal-emulator cursor quirks.
+Cursor-control-heavy changes in this area need unit coverage and real terminal smoke. The test harness checks split paste markers, prompt wrapping, Operator Console region accounting, active-turn steering, and retry behavior, but manual smoke is still the way to catch terminal-emulator cursor quirks.
 
 ### In-Session Model Switching
 
