@@ -1,18 +1,17 @@
 ---
 title: "Operator Console"
-description: "Future Papyrus-owned interactive CLI surface contract."
+description: "Papyrus-owned interactive CLI surface contract."
 ---
 
 # Operator Console
 
-This document is a planning contract for the EstaCoda Operator Console. It
-does not describe fully implemented runtime behavior yet.
+This document is the surface contract for the EstaCoda Operator Console.
 
 ## Purpose
 
-The EstaCoda Operator Console is the future Papyrus-owned interactive CLI
-surface. It replaces bottom chrome redraws, prompt echo clearing, active-turn
-side channels, fixed tool rails, and manual readline-era terminal row
+The EstaCoda Operator Console is the Papyrus-owned interactive CLI
+surface. It replaces legacy bottom-region redraws, prompt echo clearing,
+active-turn side channels, fixed tool rails, and manual readline-era terminal row
 management.
 
 The redesign keeps the existing CLI product semantics while moving live
@@ -521,7 +520,7 @@ kimi-k2.7-code ● │ ctx [▰▱▱▱▱▱▱▱▱▱] 18.4k/262k 7% │ se
 8. Add active-turn steer surface and queued steer state.
 9. Rebuild startup dashboard and setup panels with the same console language.
 10. Route the session loop through the Operator Console.
-11. Remove obsolete terminal controllers and transient chrome machinery.
+11. Remove obsolete terminal controllers and transient terminal machinery.
 
 ## Non-Goals For This Commit
 
@@ -531,26 +530,19 @@ This documentation-only commit does not:
 - change the interactive CLI path;
 - add `OperatorConsoleState` implementation files;
 - add or remove feature flags;
-- delete bottom chrome, active-turn, or select controllers;
+- delete active-turn or select controllers;
 - change approval policy or grant handling;
 - change setup behavior;
 - update snapshots.
 
 ## Legacy Code Intended For Later Deletion
 
-After the Operator Console owns the frame, later implementation PRs may delete
-or heavily reduce:
+After the Operator Console owns more of the remaining interaction lanes, later
+implementation PRs may delete or heavily reduce:
 
-- `src/cli/bottom-chrome-controller.ts`
-- `src/cli/bottom-chrome-controller.test.ts`
 - `src/cli/active-turn-command-controller.ts`
 - `src/cli/active-turn-command-controller.test.ts`
 - `ToolActivityAnimator` inside `src/cli/session-loop.ts`
-- fixed tool slot padding such as `TOOL_SLOT_COUNT = 5`
-- bottom chrome transient spinner tickers
-- bottom chrome active chrome tickers
-- `writeAboveChromeSync` / `writeAboveChromeNoRestore` plumbing
-- `suspendChromeForTranscript` style prompt-region plumbing
 - manual active-turn transient line arrays
 - terminal row clearing helpers that only exist for live chrome patches
 - terminal renderer portions of `src/cli/interactive-select.ts` after setup

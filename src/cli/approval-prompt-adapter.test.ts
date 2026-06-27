@@ -50,7 +50,6 @@ function adapterInput(answer: string, options: {
       chrome: {
         enabled: false,
         clearInlineSpinner: vi.fn(),
-        suspendChromeForTranscript: vi.fn(async (fn) => await fn()),
       },
       execution: options.execution ?? approvalExecution(),
       allowPersistentApproval: options.allowPersistentApproval ?? true,
@@ -136,7 +135,7 @@ describe("approval prompt adapter routing", () => {
     expect(host.getState().status).not.toHaveProperty("approvals");
   });
 
-  it("renders inline Operator Console file diff stats without bottom chrome suspension", async () => {
+  it("renders inline Operator Console file diff stats without prompt-region suspension", async () => {
     const { input, outputChunks } = adapterInput("approve once", {
       execution: approvalExecution({
         tool: {
@@ -180,8 +179,7 @@ describe("approval prompt adapter routing", () => {
     expect(rendered).toContain("Target: src/runtime/provider-turn-loop.ts");
     expect(rendered).toContain("Risk: workspace-write");
     expect(rendered).toContain("+2 lines  -1 lines");
-    expect(input.chrome.clearInlineSpinner).not.toHaveBeenCalled();
-    expect(input.chrome.suspendChromeForTranscript).not.toHaveBeenCalled();
+    expect(input.chrome?.clearInlineSpinner).not.toHaveBeenCalled();
   });
 
   it("maps Operator Console reject, escape, and inspect intents without adding approval scope semantics", async () => {

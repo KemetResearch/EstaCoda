@@ -393,21 +393,21 @@ describe("raw prompt render loop", () => {
     expect(output.text()).not.toMatch(forbiddenManagedRegionOutput);
   });
 
-  it("coexists with surrounding bottom-chrome writes without destructive terminal sequences", () => {
+  it("coexists with surrounding console writes without destructive terminal sequences", () => {
     const output = fakeOutput();
     const loop = new RawPromptRenderLoop(output);
 
-    output.write("bottom chrome before\n");
+    output.write("console before\n");
     loop.render({
       prompt: "> ",
       state: createLineEditorState("/h"),
       overlayRows: [{ id: "help", text: "> /help - Show help" }],
     });
-    output.write("\nbottom chrome after");
+    output.write("\nconsole after");
 
-    expect(output.text()).toContain("bottom chrome before");
+    expect(output.text()).toContain("console before");
     expect(output.text()).toContain("> /help - Show help");
-    expect(output.text()).toContain("bottom chrome after");
+    expect(output.text()).toContain("console after");
     expect(output.text()).toContain("\x1b[0K");
     expect(output.text()).not.toMatch(forbiddenManagedRegionOutput);
   });

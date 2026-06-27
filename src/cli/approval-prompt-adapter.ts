@@ -19,15 +19,13 @@ import { buildApprovalPromptViewModel } from "./tool-activity-view-models.js";
 export type ApprovalPromptChrome = {
   readonly enabled: boolean;
   clearInlineSpinner(): void;
-  suspendChromeForTranscript<T>(fn: () => T | Promise<T>): Promise<T>;
-  suspendForPrompt?<T>(fn: () => T | Promise<T>): Promise<T>;
 };
 
 export type ApprovalPromptAdapterInput = {
   readonly prompt: (question: string) => Promise<string>;
   readonly output: Pick<NodeJS.WritableStream, "write">;
   readonly renderer: { render(viewModel: ViewModel): string };
-  readonly chrome: ApprovalPromptChrome;
+  readonly chrome?: ApprovalPromptChrome;
   readonly execution: ToolExecutionRecord;
   readonly allowPersistentApproval: boolean;
   readonly operatorConsoleHost?: OperatorConsoleRuntimeHost;
@@ -42,21 +40,8 @@ export const papyrusApprovalPromptAdapter: ApprovalPromptAdapter = async (input)
 
   const promptText = "approval action > ";
   const cardText = renderPapyrusApprovalPromptCard(input.execution, input.allowPersistentApproval);
-  if (input.chrome.suspendForPrompt !== undefined) {
-    return await input.chrome.suspendForPrompt(async () => {
-      input.output.write(`${cardText}\n`);
-      return mapPapyrusApprovalAnswer(await input.prompt(promptText), input.allowPersistentApproval);
-    });
-  }
-
-  input.chrome.clearInlineSpinner();
-  if (input.chrome.enabled) {
-    await input.chrome.suspendChromeForTranscript(() => {
-      input.output.write(`${cardText}\n`);
-    });
-  } else {
-    input.output.write(`${cardText}\n`);
-  }
+  input.chrome?.clearInlineSpinner();
+  input.output.write(`${cardText}\n`);
   return mapPapyrusApprovalAnswer(await input.prompt(promptText), input.allowPersistentApproval);
 };
 

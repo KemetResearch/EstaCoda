@@ -196,11 +196,11 @@ Secret prompts are a hard boundary. They may accept pasted bytes as input, but t
 
 ### 6.2 Managed Prompt Region
 
-`BottomChromeController` and the Papyrus surface controller own the managed prompt
+The Operator Console and Papyrus surface controllers own the managed prompt
 region around live interactive input. The transcript area owns durable user rails,
-assistant cards, and tool activity rows. The bottom prompt region owns the status
-rail, input row/placeholder, fixed-height slash completion panel, and compact
-paste notice/reference when applicable.
+assistant cards, and tool activity rows. The managed prompt/status region owns
+the status rail, input row/placeholder, fixed-height slash completion panel, and
+compact paste notice/reference when applicable.
 
 Do not manually combine old readline-era transient-region calls with Papyrus
 prompt rendering. The controller tracks managed-region height across growth,
@@ -210,10 +210,11 @@ do not resize the prompt region.
 
 ### 6.3 Active-Turn Chrome
 
-After submit, the idle prompt no longer owns the cursor. Active-turn chrome shows
+After submit, the idle prompt no longer owns the cursor. Active-turn surfaces show
 status, timing, spinner, setup/approval output, and transient active-lane
-messages. Tool activity rows are durable transcript output above bottom chrome.
-Active-turn chrome must not recreate the removed fake read-only prompt box.
+messages. Tool activity rows route through the Operator Console active-work
+surface when available. Active-turn surfaces must not recreate the removed fake
+read-only prompt box.
 
 The active-turn input lane is CLI-local. `ActiveTurnCommandController` attaches only while `runtime.handle()` is active in an interactive TTY. Normal submitted text is visible and queued as the next user turn after the current response completes. `/interrupt` aborts the active turn. `/steer <note>` aborts and schedules one CLI-layer retry with an explicit steering note; it is not a runtime/provider in-flight steering primitive. `<note>` is documentation notation only; users type free-form note text after `/steer`.
 

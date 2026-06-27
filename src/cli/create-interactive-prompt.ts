@@ -9,6 +9,7 @@ export type CreateInteractivePromptOptions = {
   readonly output?: Writable;
   readonly env?: Record<string, string | undefined>;
   readonly uiContext?: PromptUiContext;
+  readonly useOperatorConsole?: boolean;
   readonly createPapyrus?: (options: CreatePapyrusPromptOptions) => Prompt;
 };
 
@@ -20,5 +21,6 @@ export function createInteractivePrompt(options: CreateInteractivePromptOptions 
     output,
     env: options.env,
     uiContext: options.uiContext,
+    ...(options.useOperatorConsole === true ? { useOperatorConsole: true } : {}),
   });
 }

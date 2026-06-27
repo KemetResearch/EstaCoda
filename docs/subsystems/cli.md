@@ -15,7 +15,6 @@ description: "CLI commands, interactive session loop, trace/eval inspection, and
 | `src/cli/one-shot.ts` | One-shot prompt execution |
 | `src/cli/papyrus-prompt.ts` | Papyrus-capable interactive prompt factory |
 | `src/cli/paste-interceptor.ts` | Bracketed paste interception and newline restoration |
-| `src/cli/bottom-chrome-controller.ts` | Managed terminal chrome below/above prompt regions |
 | `src/cli/active-turn-command-controller.ts` | CLI-local active-turn command lane |
 | `src/cli/slash-menu.ts` | Slash command menu rendering |
 | `src/cli/tool-activity-renderer.ts` | Tool activity display |
@@ -191,9 +190,9 @@ Interactive `/compact [topic]` is semantic session compression for the current s
 
 The idle CLI prompt is Papyrus-owned raw input. The Papyrus prompt factory owns
 interactive setup/operator prompts, core session input, slash autocomplete,
-approval cards, paste references, and terminal cleanup. The bottom chrome is
-redrawn around the Papyrus-managed prompt region instead of treating the prompt
-row as an ad hoc output line.
+approval cards, paste references, and terminal cleanup. The Operator Console
+owns the managed prompt/status frame instead of treating the prompt row as an
+ad hoc output line.
 
 The terminal regions are intentionally separate:
 
@@ -203,18 +202,18 @@ Transcript area:
   durable assistant cards
   durable tool activity rows
 
-Bottom prompt region:
+Operator Console region:
   status rail
   input row / placeholder
   fixed-height slash completion panel
   compact paste notice/reference when applicable
 ```
 
-Tool-start and tool-result rows are durable transcript output above bottom chrome. The active spinner and status rail stay in the bottom prompt region.
+Tool-start and tool-result rows route through the Operator Console active-work surface when available, with durable/plain fallbacks outside TTY console rendering. The active spinner and status rail stay in the managed prompt/status region.
 
 Bracketed paste is enabled only for TTY prompts that run through the paste interceptor. Small single-line pastes remain inline. Multiline and large pastes display as compact `[Pasted text #...]` references when a paste reference store is available. Paste files are written under the active profile temp state, not the workspace, and are temporary operational artifacts, not a permanent knowledge store. The submitted runtime input restores the original pasted content. Secret prompts bypass paste preview and paste reference storage; pasted secret content must not be logged, echoed in chrome/status text, or mirrored outside the prompt answer path.
 
-Shortcut hints are shown as input-lane placeholder copy while the idle input line is empty. The prompt row owns the prompt marker, so placeholder copy must not include its own `>` or `›`. The hint disappears as soon as the user starts typing. Slash hints take priority when idle input starts with `/`; the hint model is built from the current line before submit, rendered through the Papyrus bottom chrome path, and cleared when the line no longer starts with `/` or the prompt resolves. Slash completions render in a fixed-height prompt-region panel, so fewer matches do not shrink the panel. Plain, non-TTY, or non-bottom-chrome sessions keep the direct startup hint fallback.
+Shortcut hints are shown as input-lane placeholder copy while the idle input line is empty. The prompt row owns the prompt marker, so placeholder copy must not include its own `>` or `›`. The hint disappears as soon as the user starts typing. Slash hints take priority when idle input starts with `/`; the hint model is built from the current line before submit, rendered through the Papyrus prompt/Operator Console path, and cleared when the line no longer starts with `/` or the prompt resolves. Slash completions render in a fixed-height prompt-region panel, so fewer matches do not shrink the panel. Plain, non-TTY, or unsupported terminal sessions keep the direct startup hint fallback.
 
 Arabic setup chrome is direction-aware for localized setup selectors, rails, onboarding summaries, prompt cards, raw setup prompts, verification reports, and the startup dashboard. Arabic picker rows are RTL/right-aligned as full option rows; selected output uses `تم تحديد`, and technical selected values are LTR-isolated. The Arabic startup dashboard uses two RTL-aware columns at normal terminal widths and falls back to a bounded stacked layout on narrow terminals. Technical tokens such as paths, env vars, provider/model IDs, slash commands, and version numbers remain untranslated and isolated. Do not describe this as full runtime Arabic localization.
 
@@ -248,7 +247,7 @@ Active-turn commands:
 
 An empty `/steer` shows usage and does not abort. Repeated steering attempts for the same submitted turn are bounded; the same note is not reapplied indefinitely if the retry fails, is cancelled, or is interrupted.
 
-Cursor-control-heavy changes in this area need unit coverage and real terminal smoke. The test harness checks split paste markers, prompt wrapping, bottom chrome line accounting, active-turn commands, and retry behavior, but manual smoke is still the way to catch terminal-emulator cursor quirks.
+Cursor-control-heavy changes in this area need unit coverage and real terminal smoke. The test harness checks split paste markers, prompt wrapping, Operator Console region accounting, active-turn commands, and retry behavior, but manual smoke is still the way to catch terminal-emulator cursor quirks.
 
 ### In-Session Model Switching
 

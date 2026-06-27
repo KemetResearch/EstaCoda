@@ -262,7 +262,7 @@ Operational rules:
 - Clear stale managed lines when shortcut hints, slash hints, paste previews, or transient messages disappear.
 - Treat terminal width as mutable; prompt wrapping can change while the user is editing.
 - Never mirror secret prompt content into paste previews, transient lines, status rails, logs, or debug chrome.
-- Keep active-turn command-lane rendering in bottom chrome transient/status paths. Do not write command buffers directly to the terminal.
+- Keep active-turn command-lane rendering in Operator Console transient/status surfaces. Do not write command buffers directly to the terminal.
 - Do not reintroduce a fake prompt box after submit. The submitted user text belongs in transcript/history rendering; active-turn chrome is status and control chrome.
 - Arabic setup chrome is direction-aware for setup selectors, rails, and onboarding summaries. Raw setup string prompts are still a follow-up RTL surface; do not claim full runtime Arabic localization.
 
@@ -340,9 +340,9 @@ buildApprovalSecurityViewModel({
 | `output.write(`┌${`─`.repeat(w)}┐`)` | Use `#framedPanel()` in `StandardRenderer` or plain text blocks in `PlainRenderer`. |
 | `const lines = ["header", `  ${key}: ${value}`]` | Build a `KeyValueBlockViewModel` and render it. |
 | Hardcoding command names in `/help` | Register commands in `CommandRegistry`, read from registry. |
-| Writing terminal output into the live prompt region | Route through the Papyrus raw prompt, surface controller, or bottom chrome controller. |
+| Writing terminal output into the live prompt region | Route through the Papyrus raw prompt, surface controller, or Operator Console host. |
 | Mirroring secret prompt input into preview/status chrome | Keep secret prompt content inside the prompt answer path only. |
-| Rendering tool activity inside bottom chrome redraws | Render tool-start/tool-result rows as durable transcript output above the bottom prompt region. |
+| Rendering tool activity inside legacy redraws | Route tool-start/tool-result rows through the Operator Console active-work surface, with durable/plain fallbacks outside TTY console rendering. |
 | Putting a prompt marker inside placeholder copy | Let the prompt row own `>`/`›`; placeholder copy starts with the hint text. |
 
 ---
@@ -357,14 +357,14 @@ Transcript area:
   durable assistant cards
   durable tool activity rows
 
-Bottom prompt region:
+Managed prompt/status region:
   status rail
   input row / placeholder
   fixed-height slash completion panel
   compact paste notice/reference when applicable
 ```
 
-The transcript area is append-oriented. Tool-start and tool-result rows belong there. The bottom prompt region is cursor-managed and should contain only the active status/spinner, the current input row, prompt placeholder text, slash completions, and paste reference notices.
+The transcript area is append-oriented. Tool-start and tool-result rows belong there. The managed prompt/status region is cursor-managed and should contain only the active status/spinner, the current input row, prompt placeholder text, slash completions, and paste reference notices.
 
 Idle placeholder copy is not a separate shortcut rail and must not include a prompt marker. Slash completion panels reserve stable height; fewer matches should not shrink the managed prompt region. Arabic prompt-region surfaces must measure visible width, keep technical tokens LTR-isolated, and preserve balanced bidi isolates after truncation or padding.
 

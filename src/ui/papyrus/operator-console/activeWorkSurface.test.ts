@@ -145,7 +145,7 @@ describe("Papyrus operator console active work surface", () => {
       items: [
         item("exec", "running", { toolName: "terminal.exec", target: "pnpm test", durationMs: 43_000 }),
         item("read", "running", { toolName: "read_file", target: "src/cli/session-loop.ts", durationMs: 4_000 }),
-        item("rg", "running", { toolName: "rg", target: "\"bottomChrome\" src", durationMs: 2_000 }),
+        item("rg", "running", { toolName: "rg", target: "\"operatorConsole\" src", durationMs: 2_000 }),
         ...manyItems(42, "succeeded"),
       ],
     });
