@@ -163,6 +163,20 @@ describe("interactive-select prompt card surface", () => {
     expect(rendered).toContain("Selected: Local");
   });
 
+  it("does not emit old cursor save/restore, clear-down, or cursor visibility sequences on structured TTY setup selects", async () => {
+    clearCiEnv();
+    const { input, output } = makeTtyStreams(96);
+    const pending = selectOption(input, output, setupPanelSelection());
+
+    await Promise.resolve();
+    press(input, "\x1b[B");
+    press(input, "\r");
+
+    await expect(pending).resolves.toBe("local");
+    expect(output.getText()).not.toMatch(/\x1B7|\x1B8|\x1B\[J|\x1B\[\?25[lh]|\x1B\[s|\x1B\[u/u);
+    expect(output.getText()).toContain("\x1b[0K");
+  });
+
   it("keeps setup panel selection stable across redraw-width changes", async () => {
     clearCiEnv();
     const { input, output } = makeTtyStreams(96);
@@ -647,6 +661,14 @@ function latestRenderedFrame(text: string): string {
   const restoreCursor = "\x1B8";
   const clearDown = "\x1B[J";
   const lastRender = text.lastIndexOf(`${restoreCursor}${clearDown}`);
-  if (lastRender === -1) return text;
+  if (lastRender === -1) {
+    const repaintPattern = /\x1b\[\d+A\r/gu;
+    let lastRepaint: RegExpExecArray | null = null;
+    for (let match = repaintPattern.exec(text); match !== null; match = repaintPattern.exec(text)) {
+      lastRepaint = match;
+    }
+    if (lastRepaint === null) return text;
+    return text.slice(lastRepaint.index + lastRepaint[0].length);
+  }
   return text.slice(lastRender + restoreCursor.length + clearDown.length);
 }

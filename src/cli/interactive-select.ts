@@ -88,18 +88,14 @@ async function ttySelect<T>(input: Readable, output: Writable, selection: Select
     let selectState = createPapyrusSelectState(selection);
     let settled = false;
     const wasRaw = ttyInput.isRaw === true;
-    const saveCursor = "\x1B7";
-    const restoreCursor = "\x1B8";
-    const clearDown = "\x1B[J";
 
     const renderer = createSessionRenderer({ output: output as NodeJS.WriteStream, locale: selection.locale });
+    const renderLoop = new TtySelectRenderLoop(output);
 
     const render = () => {
       const selectedIndex = focusedSelectionIndex(selectState);
       const text = renderTtySelection(selection, selectedIndex, renderer);
-
-      output.write(`${restoreCursor}${clearDown}`);
-      output.write(text);
+      renderLoop.render(text);
     };
 
     const restoreTerminal = () => {
@@ -107,7 +103,6 @@ async function ttySelect<T>(input: Readable, output: Writable, selection: Select
       if (!wasRaw) {
         ttyInput.setRawMode(false);
       }
-      output.write("\x1B[?25h");
     };
 
     const finish = (value: T, selectedIndex: number) => {
@@ -150,13 +145,33 @@ async function ttySelect<T>(input: Readable, output: Writable, selection: Select
     ttyInput.setRawMode(true);
     ttyInput.resume();
 
-    const initialText = renderTtySelection(selection, focusedSelectionIndex(selectState), renderer);
-    const reserveLines = Math.max(1, initialText.split("\n").length - 1);
-    output.write("\n".repeat(reserveLines));
-    output.write(`\x1B[${reserveLines}A`);
-    output.write(`\x1B[?25l${saveCursor}`);
     render();
   });
+}
+
+class TtySelectRenderLoop {
+  #renderedRows = 0;
+
+  constructor(private readonly output: Writable) {}
+
+  render(text: string): void {
+    const rows = text.length === 0 ? [""] : text.split("\n");
+    this.#moveToFirstRenderedRow();
+
+    const physicalRows = Math.max(this.#renderedRows, rows.length);
+    for (let row = 0; row < physicalRows; row += 1) {
+      this.output.write("\x1b[0K");
+      if (row < rows.length) this.output.write(rows[row]!);
+      if (row < physicalRows - 1) this.output.write("\n");
+    }
+
+    this.#renderedRows = rows.length;
+  }
+
+  #moveToFirstRenderedRow(): void {
+    if (this.#renderedRows > 1) this.output.write(`\x1b[${this.#renderedRows - 1}A`);
+    if (this.#renderedRows > 0) this.output.write("\r");
+  }
 }
 
 function renderTtySelection<T>(
