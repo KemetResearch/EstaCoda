@@ -23,7 +23,7 @@ import type { TerminalCapabilities, UiLocale } from "../contracts/ui.js";
 import type { CompactResult } from "../prompt/session-compression-service.js";
 import { isolateLtr } from "../ui/bidi.js";
 import { renderPlain } from "../ui/renderers/plain-renderer.js";
-import { stripAnsi } from "../ui/renderers/layout.js";
+import { measureVisibleWidth, stripAnsi } from "../ui/renderers/layout.js";
 import { StandardRenderer } from "../ui/renderers/standard-renderer.js";
 import { buildStartupDashboardViewModel } from "../ui/view-models/builders.js";
 import { resolveTokens } from "../theme/token-resolver.js";
@@ -170,6 +170,7 @@ async function captureStartupSession(options: {
   runtime?: Runtime;
   capabilities?: TerminalCapabilities;
   locale?: UiLocale;
+  operatorConsoleHost?: OperatorConsoleRuntimeHost;
 } = {}): Promise<{ raw: string; chunks: string[]; promptOptions?: PromptOptions }> {
   const outputChunks: string[] = [];
   const capabilities = options.capabilities ?? interactiveCaps({ supportsAnimation: false });
@@ -195,6 +196,9 @@ async function captureStartupSession(options: {
       { close: () => {} }
     ),
     close: () => {},
+    ...(options.operatorConsoleHost === undefined
+      ? {}
+      : { operatorConsole: { enabled: true, runtimeHost: options.operatorConsoleHost } }),
   });
 
   return { raw: outputChunks.join(""), chunks: outputChunks, promptOptions };
@@ -866,6 +870,130 @@ describe("runSessionLoop — user prompt rail behavior", () => {
     });
     expect(tty.raw).not.toContain("Type a message.");
     expect(tty.promptOptions?.placeholder).toContain("/help");
+  });
+
+  it("routes supported TTY startup through the Operator Console startup surface when enabled", async () => {
+    const host = createOperatorConsoleRuntimeHost();
+    const setStartupDashboard = vi.spyOn(host, "setStartupDashboard");
+    const runtime = createMockRuntime({
+      sessionId: "20ea8195-with-suffix",
+      getModelInfo: () => ({
+        kind: "kv" as const,
+        title: "Model",
+        entries: [
+          { key: "provider", value: "kimi" },
+          { key: "model", value: "kimi-k2.6" },
+          { key: "context window", value: 262_000 },
+        ],
+      }),
+      getStartupReadiness: async () => ({
+        workspaceTrust: "trusted",
+        workspaceVerification: "verified",
+        providerReadiness: "degraded",
+        versionStatus: "unknown",
+        workspaceDirectory: "/tmp",
+        securityMode: "open",
+        skillAutonomy: "autonomous",
+        model: { provider: "kimi", id: "kimi-k2.6" },
+        warnings: [],
+      }),
+    });
+
+    const { raw } = await captureStartupSession({
+      runtime,
+      capabilities: interactiveCaps({ terminalWidth: 96, supportsAnimation: false }),
+      operatorConsoleHost: host,
+    });
+    const plain = stripAnsi(raw);
+
+    expect(raw.startsWith(STARTUP_VISIBLE_SCREEN_CLEAR)).toBe(true);
+    expect(setStartupDashboard).toHaveBeenCalledTimes(1);
+    expect(setStartupDashboard.mock.calls[0]?.[0]).toMatchObject({
+      productName: "EstaCoda",
+      orgName: "Kemet Research",
+      sessionId: "20ea8195",
+      session: {
+        model: "kimi-k2.6 ◐",
+        context: "0 / 262k",
+        workspace: "verified",
+        security: "open",
+        autonomy: "autonomous",
+      },
+    });
+    expect(plain).toContain("EstaCoda");
+    expect(plain).toContain("Kemet Research");
+    expect(plain).toContain("sovereign agentic infrastructure");
+    expect(plain).toContain("session 20ea8195");
+    expect(plain).toContain("╭─ Session");
+    expect(plain).toContain("╭─ Commands");
+    expect(plain).toContain("model      kimi-k2.6");
+    expect(plain).toContain("context    0 / 262k");
+    expect(plain).toContain("workspace  verified");
+    expect(plain).toContain("security   open");
+    expect(plain).toContain("autonomy   autonomous");
+    expect(plain).toContain("/tools");
+    expect(plain).toContain("/skills");
+    expect(plain).toContain("/model");
+    expect(plain).toContain("/status");
+    expect(plain).toContain("/setup");
+    expect(plain).toContain("Tips");
+    expect(plain).not.toContain("╭─ Tips");
+    expect(host.getState().startup).toBeUndefined();
+    expect(host.getState().status.context.usedTokens).toBe(0);
+    expect(host.getState().status.model.label).not.toContain("kimi-k2.6");
+    expect(host.getState().status.model.label).not.toContain("workspace");
+    expect(host.getState().status.model.label).not.toContain("autonomous");
+  });
+
+  it("stacks Operator Console startup session and command boxes on narrow terminals", async () => {
+    const host = createOperatorConsoleRuntimeHost();
+    const { raw } = await captureStartupSession({
+      capabilities: interactiveCaps({ terminalWidth: 48, supportsAnimation: false }),
+      operatorConsoleHost: host,
+    });
+    const plain = stripAnsi(raw.slice(STARTUP_VISIBLE_SCREEN_CLEAR.length));
+    const lines = plain.split("\n").filter((line) => line.length > 0);
+    const sessionIndex = lines.findIndex((line) => line.includes("╭─ Session"));
+    const commandsIndex = lines.findIndex((line) => line.includes("╭─ Commands"));
+
+    expect(sessionIndex).toBeGreaterThanOrEqual(0);
+    expect(commandsIndex).toBeGreaterThan(sessionIndex);
+    expect(lines.every((line) => measureVisibleWidth(line) <= 48)).toBe(true);
+  });
+
+  it("keeps Operator Console startup disabled for unsupported terminal fallback paths", async () => {
+    const host = createOperatorConsoleRuntimeHost();
+    const setStartupDashboard = vi.spyOn(host, "setStartupDashboard");
+    const { raw } = await captureStartupSession({
+      capabilities: interactiveCaps({ isTTY: false, supportsAnimation: false }),
+      operatorConsoleHost: host,
+    });
+
+    expect(setStartupDashboard).not.toHaveBeenCalled();
+    expect(raw).not.toContain(STARTUP_VISIBLE_SCREEN_CLEAR);
+    expect(stripAnsi(raw)).toContain("Type a message.");
+  });
+
+  it("does not route readiness failures through the Operator Console startup surface", async () => {
+    const host = createOperatorConsoleRuntimeHost();
+    const setStartupDashboard = vi.spyOn(host, "setStartupDashboard");
+    const runtime = createMockRuntime({
+      getStartupReadiness: vi.fn(async () => {
+        throw new Error("readiness failed");
+      }),
+    });
+    const { raw } = await captureStartupSession({
+      runtime,
+      capabilities: interactiveCaps({ terminalWidth: 96, supportsAnimation: false }),
+      operatorConsoleHost: host,
+    });
+    const plain = stripAnsi(raw);
+
+    expect(setStartupDashboard).not.toHaveBeenCalled();
+    expect(raw).not.toContain(STARTUP_VISIBLE_SCREEN_CLEAR);
+    expect(plain).toContain("model: mock/mock-model");
+    expect(plain).toContain("readiness: ready");
+    expect(plain).not.toContain("╭─ Session");
   });
 
   it("keeps StandardRenderer startup dashboard output uncentered", () => {

@@ -47,13 +47,14 @@ import {
 import { createSessionRenderer, type SessionRenderer } from "./session-renderer.js";
 import type { ResolvedTokens } from "../contracts/ui-tokens.js";
 import { BottomChromeController, type BottomChromeState } from "./bottom-chrome-controller.js";
-import type { SessionStatusRailViewModel, ShortcutHintRailViewModel, SlashMenuViewModel, StatusViewModel, ToolActivityRailEvent, ViewModel } from "../contracts/view-model.js";
+import type { SessionStatusRailViewModel, ShortcutHintRailViewModel, SlashMenuViewModel, StartupDashboardViewModel, StatusViewModel, ToolActivityRailEvent, ViewModel } from "../contracts/view-model.js";
 import type { TerminalCapabilities } from "../contracts/ui.js";
 import {
   applyActiveWorkRuntimeEvent,
   createActiveWorkRuntimeState,
   createSubmittedSteerTranscriptBlock,
   createOperatorConsoleRuntimeHost,
+  mapStartupDashboardViewModelToOperatorConsoleState,
   renderOperatorConsoleLines,
   routeSteerKey,
   type ActiveWorkRuntimeEvent,
@@ -353,6 +354,73 @@ function formatStartupScreenText(input: {
   return `\x1b[2J\x1b[H${centerVisibleBlock(input.rendered, input.capabilities.terminalWidth)}`;
 }
 
+function renderStartupScreenText(input: {
+  viewModel: ViewModel;
+  rendered: string;
+  capabilities: TerminalCapabilities;
+  operatorConsoleRuntimeHost?: OperatorConsoleRuntimeHost;
+  contextWindow?: number;
+}): string {
+  if (!canRenderStartupThroughOperatorConsole(input)) {
+    return formatStartupScreenText({
+      viewModel: input.viewModel,
+      rendered: input.rendered,
+      capabilities: input.capabilities,
+    });
+  }
+
+  const startupText = renderOperatorConsoleStartupDashboard({
+    viewModel: input.viewModel,
+    contextWindow: input.contextWindow,
+    capabilities: input.capabilities,
+    operatorConsoleRuntimeHost: input.operatorConsoleRuntimeHost,
+  });
+  return `\x1b[2J\x1b[H${startupText}`;
+}
+
+function canRenderStartupThroughOperatorConsole(input: {
+  viewModel: ViewModel;
+  capabilities: TerminalCapabilities;
+  operatorConsoleRuntimeHost?: OperatorConsoleRuntimeHost;
+}): input is {
+  viewModel: StartupDashboardViewModel;
+  capabilities: TerminalCapabilities;
+  operatorConsoleRuntimeHost: OperatorConsoleRuntimeHost;
+} {
+  return input.operatorConsoleRuntimeHost !== undefined &&
+    input.viewModel.kind === "startupDashboard" &&
+    input.capabilities.isTTY &&
+    !input.capabilities.isCI &&
+    !input.capabilities.isDumb &&
+    input.capabilities.supportsColor;
+}
+
+function renderOperatorConsoleStartupDashboard(input: {
+  viewModel: StartupDashboardViewModel;
+  contextWindow?: number;
+  capabilities: TerminalCapabilities;
+  operatorConsoleRuntimeHost: OperatorConsoleRuntimeHost;
+}): string {
+  const host = input.operatorConsoleRuntimeHost;
+  host.clear();
+  host.setTerminal({
+    width: input.capabilities.terminalWidth,
+    height: 40,
+    isTty: input.capabilities.isTTY,
+  });
+  host.setStartupDashboard(mapStartupDashboardViewModelToOperatorConsoleState({
+    viewModel: input.viewModel,
+    contextWindow: input.contextWindow,
+  }));
+  const frame = host.render();
+  const startupText = renderOperatorConsoleLines(frame.state, frame.layout)
+    .filter((line) => line.region === "startupDashboard")
+    .map((line) => line.text)
+    .join("\n");
+  host.clear();
+  return startupText;
+}
+
 export async function runSessionLoop(options: SessionLoopOptions): Promise<void> {
   const output = options.output ?? defaultOutput;
   const renderer = createSessionRenderer({ output, locale: options.locale, capabilities: options.capabilities });
@@ -448,10 +516,12 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
     };
     const startupVm = await buildSessionStartupViewModel(runtime);
     const renderedStartupText = renderer.render(startupVm);
-    const startupText = formatStartupScreenText({
+    const startupText = renderStartupScreenText({
       viewModel: startupVm,
       rendered: renderedStartupText,
       capabilities: renderer.capabilities,
+      operatorConsoleRuntimeHost,
+      contextWindow: modelContextWindow(runtime),
     });
     output.write(`${startupText}\n\n`);
     if (!bottomChrome.enabled) {
