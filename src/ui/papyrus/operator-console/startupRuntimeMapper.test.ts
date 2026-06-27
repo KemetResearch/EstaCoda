@@ -23,6 +23,7 @@ describe("Operator Console startup runtime mapper", () => {
         security: "open",
         autonomy: "autonomous",
       },
+      updateStatus: "Unknown.",
     });
     expect(state.commands.map((command) => command.command)).toEqual([
       "/tools",
@@ -46,6 +47,17 @@ describe("Operator Console startup runtime mapper", () => {
     });
 
     expect(state.commands).toEqual([{ command: "/custom", description: "preserved description" }]);
+  });
+
+  it("maps known version status into dashboard update copy", () => {
+    const state = mapStartupDashboardViewModelToOperatorConsoleState({
+      viewModel: {
+        ...startupViewModel(),
+        versionStatus: "up-to-date",
+      },
+    });
+
+    expect(state.updateStatus).toBe("Up to date.");
   });
 
   it("preserves Arabic and technical tokens without translating them", () => {

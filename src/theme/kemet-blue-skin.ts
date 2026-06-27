@@ -45,7 +45,8 @@ export const kemetBlueSkin: ThemeAwareSkin = {
   },
   dark: {
     palette: {
-      brand: "#4C8AE0",
+      brand: "#4389D7",
+      accent: "#4C8AE0",
       action: "#40E0D0",
       caution: "#FFB454",
     },
@@ -58,7 +59,8 @@ export const kemetBlueSkin: ThemeAwareSkin = {
   },
   light: {
     palette: {
-      brand: "#0057D9",
+      brand: "#4389D7",
+      accent: "#0057D9",
       action: "#008C95",
       caution: "#B45309",
     },

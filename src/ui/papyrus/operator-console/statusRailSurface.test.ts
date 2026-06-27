@@ -49,7 +49,7 @@ describe("Papyrus operator console status rail surface", () => {
 
   it("uses deterministic empty model fallback", () => {
     expect(renderStatusRailSurface(createDefaultStatusRailState(), { width: 80 })).toBe(
-      "model pending ○ │ ctx [▱▱▱▱▱▱▱▱▱▱] 0 0% │ ◷ 00:00"
+      "model pending ● │ ctx [▱▱▱▱▱▱▱▱▱▱] 0 0% │ ◷ 00:00"
     );
   });
 
@@ -79,10 +79,10 @@ describe("Papyrus operator console status rail surface", () => {
 
     expect(renderStatusRailSurface(status({
       model: { label: "kimi-k2.7-code", state: "idle", route: "primary" },
-    }), { width: 80, style })).toContain(`${ansiFg(tokens.contract.severity.ok)}○\x1b[0m`);
+    }), { width: 80, style })).toContain(`${ansiFg(tokens.contract.severity.ok)}●\x1b[0m`);
     expect(renderStatusRailSurface(status({
       model: { label: "kimi-k2.7-code", state: "idle", route: "fallback" },
-    }), { width: 80, style })).toContain(`${ansiFg(tokens.contract.palette.caution)}○\x1b[0m`);
+    }), { width: 80, style })).toContain(`${ansiFg(tokens.contract.palette.caution)}●\x1b[0m`);
   });
 });
 

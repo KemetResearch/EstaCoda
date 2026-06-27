@@ -90,7 +90,7 @@ function rawModelStateSymbol(state: StatusRailState["model"]["state"]): string {
     case "degraded":
       return "◐";
     case "idle":
-      return "○";
+      return "●";
   }
 }
 

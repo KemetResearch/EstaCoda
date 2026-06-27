@@ -24,6 +24,7 @@ export function mapStartupDashboardViewModelToOperatorConsoleState(
       security: viewModel.securityMode,
       autonomy: viewModel.skillAutonomy ?? "manual",
     },
+    updateStatus: versionStatusText(viewModel.versionStatus),
     commands: startupCommands(viewModel),
     tips: [
       "Paste large context as attachments.",
@@ -49,6 +50,18 @@ function startupCommands(
     { command: "/status", description: "runtime state" },
     { command: "/compact", description: "compact session context" },
   ];
+}
+
+function versionStatusText(status: StartupDashboardViewModel["versionStatus"]): string {
+  switch (status) {
+    case "up-to-date":
+      return "Up to date.";
+    case "update-available":
+      return "Update available.";
+    case "unknown":
+    case undefined:
+      return "Unknown.";
+  }
 }
 
 function readinessSymbol(readiness: StartupDashboardViewModel["providerReadiness"]): string {

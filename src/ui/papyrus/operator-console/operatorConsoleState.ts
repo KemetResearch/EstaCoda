@@ -78,6 +78,7 @@ export type StartupDashboardState = {
     readonly security: string;
     readonly autonomy: string;
   };
+  readonly updateStatus?: string;
   readonly commands: readonly StartupCommandState[];
   readonly tips: readonly string[];
 };

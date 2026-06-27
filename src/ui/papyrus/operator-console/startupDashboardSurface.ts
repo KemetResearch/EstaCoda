@@ -25,6 +25,7 @@ export function createDefaultStartupDashboardState(): StartupDashboardState {
       security: "adaptive",
       autonomy: "manual",
     },
+    updateStatus: "Unknown.",
     commands: [
       { command: "/tools", description: "inspect tools" },
       { command: "/skills", description: "loaded skills" },
@@ -44,7 +45,8 @@ export function getStartupDashboardSurfaceDesiredHeight(
   const panelRows = normalizedWidth >= WIDE_LAYOUT_MIN_WIDTH
     ? Math.max(7, Math.max(sessionRows(state, undefined).length, commandRows(state.commands).length) + 2)
     : sessionRows(state, undefined).length + commandRows(state.commands).length + 6;
-  return 4 + panelRows + Math.min(Math.max(1, state.tips.length), normalizedWidth >= WIDE_LAYOUT_MIN_WIDTH ? 3 : 2) + 3;
+  const infoRows = normalizedWidth >= WIDE_LAYOUT_MIN_WIDTH ? 3 : 4;
+  return 1 + panelRows + 1 + infoRows + 2;
 }
 
 export function renderStartupDashboardSurface(
@@ -71,13 +73,11 @@ function renderWideStartupDashboard(
   const gapWidth = 2;
   const leftWidth = Math.max(3, Math.floor((bodyWidth - gapWidth) / 2));
   const rightWidth = Math.max(3, bodyWidth - leftWidth - gapWidth);
-  const session = renderInnerBox("Runtime", sessionRows(state, style), leftWidth, style);
+  const session = renderInnerBox("Session", sessionRows(state, style), leftWidth, style);
   const commands = renderInnerBox("Commands", commandRows(state.commands), rightWidth, style);
   const boxHeight = Math.max(session.length, commands.length);
   const output = [
-    centerText(styleColor(style, styleBold(style, state.productName), style?.tokens.contract.palette.brand ?? ""), width),
-    centerText(`☥ ${state.orgName} ☥`, width),
-    renderTopBorder(`${state.version}  𓂀  session ${state.sessionId}`, width),
+    renderTopBorder(`${state.productName}  𓂀  ${state.version}`, width, style),
   ];
 
   for (let index = 0; index < boxHeight; index += 1) {
@@ -89,8 +89,10 @@ function renderWideStartupDashboard(
   }
 
   output.push(renderOuterRow("", bodyWidth, width));
-  output.push(renderOuterRow("Tips", bodyWidth, width));
-  for (const tip of state.tips.slice(0, 2)) output.push(renderOuterRow(tip, bodyWidth, width));
+  for (const row of renderInfoColumns(state, leftWidth, rightWidth, gapWidth, bodyWidth, width, style)) {
+    output.push(row);
+  }
+  output.push(renderOuterRow(styleSectionLabel(`☥ ${state.orgName} ☥`, style), bodyWidth, width));
   output.push(renderBottomBorder(width));
   return output;
 }
@@ -102,19 +104,20 @@ function renderNarrowStartupDashboard(
 ): readonly string[] {
   const bodyWidth = Math.max(0, width - 4);
   const output = [
-    centerText(styleColor(style, styleBold(style, state.productName), style?.tokens.contract.palette.brand ?? ""), width),
-    centerText(`☥ ${state.orgName} ☥`, width),
-    renderTopBorder(`${state.version}  𓂀  session ${state.sessionId}`, width),
+    renderTopBorder(`${state.productName}  𓂀  ${state.version}`, width, style),
   ];
-  for (const row of renderInnerBox("Runtime", sessionRows(state, style).slice(0, 4), bodyWidth, style)) {
+  for (const row of renderInnerBox("Session", sessionRows(state, style).slice(0, 4), bodyWidth, style)) {
     output.push(renderOuterRow(row, bodyWidth, width));
   }
   for (const row of renderInnerBox("Commands", commandRows(state.commands).slice(0, 4), bodyWidth, style)) {
     output.push(renderOuterRow(row, bodyWidth, width));
   }
   output.push(renderOuterRow("", bodyWidth, width));
-  output.push(renderOuterRow("Tips", bodyWidth, width));
+  output.push(renderOuterRow(styleSectionLabel("Update", style), bodyWidth, width));
+  output.push(renderOuterRow(state.updateStatus ?? "Unknown.", bodyWidth, width));
+  output.push(renderOuterRow(styleSectionLabel("Tips", style), bodyWidth, width));
   if (state.tips[0] !== undefined) output.push(renderOuterRow(state.tips[0], bodyWidth, width));
+  output.push(renderOuterRow(styleSectionLabel(`☥ ${state.orgName} ☥`, style), bodyWidth, width));
   output.push(renderBottomBorder(width));
   return output;
 }
@@ -125,10 +128,10 @@ function sessionRows(
 ): readonly string[] {
   return [
     formatKeyValue("model", formatModelValue(state.session.model, state.session.modelRoute, style)),
-    formatKeyValue("context", state.session.context),
+    formatKeyValue("session", state.sessionId),
     formatKeyValue("workspace", state.session.workspace),
-    formatKeyValue("approval", state.session.security),
-    formatKeyValue("autonomy", state.session.autonomy),
+    formatKeyValue("security", state.session.security),
+    formatKeyValue("evolution", state.session.autonomy),
   ];
 }
 
@@ -156,9 +159,39 @@ function renderInnerBox(
   ];
 }
 
-function renderTopBorder(labelText: string, width: number): string {
+function renderInfoColumns(
+  state: StartupDashboardState,
+  leftWidth: number,
+  rightWidth: number,
+  gapWidth: number,
+  bodyWidth: number,
+  width: number,
+  style: OperatorConsoleStyle | undefined
+): readonly string[] {
+  const leftRows = [
+    styleSectionLabel("Update", style),
+    state.updateStatus ?? "Unknown.",
+  ];
+  const rightRows = [
+    styleSectionLabel("Tips", style),
+    ...state.tips.slice(0, 2),
+  ];
+  const rowCount = Math.max(leftRows.length, rightRows.length);
+  return Array.from({ length: rowCount }, (_, index) => renderOuterRow(
+    `${padVisibleEnd(leftRows[index] ?? "", leftWidth)}${" ".repeat(gapWidth)}${padVisibleEnd(rightRows[index] ?? "", rightWidth)}`,
+    bodyWidth,
+    width
+  ));
+}
+
+function renderTopBorder(
+  labelText: string,
+  width: number,
+  style: OperatorConsoleStyle | undefined
+): string {
   if (width <= 1) return "╭".slice(0, width);
-  const label = ` ${labelText} `;
+  const styledLabel = styleColor(style, styleBold(style, labelText), style?.tokens.contract.palette.brand ?? "");
+  const label = ` ${styledLabel} `;
   const remaining = Math.max(0, width - 2 - stringWidth(label));
   const left = Math.floor(remaining / 2);
   const right = remaining - left;
@@ -172,10 +205,14 @@ function renderBottomBorder(width: number): string {
 
 function renderTitledTopBorder(title: string, width: number, style: OperatorConsoleStyle | undefined): string {
   if (width <= 1) return "╭".slice(0, width);
-  const styledTitle = styleColor(style, title, style?.tokens.contract.text.secondary ?? "");
+  const styledTitle = styleSectionLabel(title, style);
   const label = `─ ${styledTitle} `;
   const remaining = Math.max(0, width - 2 - stringWidth(label));
   return truncateVisibleCells(`╭${label}${"─".repeat(remaining)}╮`, width);
+}
+
+function styleSectionLabel(title: string, style: OperatorConsoleStyle | undefined): string {
+  return styleColor(style, title, style?.tokens.contract.palette.accent ?? "");
 }
 
 function renderInnerBottomBorder(width: number): string {
@@ -193,13 +230,6 @@ function renderOuterRow(row: string, contentWidth: number, width: number): strin
   if (width <= 0) return "";
   const content = padVisibleEnd(truncateVisibleCells(row, contentWidth), contentWidth);
   return truncateVisibleCells(`  ${content}`, width);
-}
-
-function centerText(text: string, width: number): string {
-  if (width <= 0) return "";
-  const truncated = truncateVisibleCells(text, width);
-  const pad = Math.max(0, Math.floor((width - stringWidth(truncated)) / 2));
-  return truncateVisibleCells(`${" ".repeat(pad)}${truncated}`, width);
 }
 
 function formatModelValue(

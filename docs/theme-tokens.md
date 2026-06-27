@@ -33,13 +33,14 @@ ResolvedTokens
 
 | Token | Value | Usage |
 |-------|-------|-------|
-| `palette.brand` | `#5AACFF` | Identity, live state, agent name |
-| `palette.action` | `#40E0D0` | Selection, action accent (turquoise) |
-| `palette.caution` | `#FFB454` | Rare caution/approval accent (amber) |
+| `palette.brand` | `#B0B0B0` | Neutral identity fallback |
+| `palette.accent` | `#B0B0B0` | Neutral section/accent label fallback |
+| `palette.action` | `#B0B0B0` | Neutral selection/action fallback |
+| `palette.caution` | `#B0B0B0` | Neutral caution fallback |
 | `severity.ok` | `#4CAF50` | Success indicators |
 | `severity.error` | `#EF5350` | Errors, failures |
 | `severity.warn` | `#FFA726` | Warnings |
-| `severity.info` | `#5AACFF` | Info banners |
+| `severity.info` | `#888888` | Info banners |
 | `surface.bg` | `#1A1A1A` | Page background |
 | `surface.bgElevated` | `#252525` | Elevated panels |
 | `surface.border` | `#ededed` | Strong borders |
@@ -53,13 +54,14 @@ ResolvedTokens
 
 | Token | Value | Usage |
 |-------|-------|-------|
-| `palette.brand` | `#0057D9` | Identity, live state |
-| `palette.action` | `#008C95` | Selection accent |
-| `palette.caution` | `#B45309` | Caution accent |
+| `palette.brand` | `#666666` | Neutral identity fallback |
+| `palette.accent` | `#666666` | Neutral section/accent label fallback |
+| `palette.action` | `#666666` | Neutral selection/action fallback |
+| `palette.caution` | `#666666` | Neutral caution fallback |
 | `severity.ok` | `#2E7D32` | Success |
 | `severity.error` | `#C62828` | Errors |
 | `severity.warn` | `#EF6C00` | Warnings |
-| `severity.info` | `#0057D9` | Info |
+| `severity.info` | `#757575` | Info |
 | `surface.bg` | `#FFFFFF` | Page background |
 | `surface.bgElevated` | `#F5F5F5` | Elevated panels |
 | `surface.border` | `#E0E0E0` | Strong borders |
@@ -114,9 +116,12 @@ The KemetBlue skin overrides glyphs, branding, tool icons, and selected dark-mod
 
 ### 3.4 Dark Color Overrides
 
-| Token | KemetBlue Dark Value | Usage |
-|-------|----------------------|-------|
-| `palette.brand` | `#236df7` | Assistant title and brand identity |
+| Token | KemetBlue Dark Value | KemetBlue Light Value | Usage |
+|-------|----------------------|-----------------------|-------|
+| `palette.brand` | `#4389D7` | `#4389D7` | Assistant title and brand identity |
+| `palette.accent` | `#4C8AE0` | `#0057D9` | Section labels and dashboard accents |
+| `palette.action` | `#40E0D0` | `#008C95` | Selection and action accent |
+| `palette.caution` | `#FFB454` | `#B45309` | Rare caution/approval accent |
 
 ### 3.5 Assistant Response Progress
 

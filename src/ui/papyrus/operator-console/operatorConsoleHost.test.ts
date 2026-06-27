@@ -205,7 +205,7 @@ describe("Papyrus operator console raw prompt host", () => {
     });
 
     expect(frame.state.style).toBe(style);
-    expect(frame.rows.join("\n")).toContain(`${ansiFg(tokens.contract.palette.caution)}○\x1b[0m`);
+    expect(frame.rows.join("\n")).toContain(`${ansiFg(tokens.contract.palette.caution)}●\x1b[0m`);
   });
 });
 

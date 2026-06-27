@@ -1002,19 +1002,20 @@ describe("runSessionLoop — user prompt rail behavior", () => {
     expect(plain).toContain("EstaCoda");
     expect(plain).toContain("Kemet Research");
     expect(plain).not.toContain("sovereign agentic infrastructure");
-    expect(plain).toContain("session 20ea8195");
-    expect(plain).toContain("╭─ Runtime");
+    expect(plain).toContain("EstaCoda  𓂀");
+    expect(plain).toContain("session    20ea8195");
+    expect(plain).toContain("╭─ Session");
     expect(plain).toContain("╭─ Commands");
     expect(plain).toContain("model      kimi-k2.6");
-    expect(plain).toContain("context    0 / 262k");
     expect(plain).toContain("workspace  /tmp");
-    expect(plain).toContain("approval   open");
-    expect(plain).toContain("autonomy   autonomous");
+    expect(plain).toContain("security   open");
+    expect(plain).toContain("evolution  autonomous");
     expect(plain).toContain("/tools");
     expect(plain).toContain("/skills");
     expect(plain).toContain("/model");
     expect(plain).toContain("/status");
     expect(plain).toContain("/compact");
+    expect(plain).toContain("Update");
     expect(plain).toContain("Tips");
     expect(plain).not.toContain("╭─ Tips");
     expect(host.getState().startup).toBeUndefined();
@@ -1032,7 +1033,7 @@ describe("runSessionLoop — user prompt rail behavior", () => {
     });
     const plain = stripAnsi(raw.slice(STARTUP_VISIBLE_SCREEN_CLEAR.length));
     const lines = plain.split("\n").filter((line) => line.length > 0);
-    const sessionIndex = lines.findIndex((line) => line.includes("╭─ Runtime"));
+    const sessionIndex = lines.findIndex((line) => line.includes("╭─ Session"));
     const commandsIndex = lines.findIndex((line) => line.includes("╭─ Commands"));
 
     expect(sessionIndex).toBeGreaterThanOrEqual(0);

@@ -9,43 +9,43 @@ import {
 } from "./index.js";
 
 describe("Papyrus operator console startup dashboard surface", () => {
-  it("renders wide startup identity, startup seal, session, commands, and plain tips", () => {
+  it("renders wide startup identity, session, commands, update, tips, and footer seal", () => {
     const output = renderStartupDashboardSurface(startupState(), { width: 80 });
     const text = output.join("\n");
 
-    expect(output[0]).toContain("EstaCoda");
-    expect(output[1]).toContain("Kemet Research");
-    expect(output[2]).toContain("v0.1.0  𓂀  session 20ea8195");
+    expect(output[0]).toContain("EstaCoda  𓂀  v0.1.0");
     expect(text).not.toContain("sovereign agentic infrastructure");
     expect(text).toContain("v0.1.0");
-    expect(text).toContain("session 20ea8195");
-    expect(text).toContain("╭─ Runtime");
+    expect(text).toContain("session    20ea8195");
+    expect(text).toContain("╭─ Session");
     expect(text).toContain("╭─ Commands");
     expect(text).toContain("model      kimi-k2.6 ◐");
-    expect(text).toContain("context    0 / 262k");
     expect(text).toContain("workspace  verified");
-    expect(text).toContain("approval   open");
-    expect(text).toContain("autonomy   autonomous");
+    expect(text).toContain("security   open");
+    expect(text).toContain("evolution  autonomous");
     expect(text).toContain("/tools");
     expect(text).toContain("/skills");
     expect(text).toContain("/model");
     expect(text).toContain("/status");
     expect(text).toContain("/compact");
+    expect(text).toContain("Update");
+    expect(text).toContain("Up to date.");
     expect(text).toContain("Tips");
     expect(text).toContain("Paste large context as attachments.");
     expect(text).not.toContain("╭─ Tips");
+    expect(output.at(-2)).toContain("☥ Kemet Research ☥");
     expect(output.every((line) => stringWidth(line) <= 80)).toBe(true);
   });
 
-  it("stacks Runtime and Commands boxes in narrow layout", () => {
+  it("stacks Session and Commands boxes in narrow layout", () => {
     const output = renderStartupDashboardSurface(startupState(), { width: 46 });
     const text = output.join("\n");
-    const sessionIndex = output.findIndex((line) => line.includes("Runtime"));
+    const sessionIndex = output.findIndex((line) => line.includes("Session"));
     const commandsIndex = output.findIndex((line) => line.includes("Commands"));
 
     expect(text).toContain("EstaCoda");
     expect(text).toContain("Kemet Research");
-    expect(text).toContain("v0.1.0  𓂀  session 20ea8195");
+    expect(text).toContain("EstaCoda  𓂀  v0.1.0");
     expect(sessionIndex).toBeGreaterThanOrEqual(0);
     expect(commandsIndex).toBeGreaterThan(sessionIndex);
     expect(output.every((line) => stringWidth(line) <= 46)).toBe(true);
@@ -64,6 +64,7 @@ describe("Papyrus operator console startup dashboard surface", () => {
     const text = output.join("\n");
 
     expect(text).not.toContain("extremely-long-route-name");
+    expect(text).not.toContain("extremely-long-suffix");
     expect(output.every((line) => stringWidth(line) <= 44)).toBe(true);
   });
 
@@ -103,8 +104,11 @@ describe("Papyrus operator console startup dashboard surface", () => {
     }, { width: 80, style }).join("\n");
 
     expect(output).toContain(ansiFg(tokens.contract.palette.brand));
-    expect(output).toContain(`${ansiFg(tokens.contract.text.secondary)}Runtime\x1b[0m`);
-    expect(output).toContain(`${ansiFg(tokens.contract.text.secondary)}Commands\x1b[0m`);
+    expect(output).toContain(`${ansiFg(tokens.contract.palette.accent)}Session\x1b[0m`);
+    expect(output).toContain(`${ansiFg(tokens.contract.palette.accent)}Commands\x1b[0m`);
+    expect(output).toContain(`${ansiFg(tokens.contract.palette.accent)}Update\x1b[0m`);
+    expect(output).toContain(`${ansiFg(tokens.contract.palette.accent)}Tips\x1b[0m`);
+    expect(output).toContain(`${ansiFg(tokens.contract.palette.accent)}☥ Kemet Research ☥\x1b[0m`);
     expect(output).toContain(`${ansiFg(tokens.contract.palette.caution)}◐\x1b[0m`);
   });
 });
@@ -116,6 +120,7 @@ function startupState(): StartupDashboardState {
     tagline: "sovereign agentic infrastructure",
     version: "v0.1.0",
     sessionId: "20ea8195",
+    updateStatus: "Up to date.",
     session: {
       model: "kimi-k2.6 ◐",
       context: "0 / 262k",
