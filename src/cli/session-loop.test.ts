@@ -2469,6 +2469,16 @@ describe("runSessionLoop — active turn spinner", () => {
     expect(source).not.toContain("createActiveTurnCommandController");
   });
 
+  it("does not contain retired fixed tool rail or spinner ticker plumbing", async () => {
+    const source = await readFile(new URL("./session-loop.ts", import.meta.url), "utf8");
+
+    expect(source).not.toMatch(/ToolActivityAnimator|ToolActivityRailAnimator/u);
+    expect(source).not.toMatch(/TOOL_SLOT_COUNT|EMPTY_TOOL_SLOT|fixedToolActivitySlots/u);
+    expect(source).not.toMatch(/bottomChrome.*Ticker|bottomChrome.*ToolActivity/u);
+    expect(source).not.toMatch(/completedBottomChromeToolRows|completedToolRowsFlushed/u);
+    expect(source).not.toMatch(/flushCompletedToolRowsNoRestore|runtimeEventBottomChrome/u);
+  });
+
   it("keeps active-turn input detached until Operator Console steering is enabled", async () => {
     const input = makeTtyInput();
     let resolvePrompt: ((value: string) => void) | undefined;

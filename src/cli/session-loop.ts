@@ -153,143 +153,6 @@ type SubmittedCliInput = {
   clearSubmittedPrompt: boolean;
 };
 
-type ToolActivityRailAnimator = {
-  start(event: ToolActivityRailEvent): void;
-  complete(event: ToolActivityRailEvent): void;
-  cancel(): void;
-  dispose(): void;
-};
-
-export class ToolActivityAnimator implements ToolActivityRailAnimator {
-  readonly #output: NodeJS.WritableStream;
-  readonly #renderer: { render(viewModel: import("../contracts/view-model.js").ViewModel): string };
-  readonly #streamState: { lastWriteEndedWithNewline: boolean };
-  readonly #enabled: boolean;
-  readonly #tickMs = 200;
-  #timer?: ReturnType<typeof setInterval>;
-  #rows: Array<{ event: ToolActivityRailEvent; active: boolean }> = [];
-  #renderedRowCount = 0;
-
-  constructor(options: {
-    output: NodeJS.WritableStream;
-    renderer: { render(viewModel: import("../contracts/view-model.js").ViewModel): string };
-    streamState: { lastWriteEndedWithNewline: boolean };
-    enabled: boolean;
-  }) {
-    this.#output = options.output;
-    this.#renderer = options.renderer;
-    this.#streamState = options.streamState;
-    this.#enabled = options.enabled;
-  }
-
-  start(event: ToolActivityRailEvent): void {
-    if (!this.#enabled) {
-      this.#writeDurableRow(event);
-      return;
-    }
-    this.#upsertRow(event, true);
-    this.#redrawRows();
-    if (this.#timer === undefined) {
-      this.#timer = setInterval(() => this.#tick(), this.#tickMs);
-    }
-  }
-
-  complete(event: ToolActivityRailEvent): void {
-    if (!this.#enabled || this.#rows.length === 0) {
-      this.#writeDurableRow(event);
-      return;
-    }
-    this.#upsertRow(event, false);
-    this.#redrawRows();
-    if (!this.#hasActiveRows()) {
-      this.#stopTimer();
-      this.#rows = [];
-      this.#renderedRowCount = 0;
-    }
-  }
-
-  cancel(): void {
-    this.#stopTimer();
-    if (this.#enabled && this.#renderedRowCount > 0) {
-      this.#clearRows();
-    }
-    this.#rows = [];
-    this.#renderedRowCount = 0;
-  }
-
-  dispose(): void {
-    this.#stopTimer();
-    this.#rows = [];
-    this.#renderedRowCount = 0;
-  }
-
-  #tick(): void {
-    if (!this.#hasActiveRows() || this.#renderedRowCount === 0) return;
-    this.#redrawRows();
-  }
-
-  #upsertRow(event: ToolActivityRailEvent, active: boolean): void {
-    const index = this.#findRowIndex(event);
-    const row = { event, active };
-    if (index === -1) {
-      this.#rows.push(row);
-    } else {
-      this.#rows[index] = row;
-    }
-  }
-
-  #findRowIndex(event: ToolActivityRailEvent): number {
-    const key = toolActivityRowKey(event);
-    const exactIndex = this.#rows.findIndex((row) => toolActivityRowKey(row.event) === key);
-    if (exactIndex !== -1 || event.target !== undefined || event.activityId !== undefined) {
-      return exactIndex;
-    }
-    return this.#rows.findIndex((row) => row.active && row.event.tool === event.tool);
-  }
-
-  #hasActiveRows(): boolean {
-    return this.#rows.some((row) => row.active);
-  }
-
-  #redrawRows(): void {
-    // The animated terminal path owns a contiguous tool block at the bottom of the transcript;
-    // unrelated output must clear/cancel it before writing.
-    this.#clearRows();
-    const vm = buildToolActivityRailViewModel({ events: this.#rows.map((row) => row.event) });
-    this.#output.write(`${this.#renderer.render(vm)}\n`);
-    this.#renderedRowCount = this.#rows.length;
-    this.#streamState.lastWriteEndedWithNewline = true;
-  }
-
-  #clearRows(): void {
-    if (this.#renderedRowCount === 0) {
-      return;
-    }
-    if (this.#renderedRowCount === 1) {
-      this.#output.write(`\x1b[1A\x1b[2K\r`);
-      return;
-    }
-    this.#output.write(clearTranscriptBlock(this.#renderedRowCount));
-  }
-
-  #writeDurableRow(event: ToolActivityRailEvent): void {
-    const vm = buildToolActivityRailViewModel({ events: [event] });
-    this.#output.write(`${this.#renderer.render(vm)}\n`);
-    this.#streamState.lastWriteEndedWithNewline = true;
-  }
-
-  #stopTimer(): void {
-    if (this.#timer !== undefined) {
-      clearInterval(this.#timer);
-      this.#timer = undefined;
-    }
-  }
-}
-
-function toolActivityRowKey(event: ToolActivityRailEvent): string {
-  return event.activityId ?? `${event.tool}\0${event.target ?? ""}`;
-}
-
 async function buildSessionStartupViewModel(runtime: Runtime): Promise<ViewModel> {
   const legacyStartup = runtime.getStartup();
 
@@ -417,7 +280,6 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
     tools: runtime.tools()
   });
   let activeTurn: AbortController | undefined;
-  let currentAnimator: ToolActivityAnimator | undefined;
   let clearActiveTurnChrome: () => void = () => undefined;
   const operatorConsoleEnabled = options.operatorConsole?.enabled === true
     && renderer.capabilities.isTTY
@@ -442,7 +304,6 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
   });
   const close = options.close ?? (() => prompt.close?.());
   const onSigint = () => {
-    currentAnimator?.cancel();
     if (activeTurn !== undefined) {
       clearActiveTurnChrome();
       activeTurn.abort("SIGINT");
@@ -641,19 +502,7 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
         let operatorConsoleSteerSequence = 0;
         let disposeOperatorConsoleSteerInput: (() => void) | undefined;
         let lastOperatorConsoleTransientFrame = "";
-        let currentPhase: string | undefined;
         let turnWasCancelled = false;
-
-        currentAnimator = new ToolActivityAnimator({
-          output,
-          renderer,
-          streamState,
-          enabled: operatorConsoleRuntimeHost === undefined
-            && renderer.capabilities.isTTY
-            && renderer.capabilities.supportsAnimation
-            && !renderer.capabilities.isCI
-            && !renderer.capabilities.isDumb,
-        });
 
         function operatorConsoleSteerVisible(state: SteerState | undefined): boolean {
           return state?.mode === "drafting" || state?.mode === "queued";
@@ -877,7 +726,6 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
         }
 
         const renderSpinner = (phase: string) => {
-          currentPhase = phase;
           if (turnOutput.spinnerPhase === phase) {
             return;
           }
@@ -941,7 +789,7 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
 	                refreshOperatorConsoleTransientSurface();
 	                newPhase = "tool";
 	              } else {
-	                newPhase = renderRuntimeEvent(output, event, activityBuilder, renderer, streamState, undefined, turnOutput, currentAnimator);
+	                newPhase = renderRuntimeEvent(output, event, activityBuilder, renderer, streamState, undefined, turnOutput);
 	              }
               if (newPhase !== undefined) {
                 renderSpinner(newPhase);
@@ -957,10 +805,7 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
 	            operatorConsoleActiveWorkState = createActiveWorkRuntimeState();
 	            operatorConsoleRuntimeHost?.setActiveWork(operatorConsoleActiveWorkState);
 	            operatorConsoleRuntimeHost?.setSteer(undefined);
-	            currentPhase = undefined;
 	            clearSpinner();
-	            currentAnimator?.dispose();
-	            currentAnimator = undefined;
 	            clearActiveTurnChrome = () => undefined;
 	          });
         const response = await responsePromise;
@@ -2555,8 +2400,7 @@ export function renderRuntimeEvent(
   renderer: { render(viewModel: import("../contracts/view-model.js").ViewModel): string },
   streamState: { lastWriteEndedWithNewline: boolean },
   _legacyChrome: unknown,
-  turnOutput: { spinnerPhase?: string; hasOutput: boolean; lastOutputWasSpinner: boolean },
-  animator?: ToolActivityRailAnimator
+  turnOutput: { spinnerPhase?: string; hasOutput: boolean; lastOutputWasSpinner: boolean }
 ): string | undefined {
   function safeWrite(text: string): void {
     const endsWithNewline = text.endsWith("\n");
@@ -2593,23 +2437,15 @@ export function renderRuntimeEvent(
     case "tool-start": {
       clearActiveSpinnerLine();
       const railEvent = activityBuilder.buildToolActivityRailEvent(event);
-      if (animator !== undefined) {
-        animator.start(railEvent);
-      } else {
-        const railVm = buildToolActivityRailViewModel({ events: [railEvent] });
-        safeWrite(`${renderer.render(railVm)}\n`);
-      }
+      const railVm = buildToolActivityRailViewModel({ events: [railEvent] });
+      safeWrite(`${renderer.render(railVm)}\n`);
       return "tool";
     }
     case "tool-result": {
       clearActiveSpinnerLine();
       const railEvent = activityBuilder.buildToolActivityRailEvent(event);
-      if (animator !== undefined) {
-        animator.complete(railEvent);
-      } else {
-        const railVm = buildToolActivityRailViewModel({ events: [railEvent] });
-        safeWrite(`${renderer.render(railVm)}\n`);
-      }
+      const railVm = buildToolActivityRailViewModel({ events: [railEvent] });
+      safeWrite(`${renderer.render(railVm)}\n`);
       if (event.fileChangePreview !== undefined) {
         safeWrite(`${renderer.render(event.fileChangePreview)}\n`);
       }
@@ -2630,12 +2466,8 @@ export function renderRuntimeEvent(
     case "provider-tool-call":
       return "tool";
     case "provider-result":
-      if (!event.ok && !event.willFallback) {
-        animator?.cancel();
-      }
       return event.ok || !event.willFallback ? "finalizing" : "provider";
     case "provider-budget-exhausted":
-      animator?.cancel();
       clearActiveSpinnerLine();
       safeWrite(`\nprovider budget: ${event.reason}\n`);
       return undefined;
@@ -2644,12 +2476,10 @@ export function renderRuntimeEvent(
     case "session-compacted":
       return undefined;
     case "agent-cancelled":
-      animator?.cancel();
       clearActiveSpinnerLine();
       safeWrite(`\ncancelled: ${event.reason}\n`);
       return undefined;
     case "agent-final":
-      animator?.dispose();
       return undefined;
   }
 }
@@ -2661,11 +2491,6 @@ function truncateSingleLine(value: string, maxLength: number): string {
   }
 
   return `${singleLine.slice(0, Math.max(0, maxLength - 1))}…`;
-}
-
-function clearTranscriptBlock(lineCount: number): string {
-  const count = Math.max(1, Math.ceil(lineCount));
-  return `\x1b[${count}A\x1b[0J`;
 }
 
 function contextUsagePriority(source: ContextUsageSource): number {

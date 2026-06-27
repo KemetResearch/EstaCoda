@@ -540,7 +540,6 @@ This documentation-only commit does not:
 After the Operator Console owns more of the remaining interaction lanes, later
 implementation PRs may delete or heavily reduce:
 
-- `ToolActivityAnimator` inside `src/cli/session-loop.ts`
 - manual active-turn transient line arrays
 - terminal row clearing helpers that only exist for live chrome patches
 - terminal renderer portions of `src/cli/interactive-select.ts` after setup
