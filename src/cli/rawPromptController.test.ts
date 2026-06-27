@@ -1070,12 +1070,48 @@ describe("raw prompt controller", () => {
     read.input.send("\r");
     await flushPromises();
 
-    expect(read.output.writes.join("")).toContain("> /help - Show help");
+    expect(read.output.writes.join("")).toContain("Command palette");
+    expect(read.output.writes.join("")).toContain("❯ /help  Show help");
+    expect(read.output.writes.join("")).not.toContain("> /help - Show help");
     expect(read.output.writes.join("")).toContain("│ › /help");
     expect(read.isResolved()).toBe(false);
 
     read.input.send("\r");
     expect(await read.pending).toEqual({ type: "submit", text: "/help" });
+  });
+
+  it("renders Operator Console slash menu below prompt and clears it after submit", async () => {
+    const provider = providerFor(SLASH_COMMAND_SUGGESTION_PROVIDER_ID, [slashSuggestion, statusSlashSuggestion]);
+    const typeahead = fakeTypeahead(provider);
+    const overlayHost = new RawPromptOverlayHost();
+    const read = startPendingOperatorConsoleRead({
+      overlayHost,
+      typeahead: {
+        router: typeahead.router,
+      },
+    });
+
+    read.input.send("/h");
+    await flushPromises();
+
+    const openRender = read.output.writes.join("");
+    expect(openRender.indexOf("╭─ Prompt")).toBeLessThan(openRender.indexOf("╭─ Command palette"));
+    expect(openRender.indexOf("╭─ Command palette")).toBeLessThan(openRender.lastIndexOf("session"));
+    expect(openRender).toContain("❯ /help  Show help");
+    expect(openRender).toContain("  /status  Show status");
+    expect(openRender).not.toMatch(/\b(slash|command palette|help)\b.*session/iu);
+    expect(overlayHost.getRows()).toEqual([]);
+
+    read.input.send("\x1b[B");
+    await flushPromises();
+    expect(read.output.writes.join("")).toContain("❯ /status  Show status");
+
+    read.input.send("\r");
+    await flushPromises();
+    read.input.send("\r");
+
+    expect(await read.pending).toEqual({ type: "submit", text: "/status" });
+    expect(overlayHost.getRows()).toEqual([]);
   });
 
   it("inserts Alt+Enter instead of accepting an open slash suggestion", async () => {
@@ -1131,8 +1167,11 @@ describe("raw prompt controller", () => {
     await flushPromises();
 
     expect(read.isResolved()).toBe(false);
-    expect(read.output.writes.join("")).toContain("Prompt · multiline");
-    expect(read.output.writes.join("")).toContain("│ › /h");
+    const multilineRender = read.output.writes.join("");
+    const finalFrame = multilineRender.slice(multilineRender.lastIndexOf("╭─ Prompt · multiline"));
+    expect(finalFrame).toContain("Prompt · multiline");
+    expect(finalFrame).toContain("│ › /h");
+    expect(finalFrame).not.toContain("❯ /help");
     expect(overlayHost.getRows()).toEqual([]);
 
     read.input.send("\r");

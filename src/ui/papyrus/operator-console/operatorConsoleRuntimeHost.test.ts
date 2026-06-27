@@ -133,6 +133,35 @@ describe("OperatorConsoleRuntimeHost", () => {
     expect(status).not.toMatch(/\b(Authorization|Bearer|attachment|pasted text)\b/iu);
   });
 
+  it("renders slash menu state below prompt without polluting status rail", () => {
+    const host = createHost({ width: 72, height: 12 });
+
+    host.setPrompt({ text: "/mo", cursorOffset: 3 });
+    host.setSlash({
+      query: "/mo",
+      activeItemId: "slash.model",
+      items: [
+        { id: "slash.model", label: "/model", detail: "show or change active model route" },
+        { id: "slash.model.setup", label: "/model setup", detail: "configure provider/model credentials" },
+      ],
+    });
+
+    const lines = host.render().lines;
+    const promptIndex = lines.findIndex((line) => line.includes("Prompt"));
+    const slashIndex = lines.findIndex((line) => line.includes("Commands"));
+    const status = lines.at(-1) ?? "";
+
+    expect(host.getState().slash?.query).toBe("/mo");
+    expect(promptIndex).toBeGreaterThanOrEqual(0);
+    expect(slashIndex).toBeGreaterThan(promptIndex);
+    expect(lines).toContainEqual(expect.stringContaining("❯ /model  show or change active model route"));
+    expect(status).toContain("session");
+    expect(status).not.toMatch(/\b(slash|Commands|model setup)\b/iu);
+
+    host.setSlash(undefined);
+    expect(host.render().lines.join("\n")).not.toContain("Commands");
+  });
+
   it("renders queued steer above attachments and prompt while active work stays above queued steer", () => {
     const host = createHost({ height: 28 });
     host.setActiveWork(activeWork([workItem("read", "running")]));

@@ -13,6 +13,7 @@ export * from "./operatorConsoleRuntimeHost.js";
 export * from "./operatorConsoleState.js";
 export * from "./promptSurface.js";
 export * from "./setupPanelSurface.js";
+export * from "./slashSurface.js";
 export * from "./steerSurface.js";
 export * from "./startupDashboardSurface.js";
 export * from "./statusRailSurface.js";

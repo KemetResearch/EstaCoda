@@ -166,7 +166,7 @@ function createRegionDescriptors(
       kind: "slashMenu",
       priority: INTERACTIVE_OPTIONAL_PRIORITY,
       minHeight: 1,
-      desiredHeight: Math.min(4, Math.max(1, state.slash.items.length + 1)),
+      desiredHeight: Math.min(6, Math.max(3, state.slash.items.length + 2)),
     });
   }
 

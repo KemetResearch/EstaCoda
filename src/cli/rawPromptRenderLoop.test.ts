@@ -178,6 +178,42 @@ describe("raw prompt render loop", () => {
     expect(text).not.toMatch(forbiddenManagedRegionOutput);
   });
 
+  it("passes Operator Console slash state through the persistent runtime host", () => {
+    const output = fakeOutput();
+    const host = createOperatorConsoleRuntimeHost();
+    const setSlash = vi.spyOn(host, "setSlash");
+    const loop = new RawPromptRenderLoop(output, {
+      operatorConsoleHostFactory: () => host,
+    });
+
+    const rows = loop.render({
+      prompt: "> ",
+      state: createLineEditorState("/mo"),
+      operatorConsole: {
+        enabled: true,
+        terminal: { width: 72, height: 12, isTty: true },
+        status: status({ usedTokens: 18000, elapsedMs: 13000 }),
+        slash: {
+          query: "/mo",
+          activeItemId: "slash.model",
+          items: [
+            { id: "slash.model", label: "/model", detail: "show or change active model route" },
+            { id: "slash.model.setup", label: "/model setup", detail: "configure provider/model credentials" },
+          ],
+        },
+      },
+    });
+    const text = output.text();
+
+    expect(rows).toBeGreaterThan(4);
+    expect(setSlash).toHaveBeenCalledWith(expect.objectContaining({ query: "/mo" }));
+    expect(host.getState().slash?.activeItemId).toBe("slash.model");
+    expect(text.indexOf("╭─ Prompt")).toBeLessThan(text.indexOf("╭─ Commands"));
+    expect(text.indexOf("╭─ Commands")).toBeLessThan(text.indexOf("session 00:13"));
+    expect(text).toContain("❯ /model  show or change active model route");
+    expect(text).not.toMatch(/\b(command palette|slash|model setup)\b.*session/iu);
+  });
+
   it("renders Operator Console attachments above the prompt and below no status pollution", () => {
     const output = fakeOutput();
     const host = createOperatorConsoleRuntimeHost();

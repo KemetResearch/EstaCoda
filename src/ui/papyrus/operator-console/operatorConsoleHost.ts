@@ -4,6 +4,7 @@ import {
   createInitialOperatorConsoleState,
   type AttachmentCardState,
   type OperatorConsoleState,
+  type SlashMenuState,
   type StatusRailState,
   type TerminalMetrics,
 } from "./operatorConsoleState.js";
@@ -26,6 +27,7 @@ export type OperatorConsoleRawPromptSnapshot = {
   readonly terminal?: Partial<TerminalMetrics>;
   readonly overlayRows?: readonly OperatorConsoleRawPromptOverlayRow[];
   readonly attachments?: readonly AttachmentCardState[];
+  readonly slash?: SlashMenuState;
 };
 
 export type OperatorConsoleRawPromptFrame = {
@@ -56,6 +58,7 @@ export function buildOperatorConsoleStateFromRawPrompt(
     },
     status: snapshot.status ?? createDefaultOperatorConsoleRawPromptStatus(),
     attachments: snapshot.attachments ?? [],
+    ...(snapshot.slash === undefined ? {} : { slash: snapshot.slash }),
   });
 }
 
@@ -87,6 +90,7 @@ export function buildOperatorConsoleRawPromptFrameWithRuntimeHost(
   host.setTerminal(terminal);
   host.setStatus(snapshot.status ?? createDefaultOperatorConsoleRawPromptStatus());
   host.setAttachments(snapshot.attachments ?? []);
+  host.setSlash(snapshot.slash);
   host.setPrompt({
     text: snapshot.state.text,
     cursorOffset: snapshot.state.cursor,

@@ -15,6 +15,7 @@ import {
   renderQueuedSteerSurface,
   renderSteerInputSurface,
 } from "./steerSurface.js";
+import { renderSlashSurface } from "./slashSurface.js";
 import { renderStartupDashboardSurface } from "./startupDashboardSurface.js";
 import { renderStatusRailSurface } from "./statusRailSurface.js";
 
@@ -88,6 +89,12 @@ function renderRegionLines(
   }
   if (region.kind === "queuedSteer" && state.steer?.queued !== undefined) {
     return renderQueuedSteerSurface(state.steer.queued, {
+      width: region.width,
+      height: region.height,
+    }).map((text) => ({ region: region.kind, text }));
+  }
+  if (region.kind === "slashMenu") {
+    return renderSlashSurface(state.slash, {
       width: region.width,
       height: region.height,
     }).map((text) => ({ region: region.kind, text }));

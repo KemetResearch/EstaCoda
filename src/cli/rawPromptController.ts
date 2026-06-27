@@ -32,6 +32,7 @@ import {
   createPastedTextAttachment,
   formatSubmittedPromptWithAttachmentReferences,
   type AttachmentCardState,
+  type SlashMenuState,
 } from "../ui/papyrus/operator-console/index.js";
 
 type RawPromptDataListener = (chunk: string | Buffer | Uint8Array) => void;
@@ -122,11 +123,14 @@ export class RawPromptController {
       this.#keymap?.mode === "vim" ? createPapyrusVimKeymapState() : undefined;
     let typeaheadState: TypeaheadState<SlashCommandSuggestionMetadata> = createTypeaheadControllerState();
     const render = () => {
-      const overlayRows = this.#overlayHost.getRows();
+      const slashMenu = this.#operatorConsole?.enabled === true
+        ? typeaheadStateToSlashMenu(typeaheadState)
+        : undefined;
+      const overlayRows = this.#operatorConsole?.enabled === true ? [] : this.#overlayHost.getRows();
       const rows = renderLoop.render({
         prompt: question,
         state,
-        ghostText: overlayRows.length === 0 ? ghostTextForRender(this.#ghostText, state) : undefined,
+        ghostText: overlayRows.length === 0 && slashMenu === undefined ? ghostTextForRender(this.#ghostText, state) : undefined,
         overlayRows,
         operatorConsole: this.#operatorConsole?.enabled === true
           ? {
@@ -137,6 +141,7 @@ export class RawPromptController {
               isTty: this.#operatorConsole.terminal?.isTty ?? this.#output.isTTY ?? true,
             },
             attachments,
+            slash: slashMenu,
           }
           : undefined,
       });
@@ -157,7 +162,11 @@ export class RawPromptController {
       let settled = false;
 
       const notifyTypeahead = () => {
-        this.#overlayHost.setRows(buildRawPromptSlashAutocompleteRows(typeaheadState));
+        if (this.#operatorConsole?.enabled === true) {
+          this.#overlayHost.clear();
+        } else {
+          this.#overlayHost.setRows(buildRawPromptSlashAutocompleteRows(typeaheadState));
+        }
         this.#typeahead?.onStateChange?.(typeaheadState);
       };
 
@@ -403,4 +412,47 @@ function ghostTextForRender(
     ? ghost.suggestionText.slice(currentText.length)
     : ghost.suggestionText;
   return text.length === 0 ? undefined : { text };
+}
+
+function typeaheadStateToSlashMenu(
+  state: TypeaheadState<SlashCommandSuggestionMetadata>
+): SlashMenuState | undefined {
+  switch (state.status) {
+    case "loading":
+      return {
+        query: state.context?.token ?? "",
+        items: [{ id: "slash.loading", label: "Loading slash commands..." }],
+        activeItemId: "slash.loading",
+      };
+    case "empty":
+      return {
+        query: state.context?.token ?? "",
+        items: [{ id: "slash.empty", label: "No slash commands found" }],
+        activeItemId: "slash.empty",
+      };
+    case "error":
+      return {
+        query: state.context?.token ?? "",
+        items: [{ id: "slash.error", label: `Slash suggestions unavailable: ${state.error?.message ?? "unknown error"}` }],
+        activeItemId: "slash.error",
+      };
+    case "open": {
+      const activeItemId = state.focusedIndex === undefined ? undefined : state.items[state.focusedIndex]?.id;
+      return {
+        query: state.context?.token ?? "",
+        items: state.items.map((item) => ({
+          id: item.id,
+          label: item.label,
+          ...(item.description === undefined && item.detail === undefined
+            ? {}
+            : { detail: item.description ?? item.detail }),
+        })),
+        ...(activeItemId === undefined ? {} : { activeItemId }),
+      };
+    }
+    case "closed":
+    case "canceled":
+    case "dismissed":
+      return undefined;
+  }
 }

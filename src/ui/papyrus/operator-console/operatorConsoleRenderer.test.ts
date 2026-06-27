@@ -385,6 +385,40 @@ describe("Papyrus operator console renderer", () => {
     expect(output[0]).toContain("Prompt");
   });
 
+  it("renders slash menu between prompt and status rail", () => {
+    const state = createState({
+      prompt: {
+        value: "/mo",
+        cursorOffset: 3,
+        multiline: false,
+        scrollOffset: 0,
+        mode: "prompt",
+      },
+      slash: {
+        query: "/mo",
+        activeItemId: "slash.model",
+        items: [
+          { id: "slash.model", label: "/model", detail: "show or change active model route" },
+          { id: "slash.model.setup", label: "/model setup", detail: "configure provider/model credentials" },
+        ],
+      },
+    });
+    const output = renderOperatorConsoleTextLines(
+      state,
+      createOperatorConsoleLayout(state, { width: 72, height: 10, isTty: true })
+    );
+    const promptIndex = output.findIndex((line) => line.includes("Prompt"));
+    const slashIndex = output.findIndex((line) => line.includes("Commands"));
+    const statusIndex = output.findIndex((line) => line.includes("session 00:00"));
+
+    expect(promptIndex).toBeGreaterThanOrEqual(0);
+    expect(slashIndex).toBeGreaterThan(promptIndex);
+    expect(statusIndex).toBeGreaterThan(slashIndex);
+    expect(output).toContainEqual(expect.stringContaining("❯ /model  show or change active model route"));
+    expect(output.every((line) => stringWidth(line) <= 72)).toBe(true);
+    expect(output.at(-1)).not.toMatch(/\b(slash|Commands|model setup)\b/iu);
+  });
+
   it("keeps rendered line widths within the terminal width", () => {
     const state = createFullState();
     const layout = createOperatorConsoleLayout(state, { width: 20, height: 20, isTty: true });

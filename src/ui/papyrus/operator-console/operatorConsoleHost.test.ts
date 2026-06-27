@@ -116,6 +116,34 @@ describe("Papyrus operator console raw prompt host", () => {
     expect(statusIndex).toBeGreaterThan(overlayIndex);
   });
 
+  it("maps raw prompt slash state into a boxed slash menu above the status rail", () => {
+    const frame = buildOperatorConsoleRawPromptFrame({
+      prompt: "> ",
+      state: createLineEditorState("/mo"),
+      terminal: { width: 72, height: 12, isTty: true },
+      slash: {
+        query: "/mo",
+        activeItemId: "slash.model",
+        items: [
+          { id: "slash.model", label: "/model", detail: "show or change active model route" },
+          { id: "slash.model.setup", label: "/model setup", detail: "configure provider/model credentials" },
+        ],
+      },
+    });
+    const promptIndex = frame.rows.findIndex((line) => line.includes("Prompt"));
+    const slashIndex = frame.rows.findIndex((line) => line.includes("Commands"));
+    const statusIndex = frame.rows.findIndex((line) => line.includes("session 00:00"));
+
+    expect(frame.state.slash?.query).toBe("/mo");
+    expect(frame.state.slash?.items).toHaveLength(2);
+    expect(promptIndex).toBeGreaterThanOrEqual(0);
+    expect(slashIndex).toBeGreaterThan(promptIndex);
+    expect(statusIndex).toBeGreaterThan(slashIndex);
+    expect(frame.rows).toContainEqual(expect.stringContaining("❯ /model  show or change active model route"));
+    expect(frame.rows.at(-1)).not.toMatch(/\b(slash|model setup|Commands)\b/iu);
+    expect(frame.rows.every((line) => stringWidth(line) <= 72)).toBe(true);
+  });
+
   it("maps raw prompt attachments into state and renders them above the prompt without status pollution", () => {
     const attachment = createPastedTextAttachment({
       id: "paste-1",
