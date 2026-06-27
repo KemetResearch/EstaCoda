@@ -16,6 +16,10 @@ import {
 } from "../ui/papyrus/widgets/selectKeymap.js";
 import type { PapyrusOption } from "../ui/papyrus/widgets/optionMap.js";
 import { parseKeypress, type ParsedKeypress } from "../ui/input/parseKeypress.js";
+import {
+  mapSetupSelectToSetupPanelState,
+  renderSetupPanelSurface,
+} from "../ui/papyrus/operator-console/index.js";
 
 export type SelectPromptInput<T> = {
   title: string;
@@ -92,8 +96,7 @@ async function ttySelect<T>(input: Readable, output: Writable, selection: Select
 
     const render = () => {
       const selectedIndex = focusedSelectionIndex(selectState);
-      const vm = buildSelectionViewModel(selection, selectedIndex);
-      const text = renderer.render(vm);
+      const text = renderTtySelection(selection, selectedIndex, renderer);
 
       output.write(`${restoreCursor}${clearDown}`);
       output.write(text);
@@ -147,13 +150,53 @@ async function ttySelect<T>(input: Readable, output: Writable, selection: Select
     ttyInput.setRawMode(true);
     ttyInput.resume();
 
-    const vm = buildSelectionViewModel(selection, focusedSelectionIndex(selectState));
-    const initialText = renderer.render(vm);
+    const initialText = renderTtySelection(selection, focusedSelectionIndex(selectState), renderer);
     const reserveLines = Math.max(1, initialText.split("\n").length - 1);
     output.write("\n".repeat(reserveLines));
     output.write(`\x1B[${reserveLines}A`);
     output.write(`\x1B[?25l${saveCursor}`);
     render();
+  });
+}
+
+function renderTtySelection<T>(
+  selection: SelectPromptInput<T>,
+  selectedIndex: number,
+  renderer: ReturnType<typeof createSessionRenderer>
+): string {
+  const setupPanel = mapTtySetupSelection(selection, selectedIndex);
+  if (setupPanel !== undefined) {
+    return renderSetupPanelSurface(setupPanel, { width: renderer.capabilities.terminalWidth }).join("\n");
+  }
+  const vm = buildSelectionViewModel(selection, selectedIndex);
+  return renderer.render(vm);
+}
+
+function mapTtySetupSelection<T>(
+  selection: SelectPromptInput<T>,
+  selectedIndex: number
+) {
+  if (
+    selection.surface !== "promptCard" ||
+    selection.columns === undefined ||
+    !selection.options.some((option) => option.cells !== undefined)
+  ) {
+    return undefined;
+  }
+  return mapSetupSelectToSetupPanelState({
+    title: selection.title,
+    body: selection.body,
+    hint: selection.hint ?? selection.instruction,
+    locale: selection.locale === "ar" ? "ar" : "en",
+    options: selection.options.map((option) => ({
+      id: option.id,
+      label: option.label,
+      description: option.description,
+      cells: option.cells,
+      badges: option.badges,
+      current: option.current,
+    })),
+    selectedIndex,
   });
 }
 

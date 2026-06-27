@@ -1,7 +1,7 @@
 import { describe, expect, it, vi, afterEach } from "vitest";
 import { PassThrough, Readable, Writable } from "node:stream";
 import { selectOption, type SelectPromptInput } from "./interactive-select.js";
-import { stripAnsi } from "../ui/renderers/layout.js";
+import { measureVisibleWidth, stripAnsi } from "../ui/renderers/layout.js";
 import { isolateLtr, isolateRtl, LRI, PDI, RLI } from "../ui/bidi.js";
 
 type TtyInput = PassThrough & {
@@ -135,6 +135,134 @@ describe("interactive-select prompt card surface", () => {
     const rendered = stripAnsi(output.getText());
     expect(rendered).toContain("Workspace trust");
     expect(rendered).toContain("Trust workspace");
+  });
+
+  it("routes TTY setup provider/model tables through the Papyrus setup panel", async () => {
+    clearCiEnv();
+    const { input, output } = makeTtyStreams(96);
+    const pending = selectOption(input, output, setupPanelSelection());
+
+    await Promise.resolve();
+    press(input, "\x1b[B");
+    press(input, "\r");
+
+    await expect(pending).resolves.toBe("local");
+    const rendered = stripAnsi(output.getText());
+    const latestFrame = stripAnsi(latestRenderedFrame(output.getText()));
+    expect(rendered).toContain("╭─ Model route");
+    expect(rendered).toContain("Choose the active provider and model route.");
+    expect(rendered).toContain("Provider");
+    expect(rendered).toContain("Model");
+    expect(rendered).toContain("Status");
+    expect(rendered).toContain("Notes");
+    expect(rendered).toContain("gpt-5.5");
+    expect(rendered).toContain("qwen3-coder");
+    expect(rendered).toContain("↑↓ navigate · Enter select · / filter · Esc back");
+    expect(latestFrame).toContain("❯ Local");
+    expect(latestFrame).not.toContain("❯ OpenAI");
+    expect(rendered).toContain("Selected: Local");
+  });
+
+  it("keeps setup panel selection stable across redraw-width changes", async () => {
+    clearCiEnv();
+    const { input, output } = makeTtyStreams(96);
+    const pending = selectOption(input, output, setupPanelSelection());
+
+    await Promise.resolve();
+    press(input, "\x1b[B");
+    output.columns = 44;
+    press(input, "\x1b[B");
+    press(input, "\x1b[A");
+    press(input, "\r");
+
+    await expect(pending).resolves.toBe("local");
+    const latestFrame = stripAnsi(latestRenderedFrame(output.getText()));
+    expect(latestFrame).toContain("❯ Local");
+    expect(latestFrame).toContain("qwen3-coder");
+  });
+
+  it("renders narrow TTY setup selections as compact setup panels", async () => {
+    clearCiEnv();
+    const { input, output } = makeTtyStreams(44);
+    const pending = selectOption(input, output, setupPanelSelection());
+
+    await Promise.resolve();
+    press(input, "\r");
+
+    await expect(pending).resolves.toBe("openai");
+    const latestFrame = stripAnsi(latestRenderedFrame(output.getText()));
+    expect(latestFrame).toContain("❯ OpenAI");
+    expect(latestFrame).toContain("gpt-5.5");
+    expect(latestFrame).toContain("ready · API key set");
+    expect(latestFrame).toContain("Local");
+    expect(latestFrame.split("\n").every((line) => measureVisibleWidth(line) <= 44)).toBe(true);
+  });
+
+  it("renders Arabic TTY setup panels while preserving technical tokens", async () => {
+    clearCiEnv();
+    process.env.LANG = "ar_EG.UTF-8";
+    const { input, output } = makeTtyStreams(80);
+    const pending = selectOption(input, output, arabicSetupPanelSelection());
+
+    await Promise.resolve();
+    press(input, "\r");
+
+    await expect(pending).resolves.toBe("openai");
+    const latestFrame = stripAnsi(latestRenderedFrame(output.getText()));
+    expect(latestFrame).toContain("إعداد النموذج");
+    expect(latestFrame).toContain("المزود");
+    expect(latestFrame).toContain("النموذج");
+    expect(latestFrame).toContain("الحالة");
+    expect(latestFrame).toContain("OpenAI");
+    expect(latestFrame).toContain("gpt-5.5");
+    expect(latestFrame).toContain("Local");
+    expect(latestFrame).toContain("qwen3-coder");
+    expect(latestFrame).toContain("URL");
+    expect(latestFrame).toContain("API key");
+    expect(latestFrame).toContain("Enter");
+    expect(latestFrame).toContain("Esc");
+  });
+
+  it("keeps Back and Cancel setup semantics on the Papyrus setup panel path", async () => {
+    clearCiEnv();
+    const { input, output } = makeTtyStreams(96);
+    const pending = selectOption(input, output, {
+      ...setupPanelSelection(),
+      options: [
+        ...setupPanelSelection().options,
+        {
+          id: "back",
+          value: "back",
+          label: "Back",
+          group: "navigation",
+          cells: {
+            provider: "Back",
+            model: "",
+            status: "navigation",
+            notes: "Return to previous setup page",
+          },
+        },
+        {
+          id: "cancel",
+          value: "cancel",
+          label: "Cancel",
+          group: "navigation",
+          cells: {
+            provider: "Cancel",
+            model: "",
+            status: "navigation",
+            notes: "Exit setup",
+          },
+        },
+      ],
+    });
+
+    await Promise.resolve();
+    press(input, "\x1b[F");
+    press(input, "\r");
+
+    await expect(pending).resolves.toBe("cancel");
+    expect(stripAnsi(output.getText())).toContain("Selected: Cancel");
   });
 
   it("renders no-color prompt cards without ANSI leakage", async () => {
@@ -424,6 +552,62 @@ function arabicPromptCardSelection(): SelectPromptInput<string> {
   };
 }
 
+function setupPanelSelection(): SelectPromptInput<string> {
+  return {
+    surface: "promptCard",
+    locale: "en",
+    direction: "ltr",
+    title: "Model route",
+    body: "Choose the active provider and model route.",
+    defaultIndex: 0,
+    columns: [
+      { key: "provider", header: "Provider" },
+      { key: "model", header: "Model" },
+      { key: "status", header: "Status" },
+      { key: "notes", header: "Notes" },
+    ],
+    options: [
+      {
+        id: "openai",
+        value: "openai",
+        label: "OpenAI",
+        cells: { provider: "OpenAI", model: "gpt-5.5", status: "ready", notes: "API key set" },
+      },
+      {
+        id: "local",
+        value: "local",
+        label: "Local",
+        cells: { provider: "Local", model: "qwen3-coder", status: "offline", notes: "endpoint unset" },
+      },
+    ],
+    fallbackPrompt: "Choose: ",
+  };
+}
+
+function arabicSetupPanelSelection(): SelectPromptInput<string> {
+  return {
+    ...setupPanelSelection(),
+    locale: "ar",
+    direction: "rtl",
+    title: "إعداد النموذج",
+    body: "اختر مزود النموذج والمسار النشط.",
+    options: [
+      {
+        id: "openai",
+        value: "openai",
+        label: "OpenAI",
+        cells: { provider: "OpenAI", model: "gpt-5.5", status: "جاهز", notes: "API key محفوظ" },
+      },
+      {
+        id: "local",
+        value: "local",
+        label: "Local",
+        cells: { provider: "Local", model: "qwen3-coder", status: "غير متصل", notes: "URL غير مضبوط" },
+      },
+    ],
+  };
+}
+
 function clearCiEnv(): void {
   delete process.env.NO_COLOR;
   process.env.TERM = "xterm-256color";
@@ -457,4 +641,12 @@ function makeOutput(isTTY: boolean, columns = 80): CapturingOutput {
   output.columns = columns;
   output.getText = () => text;
   return output;
+}
+
+function latestRenderedFrame(text: string): string {
+  const restoreCursor = "\x1B8";
+  const clearDown = "\x1B[J";
+  const lastRender = text.lastIndexOf(`${restoreCursor}${clearDown}`);
+  if (lastRender === -1) return text;
+  return text.slice(lastRender + restoreCursor.length + clearDown.length);
 }
