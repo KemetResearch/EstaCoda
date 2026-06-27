@@ -21,6 +21,9 @@ import {
   renderSetupPanelSurface,
 } from "../ui/papyrus/operator-console/index.js";
 
+const HIDE_CURSOR = "\x1b[?25l";
+const SHOW_CURSOR = "\x1b[?25h";
+
 export type SelectPromptInput<T> = {
   title: string;
   body?: string;
@@ -87,6 +90,8 @@ async function ttySelect<T>(input: Readable, output: Writable, selection: Select
     const ttyInput = input as NodeJS.ReadStream;
     let selectState = createPapyrusSelectState(selection);
     let settled = false;
+    let restored = false;
+    let cursorHidden = false;
     const wasRaw = ttyInput.isRaw === true;
 
     const renderer = createSessionRenderer({ output: output as NodeJS.WriteStream, locale: selection.locale });
@@ -98,10 +103,27 @@ async function ttySelect<T>(input: Readable, output: Writable, selection: Select
       renderLoop.render(text);
     };
 
+    const renderSafely = () => {
+      try {
+        render();
+      } catch (error) {
+        restoreTerminal();
+        throw error;
+      }
+    };
+
     const restoreTerminal = () => {
+      if (restored) {
+        return;
+      }
+      restored = true;
       ttyInput.off("data", onData);
       if (!wasRaw) {
         ttyInput.setRawMode(false);
+      }
+      if (cursorHidden) {
+        output.write(SHOW_CURSOR);
+        cursorHidden = false;
       }
     };
 
@@ -136,7 +158,7 @@ async function ttySelect<T>(input: Readable, output: Writable, selection: Select
           return;
         }
         if (result.intent?.type === "focus-changed" || result.intent === undefined) {
-          render();
+          renderSafely();
         }
       }
     };
@@ -144,8 +166,10 @@ async function ttySelect<T>(input: Readable, output: Writable, selection: Select
     ttyInput.on("data", onData);
     ttyInput.setRawMode(true);
     ttyInput.resume();
+    output.write(HIDE_CURSOR);
+    cursorHidden = true;
 
-    render();
+    renderSafely();
   });
 }
 

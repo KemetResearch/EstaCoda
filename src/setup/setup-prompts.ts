@@ -184,7 +184,7 @@ function setupBackChoice(locale: SetupCopyLocale): SetupChoice<typeof SETUP_BACK
 export function setupChoiceColumns(locale: SetupCopyLocale): readonly SetupChoiceColumn[] {
   if (locale === "ar") {
     return [
-      { key: "description", header: "التفاصيل", align: "right" },
+      { key: "description", header: "التفاصيل", align: "left" },
       { key: "name", header: "الاسم", align: "right" },
     ];
   }

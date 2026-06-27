@@ -86,6 +86,12 @@ function visibleTextEndColumn(line: string, text: string): number {
   return measureVisibleWidth(line.slice(0, textIndex)) + measureVisibleWidth(text);
 }
 
+function visibleTextStartColumn(line: string, text: string): number {
+  const textIndex = line.indexOf(text);
+  expect(textIndex).toBeGreaterThanOrEqual(0);
+  return measureVisibleWidth(line.slice(0, textIndex));
+}
+
 function countBidiControl(line: string, control: string): number {
   return [...line].filter((char) => char === control).length;
 }
@@ -726,7 +732,7 @@ describe("PlainRenderer — renderOnboardingPromptCard", () => {
       tableMaxWidth: 88,
       tableAlign: "right" as const,
       columns: [
-        { key: "description", header: "التفاصيل", align: "right" as const },
+        { key: "description", header: "التفاصيل", align: "left" as const },
         { key: "name", header: "الاسم", align: "right" as const },
       ],
       options: [
@@ -772,7 +778,7 @@ describe("PlainRenderer — renderOnboardingPromptCard", () => {
       tableMaxWidth: 88,
       tableAlign: "right" as const,
       columns: [
-        { key: "description", header: "التفاصيل", align: "right" as const },
+        { key: "description", header: "التفاصيل", align: "left" as const },
         { key: "name", header: "الاسم", align: "right" as const },
       ],
       options: [
@@ -833,12 +839,14 @@ describe("PlainRenderer — renderOnboardingPromptCard", () => {
     expect(searchLine).toContain(isolateLtr("EstaCoda"));
     expect(searchLine.indexOf("اضبط كيف")).toBeLessThan(searchLine.indexOf("البحث"));
     expect(visibleMarkerColumn(searchLine, "<")).toBe(visibleMarkerColumn(auxiliaryLine, "<"));
+    expect(visibleTextStartColumn(searchLine, "اضبط كيف")).toBe(visibleTextStartColumn(auxiliaryLine, "نماذج تُستخدم"));
     expect(visibleTextEndColumn(searchLine, "البحث")).toBe(visibleTextEndColumn(auxiliaryLine, "النماذج المساعدة"));
 
     const evolutionLine = markerLineFor(5);
     expect(evolutionLine).toContain(isolateLtr("Agent Evolution"));
     expect(evolutionLine.indexOf("مقترحات تحسين")).toBeLessThan(evolutionLine.indexOf("Agent Evolution"));
     expect(visibleMarkerColumn(evolutionLine, "<")).toBe(visibleMarkerColumn(auxiliaryLine, "<"));
+    expect(visibleTextStartColumn(evolutionLine, "مقترحات تحسين")).toBe(visibleTextStartColumn(auxiliaryLine, "نماذج تُستخدم"));
     expect(visibleTextEndColumn(evolutionLine, "Agent Evolution")).toBe(visibleTextEndColumn(auxiliaryLine, "النماذج المساعدة"));
 
     const channelLine = renderedFor(2).split("\n").find((line) => line.includes("Telegram"));

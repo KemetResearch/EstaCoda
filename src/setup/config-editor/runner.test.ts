@@ -212,7 +212,7 @@ describe("runConfigEditor", () => {
     expect(prompts[0]?.body).not.toContain("\x1b[");
     expect(prompts[0]?.bodyLineStyles).toEqual([{ emphasis: "strong" }]);
     expect(prompts[0]?.columns).toEqual([
-      { key: "description", header: "التفاصيل", align: "right" },
+      { key: "description", header: "التفاصيل", align: "left" },
       { key: "name", header: "الاسم", align: "right" },
     ]);
     expect(prompts[0]?.tableDirection).toBe("rtl");
@@ -621,7 +621,7 @@ describe("runConfigEditor", () => {
     );
     expect(webSearch).toEqual({ provider: "none" });
     expect(searchInput?.columns).toEqual([
-      { key: "description", header: "التفاصيل", align: "right" },
+      { key: "description", header: "التفاصيل", align: "left" },
       { key: "name", header: "الاسم", align: "right" },
     ]);
     expect(searchInput?.tableDirection).toBe("rtl");

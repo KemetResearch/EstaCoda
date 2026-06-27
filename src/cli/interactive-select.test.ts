@@ -59,13 +59,14 @@ describe("interactive-select prompt card surface", () => {
   it("keeps Ctrl+C cancellation routed through the existing selector path", async () => {
     clearCiEnv();
     const emitSpy = vi.spyOn(process, "emit").mockImplementation(((event: string) => event === "SIGINT") as typeof process.emit);
-    const { input } = makeTtyStreams();
-    void selectOption(input, makeTtyStreams().output, promptCardSelection());
+    const { input, output } = makeTtyStreams();
+    void selectOption(input, output, promptCardSelection());
 
     await Promise.resolve();
     press(input, "\x03");
 
     expect(emitSpy).toHaveBeenCalledWith("SIGINT");
+    expect(output.getText()).toContain("\x1b[?25h");
   });
 
   it("selects TTY digit shortcuts through the Papyrus select keymap", async () => {
@@ -163,7 +164,7 @@ describe("interactive-select prompt card surface", () => {
     expect(rendered).toContain("Selected: Local");
   });
 
-  it("does not emit old cursor save/restore, clear-down, or cursor visibility sequences on structured TTY setup selects", async () => {
+  it("hides the cursor during structured TTY setup selects and restores it on exit", async () => {
     clearCiEnv();
     const { input, output } = makeTtyStreams(96);
     const pending = selectOption(input, output, setupPanelSelection());
@@ -173,7 +174,10 @@ describe("interactive-select prompt card surface", () => {
     press(input, "\r");
 
     await expect(pending).resolves.toBe("local");
-    expect(output.getText()).not.toMatch(/\x1B7|\x1B8|\x1B\[J|\x1B\[\?25[lh]|\x1B\[s|\x1B\[u/u);
+    expect(output.getText()).not.toMatch(/\x1B7|\x1B8|\x1B\[J|\x1B\[s|\x1B\[u/u);
+    expect(output.getText()).toContain("\x1b[?25l");
+    expect(output.getText()).toContain("\x1b[?25h");
+    expect(output.getText().indexOf("\x1b[?25l")).toBeLessThan(output.getText().lastIndexOf("\x1b[?25h"));
     expect(output.getText()).toContain("\x1b[0K");
   });
 
