@@ -320,7 +320,7 @@ describe("raw prompt render loop", () => {
     expect(host.getState().slash?.activeItemId).toBe("slash.model");
     expect(text.indexOf("› /mo")).toBeLessThan(text.indexOf("╭─ Commands"));
     expect(text.indexOf("╭─ Commands")).toBeLessThan(text.indexOf("◷ 00:13"));
-    expect(text).toContain("❯ /model  show or change active model route");
+    expect(text).toContain("❯ /model        show or change active model route");
     expect(text).not.toMatch(/\b(command palette|slash|model setup)\b.*session/iu);
   });
 

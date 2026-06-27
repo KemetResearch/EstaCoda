@@ -2755,7 +2755,7 @@ describe("StandardRenderer — prompt chrome rails", () => {
     const r = renderer("dark", { ...fullCaps(), supportsAnimation: false });
     const vm = buildActiveTurnSpinnerViewModel({ phase: "thinking" });
     const out = stripAnsi(r.render(vm));
-    expect(out).toContain("⠋");
+    expect(out).toContain("⣾⣷");
     expect(out).not.toContain("𓇠");
     expect(out).toContain("contemplating");
   });
@@ -2791,7 +2791,7 @@ describe("StandardRenderer — prompt chrome rails", () => {
       events: [toolActivityRailEvent("readFile", "running", { label: "preparing" })],
     });
     const out = stripAnsi(r.render(vm));
-    expect(out).toContain("⣾");
+    expect(out).toContain("⣾⣷");
     expect(out).not.toContain("𓇠");
     expect(out).toContain("preparing");
   });

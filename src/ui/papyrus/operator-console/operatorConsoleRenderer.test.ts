@@ -414,7 +414,7 @@ describe("Papyrus operator console renderer", () => {
     expect(promptIndex).toBeGreaterThanOrEqual(0);
     expect(slashIndex).toBeGreaterThan(promptIndex);
     expect(statusIndex).toBeGreaterThan(slashIndex);
-    expect(output).toContainEqual(expect.stringContaining("❯ /model  show or change active model route"));
+    expect(output).toContainEqual(expect.stringContaining("❯ /model        show or change active model route"));
     expect(output.every((line) => stringWidth(line) <= 72)).toBe(true);
     expect(output.at(-1)).not.toMatch(/\b(slash|Commands|model setup)\b/iu);
   });

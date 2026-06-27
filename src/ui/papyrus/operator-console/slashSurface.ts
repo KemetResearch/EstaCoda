@@ -24,9 +24,14 @@ export function renderSlashSurface(
   const contentWidth = Math.max(0, width - 4);
   const itemRows = Math.max(1, height - 2);
   const visibleItems = state.items.slice(0, itemRows);
+  const commandColumnCells = slashCommandColumnCells(visibleItems, contentWidth);
   const rows = [
     renderTopBorder(titleForSlashMenu(state), width),
-    ...visibleItems.map((item) => renderContentRow(formatSlashItemRow(state, item, options.style), contentWidth, width)),
+    ...visibleItems.map((item) => renderContentRow(
+      formatSlashItemRow(state, item, commandColumnCells, options.style),
+      contentWidth,
+      width
+    )),
     renderBottomBorder(width),
   ];
 
@@ -40,15 +45,30 @@ function titleForSlashMenu(state: SlashMenuState): string {
 function formatSlashItemRow(
   state: SlashMenuState,
   item: SlashMenuState["items"][number],
+  commandColumnCells: number,
   style: OperatorConsoleStyle | undefined
 ): string {
   const selected = item.id === state.activeItemId;
   const marker = selected ? "❯" : " ";
+  const label = padVisibleEnd(truncateVisibleCells(item.label, commandColumnCells), commandColumnCells);
   const detail = item.detail === undefined || item.detail.length === 0 ? "" : `  ${item.detail}`;
-  const row = `${marker} ${item.label}${detail}`;
+  const row = `${marker} ${label}${detail}`;
   return selected && style !== undefined
     ? styleColor(style, row, style.tokens.contract.palette.action)
     : row;
+}
+
+function slashCommandColumnCells(items: readonly SlashMenuState["items"][number][], contentWidth: number): number {
+  if (items.length === 0) return 1;
+  const markerCells = 2;
+  const detailGapCells = 2;
+  const preferredDetailCells = 16;
+  const maxLabelCells = Math.max(...items.map((item) => stringWidth(item.label)));
+  const availableAfterMarker = Math.max(1, contentWidth - markerCells);
+  if (maxLabelCells + detailGapCells + preferredDetailCells <= availableAfterMarker) {
+    return maxLabelCells;
+  }
+  return Math.max(1, Math.min(maxLabelCells, availableAfterMarker - detailGapCells));
 }
 
 function renderFallbackLine(state: SlashMenuState): string {

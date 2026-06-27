@@ -33,7 +33,7 @@ function turnActivitySpinner(
     ? style?.tokens.contract.glyph.spinner.background ?? ["⡀"]
     : style?.tokens.contract.glyph.spinner.thinking ?? ["⠋"];
   const frame = frames[frameIndex(state.frameIndex, frames.length)] ?? "";
-  return styleColor(style, frame, style?.tokens.contract.palette.caution ?? "");
+  return styleColor(style, frame, style?.tokens.contract.palette.action ?? "");
 }
 
 function turnActivityLabel(state: TurnActivityState, locale: "en" | "ar" | undefined): string {

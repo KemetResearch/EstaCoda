@@ -529,6 +529,9 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
               height: OPERATOR_CONSOLE_ACTIVE_WORK_TERMINAL_HEIGHT,
               isTty: renderer.capabilities.isTTY,
             },
+            capabilities: {
+              supportsAnimation: renderer.capabilities.supportsAnimation,
+            },
             getStatus: getOperatorConsoleStatus,
           });
         let turnWasCancelled = false;
@@ -729,6 +732,7 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
         };
 
         const clearSpinner = () => {
+          operatorConsoleLiveFrame?.clearTurnActivity();
           clearOperatorConsoleLiveFrame();
           turnOutput.spinnerPhase = undefined;
           turnOutput.lastOutputWasSpinner = false;

@@ -127,7 +127,7 @@ describe("Papyrus operator console raw prompt host", () => {
     expect(promptIndex).toBeGreaterThanOrEqual(0);
     expect(slashIndex).toBeGreaterThan(promptIndex);
     expect(statusIndex).toBeGreaterThan(slashIndex);
-    expect(frame.rows).toContainEqual(expect.stringContaining("❯ /model  show or change active model route"));
+    expect(frame.rows).toContainEqual(expect.stringContaining("❯ /model        show or change active model route"));
     expect(frame.rows.at(-1)).not.toMatch(/\b(slash|model setup|Commands)\b/iu);
     expect(frame.rows.every((line) => stringWidth(line) <= 72)).toBe(true);
   });

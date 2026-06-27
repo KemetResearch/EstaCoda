@@ -1,4 +1,5 @@
 import type { Writable } from "node:stream";
+import type { TerminalCapabilities } from "../contracts/ui.js";
 import { createLineEditorState } from "../ui/input/lineEditor.js";
 import {
   applyActiveWorkRuntimeEvent,
@@ -22,23 +23,35 @@ export type LiveOperatorConsoleControllerOptions = {
   };
   readonly runtimeHost: OperatorConsoleRuntimeHost;
   readonly terminal: Partial<TerminalMetrics>;
+  readonly capabilities?: Pick<TerminalCapabilities, "supportsAnimation">;
+  readonly animationIntervalMs?: number;
   readonly getStatus: () => StatusRailState;
 };
+
+const DEFAULT_OPERATOR_CONSOLE_ANIMATION_INTERVAL_MS = 90;
 
 export class LiveOperatorConsoleController {
   readonly #renderLoop: RawPromptRenderLoop;
   readonly #runtimeHost: OperatorConsoleRuntimeHost;
   readonly #terminal: Partial<TerminalMetrics>;
+  readonly #supportsAnimation: boolean;
+  readonly #animationIntervalMs: number;
   readonly #getStatus: () => StatusRailState;
   #activeWork: ToolActivityState = createActiveWorkRuntimeState();
   #activeWorkFrameIndex = 0;
   #steer: SteerState | undefined;
   #turnActivity: TurnActivityState | undefined;
   #turnActivityFrameIndex = 0;
+  #animationTimer: ReturnType<typeof setInterval> | undefined;
 
   constructor(options: LiveOperatorConsoleControllerOptions) {
     this.#runtimeHost = options.runtimeHost;
     this.#terminal = options.terminal;
+    this.#supportsAnimation = options.capabilities?.supportsAnimation ?? options.terminal.isTty ?? false;
+    this.#animationIntervalMs = normalizePositiveInteger(
+      options.animationIntervalMs ?? DEFAULT_OPERATOR_CONSOLE_ANIMATION_INTERVAL_MS,
+      DEFAULT_OPERATOR_CONSOLE_ANIMATION_INTERVAL_MS
+    );
     this.#getStatus = options.getStatus;
     this.#renderLoop = new RawPromptRenderLoop(options.output, {
       operatorConsoleHostFactory: () => options.runtimeHost,
@@ -63,6 +76,7 @@ export class LiveOperatorConsoleController {
     this.#activeWork = createActiveWorkRuntimeState();
     this.#activeWorkFrameIndex = 0;
     this.#runtimeHost.setActiveWork(this.#activeWork);
+    this.#syncAnimationTimer();
   }
 
   activeWorkSummary(): string | undefined {
@@ -94,7 +108,15 @@ export class LiveOperatorConsoleController {
     this.refresh();
   }
 
+  clearTurnActivity(): void {
+    this.#turnActivity = undefined;
+    this.#turnActivityFrameIndex = 0;
+    this.#runtimeHost.setTurnActivity(undefined);
+    this.#syncAnimationTimer();
+  }
+
   clear(): void {
+    this.#stopAnimationTimer();
     this.#renderLoop.clear();
   }
 
@@ -114,9 +136,11 @@ export class LiveOperatorConsoleController {
         promptMode: steerVisible ? "steer" : "prompt",
       },
     });
+    this.#syncAnimationTimer();
   }
 
   withDurableWrite(write: () => void, options: { readonly redraw?: boolean } = {}): void {
+    this.#stopAnimationTimer();
     this.clear();
     write();
     if (options.redraw === true) {
@@ -136,6 +160,44 @@ export class LiveOperatorConsoleController {
     this.#activeWorkFrameIndex += 1;
     return snapshot;
   }
+
+  #advanceAnimationFrame(): void {
+    if (this.#turnActivity !== undefined) {
+      this.#turnActivityFrameIndex += 1;
+      this.#turnActivity = {
+        ...this.#turnActivity,
+        frameIndex: this.#turnActivityFrameIndex,
+      };
+      this.#runtimeHost.setTurnActivity(this.#turnActivity);
+    }
+    this.refresh();
+  }
+
+  #syncAnimationTimer(): void {
+    if (!this.#shouldAnimate()) {
+      this.#stopAnimationTimer();
+      return;
+    }
+    if (this.#animationTimer !== undefined) return;
+    this.#animationTimer = setInterval(() => {
+      this.#advanceAnimationFrame();
+    }, this.#animationIntervalMs);
+    const timer = this.#animationTimer as { unref?: () => void };
+    timer.unref?.();
+  }
+
+  #stopAnimationTimer(): void {
+    if (this.#animationTimer === undefined) return;
+    clearInterval(this.#animationTimer);
+    this.#animationTimer = undefined;
+  }
+
+  #shouldAnimate(): boolean {
+    if (!this.#supportsAnimation) return false;
+    const styleAllowsAnimation = this.#runtimeHost.getState().style?.tokens.contract.behavior.allowAnimation ?? true;
+    if (!styleAllowsAnimation) return false;
+    return this.#turnActivity !== undefined || hasRunningActiveWork(this.#activeWork);
+  }
 }
 
 function isSameTurnActivity(
@@ -149,4 +211,10 @@ function isSameTurnActivity(
 
 function hasRunningActiveWork(state: ToolActivityState): boolean {
   return state.items.some((item) => item.status === "running");
+}
+
+function normalizePositiveInteger(value: number, fallback: number): number {
+  if (!Number.isFinite(value)) return fallback;
+  const normalized = Math.floor(value);
+  return normalized > 0 ? normalized : fallback;
 }

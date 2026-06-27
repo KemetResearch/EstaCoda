@@ -9,7 +9,7 @@ describe("Papyrus operator console slash surface", () => {
     const output = renderSlashSurface(slashMenu({ query: "/mo" }), { width: 72 });
 
     expect(output[0]).toContain("Commands");
-    expect(output).toContainEqual(expect.stringContaining("❯ /model  show or change active model route"));
+    expect(output).toContainEqual(expect.stringContaining("❯ /model        show or change active model route"));
     expect(output).toContainEqual(expect.stringContaining("  /model setup  configure provider/model credentials"));
     expect(output.at(-1)).toMatch(/^╰/u);
   });

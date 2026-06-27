@@ -1197,7 +1197,7 @@ describe("raw prompt controller", () => {
     const openRender = read.output.writes.join("");
     expect(openRender.indexOf("╭─ Prompt")).toBeLessThan(openRender.indexOf("╭─ Command palette"));
     expect(openRender.indexOf("╭─ Command palette")).toBeLessThan(openRender.lastIndexOf("◷"));
-    expect(openRender).toContain("❯ /help  Show help");
+    expect(openRender).toContain("❯ /help    Show help");
     expect(openRender).toContain("  /status  Show status");
     expect(openRender).not.toMatch(/\b(slash|command palette|help)\b.*◷/iu);
     expect(overlayHost.getRows()).toEqual([]);
