@@ -35,6 +35,7 @@ import {
   buildSetupNeededViewModel,
 } from "./tool-activity-view-models.js";
 import { papyrusApprovalPromptAdapter, type ApprovalPromptAdapter } from "./approval-prompt-adapter.js";
+import { RawPromptRenderLoop } from "./rawPromptRenderLoop.js";
 import {
   buildActiveTurnSpinnerViewModel,
   buildAssistantResponseViewModel,
@@ -53,6 +54,7 @@ import {
   createActiveWorkRuntimeState,
   createSubmittedSteerTranscriptBlock,
   createOperatorConsoleRuntimeHost,
+  formatActiveWorkSummary,
   mapStartupDashboardViewModelToOperatorConsoleState,
   renderOperatorConsoleLines,
   routeSteerKey,
@@ -63,6 +65,7 @@ import {
   type SteerState,
   type ToolActivityState,
 } from "../ui/papyrus/operator-console/index.js";
+import { createLineEditorState } from "../ui/input/lineEditor.js";
 import { parseKeypress, type ParsedKeypress } from "../ui/input/parseKeypress.js";
 import { centerVisibleBlock, measureVisibleWidth, truncateVisible } from "../ui/renderers/layout.js";
 import { chromeCopy } from "../ui/cli-ui-copy.js";
@@ -501,62 +504,57 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
         let operatorConsoleSteerState: SteerState | undefined;
         let operatorConsoleSteerSequence = 0;
         let disposeOperatorConsoleSteerInput: (() => void) | undefined;
-        let lastOperatorConsoleTransientFrame = "";
+        const operatorConsoleActiveTurnRenderLoop = operatorConsoleRuntimeHost === undefined
+          ? undefined
+          : new RawPromptRenderLoop(output, {
+            operatorConsoleHostFactory: () => operatorConsoleRuntimeHost,
+          });
         let turnWasCancelled = false;
 
         function operatorConsoleSteerVisible(state: SteerState | undefined): boolean {
           return state?.mode === "drafting" || state?.mode === "queued";
         }
 
-        function renderOperatorConsoleTransientSurfaceLines(state: ToolActivityState): string[] {
+        function renderOperatorConsoleLiveFrame(state: ToolActivityState): void {
           const steerVisible = operatorConsoleSteerVisible(operatorConsoleSteerState);
           if (
             operatorConsoleRuntimeHost === undefined ||
+            operatorConsoleActiveTurnRenderLoop === undefined ||
             (state.items.length === 0 && !steerVisible)
           ) {
-            return [];
+            clearOperatorConsoleLiveFrame();
+            return;
           }
-          operatorConsoleRuntimeHost.clear();
-          operatorConsoleRuntimeHost.setTerminal({
-            width: termWidth,
-            height: OPERATOR_CONSOLE_ACTIVE_WORK_TERMINAL_HEIGHT,
-            isTty: renderer.capabilities.isTTY,
+          operatorConsoleActiveTurnRenderLoop.render({
+            prompt: "",
+            state: createLineEditorState(operatorConsoleSteerState?.mode === "drafting" ? operatorConsoleSteerState.draft : ""),
+            operatorConsole: {
+              enabled: true,
+              terminal: {
+                width: termWidth,
+                height: OPERATOR_CONSOLE_ACTIVE_WORK_TERMINAL_HEIGHT,
+                isTty: renderer.capabilities.isTTY,
+              },
+              status: operatorConsoleStatusRailState({
+                runtime,
+                renderer,
+                contextUsage: latestContextUsage,
+                timing: railTiming(),
+                providerExecutionSummary: lastProviderExecutionSummary
+              }),
+              activeWork: state,
+              steer: operatorConsoleSteerState,
+              promptMode: steerVisible ? "steer" : "prompt",
+            },
           });
-          operatorConsoleRuntimeHost.setStatus(operatorConsoleStatusRailState({
-            runtime,
-            renderer,
-            contextUsage: latestContextUsage,
-            timing: railTiming(),
-            providerExecutionSummary: lastProviderExecutionSummary
-          }));
-          operatorConsoleRuntimeHost.setPrompt({
-            text: "",
-            cursorOffset: 0,
-            multiline: false,
-            scrollOffset: 0,
-            mode: steerVisible ? "steer" : "prompt",
-          });
-          operatorConsoleRuntimeHost.setActiveWork(state);
-          operatorConsoleRuntimeHost.setSteer(operatorConsoleSteerState);
+        }
 
-          const frame = operatorConsoleRuntimeHost.render();
-          const transientRegions = new Set(["activeWork", "status"]);
-          if (steerVisible) {
-            transientRegions.add("queuedSteer");
-            transientRegions.add("prompt");
-          }
-          return renderOperatorConsoleLines(frame.state, frame.layout)
-            .filter((line) => transientRegions.has(line.region))
-            .map((line) => line.text);
+        function clearOperatorConsoleLiveFrame(): void {
+          operatorConsoleActiveTurnRenderLoop?.clear();
         }
 
         function refreshOperatorConsoleTransientSurface(): void {
-          const lines = renderOperatorConsoleTransientSurfaceLines(operatorConsoleActiveWorkState);
-          if (lines.length === 0) return;
-          const renderedFrame = lines.join("\n");
-          if (renderedFrame === lastOperatorConsoleTransientFrame) return;
-          writeTurnBoundaryRows(lines);
-          lastOperatorConsoleTransientFrame = renderedFrame;
+          renderOperatorConsoleLiveFrame(operatorConsoleActiveWorkState);
         }
 
         function setOperatorConsoleSteerState(state: SteerState | undefined): void {
@@ -584,13 +582,17 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
           };
         }
 
-        function writeTurnBoundaryRows(rows: readonly string[]): void {
+        function writeTurnBoundaryRows(rows: readonly string[], options: { readonly redrawLiveFrame?: boolean } = {}): void {
           if (rows.length === 0) return;
+          clearOperatorConsoleLiveFrame();
           if (!streamState.lastWriteEndedWithNewline) {
             output.write("\n");
           }
           output.write(`${rows.join("\n")}\n`);
           streamState.lastWriteEndedWithNewline = true;
+          if (options.redrawLiveFrame === true) {
+            refreshOperatorConsoleTransientSurface();
+          }
         }
 
         function isToolActivityRuntimeEvent(
@@ -615,7 +617,7 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
             text,
             createdAtMs: now(),
           });
-          writeTurnBoundaryRows(block.text.split("\n"));
+          writeTurnBoundaryRows(block.text.split("\n"), { redrawLiveFrame: true });
         }
 
         function currentDraftSteerState(draft: string): SteerState {
@@ -729,6 +731,11 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
           if (turnOutput.spinnerPhase === phase) {
             return;
           }
+          if (operatorConsoleActiveTurnRenderLoop !== undefined) {
+            turnOutput.spinnerPhase = phase;
+            refreshOperatorConsoleTransientSurface();
+            return;
+          }
           const spinnerText = renderer.render(buildActiveTurnSpinnerViewModel({ phase }));
           output.write(`${spinnerText}\n`);
           streamState.lastWriteEndedWithNewline = true;
@@ -738,6 +745,7 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
         };
 
         const clearSpinner = () => {
+          clearOperatorConsoleLiveFrame();
           turnOutput.spinnerPhase = undefined;
           turnOutput.lastOutputWasSpinner = false;
         };
@@ -789,6 +797,9 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
 	                refreshOperatorConsoleTransientSurface();
 	                newPhase = "tool";
 	              } else {
+                  if (operatorConsoleActiveTurnRenderLoop !== undefined) {
+                    clearOperatorConsoleLiveFrame();
+                  }
 	                newPhase = renderRuntimeEvent(output, event, activityBuilder, renderer, streamState, undefined, turnOutput);
 	              }
               if (newPhase !== undefined) {
@@ -802,13 +813,16 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
 	            disposeOperatorConsoleSteerInput?.();
 	            disposeOperatorConsoleSteerInput = undefined;
 	            operatorConsoleSteerState = undefined;
-	            operatorConsoleActiveWorkState = createActiveWorkRuntimeState();
-	            operatorConsoleRuntimeHost?.setActiveWork(operatorConsoleActiveWorkState);
 	            operatorConsoleRuntimeHost?.setSteer(undefined);
 	            clearSpinner();
 	            clearActiveTurnChrome = () => undefined;
 	          });
         const response = await responsePromise;
+        if (operatorConsoleRuntimeHost !== undefined && operatorConsoleActiveWorkState.items.length > 0) {
+          writeTurnBoundaryRows([formatActiveWorkSummary(operatorConsoleActiveWorkState)]);
+          operatorConsoleActiveWorkState = createActiveWorkRuntimeState();
+          operatorConsoleRuntimeHost.setActiveWork(operatorConsoleActiveWorkState);
+        }
         lastProviderExecutionSummary = response.providerExecution === undefined
           ? undefined
           : summarizeProviderExecution({

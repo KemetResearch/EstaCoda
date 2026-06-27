@@ -105,6 +105,59 @@ describe("raw prompt render loop", () => {
     expect(host.getState().status.sessionTimer.elapsedMs).toBe(2000);
   });
 
+  it("renders active work and steer through the same Operator Console frame", () => {
+    const output = fakeOutput();
+    const host = createOperatorConsoleRuntimeHost();
+    const setActiveWork = vi.spyOn(host, "setActiveWork");
+    const setSteer = vi.spyOn(host, "setSteer");
+    const loop = new RawPromptRenderLoop(output, {
+      operatorConsoleHostFactory: () => host,
+    });
+
+    const rows = loop.render({
+      prompt: "",
+      state: createLineEditorState("focus approvals"),
+      operatorConsole: {
+        enabled: true,
+        terminal: { width: 96, height: 16, isTty: true },
+        status: status({ usedTokens: 18000, elapsedMs: 13000 }),
+        activeWork: {
+          expanded: false,
+          scrollOffset: 0,
+          items: [
+            {
+              id: "tool-1",
+              toolName: "read_file",
+              status: "running",
+              summary: "src/cli/session-loop.ts",
+              durationMs: 3000,
+            },
+          ],
+        },
+        steer: {
+          mode: "drafting",
+          draft: "focus approvals",
+          cursorOffset: "focus approvals".length,
+        },
+        promptMode: "steer",
+      },
+    });
+    const text = output.text();
+
+    expect(rows).toBeGreaterThan(4);
+    expect(setActiveWork).toHaveBeenCalledWith(expect.objectContaining({
+      items: [expect.objectContaining({ toolName: "read_file" })],
+    }));
+    expect(setSteer).toHaveBeenCalledWith(expect.objectContaining({
+      mode: "drafting",
+      draft: "focus approvals",
+    }));
+    expect(text.indexOf("╭─ Active work")).toBeLessThan(text.indexOf("╭─ Steer current turn"));
+    expect(text.indexOf("╭─ Steer current turn")).toBeLessThan(text.indexOf("session 00:13"));
+    expect(text).toContain("│ › focus approvals");
+    expect(text).not.toMatch(forbiddenManagedRegionOutput);
+  });
+
   it("keeps status rail state limited when noisy live status input reaches the runtime host", () => {
     const output = fakeOutput();
     const host = createOperatorConsoleRuntimeHost();

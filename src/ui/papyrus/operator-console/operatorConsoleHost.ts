@@ -4,9 +4,12 @@ import {
   createInitialOperatorConsoleState,
   type AttachmentCardState,
   type OperatorConsoleState,
+  type PromptSurfaceState,
   type SlashMenuState,
   type StatusRailState,
+  type SteerState,
   type TerminalMetrics,
+  type ToolActivityState,
 } from "./operatorConsoleState.js";
 import { createOperatorConsoleLayout } from "./operatorConsoleLayout.js";
 import { getPromptSurfaceMetrics } from "./promptSurface.js";
@@ -23,6 +26,9 @@ export type OperatorConsoleRawPromptSnapshot = {
   readonly terminal?: Partial<TerminalMetrics>;
   readonly attachments?: readonly AttachmentCardState[];
   readonly slash?: SlashMenuState;
+  readonly activeWork?: ToolActivityState;
+  readonly steer?: SteerState;
+  readonly promptMode?: PromptSurfaceState["mode"];
 };
 
 export type OperatorConsoleRawPromptFrame = {
@@ -49,10 +55,12 @@ export function buildOperatorConsoleStateFromRawPrompt(
       cursorOffset: snapshot.state.cursor,
       multiline: snapshot.state.text.includes("\n"),
       scrollOffset: 0,
-      mode: "prompt",
+      mode: snapshot.promptMode ?? "prompt",
     },
     status: snapshot.status ?? createDefaultOperatorConsoleRawPromptStatus(),
     attachments: snapshot.attachments ?? [],
+    activeWork: snapshot.activeWork,
+    steer: snapshot.steer,
     ...(snapshot.slash === undefined ? {} : { slash: snapshot.slash }),
   });
 }
@@ -86,12 +94,14 @@ export function buildOperatorConsoleRawPromptFrameWithRuntimeHost(
   host.setStatus(snapshot.status ?? createDefaultOperatorConsoleRawPromptStatus());
   host.setAttachments(snapshot.attachments ?? []);
   host.setSlash(snapshot.slash);
+  host.setActiveWork(snapshot.activeWork ?? createInitialOperatorConsoleState().activeWork);
+  host.setSteer(snapshot.steer);
   host.setPrompt({
     text: snapshot.state.text,
     cursorOffset: snapshot.state.cursor,
     multiline: snapshot.state.text.includes("\n"),
     scrollOffset: 0,
-    mode: "prompt",
+    mode: snapshot.promptMode ?? "prompt",
   });
   return rawPromptFrameFromRuntimeFrame(host.render());
 }

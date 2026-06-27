@@ -2391,30 +2391,26 @@ describe("runSessionLoop — active turn spinner", () => {
     );
 
     const strippedChunks = outputChunks.map((chunk) => stripAnsi(chunk));
-    const activeWorkChunk = strippedChunks.reduce<string | undefined>((latest, chunk) =>
-      chunk.includes("Active work") &&
-      chunk.includes("src/running-0.ts")
-        ? chunk
-        : latest,
-      undefined
-    );
-    expect(activeWorkChunk).toBeDefined();
-    expect(activeWorkChunk).toContain("more completed this turn");
-    expect(activeWorkChunk).toContain("approval required");
-    expect(activeWorkChunk).toContain("src/completed-0.ts");
-    expect(activeWorkChunk).not.toContain("src/completed-7.ts");
-
-    const activeWorkIndex = activeWorkChunk?.indexOf("Active work") ?? -1;
-    expect(activeWorkIndex).toBeGreaterThanOrEqual(0);
-    expect(activeWorkChunk?.indexOf("src/running-0.ts")).toBeLessThan(
-      activeWorkChunk?.indexOf("src/completed-0.ts") ?? -1
-    );
+    const activeWorkTitleIndex = strippedChunks.findIndex((chunk) => chunk.includes("Active work"));
+    expect(activeWorkTitleIndex).toBeGreaterThan(-1);
+    expect(outputChunks[activeWorkTitleIndex - 1]).toBe("\x1b[0K");
+    expect(strippedChunks.some((chunk) => chunk.includes("src/running-0.ts"))).toBe(true);
+    expect(strippedChunks.some((chunk) => chunk.includes("approval required"))).toBe(true);
+    expect(strippedChunks.some((chunk) => chunk.includes("src/completed-0.ts"))).toBe(true);
+    expect(strippedChunks.some((chunk) => chunk.includes("more completed this turn"))).toBe(true);
+    expect(strippedChunks.some((chunk) => chunk.includes("Active work") && chunk.includes("src/running-0.ts"))).toBe(false);
 
     const durableResponseChunk = strippedChunks.find((chunk) => chunk.includes("Mock response"));
     expect(durableResponseChunk).toBeDefined();
     expect(durableResponseChunk).not.toContain("src/completed-0.ts");
     expect(durableResponseChunk).not.toContain("src/completed-7.ts");
     expect(durableResponseChunk).not.toContain("approval required");
+    const summaryChunks = strippedChunks.filter((chunk) => chunk.includes("Completed tool work:"));
+    expect(summaryChunks).toEqual([
+      "Completed tool work: 3 running steps resolved, 13 total tool events, 1 file change inspected.\n",
+    ]);
+    expect(summaryChunks[0]).not.toContain("src/completed-0.ts");
+    expect(summaryChunks[0]).not.toContain("approval required");
   });
 
   it("renders provider spinner below the most recent tool row in managed TTY mode", async () => {
@@ -2685,7 +2681,15 @@ describe("runSessionLoop — active turn spinner", () => {
       "build feature",
       "build feature\n\n[Steering note while previous turn was interrupted]\nfocus only on approval cards",
     ]);
-    const rendered = stripAnsi(outputChunks.join(""));
+    const strippedChunks = outputChunks.map((chunk) => stripAnsi(chunk));
+    const rendered = strippedChunks.join("");
+    const queuedSteerIndex = strippedChunks.findIndex((chunk) => chunk.includes("Queued steer"));
+    expect(queuedSteerIndex).toBeGreaterThan(-1);
+    expect(outputChunks[queuedSteerIndex - 1]).toBe("\x1b[0K");
+    expect(strippedChunks.filter((chunk) => chunk.includes("User steer:"))).toEqual([
+      "User steer:\nfocus only on approval cards\n",
+    ]);
+    expect(strippedChunks.some((chunk) => chunk.includes("Queued steer") && chunk.includes("User steer:"))).toBe(false);
     expect(rendered).toContain("Queued steer");
     expect(rendered).toContain("User steer:\nfocus only on approval cards");
     expect(rendered).not.toContain("Assistant:\nWaiting");
