@@ -100,22 +100,6 @@ describe("Papyrus operator console raw prompt host", () => {
     expect(frame.rows.at(-1)).toContain("session 01:12");
   });
 
-  it("keeps slash overlay rows above the status rail", () => {
-    const frame = buildOperatorConsoleRawPromptFrame({
-      prompt: "> ",
-      state: createLineEditorState("/h"),
-      terminal: { width: 72, height: 12, isTty: true },
-      overlayRows: [{ text: "> /help - Show help" }],
-    });
-    const promptIndex = frame.rows.findIndex((line) => line.includes("Prompt"));
-    const overlayIndex = frame.rows.findIndex((line) => line.includes("/help"));
-    const statusIndex = frame.rows.findIndex((line) => line.includes("session 00:00"));
-
-    expect(promptIndex).toBeGreaterThanOrEqual(0);
-    expect(overlayIndex).toBeGreaterThan(promptIndex);
-    expect(statusIndex).toBeGreaterThan(overlayIndex);
-  });
-
   it("maps raw prompt slash state into a boxed slash menu above the status rail", () => {
     const frame = buildOperatorConsoleRawPromptFrame({
       prompt: "> ",

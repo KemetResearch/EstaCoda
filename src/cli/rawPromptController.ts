@@ -126,12 +126,12 @@ export class RawPromptController {
       const slashMenu = this.#operatorConsole?.enabled === true
         ? typeaheadStateToSlashMenu(typeaheadState)
         : undefined;
-      const overlayRows = this.#operatorConsole?.enabled === true ? [] : this.#overlayHost.getRows();
+      const fallbackRows = this.#operatorConsole?.enabled === true ? [] : this.#overlayHost.getRows();
       const rows = renderLoop.render({
         prompt: question,
         state,
-        ghostText: overlayRows.length === 0 && slashMenu === undefined ? ghostTextForRender(this.#ghostText, state) : undefined,
-        overlayRows,
+        ghostText: fallbackRows.length === 0 && slashMenu === undefined ? ghostTextForRender(this.#ghostText, state) : undefined,
+        fallbackRows,
         operatorConsole: this.#operatorConsole?.enabled === true
           ? {
             ...this.#operatorConsole,

@@ -248,7 +248,7 @@ terminal overlays must route through the Papyrus prompt/surface controllers rath
 than ad hoc terminal writes.
 
 The prompt row is not a free output line. The Papyrus raw prompt and surface
-controllers own cursor movement, managed regions, slash overlay rows, paste
+controllers own cursor movement, managed regions, slash surfaces, paste
 reference rows, active status chrome, and cleanup on submit/cancel/error.
 
 Operational rules:

@@ -133,10 +133,10 @@ terminal lifecycle cleanup.
 | Default launch | `estacoda` | Startup and Operator Console surfaces use the Papyrus session surface. Input uses the raw prompt path. `/status` shows shell history, clipboard, MCP suggestions, skill suggestions, and Vim keymap as `off` unless explicitly enabled. |
 | Removed renderer flag | `ESTACODA_UI_RENDERER=legacy estacoda` | The flag is ignored. Session output still uses the Papyrus renderer/Operator Console path. |
 | Removed input flag | `ESTACODA_INPUT_MODE=readline estacoda` | The flag is ignored for interactive sessions. The prompt still uses the raw Papyrus input path. |
-| Slash autocomplete | `estacoda` then type `/` | The Papyrus slash autocomplete overlay appears in the raw prompt. Arrow keys and `Ctrl-N`/`Ctrl-P` move focus. `Escape` dismisses the overlay without cancelling the prompt. |
+| Slash autocomplete | `estacoda` then type `/` | The Operator Console slash menu appears below the prompt and above the status rail. Arrow keys and `Ctrl-N`/`Ctrl-P` move focus. `Escape` dismisses the menu without cancelling the prompt. |
 | Approval ask | `estacoda` then run a prompt that triggers a command or file approval | Promptable approvals render as Papyrus approval cards. Hardline/policy-denied actions do not render approval cards. |
 | Paste | `estacoda` then paste single-line and multiline text | Small single-line paste remains inline. Multiline/large paste uses the existing compact paste reference behavior and submits the original pasted content. |
-| Resize | `estacoda` then resize narrower and wider while idle, during slash autocomplete, and during active-turn chrome | Prompt rows, slash overlay rows, and Operator Console regions reflow without full-screen clear, scrollback clear, or overlapping text. Focused slash rows remain visible. |
+| Resize | `estacoda` then resize narrower and wider while idle, during slash autocomplete, and during active-turn chrome | Prompt rows, slash menu rows, and Operator Console regions reflow without full-screen clear, scrollback clear, or overlapping text. Focused slash rows remain visible. |
 | Cancel/EOF | `estacoda`, then press `Ctrl-C`; relaunch and press `Ctrl-D` on an empty prompt | `Ctrl-C` cancels/cleans up the raw prompt. `Ctrl-D` exits cleanly from an empty prompt. Terminal raw mode is restored after each exit path. |
 
 The renderer/input rollout flags are removed and should no longer activate

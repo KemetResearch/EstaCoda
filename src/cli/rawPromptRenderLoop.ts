@@ -30,11 +30,11 @@ export type RawPromptRenderSnapshot = {
   readonly prompt: string;
   readonly state: LineEditorState;
   readonly ghostText?: RawPromptGhostText;
-  readonly overlayRows?: readonly RawPromptOverlayRow[];
+  readonly fallbackRows?: readonly RawPromptOverlayRow[];
   readonly operatorConsole?: RawPromptOperatorConsoleOptions;
 };
 
-export type RawPromptOperatorConsoleOptions = Omit<OperatorConsoleRawPromptSnapshot, "prompt" | "state" | "overlayRows"> & {
+export type RawPromptOperatorConsoleOptions = Omit<OperatorConsoleRawPromptSnapshot, "prompt" | "state"> & {
   readonly enabled: boolean;
   readonly onAttachmentsChange?: (attachments: readonly AttachmentCardState[]) => void;
   readonly slash?: SlashMenuState;
@@ -79,9 +79,8 @@ export class RawPromptRenderLoop {
         terminal: snapshot.operatorConsole.terminal,
         attachments: snapshot.operatorConsole.attachments,
         slash: snapshot.operatorConsole.slash,
-        overlayRows: snapshot.overlayRows,
       })
-      : buildRawPromptFrame(snapshot);
+      : buildFallbackRawPromptFrame(snapshot);
     this.#moveToFirstRenderedRow();
 
     const physicalRows = Math.max(this.#renderedRows, frame.rows.length);
@@ -127,7 +126,7 @@ export class RawPromptRenderLoop {
   }
 }
 
-export function buildRawPromptFrame(snapshot: RawPromptRenderSnapshot): {
+function buildFallbackRawPromptFrame(snapshot: RawPromptRenderSnapshot): {
   readonly rows: readonly string[];
   readonly cursorRow: number;
   readonly cursorColumn: number;
@@ -143,8 +142,8 @@ export function buildRawPromptFrame(snapshot: RawPromptRenderSnapshot): {
       : line;
     return index === 0 ? `${snapshot.prompt}${renderedLine}` : renderedLine;
   });
-  const overlayRows = (snapshot.overlayRows ?? []).map((row) => row.text);
-  const rows = [...promptRows, ...overlayRows];
+  const fallbackRows = (snapshot.fallbackRows ?? []).map((row) => row.text);
+  const rows = [...promptRows, ...fallbackRows];
   const cursorRow = cursorLineIndex;
   const cursorLinePrefix = beforeCursorLines[beforeCursorLines.length - 1] ?? "";
   const cursorColumn = (cursorRow === 0 ? stringWidth(snapshot.prompt) : 0) + stringWidth(cursorLinePrefix);

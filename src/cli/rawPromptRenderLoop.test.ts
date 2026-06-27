@@ -1,7 +1,7 @@
+import { readFile } from "node:fs/promises";
 import { describe, expect, it, vi } from "vitest";
 import { createLineEditorState } from "../ui/input/lineEditor.js";
 import {
-  buildRawPromptFrame,
   RawPromptOverlayHost,
   RawPromptRenderLoop,
   type RawPromptRenderOutput,
@@ -157,14 +157,14 @@ describe("raw prompt render loop", () => {
     expect(factory).not.toHaveBeenCalled();
   });
 
-  it("places raw overlay rows between Operator Console prompt and status rail", () => {
+  it("does not insert legacy raw overlay rows into Operator Console frames", () => {
     const output = fakeOutput();
     const loop = new RawPromptRenderLoop(output);
 
     const rows = loop.render({
       prompt: "> ",
       state: createLineEditorState("/h"),
-      overlayRows: [{ text: "> /help - Show help" }],
+      fallbackRows: [{ text: "> /help - Show help" }],
       operatorConsole: {
         enabled: true,
         terminal: { width: 72, height: 12, isTty: true },
@@ -172,9 +172,10 @@ describe("raw prompt render loop", () => {
     });
     const text = output.text();
 
-    expect(rows).toBe(5);
-    expect(text.indexOf("╭─ Prompt")).toBeLessThan(text.indexOf("> /help - Show help"));
-    expect(text.indexOf("> /help - Show help")).toBeLessThan(text.indexOf("session 00:00"));
+    expect(rows).toBe(4);
+    expect(text).toContain("╭─ Prompt");
+    expect(text).not.toContain("> /help - Show help");
+    expect(text.indexOf("╭─ Prompt")).toBeLessThan(text.indexOf("session 00:00"));
     expect(text).not.toMatch(forbiddenManagedRegionOutput);
   });
 
@@ -331,7 +332,7 @@ describe("raw prompt render loop", () => {
     expect(output.text()).not.toMatch(forbiddenManagedRegionOutput);
   });
 
-  it("renders inert overlay rows and clears them later", () => {
+  it("keeps fallback overlay rows only when Operator Console is disabled", () => {
     const output = fakeOutput();
     const host = new RawPromptOverlayHost();
     const loop = new RawPromptRenderLoop(output);
@@ -343,14 +344,14 @@ describe("raw prompt render loop", () => {
     expect(loop.render({
       prompt: "> ",
       state: createLineEditorState(""),
-      overlayRows: host.getRows(),
+      fallbackRows: host.getRows(),
     })).toBe(3);
 
     host.clear();
     expect(loop.render({
       prompt: "> ",
       state: createLineEditorState(""),
-      overlayRows: host.getRows(),
+      fallbackRows: host.getRows(),
     })).toBe(1);
 
     expect(output.text()).toContain("first suggestion");
@@ -365,7 +366,7 @@ describe("raw prompt render loop", () => {
     expect(loop.render({
       prompt: "> ",
       state: createLineEditorState("/"),
-      overlayRows: [
+      fallbackRows: [
         { id: "help", text: "> /help - Show help" },
         { id: "status", text: "  /status - Show status" },
         { id: "model", text: "  /model - Show model" },
@@ -375,7 +376,7 @@ describe("raw prompt render loop", () => {
     expect(loop.render({
       prompt: "> ",
       state: createLineEditorState("/s"),
-      overlayRows: [
+      fallbackRows: [
         { id: "status", text: "> /status - Show status" },
       ],
     })).toBe(2);
@@ -383,7 +384,7 @@ describe("raw prompt render loop", () => {
     expect(loop.render({
       prompt: "> ",
       state: createLineEditorState("/"),
-      overlayRows: [
+      fallbackRows: [
         { id: "help", text: "  /help - Show help" },
         { id: "status", text: "> /status - Show status" },
       ],
@@ -401,7 +402,7 @@ describe("raw prompt render loop", () => {
     loop.render({
       prompt: "> ",
       state: createLineEditorState("/h"),
-      overlayRows: [{ id: "help", text: "> /help - Show help" }],
+      fallbackRows: [{ id: "help", text: "> /help - Show help" }],
     });
     output.write("\nconsole after");
 
@@ -419,7 +420,7 @@ describe("raw prompt render loop", () => {
     loop.render({
       prompt: "> ",
       state: createLineEditorState("draft"),
-      overlayRows: [{ text: "overlay" }],
+      fallbackRows: [{ text: "overlay" }],
     });
     loop.clear();
 
@@ -427,24 +428,12 @@ describe("raw prompt render loop", () => {
     expect(output.text()).not.toMatch(forbiddenManagedRegionOutput);
   });
 
-  it("builds cursor metadata for prompt and continuation rows", () => {
-    expect(buildRawPromptFrame({
-      prompt: "> ",
-      state: createLineEditorState("abc", 2),
-    })).toMatchObject({
-      rows: ["> abc"],
-      cursorRow: 0,
-      cursorColumn: 4,
-    });
+  it("does not export the retired raw prompt frame builder", async () => {
+    const module = await import("./rawPromptRenderLoop.js");
+    const source = await readFile(new URL("./rawPromptRenderLoop.ts", import.meta.url), "utf8");
 
-    expect(buildRawPromptFrame({
-      prompt: "> ",
-      state: createLineEditorState("one\ntwo", 5),
-    })).toMatchObject({
-      rows: ["> one", "two"],
-      cursorRow: 1,
-      cursorColumn: 1,
-    });
+    expect(module).not.toHaveProperty("buildRawPromptFrame");
+    expect(source).not.toMatch(/export function buildRawPromptFrame/u);
   });
 });
 

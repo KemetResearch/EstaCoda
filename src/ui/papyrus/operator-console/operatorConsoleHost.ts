@@ -16,16 +16,11 @@ import {
   type OperatorConsoleRuntimeHost,
 } from "./operatorConsoleRuntimeHost.js";
 
-export type OperatorConsoleRawPromptOverlayRow = {
-  readonly text: string;
-};
-
 export type OperatorConsoleRawPromptSnapshot = {
   readonly prompt: string;
   readonly state: LineEditorState;
   readonly status?: StatusRailState;
   readonly terminal?: Partial<TerminalMetrics>;
-  readonly overlayRows?: readonly OperatorConsoleRawPromptOverlayRow[];
   readonly attachments?: readonly AttachmentCardState[];
   readonly slash?: SlashMenuState;
 };
@@ -74,7 +69,7 @@ export function buildOperatorConsoleRawPromptFrame(
     : getPromptCursorPosition(state, promptRegion.y, promptRegion.height);
 
   return {
-    rows: insertOverlayRowsBeforeStatus(renderedRows, snapshot.overlayRows ?? []),
+    rows: renderedRows,
     cursorRow: cursor.row,
     cursorColumn: cursor.column,
     state,
@@ -98,7 +93,7 @@ export function buildOperatorConsoleRawPromptFrameWithRuntimeHost(
     scrollOffset: 0,
     mode: "prompt",
   });
-  return rawPromptFrameFromRuntimeFrame(host.render(), snapshot.overlayRows ?? []);
+  return rawPromptFrameFromRuntimeFrame(host.render());
 }
 
 export function createDefaultOperatorConsoleRawPromptStatus(): StatusRailState {
@@ -116,35 +111,18 @@ export function createDefaultOperatorConsoleRawPromptStatus(): StatusRailState {
   };
 }
 
-function rawPromptFrameFromRuntimeFrame(
-  frame: OperatorConsoleRuntimeFrame,
-  overlayRows: readonly OperatorConsoleRawPromptOverlayRow[]
-): OperatorConsoleRawPromptFrame {
+function rawPromptFrameFromRuntimeFrame(frame: OperatorConsoleRuntimeFrame): OperatorConsoleRawPromptFrame {
   const promptRegion = frame.layout.regions.find((region) => region.kind === "prompt");
   const cursor = promptRegion === undefined
     ? { row: 0, column: 0 }
     : getPromptCursorPosition(frame.state, promptRegion.y, promptRegion.height);
 
   return {
-    rows: insertOverlayRowsBeforeStatus(frame.lines, overlayRows),
+    rows: frame.lines,
     cursorRow: cursor.row,
     cursorColumn: cursor.column,
     state: frame.state,
   };
-}
-
-function insertOverlayRowsBeforeStatus(
-  rows: readonly string[],
-  overlayRows: readonly OperatorConsoleRawPromptOverlayRow[]
-): readonly string[] {
-  if (overlayRows.length === 0) return rows;
-  if (rows.length === 0) return overlayRows.map((row) => row.text);
-  const statusIndex = rows.length - 1;
-  return [
-    ...rows.slice(0, statusIndex),
-    ...overlayRows.map((row) => row.text),
-    ...rows.slice(statusIndex),
-  ];
 }
 
 function getPromptCursorPosition(
