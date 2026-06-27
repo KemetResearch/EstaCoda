@@ -53,6 +53,63 @@ describe("raw prompt render loop", () => {
     expect(output.text()).not.toMatch(forbiddenManagedRegionOutput);
   });
 
+  it("redraws Operator Console frames from the previous prompt cursor row", () => {
+    const output = fakeOutput();
+    const loop = new RawPromptRenderLoop(output);
+
+    expect(loop.render({
+      prompt: "> ",
+      state: createLineEditorState("h"),
+      operatorConsole: {
+        enabled: true,
+        terminal: { width: 72, height: 12, isTty: true },
+        status: status({ usedTokens: 0, elapsedMs: 0 }),
+      },
+    })).toBe(4);
+
+    const secondRenderStart = output.chunks().length;
+    expect(loop.render({
+      prompt: "> ",
+      state: createLineEditorState("he"),
+      operatorConsole: {
+        enabled: true,
+        terminal: { width: 72, height: 12, isTty: true },
+        status: status({ usedTokens: 0, elapsedMs: 0 }),
+      },
+    })).toBe(4);
+
+    const secondRender = output.chunks().slice(secondRenderStart).join("");
+    expect(secondRender.startsWith("\x1b[1A\r")).toBe(true);
+    expect(secondRender.startsWith("\x1b[3A\r")).toBe(false);
+  });
+
+  it("redraws fallback overlay rows from the previous prompt cursor row", () => {
+    const output = fakeOutput();
+    const loop = new RawPromptRenderLoop(output);
+
+    expect(loop.render({
+      prompt: "> ",
+      state: createLineEditorState("/"),
+      fallbackRows: [
+        { id: "help", text: "> /help - Show help" },
+        { id: "status", text: "  /status - Show status" },
+      ],
+    })).toBe(3);
+
+    const secondRenderStart = output.chunks().length;
+    expect(loop.render({
+      prompt: "> ",
+      state: createLineEditorState("/s"),
+      fallbackRows: [
+        { id: "status", text: "> /status - Show status" },
+      ],
+    })).toBe(2);
+
+    const secondRender = output.chunks().slice(secondRenderStart).join("");
+    expect(secondRender.startsWith("\r")).toBe(true);
+    expect(secondRender.startsWith("\x1b[2A\r")).toBe(false);
+  });
+
   it("uses a persistent Operator Console runtime host for gated prompt/status rendering", () => {
     const output = fakeOutput();
     const host = createOperatorConsoleRuntimeHost();
@@ -518,13 +575,14 @@ describe("raw prompt render loop", () => {
   });
 });
 
-function fakeOutput(): RawPromptRenderOutput & { text(): string } {
+function fakeOutput(): RawPromptRenderOutput & { text(): string; chunks(): readonly string[] } {
   const writes: string[] = [];
   return {
     write: vi.fn((chunk: string) => {
       writes.push(chunk);
     }),
     text: () => writes.join(""),
+    chunks: () => [...writes],
   };
 }
 

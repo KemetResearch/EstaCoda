@@ -156,6 +156,8 @@ class TtySelectRenderLoop {
 
   render(text: string): void {
     const rows = text.length === 0 ? [""] : text.split("\n");
+    // Select frames intentionally leave the cursor on the bottom row. If focus
+    // later moves inside the frame, this anchor must track that cursor row.
     this.#moveToFirstRenderedRow();
 
     const physicalRows = Math.max(this.#renderedRows, rows.length);

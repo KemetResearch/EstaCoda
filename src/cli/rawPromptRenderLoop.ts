@@ -73,6 +73,7 @@ export class RawPromptRenderLoop {
   readonly #operatorConsoleHostFactory: () => OperatorConsoleRuntimeHost;
   #operatorConsoleHost: OperatorConsoleRuntimeHost | undefined;
   #renderedRows = 0;
+  #cursorRow = 0;
 
   constructor(
     output: RawPromptRenderOutput,
@@ -108,6 +109,7 @@ export class RawPromptRenderLoop {
 
     this.#moveToFrameCursor(physicalRows, frame.cursorRow, frame.cursorColumn);
     this.#renderedRows = frame.rows.length;
+    this.#cursorRow = frame.cursorRow;
     return frame.rows.length;
   }
 
@@ -120,6 +122,7 @@ export class RawPromptRenderLoop {
     }
     this.#moveToFrameCursor(this.#renderedRows, 0, 0);
     this.#renderedRows = 0;
+    this.#cursorRow = 0;
   }
 
   #getOperatorConsoleHost(): OperatorConsoleRuntimeHost {
@@ -130,7 +133,7 @@ export class RawPromptRenderLoop {
   }
 
   #moveToFirstRenderedRow(): void {
-    if (this.#renderedRows > 1) this.#output.write(`\x1b[${this.#renderedRows - 1}A`);
+    if (this.#cursorRow > 0) this.#output.write(`\x1b[${this.#cursorRow}A`);
     if (this.#renderedRows > 0) this.#output.write("\r");
   }
 

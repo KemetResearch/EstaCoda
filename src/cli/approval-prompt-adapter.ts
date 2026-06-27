@@ -93,6 +93,9 @@ async function readInlineOperatorConsoleApproval(input: {
   let renderedRows = 0;
   const wasRaw = input.input.isRaw === true;
 
+  // This inline card leaves the cursor on the bottom row after every render.
+  // If a future version moves focus inside the frame, this anchor must track
+  // the cursor row like RawPromptRenderLoop does.
   const moveToFirstRenderedRow = () => {
     if (renderedRows > 1) input.output.write(`\x1b[${renderedRows - 1}A`);
     if (renderedRows > 0) input.output.write("\r");
