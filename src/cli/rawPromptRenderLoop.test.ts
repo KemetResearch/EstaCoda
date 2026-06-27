@@ -341,6 +341,34 @@ describe("raw prompt render loop", () => {
     expect(text).not.toMatch(/\b(attachment|pasted text)\b.*session/iu);
   });
 
+  it("passes Operator Console attachment focus through the persistent runtime host", () => {
+    const output = fakeOutput();
+    const host = createOperatorConsoleRuntimeHost();
+    const loop = new RawPromptRenderLoop(output, {
+      operatorConsoleHostFactory: () => host,
+    });
+
+    loop.render({
+      prompt: "> ",
+      state: createLineEditorState("summarize"),
+      operatorConsole: {
+        enabled: true,
+        terminal: { width: 96, height: 18, isTty: true },
+        status: status({ usedTokens: 18000, elapsedMs: 72000 }),
+        attachments: [
+          createPastedTextAttachment({
+            id: "paste-1",
+            content: "first pasted payload",
+          }),
+        ],
+        focus: { target: { kind: "attachment", attachmentId: "paste-1" } },
+      },
+    });
+
+    expect(host.getState().focus.target).toEqual({ kind: "attachment", attachmentId: "paste-1" });
+    expect(output.text()).toContain("╭─ › pasted text");
+  });
+
   it("redraws after edits without full-screen or scrollback clear sequences", () => {
     const output = fakeOutput();
     const loop = new RawPromptRenderLoop(output);

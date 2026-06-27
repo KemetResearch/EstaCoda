@@ -1,4 +1,5 @@
 import type { LineEditorState } from "../../input/lineEditor.js";
+import type { FocusState } from "./focusModel.js";
 import { stringWidth } from "../screen/stringWidth.js";
 import {
   createInitialOperatorConsoleState,
@@ -29,6 +30,7 @@ export type OperatorConsoleRawPromptSnapshot = {
   readonly activeWork?: ToolActivityState;
   readonly steer?: SteerState;
   readonly promptMode?: PromptSurfaceState["mode"];
+  readonly focus?: FocusState;
 };
 
 export type OperatorConsoleRawPromptFrame = {
@@ -61,6 +63,7 @@ export function buildOperatorConsoleStateFromRawPrompt(
     attachments: snapshot.attachments ?? [],
     activeWork: snapshot.activeWork,
     steer: snapshot.steer,
+    focus: snapshot.focus,
     ...(snapshot.slash === undefined ? {} : { slash: snapshot.slash }),
   });
 }
@@ -96,6 +99,7 @@ export function buildOperatorConsoleRawPromptFrameWithRuntimeHost(
   host.setSlash(snapshot.slash);
   host.setActiveWork(snapshot.activeWork ?? createInitialOperatorConsoleState().activeWork);
   host.setSteer(snapshot.steer);
+  host.setFocus(snapshot.focus ?? createInitialOperatorConsoleState().focus);
   host.setPrompt({
     text: snapshot.state.text,
     cursorOffset: snapshot.state.cursor,

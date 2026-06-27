@@ -1,5 +1,6 @@
 import { createOperatorConsoleLayout, type OperatorConsoleLayout } from "./operatorConsoleLayout.js";
 import { renderOperatorConsoleTextLines } from "./operatorConsoleRenderer.js";
+import type { FocusState, FocusTarget } from "./focusModel.js";
 import {
   createDefaultPromptSurfaceState,
   createDefaultStatusRailState,
@@ -98,6 +99,14 @@ export class OperatorConsoleRuntimeHost {
     };
   }
 
+  setFocus(focus: FocusState): void {
+    if (this.#disposed) return;
+    this.#state = {
+      ...this.#state,
+      focus: cloneFocusState(focus),
+    };
+  }
+
   setActiveWork(activeWork: ToolActivityState): void {
     if (this.#disposed) return;
     this.#state = {
@@ -188,9 +197,20 @@ function cloneOperatorConsoleState(state: OperatorConsoleState): OperatorConsole
     approvals: state.approvals.map(cloneApprovalCardState),
     slash: state.slash === undefined ? undefined : cloneSlashMenuState(state.slash),
     steer: state.steer === undefined ? undefined : cloneSteerState(state.steer),
-    focus: state.focus,
+    focus: cloneFocusState(state.focus),
     terminal: cloneTerminalMetrics(state.terminal),
   });
+}
+
+function cloneFocusState(focus: FocusState): FocusState {
+  return {
+    target: cloneFocusTarget(focus.target),
+    ...(focus.previous === undefined ? {} : { previous: cloneFocusTarget(focus.previous) }),
+  };
+}
+
+function cloneFocusTarget(target: FocusTarget): FocusTarget {
+  return { ...target };
 }
 
 function clonePromptSurfaceState(prompt: PromptSurfaceState): PromptSurfaceState {

@@ -9,6 +9,7 @@ import {
   formatSubmittedPromptWithAttachmentReferences,
   getFocusedAttachment,
   renderAttachmentSurface,
+  removeAttachmentAndRepairFocus,
   routeAttachmentKey,
   type AttachmentCardState,
   type OperatorConsoleState,
@@ -151,6 +152,18 @@ describe("Papyrus operator console attachment surface", () => {
     expect(text).toContain("184 lines");
   });
 
+  it("visually marks the focused attachment without changing stored content", () => {
+    const attachments = sampleAttachments();
+    const output = renderAttachmentSurface(attachments, {
+      width: 120,
+      focusedAttachmentId: "file-1",
+    }).join("\n");
+
+    expect(output).toContain("╭─ › file excerpt");
+    expect(output).toContain("╭─ pasted text");
+    expect(attachments[1]?.title).toBe("file excerpt");
+  });
+
   it("moves focus from prompt to attachments and back", () => {
     const state = createState({ attachments: sampleAttachments() });
     const first = focusNextAttachment(state);
@@ -214,6 +227,20 @@ describe("Papyrus operator console attachment surface", () => {
       kind: "attachment",
       attachmentId: "paste-1",
     });
+  });
+
+  it("removes focused attachments and advances focus safely", () => {
+    const state = createState({
+      attachments: sampleAttachments(),
+      focus: {
+        target: { kind: "attachment", attachmentId: "paste-1" },
+      },
+    });
+    const next = removeAttachmentAndRepairFocus(state, "paste-1");
+
+    expect(next.attachments.map((attachment) => attachment.id)).toEqual(["file-1", "paste-2"]);
+    expect(next.focus.target).toEqual({ kind: "attachment", attachmentId: "file-1" });
+    expect(state.attachments.map((attachment) => attachment.id)).toEqual(["paste-1", "file-1", "paste-2"]);
   });
 
   it("submits prompt with Enter when prompt is focused", () => {

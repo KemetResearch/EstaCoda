@@ -441,6 +441,78 @@ describe("raw prompt controller", () => {
     });
   });
 
+  it("focuses Operator Console attachment cards and opens preview without submitting", async () => {
+    const previews: AttachmentCardState[] = [];
+    const read = startPendingOperatorConsoleRead({
+      operatorConsole: {
+        enabled: true,
+        terminal: { width: 72, height: 16, isTty: true },
+        onAttachmentPreview: (attachment) => {
+          previews.push(attachment);
+        },
+      },
+    });
+
+    read.input.send("summarize");
+    read.input.send(`${PASTE_START}full pasted payload${PASTE_END}`);
+    await Promise.resolve();
+    read.input.send("\t");
+    await Promise.resolve();
+
+    expect(read.output.writes.join("")).toContain("╭─ › pasted text");
+
+    read.input.send("\r");
+    await Promise.resolve();
+
+    expect(read.isResolved()).toBe(false);
+    expect(previews.map((attachment) => attachment.content)).toEqual(["full pasted payload"]);
+
+    read.input.send("\x1b[Z");
+    read.input.send("\r");
+
+    expect(await read.pending).toEqual({
+      type: "submit",
+      text: ["summarize", "Attachments:", "- pasted text · 19 chars"].join("\n"),
+    });
+  });
+
+  it("removes focused Operator Console attachments and omits them from submitted refs", async () => {
+    const attachmentsSeen: Array<readonly AttachmentCardState[]> = [];
+    const read = startPendingOperatorConsoleRead({
+      operatorConsole: {
+        enabled: true,
+        terminal: { width: 72, height: 16, isTty: true },
+        onAttachmentsChange: (attachments) => {
+          attachmentsSeen.push(attachments);
+        },
+      },
+    });
+
+    read.input.send("summarize");
+    read.input.send(`${PASTE_START}first pasted payload${PASTE_END}`);
+    read.input.send(`${PASTE_START}second pasted payload${PASTE_END}`);
+    await Promise.resolve();
+    read.input.send("\t");
+    read.input.send("\x1b");
+    await Promise.resolve();
+
+    expect(read.isResolved()).toBe(false);
+    expect(attachmentsSeen.at(-1)?.map((attachment) => attachment.content)).toEqual(["second pasted payload"]);
+    expect(read.output.writes.join("")).toContain("╭─ › pasted text");
+
+    read.input.send("\x1b[Z");
+    read.input.send("\r");
+
+    expect(await read.pending).toEqual({
+      type: "submit",
+      text: [
+        "summarize",
+        "Attachments:",
+        "- pasted text · 21 chars",
+      ].join("\n"),
+    });
+  });
+
   it("does not remove Operator Console attachments when Escape cancels from prompt focus", async () => {
     const attachmentsSeen: Array<readonly AttachmentCardState[]> = [];
     const read = startPendingOperatorConsoleRead({

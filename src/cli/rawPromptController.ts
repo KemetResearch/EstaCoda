@@ -29,9 +29,14 @@ import {
   type PapyrusVimKeymapState,
 } from "../ui/papyrus/input/vim/vimKeymap.js";
 import {
+  createInitialFocusState,
+  createInitialOperatorConsoleState,
   createPastedTextAttachment,
   formatSubmittedPromptWithAttachmentReferences,
+  removeAttachmentAndRepairFocus,
+  routeAttachmentKey,
   type AttachmentCardState,
+  type FocusState,
   type SlashMenuState,
 } from "../ui/papyrus/operator-console/index.js";
 
@@ -119,6 +124,7 @@ export class RawPromptController {
     let state = createLineEditorState();
     let attachmentSequence = 0;
     let attachments: readonly AttachmentCardState[] = [];
+    let attachmentFocus: FocusState = createInitialFocusState();
     let vimKeymapState: PapyrusVimKeymapState | undefined =
       this.#keymap?.mode === "vim" ? createPapyrusVimKeymapState() : undefined;
     let typeaheadState: TypeaheadState<SlashCommandSuggestionMetadata> = createTypeaheadControllerState();
@@ -142,6 +148,7 @@ export class RawPromptController {
             },
             attachments,
             slash: slashMenu,
+            focus: attachmentFocus,
           }
           : undefined,
       });
@@ -315,6 +322,43 @@ export class RawPromptController {
         render();
       };
 
+      const handleAttachmentKeypress = (event: ParsedKeypress) => {
+        if (this.#operatorConsole?.enabled !== true || attachments.length === 0 || event.type !== "key") return false;
+        if (attachmentFocus.target.kind === "prompt" && event.key !== "tab") return false;
+        if (attachmentFocus.target.kind === "prompt" && event.key === "tab" && isTypeaheadActive()) return false;
+
+        const routed = routeAttachmentKey(createInitialOperatorConsoleState({
+          attachments,
+          focus: attachmentFocus,
+        }), event);
+        attachmentFocus = routed.state.focus;
+        const intent = routed.intent;
+
+        if (intent.type === "none") {
+          render();
+          return true;
+        }
+
+        if (intent.type === "openPreview") {
+          const attachment = attachments.find((candidate) => candidate.id === intent.attachmentId);
+          if (attachment !== undefined) this.#operatorConsole.onAttachmentPreview?.(attachment);
+          render();
+          return true;
+        }
+
+        if (intent.type === "remove") {
+          const nextState = removeAttachmentAndRepairFocus(routed.state, intent.attachmentId);
+          attachments = nextState.attachments;
+          attachmentFocus = nextState.focus;
+          this.#operatorConsole.onAttachmentsChange?.(attachments);
+          render();
+          return true;
+        }
+
+        finish({ type: "submit", text: formatSubmittedText(state.text) });
+        return true;
+      };
+
       const formatSubmittedText = (text: string) => {
         return this.#operatorConsole?.enabled === true && attachments.length > 0
           ? formatSubmittedPromptWithAttachmentReferences(text, attachments)
@@ -329,6 +373,7 @@ export class RawPromptController {
             addPasteAttachment(event.text);
             continue;
           }
+          if (handleAttachmentKeypress(event)) continue;
           if (handleTypeaheadKeypress(event)) continue;
           if (vimKeymapState !== undefined) {
             const vimResult = applyPapyrusVimKeymap(vimKeymapState, state, event);

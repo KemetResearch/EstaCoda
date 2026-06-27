@@ -72,6 +72,7 @@ function renderRegionLines(
     return renderAttachmentSurface(state.attachments, {
       width: region.width,
       height: region.height,
+      focusedAttachmentId: state.focus.target.kind === "attachment" ? state.focus.target.attachmentId : undefined,
     }).map((text) => ({ region: region.kind, text }));
   }
   if (region.kind === "activeWork") {

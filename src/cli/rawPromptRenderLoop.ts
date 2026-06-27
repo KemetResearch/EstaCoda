@@ -15,6 +15,7 @@ import type {
   SteerState,
   ToolActivityState,
 } from "../ui/papyrus/operator-console/operatorConsoleState.js";
+import type { FocusState } from "../ui/papyrus/operator-console/focusModel.js";
 
 export type RawPromptRenderOutput = {
   write(chunk: string): unknown;
@@ -43,6 +44,8 @@ export type RawPromptRenderSnapshot = {
 export type RawPromptOperatorConsoleOptions = Omit<OperatorConsoleRawPromptSnapshot, "prompt" | "state"> & {
   readonly enabled: boolean;
   readonly onAttachmentsChange?: (attachments: readonly AttachmentCardState[]) => void;
+  readonly onAttachmentPreview?: (attachment: AttachmentCardState) => void;
+  readonly focus?: FocusState;
   readonly slash?: SlashMenuState;
   readonly activeWork?: ToolActivityState;
   readonly steer?: SteerState;
@@ -91,6 +94,7 @@ export class RawPromptRenderLoop {
         activeWork: snapshot.operatorConsole.activeWork,
         steer: snapshot.operatorConsole.steer,
         promptMode: snapshot.operatorConsole.promptMode,
+        focus: snapshot.operatorConsole.focus,
       })
       : buildFallbackRawPromptFrame(snapshot);
     this.#moveToFirstRenderedRow();
