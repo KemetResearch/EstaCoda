@@ -229,9 +229,8 @@ describe("interactive-select prompt card surface", () => {
     await expect(pending).resolves.toBe("openai");
     const latestFrame = stripAnsi(latestRenderedFrame(output.getText()));
     expect(latestFrame).toContain("إعداد النموذج");
-    expect(latestFrame).toContain("المزود");
-    expect(latestFrame).toContain("النموذج");
-    expect(latestFrame).toContain("الحالة");
+    expect(latestFrame).not.toContain("المزود");
+    expect(latestFrame).not.toContain("الحالة");
     expect(latestFrame).toContain("OpenAI");
     expect(latestFrame).toContain("gpt-5.5");
     expect(latestFrame).toContain("Local");
@@ -254,7 +253,7 @@ describe("interactive-select prompt card surface", () => {
 
     await expect(pending).resolves.toBe("fallback");
     const latestFrame = stripAnsi(latestRenderedFrame(output.getText()));
-    expect(latestFrame).toContain("╭──── 𓂀  محرّر الإعدادات");
+    expect(latestFrame).toContain("𓂀  محرّر الإعدادات");
     expect(latestFrame).toContain("محرّر الإعدادات");
     expect(latestFrame).toContain("اختار اللي تحب تضبطه:");
     expect(latestFrame).toContain("النموذج الافتراضي الذي يستخدمه الوكيل.");

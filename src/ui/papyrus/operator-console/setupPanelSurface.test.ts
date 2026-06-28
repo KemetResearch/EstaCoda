@@ -60,7 +60,7 @@ describe("Papyrus operator console setup panel surface", () => {
     expect(output.every((line) => stringWidth(line) <= 42)).toBe(true);
   });
 
-  it("renders Arabic setup labels while preserving technical tokens", () => {
+  it("renders Arabic route choices as right-anchored stacked blocks", () => {
     const output = renderSetupPanelSurface({
       kind: "table",
       title: "إعداد النموذج",
@@ -74,9 +74,8 @@ describe("Papyrus operator console setup panel surface", () => {
     const text = output.join("\n");
 
     expect(text).toContain("إعداد النموذج");
-    expect(text).toContain("المزود");
-    expect(text).toContain("النموذج");
-    expect(text).toContain("الحالة");
+    expect(text).not.toContain("المزود");
+    expect(text).not.toContain("الحالة");
     expect(text).toContain("OpenAI");
     expect(text).toContain("gpt-5.5");
     expect(text).toContain("Local");
@@ -84,10 +83,11 @@ describe("Papyrus operator console setup panel surface", () => {
     expect(text).toContain("URL");
     expect(text).toContain("Enter");
     expect(text).toContain("Esc");
+    expect(visibleColumn(output[0]!, "𓂀  إعداد النموذج")).toBeGreaterThan(24);
     expect(output.every((line) => stringWidth(line) <= 72)).toBe(true);
   });
 
-  it("renders Arabic two-column setup choices as a stable Papyrus menu", () => {
+  it("renders Arabic setup choices as stable stacked Papyrus blocks", () => {
     const output = renderSetupPanelSurface({
       kind: "table",
       layout: "choiceMenu",
@@ -128,18 +128,18 @@ describe("Papyrus operator console setup panel surface", () => {
       selectedRowId: "fallback",
     }, { width: 120 });
     const text = output.join("\n");
-    const primaryLine = output.find((line) => line.includes("النموذج الافتراضي")) ?? "";
-    const fallbackLine = output.find((line) => line.includes("نماذج احتياطية")) ?? "";
-    const searchLine = output.find((line) => line.includes("EstaCoda")) ?? "";
+    const fallbackLabelLine = output.find((line) => line.includes("النماذج الاحتياطية") && line.includes("◂")) ?? "";
+    const fallbackDetailLine = output.find((line) => line.includes("نماذج احتياطية")) ?? "";
 
     expect(output[0]).toContain("𓂀  محرّر الإعدادات");
     expect(text).toContain("محرّر الإعدادات");
     expect(text).toContain("◂");
     expect(text).not.toContain("المزود");
     expect(text).not.toContain("الحالة");
-    expect(visibleColumn(searchLine, "اضبط كيف")).toBe(visibleColumn(primaryLine, "النموذج الافتراضي"));
-    expect(visibleColumn(fallbackLine, "◂")).toBeGreaterThan(visibleTextEndColumn(fallbackLine, "النماذج الاحتياطية"));
-    expect(visibleTextEndColumn(searchLine, "البحث")).toBe(visibleTextEndColumn(primaryLine, "النموذج الأساسي"));
+    expect(fallbackLabelLine).toContain("◂");
+    expect(fallbackDetailLine).toContain("نماذج احتياطية");
+    expect(visibleColumn(output[0]!, "𓂀  محرّر الإعدادات")).toBeGreaterThan(70);
+    expect(visibleColumn(fallbackLabelLine, "النماذج الاحتياطية")).toBeGreaterThan(80);
     expect(output.every((line) => stringWidth(line) <= 120)).toBe(true);
   });
 
@@ -152,11 +152,11 @@ describe("Papyrus operator console setup panel surface", () => {
         capabilities: { supportsColor: true, supportsTrueColor: true },
       }),
     });
-    const selectedLine = output.find((line) => line.includes("نماذج احتياطية")) ?? "";
+    const selectedLine = output.find((line) => line.includes("النماذج الاحتياطية") && line.includes("◂")) ?? "";
 
     expect(selectedLine).toContain(ansiFg(tokens.contract.palette.action));
-    expect(selectedLine).toContain(`${RLI}نماذج احتياطية`);
-    expect(selectedLine).toMatch(/نماذج احتياطية.*◂.*\x1b\[0m/u);
+    expect(selectedLine).toContain(`${RLI}النماذج الاحتياطية`);
+    expect(selectedLine).toMatch(/النماذج الاحتياطية.*◂.*\x1b\[0m/u);
   });
 
   it("colors the selected setup route row when styled", () => {
@@ -259,10 +259,6 @@ function visibleColumn(line: string, text: string): number {
   const index = line.indexOf(text);
   expect(index).toBeGreaterThanOrEqual(0);
   return stringWidth(line.slice(0, index));
-}
-
-function visibleTextEndColumn(line: string, text: string): number {
-  return visibleColumn(line, text) + stringWidth(text);
 }
 
 function arabicChoiceMenu(): SetupPanelState {

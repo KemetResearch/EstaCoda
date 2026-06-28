@@ -20,6 +20,9 @@ export function getSetupPanelSurfaceDesiredHeight(state: SetupSurfaceState, widt
   if (state.kind === "secret") return state.optional === true ? 8 : 10;
   const statusLineCount = state.statusLines?.length ?? 0;
   const navigationSeparatorCount = state.rows.some((row) => row.group === "navigation") ? 1 : 0;
+  if (state.locale === "ar") {
+    return Math.max(8, state.rows.length * 2 + navigationSeparatorCount + 6 + statusLineCount);
+  }
   const baseRows = state.rows.length + navigationSeparatorCount + 7 + statusLineCount;
   return normalizeDimension(width) >= WIDE_TABLE_MIN_WIDTH
     ? Math.max(8, baseRows)
@@ -52,15 +55,56 @@ function renderSetupTablePanel(
     renderContentRow(description, contentWidth, width),
     ...renderStatusLines(state.statusLines, contentWidth, width, style),
     renderContentRow("", contentWidth, width),
-    ...(width >= WIDE_TABLE_MIN_WIDTH
+    ...(state.locale === "ar"
+      ? renderArabicStackedRows(state, contentWidth, width, style)
+      : width >= WIDE_TABLE_MIN_WIDTH
       ? state.layout === "choiceMenu"
         ? renderChoiceMenuRows(state, contentWidth, width, style)
         : renderWideTableRows(state, copy, contentWidth, width, style)
-      : renderNarrowTableRows(state, contentWidth, width, style)),
+      : renderNarrowTableRows(state, contentWidth, width, style)
+    ),
     renderContentRow("", contentWidth, width),
     renderContentRow(styleFooter(footer, style), contentWidth, width),
     renderBottomBorder(width),
   ];
+  return rows;
+}
+
+function renderArabicStackedRows(
+  state: SetupPanelState,
+  contentWidth: number,
+  width: number,
+  style: OperatorConsoleStyle | undefined
+): readonly string[] {
+  const rows: string[] = [];
+  let renderedNavigationSeparator = false;
+
+  for (const row of state.rows) {
+    if (row.group === "navigation" && !renderedNavigationSeparator && rows.length > 0) {
+      rows.push(renderContentRow("", contentWidth, width));
+      renderedNavigationSeparator = true;
+    }
+
+    const selected = row.id === state.selectedRowId;
+    rows.push(renderSelectedRightContentRow(
+      formatArabicOptionLabel(row.provider, selected),
+      selected,
+      style,
+      contentWidth,
+      width
+    ));
+
+    for (const detailLine of wrapVisibleCells(arabicRowDetail(row, state.layout), contentWidth)) {
+      rows.push(renderSelectedRightContentRow(
+        localizeChoiceCell(detailLine),
+        selected,
+        style,
+        contentWidth,
+        width
+      ));
+    }
+  }
+
   return rows;
 }
 
@@ -136,6 +180,17 @@ function renderSelectedContentRow(
   return renderContentRow(styleSelectedChoiceRow(content, selected, style), contentWidth, width);
 }
 
+function renderSelectedRightContentRow(
+  row: string,
+  selected: boolean,
+  style: OperatorConsoleStyle | undefined,
+  contentWidth: number,
+  width: number
+): string {
+  const content = padVisibleStart(truncateVisibleCells(row, contentWidth), contentWidth);
+  return renderContentRow(styleSelectedChoiceRow(content, selected, style), contentWidth, width);
+}
+
 function physicalChoiceCell(
   value: string,
   width: number,
@@ -168,6 +223,21 @@ function choiceMenuDetail(row: SetupPanelState["rows"][number]): string {
   if (row.notes.length === 0 || row.notes === row.status) return row.status;
   if (row.status.length === 0) return row.notes;
   return `${row.status} · ${row.notes}`;
+}
+
+function formatArabicOptionLabel(label: string, selected: boolean): string {
+  const localizedLabel = localizeChoiceCell(label);
+  return selected ? `${localizedLabel} ◂` : localizedLabel;
+}
+
+function arabicRowDetail(
+  row: SetupPanelState["rows"][number],
+  layout: SetupPanelState["layout"]
+): string {
+  if (layout === "choiceMenu") return choiceMenuDetail(row);
+  return [row.model, row.status, row.notes]
+    .filter((value) => value.trim().length > 0)
+    .join(" · ");
 }
 
 function renderWideTableRows(
@@ -296,14 +366,21 @@ function renderSetupPanelTopBorder(
   width: number,
   style: OperatorConsoleStyle | undefined
 ): string {
-  return renderTopBorder(styleBrand(`𓂀  ${formatFrameTitle(title, locale)}`, style), width);
+  return renderTopBorder(
+    styleBrand(`𓂀  ${formatFrameTitle(title, locale)}`, style),
+    width,
+    locale === "ar" ? "right" : "left"
+  );
 }
 
-function renderTopBorder(title: string, width: number): string {
+function renderTopBorder(title: string, width: number, align: "left" | "right"): string {
   if (width <= 1) return "╭".slice(0, width);
-  const label = `──── ${title} `;
+  const label = align === "right" ? ` ${title} ────` : `──── ${title} `;
   const remaining = Math.max(0, width - 2 - stringWidth(label));
-  return truncateVisibleCells(`╭${label}${"─".repeat(remaining)}╮`, width);
+  const line = align === "right"
+    ? `╭${"─".repeat(remaining)}${label}╮`
+    : `╭${label}${"─".repeat(remaining)}╮`;
+  return truncateVisibleCells(line, width);
 }
 
 function renderBottomBorder(width: number): string {
@@ -384,6 +461,34 @@ function truncateVisibleCells(value: string, maxCells: number): string {
     output += char;
   }
   return output;
+}
+
+function wrapVisibleCells(value: string, maxCells: number): readonly string[] {
+  const width = normalizeDimension(maxCells);
+  if (width <= 0 || value.length === 0) return [];
+  if (stringWidth(value) <= width) return [value];
+
+  const words = value.split(/(\s+)/u).filter((part) => part.length > 0);
+  const lines: string[] = [];
+  let current = "";
+
+  for (const word of words) {
+    const next = current.length === 0 ? word.trimStart() : `${current}${word}`;
+    if (stringWidth(next) <= width) {
+      current = next;
+      continue;
+    }
+    if (current.trim().length > 0) lines.push(current.trim());
+    current = word.trim();
+    while (stringWidth(current) > width) {
+      const chunk = truncateVisibleCells(current, width);
+      lines.push(chunk);
+      current = current.slice(chunk.length).trimStart();
+    }
+  }
+
+  if (current.trim().length > 0) lines.push(current.trim());
+  return lines.length === 0 ? [truncateVisibleCells(value, width)] : lines;
 }
 
 function normalizeDimension(value: number): number {
