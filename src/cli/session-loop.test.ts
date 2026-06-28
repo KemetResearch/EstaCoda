@@ -2437,7 +2437,8 @@ describe("runSessionLoop — active turn spinner", () => {
     expect(strippedChunks.some((chunk) => chunk.includes("src/running-0.ts"))).toBe(true);
     expect(strippedChunks.some((chunk) => chunk.includes("approval required"))).toBe(true);
     expect(strippedChunks.some((chunk) => chunk.includes("src/completed-0.ts"))).toBe(true);
-    expect(strippedChunks.some((chunk) => chunk.includes("more completed this turn"))).toBe(true);
+    expect(strippedChunks.some((chunk) => chunk.includes("src/completed-7.ts"))).toBe(true);
+    expect(strippedChunks.some((chunk) => chunk.includes("more completed this turn"))).toBe(false);
     expect(strippedChunks.some((chunk) => chunk.includes("Running tools") && chunk.includes("src/running-0.ts"))).toBe(false);
 
     const durableResponseChunk = strippedChunks.find((chunk) => chunk.includes("Mock response"));

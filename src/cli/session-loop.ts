@@ -534,6 +534,7 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
               supportsAnimation: renderer.capabilities.supportsAnimation,
             },
             getStatus: getOperatorConsoleStatus,
+            turnStartedAtMs,
           });
         let turnWasCancelled = false;
 
