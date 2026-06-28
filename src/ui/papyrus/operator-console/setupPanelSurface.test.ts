@@ -200,10 +200,12 @@ describe("Papyrus operator console setup panel surface", () => {
         capabilities: { supportsColor: true, supportsTrueColor: true },
       }),
     }).join("\n");
+    const footerLine = output.split("\n").find((line) => line.includes("↑↓ navigate")) ?? "";
 
     expect(output).toContain(`${ansiFg(tokens.contract.palette.brand)}\x1b[1m𓂀  Model Route\x1b[0m\x1b[0m`);
     expect(output).toContain(`${ansiFg(tokens.contract.severity.ok)}Current: OpenAI\x1b[0m`);
-    expect(output).toContain(`${ansiFg(tokens.contract.text.secondary)}↑↓ navigate   ENTER select   CTRL+C exit\x1b[0m`);
+    expect(footerLine).toContain(ansiFg(tokens.contract.text.secondary));
+    expect(footerLine).toContain("↑↓ navigate   ENTER select   CTRL+C exit");
   });
 
   it("right-aligns English setup footers and leaves Arabic setup footers on the left", () => {

@@ -433,11 +433,10 @@ function renderFooterRow(
   width: number,
   style: OperatorConsoleStyle | undefined
 ): string {
-  const styledFooter = styleFooter(footer, style);
   const content = locale === "ar"
-    ? styledFooter
-    : padVisibleStart(styledFooter, contentWidth);
-  return renderContentRow(content, contentWidth, width);
+    ? footer
+    : padVisibleStart(footer, contentWidth);
+  return renderContentRow(styleFooter(content, style), contentWidth, width);
 }
 
 function styleStatusLine(
