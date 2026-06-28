@@ -44,13 +44,34 @@ describe("withSetupConsolePrompt", () => {
     const wrapped = withSetupConsolePrompt(prompt, { input, output });
     const selection = {
       ...setupSelection(),
-      columns: undefined,
+      surface: undefined,
     };
 
     await expect(wrapped.select!(selection)).resolves.toBe("plain");
 
     expect(baseSelectCalls).toHaveBeenCalledWith(selection);
     expect(output.text()).toBe("");
+  });
+
+  it("intercepts setup prompt-card choice menus without columns", async () => {
+    const input = createInput();
+    const output = createOutput();
+    const { select: baseSelect, calls: baseSelectCalls } = createSelect("base");
+    const prompt = createPrompt({ select: baseSelect });
+    const wrapped = withSetupConsolePrompt(prompt, { input, output });
+
+    const pending = wrapped.select!(choiceMenuSelection());
+    await Promise.resolve();
+    input.write("\x1b[B\r");
+    const result = await pending;
+    const text = stripAnsi(output.text());
+
+    expect(result).toBe("cancel");
+    expect(baseSelectCalls).not.toHaveBeenCalled();
+    expect(text).toContain("Finalize Configuration");
+    expect(text).toContain("Pending changes: Security");
+    expect(text).toContain("Cancel");
+    expect(text).not.toContain("Selected:");
   });
 
   it("keeps non-TTY setup selects on the existing prompt behavior", async () => {
@@ -150,6 +171,35 @@ function setupSelection(): SelectPromptInput<string> {
         label: "Browser",
         description: "Configure browser control.",
         value: "browser",
+      },
+    ],
+    defaultIndex: 0,
+    hint: "↑↓ navigate   ENTER select",
+    locale: "en",
+    direction: "ltr",
+  };
+}
+
+function choiceMenuSelection(): SelectPromptInput<string> {
+  return {
+    title: "Finalize configuration",
+    body: "Review the changes before applying.\n",
+    fallbackPrompt: "Choose: ",
+    surface: "promptCard",
+    statusLines: [{ text: "Pending changes: Security", tone: "warning", direction: "ltr" }],
+    options: [
+      {
+        id: "approve",
+        label: "Apply changes",
+        description: "Write reviewed setup changes.",
+        value: "approve",
+      },
+      {
+        id: "cancel",
+        label: "Cancel",
+        description: "Leave setup unchanged.",
+        group: "navigation",
+        value: "cancel",
       },
     ],
     defaultIndex: 0,

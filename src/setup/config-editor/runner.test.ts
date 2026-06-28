@@ -348,6 +348,61 @@ describe("runConfigEditor", () => {
     await expect(readFile(profileConfigPath(tempDir), "utf8")).resolves.toContain("\"provider\": \"local\"");
   });
 
+  it("routes review confirmation cards through setup console without columns", async () => {
+    await writeUserConfig(tempDir, {
+      ...localReadyConfig(),
+      security: { approvalMode: "adaptive" },
+    });
+    await trustWorkspace(tempDir, workspaceRoot);
+    const output: string[] = [];
+    const input = createTtyInput();
+    const setupOutput = createTtyOutput();
+    const prompt = fakePrompt();
+    const select = vi.fn(async () => {
+      throw new Error("base prompt select should not run for setup console review cards");
+    });
+    prompt.select = select;
+
+    const pending = runConfigEditor({
+      homeDir: tempDir,
+      workspaceRoot,
+      prompt,
+      setupConsole: { input, output: setupOutput },
+      defaultActionId: "edit-security-mode",
+      applyExecutor: createReviewedSetupApplyExecutor({
+        homeDir: tempDir,
+        workspaceRoot,
+        collectVerification: () => readyVerification(profileConfigPath(tempDir)),
+      }),
+      output: { write: (value) => output.push(value) },
+    });
+    await vi.waitFor(() => {
+      expect(stripAnsi(setupOutput.text())).toContain("Security Mode");
+    });
+    input.write("\x1b[H\r");
+    await vi.waitFor(() => {
+      expect(stripAnsi(setupOutput.text())).toContain("Finalize Configuration");
+    });
+    input.write("\r");
+
+    const result = await pending;
+    const liveText = stripAnsi(setupOutput.text());
+    const config = JSON.parse(await readFile(profileConfigPath(tempDir), "utf8")) as {
+      security?: { approvalMode?: string };
+    };
+
+    expect(result.completed).toBe(true);
+    expect(result.selectedActionId).toBe("edit-security-mode");
+    expect(select).not.toHaveBeenCalled();
+    expect(liveText).toContain("Security Mode");
+    expect(liveText).toContain("Finalize Configuration");
+    expect(liveText).toContain("Pending changes: Security");
+    expect(liveText).toContain("Confirm");
+    expect(liveText).not.toContain("Selected:");
+    expect(setupOutput.text()).not.toMatch(/\x1b\[3J|\x1b\[2J|\x1b\[H|\x1b\[\d+;\d+H/u);
+    expect(config.security?.approvalMode).toBe("strict");
+  });
+
   it("opts comparative setup editor selectors into columns without changing selected values", async () => {
     const prompt = fakePrompt({
       values: [

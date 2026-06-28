@@ -103,6 +103,49 @@ describe("Operator Console setup select runtime mapper", () => {
     });
   });
 
+  it("maps columnless setup choices without route cells into a choice menu", () => {
+    const state = mapSetupSelectToSetupPanelState({
+      title: "Finalize configuration",
+      body: "Review the changes before applying.\n",
+      statusLines: [{ text: "Pending changes: Security", tone: "warning", direction: "ltr" }],
+      selectedIndex: 1,
+      options: [
+        {
+          id: "approve",
+          label: "Apply changes",
+          description: "Write reviewed setup changes.",
+        },
+        {
+          id: "cancel",
+          label: "Cancel",
+          description: "Leave setup unchanged.",
+          group: "navigation",
+        },
+      ],
+    });
+
+    expect(state).toMatchObject({
+      kind: "table",
+      layout: "choiceMenu",
+      title: "Finalize configuration",
+      statusLines: [{ text: "Pending changes: Security", tone: "warning", direction: "ltr" }],
+      selectedRowId: "cancel",
+      rows: [
+        {
+          id: "approve",
+          provider: "Apply changes",
+          status: "Write reviewed setup changes.",
+        },
+        {
+          id: "cancel",
+          provider: "Cancel",
+          status: "Leave setup unchanged.",
+          group: "navigation",
+        },
+      ],
+    });
+  });
+
   it("maps existing setup name/details cells without changing semantic option values", () => {
     const state = mapSetupSelectToSetupPanelState({
       title: "Primary provider",

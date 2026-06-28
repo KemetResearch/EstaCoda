@@ -202,7 +202,6 @@ function shouldUseSetupConsole<T>(
   output: SetupOperatorConsoleOutput
 ): boolean {
   return selection.surface === "promptCard" &&
-    selection.columns !== undefined &&
     selection.options.length > 0 &&
     Boolean((input as TtyReadable).isTTY && output.isTTY);
 }
