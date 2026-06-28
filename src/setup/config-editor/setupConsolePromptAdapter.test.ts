@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { SelectPromptInput } from "../../cli/interactive-select.js";
 import type { Prompt } from "../../cli/prompt-contract.js";
 import {
+  SetupConsoleExitError,
   preserveSetupConsoleOnPromptClose,
   setupConsoleControllerForPrompt,
   withSetupConsolePrompt,
@@ -189,10 +190,9 @@ describe("withSetupConsolePrompt", () => {
     expect(stripAnsi(output.text())).toContain("Stored as: OPENAI_API_KEY");
   });
 
-  it("settles Ctrl+C interruption after restoring the terminal", async () => {
+  it("settles Ctrl+C setup-console exit after restoring the terminal", async () => {
     const input = createInput();
     const output = createOutput();
-    const emit = vi.spyOn(process, "emit").mockImplementation(((event: string) => event === "SIGINT") as typeof process.emit);
     const controller = createSetupOperatorConsoleController({ output });
     const clear = vi.spyOn(controller, "clear");
     const prompt = createPrompt({ select: createSelect("base").select });
@@ -202,8 +202,7 @@ describe("withSetupConsolePrompt", () => {
     await Promise.resolve();
     input.write("\x03");
 
-    await expect(pending).rejects.toThrow("Setup console selection interrupted.");
-    expect(emit).toHaveBeenCalledWith("SIGINT");
+    await expect(pending).rejects.toBeInstanceOf(SetupConsoleExitError);
     expect(output.text()).toContain("\x1b[?25h");
     expect(clear).toHaveBeenCalled();
     expect(input.rawModes).toEqual([true, false]);

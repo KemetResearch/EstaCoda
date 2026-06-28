@@ -8,6 +8,7 @@ import { CronStore } from "../cron/cron-store.js";
 import { InMemorySessionDB } from "../session/in-memory-session-db.js";
 import type { Runtime } from "../runtime/create-runtime.js";
 import { resolveProfileStateHome } from "../config/profile-home.js";
+import { SetupConsoleExitError } from "../setup/config-editor/setupConsolePromptAdapter.js";
 
 const interactivePromptMock = vi.hoisted(() => ({
   prompt: vi.fn(),
@@ -403,6 +404,28 @@ describe("runCliCommand setup prompt factory dispatch", () => {
         output: process.stdout,
       }),
     }));
+    expect(interactivePromptMock.close).toHaveBeenCalledOnce();
+  });
+
+  it("treats setup-console Ctrl+C as a quiet setup exit", async () => {
+    Object.defineProperty(process.stdin, "isTTY", {
+      configurable: true,
+      value: true,
+    });
+    setupFlowMock.collectSetupRoute.mockResolvedValue({ kind: "configured-menu" });
+    setupFlowMock.runConfigEditorSetup.mockRejectedValue(new SetupConsoleExitError());
+
+    const result = await runCliCommand({
+      argv: ["setup"],
+      workspaceRoot: tempDir,
+      homeDir: tempDir,
+    });
+
+    expect(result).toEqual({
+      handled: true,
+      exitCode: 0,
+      output: "",
+    });
     expect(interactivePromptMock.close).toHaveBeenCalledOnce();
   });
 

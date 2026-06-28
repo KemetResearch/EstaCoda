@@ -43,6 +43,17 @@ const SHOW_CURSOR = "\x1b[?25h";
 const SETUP_CONSOLE_CONTROLLER = Symbol("setupConsoleController");
 const SETUP_CONSOLE_PRESERVE_ON_CLOSE = Symbol("setupConsolePreserveOnClose");
 
+export class SetupConsoleExitError extends Error {
+  constructor() {
+    super("Setup console exit requested.");
+    this.name = "SetupConsoleExitError";
+  }
+}
+
+export function isSetupConsoleExit(error: unknown): error is SetupConsoleExitError {
+  return error instanceof SetupConsoleExitError;
+}
+
 type PromptWithSetupConsoleController = Prompt & {
   readonly [SETUP_CONSOLE_CONTROLLER]?: () => SetupOperatorConsoleController | undefined;
   readonly [SETUP_CONSOLE_PRESERVE_ON_CLOSE]?: () => void;
@@ -178,8 +189,7 @@ async function selectWithSetupConsole<T>(
     restoreTerminal();
     controller.clear();
     options.output.write("\n");
-    process.emit("SIGINT");
-    reject(new Error("Setup console selection interrupted."));
+    reject(new SetupConsoleExitError());
   };
 
   const onData = (chunk: string | Buffer | Uint8Array) => {

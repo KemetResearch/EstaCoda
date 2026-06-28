@@ -45,6 +45,7 @@ import { createSessionRenderer } from "./session-renderer.js";
 import { promptUiContextForLocale } from "../contracts/ui.js";
 import { runFirstRunSetup } from "../setup/onboarding-wizard/runner.js";
 import { runConfigEditorSetup } from "../setup/config-editor/runner.js";
+import { isSetupConsoleExit } from "../setup/config-editor/setupConsolePromptAdapter.js";
 import { selectProviderModelRoute } from "../setup/provider-model-route-prompt.js";
 import { createReviewedSetupApplyExecutor } from "../setup/review/apply-executor.js";
 import { collectSetupEntryState } from "../setup/setup-entry-state.js";
@@ -502,6 +503,15 @@ async function interactiveSetup(options: CliOptions, input: { readonly advanced:
       exitCode: 0,
       output: renderSetupRouteSummary({ decision, advanced: input.advanced }),
     };
+  } catch (error) {
+    if (isSetupConsoleExit(error)) {
+      return {
+        handled: true,
+        exitCode: 0,
+        output: "",
+      };
+    }
+    throw error;
   } finally {
     if (options.prompt === undefined) {
       prompt.close?.();
