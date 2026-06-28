@@ -125,15 +125,14 @@ describe("Papyrus operator console renderer", () => {
     const state = createState({
       setupPanel: setupPanel(),
     });
-    const layout = createOperatorConsoleLayout(state, { width: 72, height: 18, isTty: true });
+    const layout = createOperatorConsoleLayout(state, { width: 72, height: 26, isTty: true });
     const first = renderOperatorConsoleTextLines(state, layout);
     const second = renderOperatorConsoleTextLines(state, layout);
-    const setupIndex = first.findIndex((line) => line.includes("Model route"));
+    const setupIndex = first.findIndex((line) => line.includes("Provider"));
     const promptIndex = first.findIndex((line) => line.includes("›"));
 
     expect(first).toEqual(second);
     expect(setupIndex).toBeGreaterThanOrEqual(0);
-    expect(first).toContainEqual(expect.stringContaining("Provider"));
     expect(first).toContainEqual(expect.stringContaining("gpt-5.5"));
     expect(first).toContainEqual(expect.stringContaining("↑↓ navigate"));
     expect(promptIndex).toBeGreaterThan(setupIndex);

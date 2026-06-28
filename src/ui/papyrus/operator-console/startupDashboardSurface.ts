@@ -1,4 +1,6 @@
 import { stringWidth } from "../screen/stringWidth.js";
+import { isolateLtr } from "../../bidi.js";
+import type { UiLocale } from "../../cli-ui-copy.js";
 import { padVisibleEnd, truncateVisible } from "../../renderers/layout.js";
 import type { StartupCommandState, StartupDashboardState } from "./operatorConsoleState.js";
 import { styleBold, styleColor, type OperatorConsoleStyle } from "./operatorConsoleStyle.js";
@@ -6,6 +8,7 @@ import { styleBold, styleColor, type OperatorConsoleStyle } from "./operatorCons
 export type StartupDashboardRenderOptions = {
   readonly width: number;
   readonly height?: number;
+  readonly locale?: UiLocale;
   readonly style?: OperatorConsoleStyle;
 };
 
@@ -43,8 +46,8 @@ export function getStartupDashboardSurfaceDesiredHeight(
 ): number {
   const normalizedWidth = normalizeDimension(width);
   const panelRows = normalizedWidth >= WIDE_LAYOUT_MIN_WIDTH
-    ? Math.max(7, Math.max(sessionRows(state, undefined).length, commandRows(state.commands).length) + 2)
-    : sessionRows(state, undefined).length + commandRows(state.commands).length + 6;
+    ? Math.max(7, Math.max(sessionRows(state, "en", undefined).length, commandRows(state.commands, "en").length) + 2)
+    : sessionRows(state, "en", undefined).length + commandRows(state.commands, "en").length + 6;
   const infoRows = normalizedWidth >= WIDE_LAYOUT_MIN_WIDTH ? 3 : 4;
   return 1 + panelRows + 1 + infoRows + 2;
 }
@@ -58,8 +61,8 @@ export function renderStartupDashboardSurface(
 
   const state = input ?? createDefaultStartupDashboardState();
   const rows = width >= WIDE_LAYOUT_MIN_WIDTH
-    ? renderWideStartupDashboard(state, width, options.style)
-    : renderNarrowStartupDashboard(state, width, options.style);
+    ? renderWideStartupDashboard(state, width, options.locale ?? "en", options.style)
+    : renderNarrowStartupDashboard(state, width, options.locale ?? "en", options.style);
   const height = options.height === undefined ? rows.length : normalizeDimension(options.height);
   return rows.slice(0, height);
 }
@@ -67,29 +70,32 @@ export function renderStartupDashboardSurface(
 function renderWideStartupDashboard(
   state: StartupDashboardState,
   width: number,
+  locale: UiLocale,
   style: OperatorConsoleStyle | undefined
 ): readonly string[] {
   const bodyWidth = Math.max(0, width - 4);
   const gapWidth = 2;
   const leftWidth = Math.max(3, Math.floor((bodyWidth - gapWidth) / 2));
   const rightWidth = Math.max(3, bodyWidth - leftWidth - gapWidth);
-  const session = renderInnerBox("Session", sessionRows(state, style), leftWidth, style);
-  const commands = renderInnerBox("Commands", commandRows(state.commands), rightWidth, style);
-  const boxHeight = Math.max(session.length, commands.length);
+  const session = renderInnerBox(startupLabel(locale, "Session", "الجلسة"), sessionRows(state, locale, style), rightWidth, style);
+  const commands = renderInnerBox(startupLabel(locale, "Commands", "الأوامر"), commandRows(state.commands, locale), leftWidth, style);
+  const leftBox = locale === "ar" ? commands : renderInnerBox(startupLabel(locale, "Session", "الجلسة"), sessionRows(state, locale, style), leftWidth, style);
+  const rightBox = locale === "ar" ? session : renderInnerBox(startupLabel(locale, "Commands", "الأوامر"), commandRows(state.commands, locale), rightWidth, style);
+  const boxHeight = Math.max(leftBox.length, rightBox.length);
   const output = [
     renderTopBorder(`${state.productName}  𓂀  ${state.version}`, width, style),
   ];
 
   for (let index = 0; index < boxHeight; index += 1) {
     output.push(renderOuterRow(
-      `${session[index] ?? padVisibleEnd("", leftWidth)}${" ".repeat(gapWidth)}${commands[index] ?? padVisibleEnd("", rightWidth)}`,
+      `${leftBox[index] ?? padVisibleEnd("", leftWidth)}${" ".repeat(gapWidth)}${rightBox[index] ?? padVisibleEnd("", rightWidth)}`,
       bodyWidth,
       width
     ));
   }
 
   output.push(renderOuterRow("", bodyWidth, width));
-  for (const row of renderInfoColumns(state, leftWidth, rightWidth, gapWidth, bodyWidth, width, style)) {
+  for (const row of renderInfoColumns(state, locale, leftWidth, rightWidth, gapWidth, bodyWidth, width, style)) {
     output.push(row);
   }
   output.push(renderOuterRow(styleSecondaryText(`☥ ${state.orgName} ☥`, style), bodyWidth, width));
@@ -100,23 +106,26 @@ function renderWideStartupDashboard(
 function renderNarrowStartupDashboard(
   state: StartupDashboardState,
   width: number,
+  locale: UiLocale,
   style: OperatorConsoleStyle | undefined
 ): readonly string[] {
   const bodyWidth = Math.max(0, width - 4);
   const output = [
     renderTopBorder(`${state.productName}  𓂀  ${state.version}`, width, style),
   ];
-  for (const row of renderInnerBox("Session", sessionRows(state, style).slice(0, 4), bodyWidth, style)) {
+  for (const row of renderInnerBox(startupLabel(locale, "Session", "الجلسة"), sessionRows(state, locale, style).slice(0, 4), bodyWidth, style)) {
     output.push(renderOuterRow(row, bodyWidth, width));
   }
-  for (const row of renderInnerBox("Commands", commandRows(state.commands).slice(0, 4), bodyWidth, style)) {
+  for (const row of renderInnerBox(startupLabel(locale, "Commands", "الأوامر"), commandRows(state.commands, locale).slice(0, 4), bodyWidth, style)) {
     output.push(renderOuterRow(row, bodyWidth, width));
   }
   output.push(renderOuterRow("", bodyWidth, width));
-  output.push(renderOuterRow(styleSectionLabel("Update", style), bodyWidth, width));
-  output.push(renderOuterRow(state.updateStatus ?? "Unknown.", bodyWidth, width));
-  output.push(renderOuterRow(styleSectionLabel("Tips", style), bodyWidth, width));
-  if (state.tips[0] !== undefined) output.push(renderOuterRow(state.tips[0], bodyWidth, width));
+  output.push(renderOuterRow(styleSectionLabel(startupLabel(locale, "Update", "التحديث"), style), bodyWidth, width));
+  for (const row of updateRows(state, locale).slice(0, 2)) {
+    output.push(renderOuterRow(row, bodyWidth, width));
+  }
+  output.push(renderOuterRow(styleSectionLabel(startupLabel(locale, "Tips", "تلميحات"), style), bodyWidth, width));
+  if (tipRows(state, locale)[0] !== undefined) output.push(renderOuterRow(tipRows(state, locale)[0], bodyWidth, width));
   output.push(renderOuterRow(styleSecondaryText(`☥ ${state.orgName} ☥`, style), bodyWidth, width));
   output.push(renderBottomBorder(width));
   return output;
@@ -124,19 +133,38 @@ function renderNarrowStartupDashboard(
 
 function sessionRows(
   state: StartupDashboardState,
+  locale: UiLocale,
   style: OperatorConsoleStyle | undefined
 ): readonly string[] {
+  const labels = locale === "ar"
+    ? {
+      model: "النموذج",
+      session: "الجلسة",
+      workspace: "مساحة العمل",
+      security: "الأمان",
+      evolution: "التطوّر",
+    }
+    : {
+      model: "model",
+      session: "session",
+      workspace: "workspace",
+      security: "security",
+      evolution: "evolution",
+    };
   return [
-    formatKeyValue("model", formatModelValue(state.session.model, state.session.modelRoute, style)),
-    formatKeyValue("session", state.sessionId),
-    formatKeyValue("workspace", state.session.workspace),
-    formatKeyValue("security", state.session.security),
-    formatKeyValue("evolution", state.session.autonomy),
+    formatKeyValue(labels.model, formatModelValue(state.session.model, state.session.modelRoute, locale, style)),
+    formatKeyValue(labels.session, localizeTechnicalValue(state.sessionId, locale)),
+    formatKeyValue(labels.workspace, localizeTechnicalValue(state.session.workspace, locale)),
+    formatKeyValue(labels.security, localizeSecurityValue(state.session.security, locale)),
+    formatKeyValue(labels.evolution, localizeEvolutionValue(state.session.autonomy, locale)),
   ];
 }
 
-function commandRows(commands: readonly StartupCommandState[]): readonly string[] {
-  return commands.map((command) => formatKeyValue(command.command, command.description));
+function commandRows(commands: readonly StartupCommandState[], locale: UiLocale): readonly string[] {
+  return commands.map((command) => formatKeyValue(
+    localizeTechnicalValue(command.command, locale),
+    localizeCommandDescription(command, locale)
+  ));
 }
 
 function formatKeyValue(key: string, value: string): string {
@@ -161,6 +189,7 @@ function renderInnerBox(
 
 function renderInfoColumns(
   state: StartupDashboardState,
+  locale: UiLocale,
   leftWidth: number,
   rightWidth: number,
   gapWidth: number,
@@ -168,14 +197,16 @@ function renderInfoColumns(
   width: number,
   style: OperatorConsoleStyle | undefined
 ): readonly string[] {
-  const leftRows = [
-    styleSectionLabel("Update", style),
-    state.updateStatus ?? "Unknown.",
+  const update = [
+    styleSectionLabel(startupLabel(locale, "Update", "التحديث"), style),
+    ...updateRows(state, locale),
   ];
-  const rightRows = [
-    styleSectionLabel("Tips", style),
-    ...state.tips.slice(0, 2),
+  const tips = [
+    styleSectionLabel(startupLabel(locale, "Tips", "تلميحات"), style),
+    ...tipRows(state, locale).slice(0, 2),
   ];
+  const leftRows = update;
+  const rightRows = tips;
   const rowCount = Math.max(leftRows.length, rightRows.length);
   return Array.from({ length: rowCount }, (_, index) => renderOuterRow(
     `${padVisibleEnd(leftRows[index] ?? "", leftWidth)}${" ".repeat(gapWidth)}${padVisibleEnd(rightRows[index] ?? "", rightWidth)}`,
@@ -219,6 +250,88 @@ function styleSecondaryText(text: string, style: OperatorConsoleStyle | undefine
   return styleColor(style, text, style?.tokens.contract.text.secondary ?? "");
 }
 
+function startupLabel(locale: UiLocale, english: string, arabic: string): string {
+  return locale === "ar" ? arabic : english;
+}
+
+function localizeTechnicalValue(value: string, locale: UiLocale): string {
+  return locale === "ar" ? isolateLtr(value) : value;
+}
+
+function localizeCommandDescription(command: StartupCommandState, locale: UiLocale): string {
+  if (locale !== "ar") return command.description;
+  switch (command.command) {
+    case "/tools":
+      return "فحص الأدوات";
+    case "/skills":
+      return "المهارات المحمّلة";
+    case "/model":
+      return "تغيير النموذج الأساسي";
+    case "/status":
+      return "حالة التشغيل";
+    case "/compact":
+      return "ضغط سياق الجلسة";
+    default:
+      return command.description;
+  }
+}
+
+function localizeSecurityValue(value: string, locale: UiLocale): string {
+  if (locale !== "ar") return value;
+  switch (value.toLowerCase()) {
+    case "open":
+      return "مفتوح";
+    case "adaptive":
+      return "تكيفي";
+    case "strict":
+    case "high":
+      return "صارم";
+    default:
+      return value;
+  }
+}
+
+function localizeEvolutionValue(value: string, locale: UiLocale): string {
+  if (locale !== "ar") return value;
+  switch (value.toLowerCase()) {
+    case "autonomous":
+      return "تلقائي";
+    case "proactive":
+      return "استباقي";
+    case "suggest":
+      return "اقتراح";
+    case "manual":
+      return "يدوي";
+    case "off":
+      return "متوقف";
+    default:
+      return value;
+  }
+}
+
+function updateRows(state: StartupDashboardState, locale: UiLocale): readonly string[] {
+  const status = state.updateStatus ?? "Unknown.";
+  if (locale !== "ar") return [status];
+  switch (status) {
+    case "Up to date.":
+      return ["محدّث."];
+    case "Update available.":
+      return ["يوجد تحديث متاح.", `شغّل ${isolateLtr("estacoda update")}.`];
+    case "Unknown.":
+      return ["حالة التحديث غير معروفة."];
+    default:
+      return [status];
+  }
+}
+
+function tipRows(state: StartupDashboardState, locale: UiLocale): readonly string[] {
+  if (locale !== "ar") return state.tips;
+  return [
+    "الصق السياق الكبير كمرفقات.",
+    `استخدم ${isolateLtr("/model")} لتغيير المسارات.`,
+  ];
+}
+
 function renderInnerBottomBorder(width: number): string {
   if (width <= 1) return "╰".slice(0, width);
   return `╰${"─".repeat(Math.max(0, width - 2))}╯`;
@@ -239,12 +352,15 @@ function renderOuterRow(row: string, contentWidth: number, width: number): strin
 function formatModelValue(
   value: string,
   route: StartupDashboardState["session"]["modelRoute"],
+  locale: UiLocale,
   style: OperatorConsoleStyle | undefined
 ): string {
   const match = value.trimEnd().match(/^(.*?)([●◐○])$/u);
-  if (match === null) return value;
+  if (match === null) return localizeTechnicalValue(value, locale);
   const color = modelRouteColor(route, style);
-  return `${match[1]}${color === undefined ? match[2] : styleColor(style, match[2], color)}`;
+  const model = localizeTechnicalValue(match[1].trimEnd(), locale);
+  const dot = color === undefined ? match[2] : styleColor(style, match[2], color);
+  return `${model} ${dot}`;
 }
 
 function modelRouteColor(

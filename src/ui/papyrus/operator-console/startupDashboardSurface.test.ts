@@ -51,6 +51,39 @@ describe("Papyrus operator console startup dashboard surface", () => {
     expect(output.every((line) => stringWidth(line) <= 46)).toBe(true);
   });
 
+  it("renders Arabic startup dashboard with mirrored panels and localized copy", () => {
+    const output = renderStartupDashboardSurface({
+      ...startupState(),
+      sessionId: "53007044",
+      updateStatus: "Update available.",
+      session: {
+        ...startupState().session,
+        model: "kimi-k2.7-code ●",
+        modelRoute: "primary",
+        workspace: "/home/idris/estacoda",
+      },
+    }, { width: 96, locale: "ar" });
+    const text = output.join("\n");
+    const panelTitleLine = output.find((line) => line.includes("الأوامر") && line.includes("الجلسة")) ?? "";
+    const infoTitleLine = output.find((line) => line.includes("تلميحات") && line.includes("التحديث")) ?? "";
+
+    expect(panelTitleLine.indexOf("الأوامر")).toBeLessThan(panelTitleLine.indexOf("الجلسة"));
+    expect(infoTitleLine.indexOf("التحديث")).toBeLessThan(infoTitleLine.indexOf("تلميحات"));
+    expect(text).toContain("النموذج");
+    expect(text).toContain("مساحة العمل");
+    expect(text).toContain("الأمان");
+    expect(text).toContain("التطوّر");
+    expect(text).toContain("مفتوح");
+    expect(text).toContain("تلقائي");
+    expect(text).toContain("فحص الأدوات");
+    expect(text).toContain("تغيير النموذج الأساسي");
+    expect(text).toContain("يوجد تحديث متاح.");
+    expect(text).toContain("estacoda update");
+    expect(text).toContain("الصق السياق الكبير كمرفقات.");
+    expect(text).toContain("/model");
+    expect(output.every((line) => stringWidth(line) <= 96)).toBe(true);
+  });
+
   it("truncates long model, session, and tip text safely", () => {
     const output = renderStartupDashboardSurface({
       ...startupState(),
