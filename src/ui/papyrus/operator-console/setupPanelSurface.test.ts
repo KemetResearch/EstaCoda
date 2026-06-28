@@ -14,7 +14,8 @@ describe("Papyrus operator console setup panel surface", () => {
     const output = renderSetupPanelSurface(modelRoutePanel(), { width: 72 });
     const text = output.join("\n");
 
-    expect(output[0]).toContain("Model route");
+    expect(output[0]).toContain("𓂀  Setup Editor");
+    expect(text).toContain("Model route");
     expect(text).toContain("Choose the active provider and model route.");
     expect(text).toContain("Provider");
     expect(text).toContain("Model");
@@ -130,6 +131,7 @@ describe("Papyrus operator console setup panel surface", () => {
     const fallbackLine = output.find((line) => line.includes("نماذج احتياطية")) ?? "";
     const searchLine = output.find((line) => line.includes("EstaCoda")) ?? "";
 
+    expect(output[0]).toContain("𓂀  Setup Editor");
     expect(text).toContain("محرّر الإعدادات");
     expect(text).toContain("◂");
     expect(text).not.toContain("المزود");
@@ -172,6 +174,25 @@ describe("Papyrus operator console setup panel surface", () => {
     expect(selectedLine).toContain("❯");
     expect(selectedLine).toMatch(/OpenAI.*gpt-5\.5.*\x1b\[0m/u);
     expect(unselectedLine).not.toContain(ansiFg(tokens.contract.palette.action));
+  });
+
+  it("colors setup shell title, current status, and footer when styled", () => {
+    const tokens = resolveTokens("standard", "dark", "kemetBlue");
+    const output = renderSetupPanelSurface({
+      ...modelRoutePanel(),
+      statusLines: [{ text: "Current: OpenAI", tone: "active", direction: "ltr" }],
+      footer: "↑↓ navigate   ENTER select   CTRL+C exit",
+    }, {
+      width: 72,
+      style: createOperatorConsoleStyle({
+        tokens,
+        capabilities: { supportsColor: true, supportsTrueColor: true },
+      }),
+    }).join("\n");
+
+    expect(output).toContain(`${ansiFg(tokens.contract.palette.brand)}𓂀  Setup Editor\x1b[0m`);
+    expect(output).toContain(`${ansiFg(tokens.contract.severity.ok)}Current: OpenAI\x1b[0m`);
+    expect(output).toContain(`${ansiFg(tokens.contract.text.secondary)}↑↓ navigate   ENTER select   CTRL+C exit\x1b[0m`);
   });
 
   it("renders required API key panel with masked value and env var only", () => {

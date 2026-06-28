@@ -532,10 +532,18 @@ describe("runConfigEditor", () => {
     expect(securityMode).toBe("strict");
     expect(workflowLearning).toBe("proactive");
     expect(securityInput?.statusLines).toEqual([{ text: "Current: Strict", tone: "active", direction: "ltr" }]);
+    expect(securityInput?.columns).toEqual([
+      { key: "name", header: "Name", align: "left" },
+      { key: "description", header: "Details", align: "left" },
+    ]);
     expect(securityInput?.showCurrentBadge).toBe(false);
     expect(securityInput?.defaultIndex).toBe(0);
     expect(securityInput?.options.find((option) => option.id === "strict")?.current).toBe(true);
     expect(workflowInput?.statusLines).toEqual([{ text: "Current: Proactive", tone: "active", direction: "ltr" }]);
+    expect(workflowInput?.columns).toEqual([
+      { key: "name", header: "Name", align: "left" },
+      { key: "description", header: "Details", align: "left" },
+    ]);
     expect(workflowInput?.showCurrentBadge).toBe(false);
     expect(workflowInput?.options.map((option) => option.id)).toEqual([
       "suggest",

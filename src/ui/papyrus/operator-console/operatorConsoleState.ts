@@ -180,10 +180,17 @@ export type SetupPanelState = {
   readonly layout?: "routeTable" | "choiceMenu";
   readonly title: string;
   readonly description?: string;
+  readonly statusLines?: readonly SetupPanelStatusLine[];
   readonly locale?: OperatorConsoleLocale;
   readonly rows: readonly SetupTableRow[];
   readonly selectedRowId?: string;
   readonly footer?: string;
+};
+
+export type SetupPanelStatusLine = {
+  readonly text: string;
+  readonly tone?: "active" | "default" | "muted" | "warning";
+  readonly direction?: "auto" | "ltr" | "rtl";
 };
 
 export type SetupTableRow = {

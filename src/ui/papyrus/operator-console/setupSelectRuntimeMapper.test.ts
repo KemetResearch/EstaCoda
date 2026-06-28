@@ -6,6 +6,7 @@ describe("Operator Console setup select runtime mapper", () => {
     const state = mapSetupSelectToSetupPanelState({
       title: "Model route",
       body: "Choose the active provider and model route.\n",
+      statusLines: [{ text: "Current: OpenAI", tone: "active", direction: "ltr" }],
       selectedIndex: 1,
       options: [
         {
@@ -36,6 +37,7 @@ describe("Operator Console setup select runtime mapper", () => {
       layout: "routeTable",
       title: "Model route",
       description: "Choose the active provider and model route.",
+      statusLines: [{ text: "Current: OpenAI", tone: "active", direction: "ltr" }],
       locale: undefined,
       selectedRowId: "local",
       footer: "↑↓ navigate · Enter select · / filter · Esc back",

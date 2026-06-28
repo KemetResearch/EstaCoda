@@ -234,6 +234,7 @@ function mapTtySetupSelection<T>(
     title: selection.title,
     body: selection.body,
     hint: selection.hint ?? selection.instruction,
+    statusLines: selection.statusLines,
     locale: selection.locale === "ar" ? "ar" : "en",
     columns: selection.columns,
     options: selection.options.map((option) => ({

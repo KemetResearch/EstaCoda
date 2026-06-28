@@ -108,7 +108,7 @@ describe("Papyrus operator console startup dashboard surface", () => {
     expect(output).toContain(`${ansiFg(tokens.contract.palette.accent)}Commands\x1b[0m`);
     expect(output).toContain(`${ansiFg(tokens.contract.palette.accent)}Update\x1b[0m`);
     expect(output).toContain(`${ansiFg(tokens.contract.palette.accent)}Tips\x1b[0m`);
-    expect(output).toContain(`${ansiFg(tokens.contract.palette.accent)}☥ Kemet Research ☥\x1b[0m`);
+    expect(output).toContain(`${ansiFg(tokens.contract.text.secondary)}☥ Kemet Research ☥\x1b[0m`);
     expect(output).toContain(`${ansiFg(tokens.contract.palette.caution)}◐\x1b[0m`);
   });
 });

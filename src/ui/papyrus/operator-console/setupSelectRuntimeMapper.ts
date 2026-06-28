@@ -1,5 +1,5 @@
 import type { OperatorConsoleLocale } from "./activeWorkCopy.js";
-import type { SetupPanelState } from "./operatorConsoleState.js";
+import type { SetupPanelState, SetupPanelStatusLine } from "./operatorConsoleState.js";
 
 export type SetupSelectRuntimeOption = {
   readonly id?: string;
@@ -21,6 +21,7 @@ export type SetupSelectRuntimeMapperInput = {
   readonly title: string;
   readonly body?: string;
   readonly hint?: string;
+  readonly statusLines?: readonly SetupPanelStatusLine[];
   readonly locale?: OperatorConsoleLocale;
   readonly columns?: readonly SetupSelectRuntimeColumn[];
   readonly options: readonly SetupSelectRuntimeOption[];
@@ -37,6 +38,7 @@ export function mapSetupSelectToSetupPanelState(
     layout: isChoiceMenu(input.columns) ? "choiceMenu" : "routeTable",
     title: input.title,
     description: firstBodyLine(input.body),
+    ...(input.statusLines === undefined ? {} : { statusLines: input.statusLines }),
     locale: input.locale,
     rows: input.options.map((option, index) => mapOptionToRow(option, index)),
     selectedRowId: optionId(input.options[selectedIndex], selectedIndex),

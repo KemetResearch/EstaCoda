@@ -3,6 +3,7 @@ import { closeOpenBidiIsolates, isolateLtr, isolateRtl } from "../../../ui/bidi.
 import type {
   SecretEntryPanelState,
   SetupPanelState,
+  SetupPanelStatusLine,
   SetupSurfaceState,
 } from "./operatorConsoleState.js";
 import { styleColor, type OperatorConsoleStyle } from "./operatorConsoleStyle.js";
@@ -16,10 +17,13 @@ export type SetupPanelRenderOptions = {
 const WIDE_TABLE_MIN_WIDTH = 72;
 
 export function getSetupPanelSurfaceDesiredHeight(state: SetupSurfaceState, width: number): number {
-  if (state.kind === "secret") return state.optional === true ? 8 : 10;
+  if (state.kind === "secret") return state.optional === true ? 9 : 11;
+  const statusLineCount = state.statusLines?.length ?? 0;
+  const navigationSeparatorCount = state.rows.some((row) => row.group === "navigation") ? 1 : 0;
+  const baseRows = state.rows.length + navigationSeparatorCount + 8 + statusLineCount;
   return normalizeDimension(width) >= WIDE_TABLE_MIN_WIDTH
-    ? Math.max(8, state.rows.length + 7)
-    : Math.max(8, state.rows.length * 4 + 4);
+    ? Math.max(8, baseRows)
+    : Math.max(8, state.rows.length * 4 + 5 + statusLineCount);
 }
 
 export function renderSetupPanelSurface(
@@ -29,7 +33,7 @@ export function renderSetupPanelSurface(
   const width = normalizeDimension(options.width);
   if (width <= 0) return [];
   const rows = state.kind === "secret"
-    ? renderSecretEntryPanel(state, width)
+    ? renderSecretEntryPanel(state, width, options.style)
     : renderSetupTablePanel(state, width, options.style);
   return options.height === undefined ? rows : rows.slice(0, normalizeDimension(options.height));
 }
@@ -44,8 +48,10 @@ function renderSetupTablePanel(
   const description = state.description ?? copy.modelDescription;
   const footer = state.footer ?? copy.footer;
   const rows = [
-    renderTopBorder(state.title, width),
+    renderSetupEditorTopBorder(width, style),
+    renderContentRow(state.title, contentWidth, width),
     renderContentRow(description, contentWidth, width),
+    ...renderStatusLines(state.statusLines, contentWidth, width, style),
     renderContentRow("", contentWidth, width),
     ...(width >= WIDE_TABLE_MIN_WIDTH
       ? state.layout === "choiceMenu"
@@ -53,7 +59,7 @@ function renderSetupTablePanel(
         : renderWideTableRows(state, copy, contentWidth, width, style)
       : renderNarrowTableRows(state, contentWidth, width, style)),
     renderContentRow("", contentWidth, width),
-    renderContentRow(footer, contentWidth, width),
+    renderContentRow(styleFooter(footer, style), contentWidth, width),
     renderBottomBorder(width),
   ];
   return rows;
@@ -222,13 +228,18 @@ function renderNarrowTableRows(
   }).slice(0, Math.max(0, state.rows.length * 4 - 1));
 }
 
-function renderSecretEntryPanel(state: SecretEntryPanelState, width: number): readonly string[] {
+function renderSecretEntryPanel(
+  state: SecretEntryPanelState,
+  width: number,
+  style: OperatorConsoleStyle | undefined
+): readonly string[] {
   const contentWidth = Math.max(0, width - 4);
   const value = state.optional === true && (state.maskedValue === undefined || state.maskedValue.length === 0)
     ? state.emptyLabel ?? "[leave empty]"
     : maskSecretValue(state);
   const rows = [
-    renderTopBorder(state.title, width),
+    renderSetupEditorTopBorder(width, style),
+    renderContentRow(state.title, contentWidth, width),
     renderContentRow(state.description, contentWidth, width),
     renderContentRow("", contentWidth, width),
     renderContentRow(value, contentWidth, width),
@@ -240,7 +251,7 @@ function renderSecretEntryPanel(state: SecretEntryPanelState, width: number): re
     rows.push(renderContentRow("", contentWidth, width));
   }
 
-  rows.push(renderContentRow(state.footer, contentWidth, width));
+  rows.push(renderContentRow(styleFooter(state.footer, style), contentWidth, width));
   rows.push(renderBottomBorder(width));
   return rows;
 }
@@ -281,9 +292,13 @@ function resolveSetupCopy(locale: SetupPanelState["locale"]): SetupCopy {
   };
 }
 
+function renderSetupEditorTopBorder(width: number, style: OperatorConsoleStyle | undefined): string {
+  return renderTopBorder(styleBrand("𓂀  Setup Editor", style), width);
+}
+
 function renderTopBorder(title: string, width: number): string {
   if (width <= 1) return "╭".slice(0, width);
-  const label = `─ ${title} `;
+  const label = `──── ${title} `;
   const remaining = Math.max(0, width - 2 - stringWidth(label));
   return truncateVisibleCells(`╭${label}${"─".repeat(remaining)}╮`, width);
 }
@@ -297,6 +312,41 @@ function renderContentRow(row: string, contentWidth: number, width: number): str
   if (width <= 1) return "│".slice(0, width);
   const content = padVisibleEnd(truncateVisibleCells(row, contentWidth), contentWidth);
   return truncateVisibleCells(`│ ${content} │`, width);
+}
+
+function renderStatusLines(
+  statusLines: readonly SetupPanelStatusLine[] | undefined,
+  contentWidth: number,
+  width: number,
+  style: OperatorConsoleStyle | undefined
+): readonly string[] {
+  return (statusLines ?? []).map((line) => {
+    const localized = line.direction === "rtl" ? isolateRtl(line.text) : line.text;
+    return renderContentRow(styleStatusLine(localized, line, style), contentWidth, width);
+  });
+}
+
+function styleStatusLine(
+  text: string,
+  line: SetupPanelStatusLine,
+  style: OperatorConsoleStyle | undefined
+): string {
+  const tokens = style?.tokens.contract;
+  if (tokens === undefined) return text;
+  if (line.tone === "active") return styleColor(style, text, tokens.severity.ok);
+  if (line.tone === "warning") return styleColor(style, text, tokens.severity.warn);
+  if (line.tone === "muted") return styleColor(style, text, tokens.text.secondary);
+  return text;
+}
+
+function styleBrand(text: string, style: OperatorConsoleStyle | undefined): string {
+  const brand = style?.tokens.contract.palette.brand;
+  return brand === undefined ? text : styleColor(style, text, brand);
+}
+
+function styleFooter(text: string, style: OperatorConsoleStyle | undefined): string {
+  const secondary = style?.tokens.contract.text.secondary;
+  return secondary === undefined ? text : styleColor(style, text, secondary);
 }
 
 function padVisibleEnd(value: string, width: number): string {

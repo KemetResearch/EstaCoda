@@ -92,7 +92,7 @@ function renderWideStartupDashboard(
   for (const row of renderInfoColumns(state, leftWidth, rightWidth, gapWidth, bodyWidth, width, style)) {
     output.push(row);
   }
-  output.push(renderOuterRow(styleSectionLabel(`☥ ${state.orgName} ☥`, style), bodyWidth, width));
+  output.push(renderOuterRow(styleSecondaryText(`☥ ${state.orgName} ☥`, style), bodyWidth, width));
   output.push(renderBottomBorder(width));
   return output;
 }
@@ -117,7 +117,7 @@ function renderNarrowStartupDashboard(
   output.push(renderOuterRow(state.updateStatus ?? "Unknown.", bodyWidth, width));
   output.push(renderOuterRow(styleSectionLabel("Tips", style), bodyWidth, width));
   if (state.tips[0] !== undefined) output.push(renderOuterRow(state.tips[0], bodyWidth, width));
-  output.push(renderOuterRow(styleSectionLabel(`☥ ${state.orgName} ☥`, style), bodyWidth, width));
+  output.push(renderOuterRow(styleSecondaryText(`☥ ${state.orgName} ☥`, style), bodyWidth, width));
   output.push(renderBottomBorder(width));
   return output;
 }
@@ -213,6 +213,10 @@ function renderTitledTopBorder(title: string, width: number, style: OperatorCons
 
 function styleSectionLabel(title: string, style: OperatorConsoleStyle | undefined): string {
   return styleColor(style, title, style?.tokens.contract.palette.accent ?? "");
+}
+
+function styleSecondaryText(text: string, style: OperatorConsoleStyle | undefined): string {
+  return styleColor(style, text, style?.tokens.contract.text.secondary ?? "");
 }
 
 function renderInnerBottomBorder(width: number): string {
