@@ -176,14 +176,65 @@ describe("session-loop /model", () => {
       {
         surface: "promptCard",
         title: "Select provider",
-        body: "Select the provider to use for this session only."
+        body: "Select the provider to use for this session only.",
+        columns: [
+          { key: "name", header: "Name" },
+          { key: "details", header: "Details" },
+        ],
+        hint: "↑↓ navigate   ENTER select   CTRL+C exit",
+        showColumnHeaders: false,
       },
       {
         surface: "promptCard",
         title: "Select model",
-        body: "Select the model to use for this session only."
+        body: "Select the model to use for this session only.",
+        columns: [
+          { key: "name", header: "Name" },
+          { key: "details", header: "Details" },
+        ],
+        hint: "↑↓ navigate   ENTER select   CTRL+C exit",
+        showColumnHeaders: false,
       }
     ]);
+    expect(selectInputs[0]?.options).toMatchObject([
+      {
+        id: "local",
+        cells: {
+          name: "Local / Private",
+          details: "http://localhost:11434/v1",
+        },
+        current: true,
+      },
+      {
+        id: "cancel",
+        group: "navigation",
+        cells: {
+          name: "Cancel",
+          details: "Keep the current session model",
+        },
+      },
+    ]);
+    expect(selectInputs[1]?.options.find((option) => option.id === "qwen2.5:3b")).toMatchObject({
+      cells: {
+        name: "qwen2.5:3b",
+        details: "tools · 128000 tokens",
+      },
+      current: true,
+    });
+    expect(selectInputs[1]?.options.find((option) => option.id === "phi4:latest")).toMatchObject({
+      cells: {
+        name: "phi4:latest",
+        details: "128000 tokens",
+      },
+      current: false,
+    });
+    expect(selectInputs[1]?.options.find((option) => option.id === "cancel")).toMatchObject({
+      group: "navigation",
+      cells: {
+        name: "Cancel",
+        details: "Keep the current session model",
+      },
+    });
     const override = await sessionDb.getSessionModelOverride("test-session");
     expect(override?.route.provider).toBe("local");
     expect(override?.route.id).toBe("phi4:latest");

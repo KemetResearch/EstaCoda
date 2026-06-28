@@ -23,6 +23,7 @@ import { WorkspaceTrustStore } from "../security/workspace-trust-store.js";
 import { storeCapabilitySecret, type SetupNeededMetadata } from "../capabilities/capability-setup.js";
 import { defaultImageModel } from "../contracts/image-generation.js";
 import type { Prompt, PromptOptions } from "./prompt-contract.js";
+import type { SelectPromptInput } from "./interactive-select.js";
 import { createInteractivePrompt } from "./create-interactive-prompt.js";
 import type { ToolExecutionRecord } from "../tools/tool-executor.js";
 import { buildToolsMenuViewModel, buildSkillsMenuViewModel } from "./slash-menu.js";
@@ -1604,20 +1605,40 @@ async function handleSessionModelPicker(
   }
 
   const cancel = "__cancel__";
+  const currentRoute = runtimeModelRoute(input.runtime);
   const provider = await input.prompt.select<string>({
     title: "Select provider",
     body: "Select the provider to use for this session only.",
+    columns: sessionModelPickerColumns(),
     options: [
       ...providers.map((candidate) => ({
+        id: candidate.id,
         value: candidate.id,
         label: candidate.displayName,
-        description: candidate.baseUrl ?? candidate.id
+        description: candidate.baseUrl ?? candidate.id,
+        cells: {
+          name: candidate.displayName,
+          details: candidate.baseUrl ?? candidate.id,
+        },
+        current: candidate.id === currentRoute?.provider,
       })),
-      { value: cancel, label: "Cancel", description: "Keep the current session model" }
+      {
+        id: "cancel",
+        value: cancel,
+        label: "Cancel",
+        description: "Keep the current session model",
+        cells: {
+          name: "Cancel",
+          details: "Keep the current session model",
+        },
+        group: "navigation",
+      }
     ],
     fallbackPrompt: "Provider number > ",
     selectedLabel: "Provider",
-    surface: "promptCard"
+    surface: "promptCard",
+    hint: "↑↓ navigate   ENTER select   CTRL+C exit",
+    showColumnHeaders: false,
   });
   if (provider === cancel) {
     input.output.write("No changes were made.\n\n");
@@ -1633,21 +1654,44 @@ async function handleSessionModelPicker(
   const model = await input.prompt.select<string>({
     title: "Select model",
     body: "Select the model to use for this session only.",
+    columns: sessionModelPickerColumns(),
     options: [
       ...models.map((candidate) => ({
+        id: candidate.id,
         value: candidate.id,
         label: candidate.id,
         description: [
           candidate.profile.supportsTools ? "tools" : undefined,
           candidate.profile.supportsVision ? "vision" : undefined,
           `${candidate.profile.contextWindowTokens} tokens`
-        ].filter((part) => part !== undefined).join(" · ")
+        ].filter((part) => part !== undefined).join(" · "),
+        cells: {
+          name: candidate.id,
+          details: [
+            candidate.profile.supportsTools ? "tools" : undefined,
+            candidate.profile.supportsVision ? "vision" : undefined,
+            `${candidate.profile.contextWindowTokens} tokens`
+          ].filter((part) => part !== undefined).join(" · "),
+        },
+        current: provider === currentRoute?.provider && candidate.id === currentRoute?.model,
       })),
-      { value: cancel, label: "Cancel", description: "Keep the current session model" }
+      {
+        id: "cancel",
+        value: cancel,
+        label: "Cancel",
+        description: "Keep the current session model",
+        cells: {
+          name: "Cancel",
+          details: "Keep the current session model",
+        },
+        group: "navigation",
+      }
     ],
     fallbackPrompt: "Model number > ",
     selectedLabel: "Model",
-    surface: "promptCard"
+    surface: "promptCard",
+    hint: "↑↓ navigate   ENTER select   CTRL+C exit",
+    showColumnHeaders: false,
   });
   if (model === cancel) {
     input.output.write("No changes were made.\n\n");
@@ -1655,6 +1699,22 @@ async function handleSessionModelPicker(
   }
 
   return handleSessionModelSet(input, `${provider}/${model}`);
+}
+
+function sessionModelPickerColumns(): NonNullable<SelectPromptInput<string>["columns"]> {
+  return [
+    { key: "name", header: "Name" },
+    { key: "details", header: "Details" },
+  ];
+}
+
+function runtimeModelRoute(runtime: Runtime): { readonly provider: string; readonly model: string } | undefined {
+  const entries = runtime.getModelInfo().entries;
+  const provider = entries.find((entry) => entry.key === "provider")?.value;
+  const model = entries.find((entry) => entry.key === "model")?.value;
+  return provider === undefined || model === undefined
+    ? undefined
+    : { provider: String(provider), model: String(model) };
 }
 
 async function refreshCurrentRuntime(input: HandleSlashCommandInput): Promise<Runtime | undefined> {
