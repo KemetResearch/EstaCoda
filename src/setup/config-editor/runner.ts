@@ -4,6 +4,7 @@ import { defaultProfileId, readActiveProfile, resolveProfileStateHome } from "..
 import { loadRuntimeConfig } from "../../config/runtime-config.js";
 import type { AuxiliaryModelSlotInput, ProviderId } from "../../contracts/provider.js";
 import type { SecurityApprovalMode } from "../../contracts/security.js";
+import type { PromptCardStatusLine } from "../../contracts/view-model.js";
 import type { Prompt } from "../../cli/prompt-contract.js";
 import { withPromptUiContext } from "../../cli/prompt-contract.js";
 import { promptUiContextForLocale } from "../../contracts/ui.js";
@@ -47,7 +48,7 @@ import {
   type SetupRouteDecision,
 } from "../setup-router.js";
 import type { SetupVerificationReport } from "../verification.js";
-import type { SetupCopyLocale } from "../setup-copy.js";
+import type { SetupCopyKey, SetupCopyLocale } from "../setup-copy.js";
 import {
   formatSetupCopy,
   promptSetupChoice,
@@ -56,6 +57,7 @@ import {
   setupProviderCredentialQuestion,
   setupCopyText,
 } from "../setup-prompts.js";
+import { isolateLtr } from "../../ui/bidi.js";
 import {
   promptConfigEditorAction,
   promptConfigEditorReviewApproval,
@@ -310,7 +312,7 @@ async function runConfigEditorOnce(
     write(options, `${rendered}\n`);
   }
 
-  const selectedAction = await selectAction(localizedOptions, actions, defaultActionId);
+  const selectedAction = await selectAction(localizedOptions, initialDecision, actions, defaultActionId);
   if (selectedAction === undefined) {
     const output = setupCopyText(locale, "setupEditor.result.noActions");
     write(options, `${output}\n`);
@@ -365,6 +367,7 @@ async function resolveConfigEditorLocale(options: ConfigEditorRunnerOptions): Pr
 
 async function selectAction(
   options: LocalizedConfigEditorRunnerOptions,
+  initialDecision: SetupRouteDecision,
   actions: readonly ConfigEditorRenderedAction[],
   defaultActionId: SetupEditorActionId | SetupRouteActionId | undefined
 ): Promise<ConfigEditorRenderedAction | { readonly id: string } | undefined> {
@@ -373,7 +376,90 @@ async function selectAction(
     return actions.find((action) => action.id === normalizedActionId) ?? { id: normalizedActionId };
   }
 
-  return promptConfigEditorAction(options.prompt, actions, undefined, options.locale);
+  return promptConfigEditorAction(options.prompt, actions, undefined, options.locale, {
+    statusLines: setupEditorStatusLines(options, initialDecision),
+  });
+}
+
+function setupEditorStatusLines(
+  options: LocalizedConfigEditorRunnerOptions,
+  decision: SetupRouteDecision
+): readonly PromptCardStatusLine[] {
+  const locale = options.locale;
+  const direction = locale === "ar" ? "rtl" : "ltr";
+  const statusLines: PromptCardStatusLine[] = [
+    {
+      text: setupEditorModeStatus(locale, decision),
+      tone: setupEditorModeStatusTone(decision),
+      direction,
+    },
+    {
+      text: setupEditorStatusPair(
+        locale,
+        "setupEditor.status.workspace",
+        decision.state.setupVerification.workspaceTrusted
+          ? setupCopyText(locale, "setupEditor.status.workspace.trusted")
+          : setupCopyText(locale, "setupEditor.status.workspace.notTrusted")
+      ),
+      tone: decision.state.setupVerification.workspaceTrusted ? "active" : "warning",
+      direction,
+    },
+    {
+      text: setupEditorStatusPair(
+        locale,
+        "setupEditor.status.profile",
+        setupEditorTechnicalToken(locale, options.profileId ?? defaultProfileId())
+      ),
+      tone: "muted",
+      direction,
+    },
+  ];
+
+  const model = decision.state.model;
+  if (model !== undefined) {
+    statusLines.push({
+      text: setupEditorStatusPair(
+        locale,
+        "setupEditor.status.current",
+        setupEditorTechnicalToken(locale, `${model.provider}/${model.id}`)
+      ),
+      tone: "active",
+      direction,
+    });
+  }
+
+  return statusLines;
+}
+
+function setupEditorModeStatus(locale: SetupCopyLocale, decision: SetupRouteDecision): string {
+  if (decision.kind === "repair-first-menu") {
+    return setupCopyText(locale, "setupEditor.status.repairMode");
+  }
+  if (decision.kind === "configured-degraded-menu") {
+    return setupCopyText(locale, "setupEditor.status.degradedSetup");
+  }
+  if (decision.kind === "verify-readonly") {
+    return setupCopyText(locale, "setupEditor.status.readOnlyDiagnostics");
+  }
+  return setupCopyText(locale, "setupEditor.status.noChangesApplied");
+}
+
+function setupEditorModeStatusTone(decision: SetupRouteDecision): PromptCardStatusLine["tone"] {
+  return decision.kind === "repair-first-menu" || decision.kind === "configured-degraded-menu"
+    ? "warning"
+    : "muted";
+}
+
+function setupEditorStatusPair(
+  locale: SetupCopyLocale,
+  labelKey: SetupCopyKey,
+  value: string
+): string {
+  return `${setupCopyText(locale, labelKey)}: ${value}`;
+}
+
+function setupEditorTechnicalToken(locale: SetupCopyLocale, value: string): string {
+  return locale === "ar" ? isolateLtr(value) : value;
 }
 
 async function handleAction(

@@ -160,6 +160,7 @@ describe("runConfigEditor", () => {
       tableMaxWidth: SelectPromptInput<unknown>["tableMaxWidth"];
       tableAlign: SelectPromptInput<unknown>["tableAlign"];
       showColumnHeaders: SelectPromptInput<unknown>["showColumnHeaders"];
+      statusLines: SelectPromptInput<unknown>["statusLines"];
       hint: string | undefined;
       values: unknown[];
     }> = [];
@@ -178,6 +179,7 @@ describe("runConfigEditor", () => {
         tableMaxWidth: input.tableMaxWidth,
         tableAlign: input.tableAlign,
         showColumnHeaders: input.showColumnHeaders,
+        statusLines: input.statusLines,
         hint: input.hint,
         values: input.options.map((option) => option.value),
       });
@@ -221,6 +223,12 @@ describe("runConfigEditor", () => {
     expect(prompts[0]?.tableMaxWidth).toBe(88);
     expect(prompts[0]?.tableAlign).toBe("right");
     expect(prompts[0]?.showColumnHeaders).toBe(false);
+    expect(prompts[0]?.statusLines).toEqual([
+      { text: "لا تغييرات مطبّقة", tone: "muted", direction: "rtl" },
+      { text: "مساحة العمل: موثوقة", tone: "active", direction: "rtl" },
+      { text: `الملف: ${isolateLtr("default")}`, tone: "muted", direction: "rtl" },
+      { text: `الحالي: ${isolateLtr("local/local-test-model")}`, tone: "active", direction: "rtl" },
+    ]);
     expect(prompts[0]?.hint).toBe("↑↓ navigate   ENTER select   CTRL+C exit");
     expect(prompts[0]?.labels).toContain("النموذج الأساسي");
     expect(prompts[0]?.descriptions).toContain("النموذج الافتراضي الذي يستخدمه الوكيل.");
@@ -287,6 +295,10 @@ describe("runConfigEditor", () => {
     expect(result.selectedActionId).toBe("exit");
     expect(select).not.toHaveBeenCalled();
     expect(liveText).toContain("Setup Editor");
+    expect(liveText).toContain("No changes applied");
+    expect(liveText).toContain("Workspace: trusted");
+    expect(liveText).toContain("Profile: default");
+    expect(liveText).toContain("Current: local/local-test-model");
     expect(liveText).toContain("Exit without changes");
     expect(liveText).not.toContain("Selected:");
     expect(setupOutput.text()).not.toMatch(/\x1b\[3J|\x1b\[2J|\x1b\[H|\x1b\[\d+;\d+H/u);
@@ -518,6 +530,9 @@ describe("runConfigEditor", () => {
     expect(trustInput?.options.find((option) => option.id === "cancel")?.group).toBe("navigation");
     expect(reviewInput?.options.find((option) => option.id === "approve")?.group).toBeUndefined();
     expect(reviewInput?.options.find((option) => option.id === "cancel")?.group).toBe("navigation");
+    expect(reviewInput?.statusLines).toEqual([
+      { text: "Pending changes: Security", tone: "warning", direction: "ltr" },
+    ]);
     expect(postApplyInput?.options.find((option) => option.id === "exit")?.group).toBe("navigation");
     expect(autoLaunchInput?.options.find((option) => option.id === "browser-auto-launch-no")?.group).toBeUndefined();
     expect(gatewayInput?.options.find((option) => option.id === "gateway-no")?.group).toBeUndefined();
