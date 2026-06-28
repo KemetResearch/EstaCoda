@@ -1,4 +1,5 @@
 import { stringWidth } from "../screen/stringWidth.js";
+import { createPapyrusSurfaceController, type PapyrusSurface } from "../papyrus-surface-controller.js";
 import { closeOpenBidiIsolates, isolateLtr } from "../../bidi.js";
 import type { UiLocale } from "../../cli-ui-copy.js";
 import { padVisibleEnd, truncateVisible } from "../../renderers/layout.js";
@@ -75,14 +76,14 @@ function renderWideStartupDashboard(
   locale: UiLocale,
   style: OperatorConsoleStyle | undefined
 ): readonly string[] {
+  if (locale === "ar") return renderWideArabicStartupDashboard(state, width, style);
+
   const bodyWidth = Math.max(0, width - 4);
   const gapWidth = 2;
   const leftWidth = Math.max(3, Math.floor((bodyWidth - gapWidth) / 2));
   const rightWidth = Math.max(3, bodyWidth - leftWidth - gapWidth);
-  const session = renderInnerBox(startupLabel(locale, "Session", "الجلسة"), sessionRows(state, locale, style), rightWidth, style);
-  const commands = renderInnerBox(startupLabel(locale, "Commands", "الأوامر"), commandRows(state.commands, locale), leftWidth, style);
-  const leftBox = locale === "ar" ? commands : renderInnerBox(startupLabel(locale, "Session", "الجلسة"), sessionRows(state, locale, style), leftWidth, style);
-  const rightBox = locale === "ar" ? session : renderInnerBox(startupLabel(locale, "Commands", "الأوامر"), commandRows(state.commands, locale), rightWidth, style);
+  const leftBox = renderInnerBox(startupLabel(locale, "Session", "الجلسة"), sessionRows(state, locale, style), leftWidth, style);
+  const rightBox = renderInnerBox(startupLabel(locale, "Commands", "الأوامر"), commandRows(state.commands, locale), rightWidth, style);
   const boxHeight = Math.max(leftBox.length, rightBox.length);
   const output = [
     renderTopBorder(`${state.productName}  𓂀  ${state.version}`, width, style),
@@ -103,6 +104,103 @@ function renderWideStartupDashboard(
   output.push(renderOuterRow(styleSecondaryText(`☥ ${state.orgName} ☥`, style), bodyWidth, width));
   output.push(renderBottomBorder(width));
   return output;
+}
+
+function renderWideArabicStartupDashboard(
+  state: StartupDashboardState,
+  width: number,
+  style: OperatorConsoleStyle | undefined
+): readonly string[] {
+  const bodyWidth = Math.max(0, width - 4);
+  const gapWidth = 2;
+  const leftWidth = Math.max(3, Math.floor((bodyWidth - gapWidth) / 2));
+  const rightWidth = Math.max(3, bodyWidth - leftWidth - gapWidth);
+  const commandsBox = renderInnerBox(startupLabel("ar", "Commands", "الأوامر"), arabicCommandRowsForSurface(state.commands), leftWidth, style);
+  const sessionBox = renderInnerBox(startupLabel("ar", "Session", "الجلسة"), arabicSessionRowsForSurface(state, style), rightWidth, style);
+  const boxHeight = Math.max(commandsBox.length, sessionBox.length);
+  const infoRows = renderArabicInfoColumnsForSurface(state, leftWidth, rightWidth, gapWidth, bodyWidth, width, style);
+  const height = 1 + boxHeight + 1 + infoRows.length + 2;
+  const surfaces: PapyrusSurface[] = [
+    { x: 0, y: 0, text: renderTopBorder(`${state.productName}  𓂀  ${state.version}`, width, style), options: { bidi: "off" } },
+    { x: 2, y: 1, text: commandsBox.join("\n"), options: { bidi: "off" } },
+    { x: 2 + leftWidth + gapWidth, y: 1, text: sessionBox.join("\n"), options: { bidi: "off" } },
+    { x: 0, y: 1 + boxHeight, text: renderOuterRow("", bodyWidth, width), options: { bidi: "off" } },
+    { x: 0, y: 2 + boxHeight, text: infoRows.join("\n"), options: { bidi: "off" } },
+    {
+      x: 0,
+      y: 2 + boxHeight + infoRows.length,
+      text: renderOuterRow(styleSecondaryText(`☥ ${state.orgName} ☥`, style), bodyWidth, width),
+      options: { bidi: "off" },
+    },
+    { x: 0, y: height - 1, text: renderBottomBorder(width), options: { bidi: "off" } },
+  ];
+
+  return createPapyrusSurfaceController({ width, height })
+    .renderRows({ surfaces })
+    .rows.map((row) => truncateVisibleCells(row, width));
+}
+
+function arabicSessionRowsForSurface(
+  state: StartupDashboardState,
+  style: OperatorConsoleStyle | undefined
+): readonly string[] {
+  return [
+    formatArabicKeyValue("النموذج", formatModelValueForSurface(state.session.model, state.session.modelRoute, style)),
+    formatArabicKeyValue("الجلسة", state.sessionId),
+    formatArabicKeyValue("مساحة العمل", state.session.workspace),
+    formatArabicKeyValue("الأمان", localizeSecurityValue(state.session.security, "ar")),
+    formatArabicKeyValue("التطوّر", localizeEvolutionValue(state.session.autonomy, "ar")),
+  ];
+}
+
+function arabicCommandRowsForSurface(commands: readonly StartupCommandState[]): readonly string[] {
+  return commands.map((command) => formatArabicKeyValue(command.command, localizeCommandDescription(command, "ar")));
+}
+
+function renderArabicInfoColumnsForSurface(
+  state: StartupDashboardState,
+  leftWidth: number,
+  rightWidth: number,
+  gapWidth: number,
+  bodyWidth: number,
+  width: number,
+  style: OperatorConsoleStyle | undefined
+): readonly string[] {
+  const update = [
+    styleSectionLabel(startupLabel("ar", "Update", "التحديث"), style),
+    ...arabicUpdateRowsForSurface(state),
+  ];
+  const tips = [
+    styleSectionLabel(startupLabel("ar", "Tips", "تلميحات"), style),
+    ...arabicTipRowsForSurface(),
+  ];
+  const rowCount = Math.max(update.length, tips.length);
+  return Array.from({ length: rowCount }, (_, index) => renderOuterRow(
+    `${padVisibleEnd(update[index] ?? "", leftWidth)}${" ".repeat(gapWidth)}${padVisibleEnd(tips[index] ?? "", rightWidth)}`,
+    bodyWidth,
+    width
+  ));
+}
+
+function arabicUpdateRowsForSurface(state: StartupDashboardState): readonly string[] {
+  const status = state.updateStatus ?? "Unknown.";
+  switch (status) {
+    case "Up to date.":
+      return ["محدّث."];
+    case "Update available.":
+      return ["يوجد تحديث متاح.", "شغّل estacoda update."];
+    case "Unknown.":
+      return ["حالة التحديث غير معروفة."];
+    default:
+      return [status];
+  }
+}
+
+function arabicTipRowsForSurface(): readonly string[] {
+  return [
+    "الصق السياق الكبير كمرفقات.",
+    "استخدم /model لتغيير المسارات.",
+  ];
 }
 
 function renderNarrowStartupDashboard(
@@ -171,6 +269,10 @@ function commandRows(commands: readonly StartupCommandState[], locale: UiLocale)
 
 function formatKeyValue(key: string, value: string): string {
   return `${padVisibleEnd(key, 11)}${value}`;
+}
+
+function formatArabicKeyValue(key: string, value: string): string {
+  return `${padVisibleEnd(key, 11)} ${value}`;
 }
 
 function renderInnerBox(
@@ -363,6 +465,18 @@ function formatModelValue(
   const model = localizeTechnicalValue(match[1].trimEnd(), locale);
   const dot = color === undefined ? match[2] : styleColor(style, match[2], color);
   return `${model} ${dot}`;
+}
+
+function formatModelValueForSurface(
+  value: string,
+  route: StartupDashboardState["session"]["modelRoute"],
+  style: OperatorConsoleStyle | undefined
+): string {
+  const match = value.trimEnd().match(/^(.*?)([●◐○])$/u);
+  if (match === null) return value;
+  const color = modelRouteColor(route, style);
+  const dot = color === undefined ? match[2] : styleColor(style, match[2], color);
+  return `${match[1].trimEnd()} ${dot}`;
 }
 
 function modelRouteColor(

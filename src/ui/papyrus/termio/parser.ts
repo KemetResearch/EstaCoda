@@ -27,8 +27,14 @@ function graphemeWidth(value: string): 1 | 2 {
   return codePoint !== undefined && isWideCodePoint(codePoint) ? 2 : 1;
 }
 
+const graphemeSegmenter =
+  typeof Intl.Segmenter === "function" ? new Intl.Segmenter(undefined, { granularity: "grapheme" }) : undefined;
+
 function segmentText(text: string): Grapheme[] {
-  return Array.from(text, (value) => ({ value, width: graphemeWidth(value) }));
+  const graphemes = graphemeSegmenter === undefined
+    ? Array.from(text)
+    : Array.from(graphemeSegmenter.segment(text), ({ segment }) => segment);
+  return graphemes.map((value) => ({ value, width: graphemeWidth(value) }));
 }
 
 function parseCSIParams(paramString: string): number[] {
