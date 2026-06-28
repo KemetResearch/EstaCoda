@@ -467,12 +467,17 @@ function styleSecondary(text: string, style: OperatorConsoleStyle | undefined): 
   return secondary === undefined ? text : styleColor(style, text, secondary);
 }
 
+function stylePrimary(text: string, style: OperatorConsoleStyle | undefined): string {
+  const primary = style?.tokens.contract.text.primary;
+  return primary === undefined ? text : styleColor(style, text, primary);
+}
+
 function stylePrimaryChoiceRow(
   line: string,
   selected: boolean,
   style: OperatorConsoleStyle | undefined
 ): string {
-  return styleSelectedChoiceRow(styleBold(style, line), selected, style);
+  return styleSelectedChoiceRow(stylePrimary(line, style), selected, style);
 }
 
 function formatFrameTitle(title: string, locale: SetupPanelState["locale"]): string {

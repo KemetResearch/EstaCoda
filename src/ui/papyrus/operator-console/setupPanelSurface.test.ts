@@ -160,7 +160,8 @@ describe("Papyrus operator console setup panel surface", () => {
     const selectedDetailLine = output.find((line) => line.includes("نماذج احتياطية")) ?? "";
 
     expect(selectedLine).toContain(ansiFg(tokens.contract.palette.action));
-    expect(selectedLine).toContain("\x1b[1m");
+    expect(selectedLine).toContain(ansiFg(tokens.contract.text.primary));
+    expect(selectedLine).not.toContain("\x1b[1m");
     expect(selectedLine).toContain(`${RLI}النماذج الاحتياطية`);
     expect(selectedLine).toMatch(/النماذج الاحتياطية.*◂.*\x1b\[0m/u);
     expect(selectedDetailLine).toContain(ansiFg(tokens.contract.text.secondary));
