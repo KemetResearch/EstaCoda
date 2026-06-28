@@ -70,6 +70,8 @@ describe("Papyrus operator console startup dashboard surface", () => {
 
     expect(panelTitleLine.indexOf("الأوامر")).toBeLessThan(panelTitleLine.indexOf("الجلسة"));
     expect(infoTitleLine.indexOf("التحديث")).toBeLessThan(infoTitleLine.indexOf("تلميحات"));
+    expect(text).not.toContain("╭─ الأوامر");
+    expect(text).not.toContain("╭─ الجلسة");
     expect(text).toContain("النموذج");
     expect(text).toContain("مساحة العمل");
     expect(text).toContain("الأمان");

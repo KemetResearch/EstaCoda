@@ -1,5 +1,4 @@
 import { stringWidth } from "../screen/stringWidth.js";
-import { createPapyrusSurfaceController, type PapyrusSurface } from "../papyrus-surface-controller.js";
 import { closeOpenBidiIsolates, isolateLtr } from "../../bidi.js";
 import type { UiLocale } from "../../cli-ui-copy.js";
 import { padVisibleEnd, truncateVisible } from "../../renderers/layout.js";
@@ -115,29 +114,32 @@ function renderWideArabicStartupDashboard(
   const gapWidth = 2;
   const leftWidth = Math.max(3, Math.floor((bodyWidth - gapWidth) / 2));
   const rightWidth = Math.max(3, bodyWidth - leftWidth - gapWidth);
-  const commandsBox = renderInnerBox(startupLabel("ar", "Commands", "الأوامر"), arabicCommandRowsForSurface(state.commands), leftWidth, style);
-  const sessionBox = renderInnerBox(startupLabel("ar", "Session", "الجلسة"), arabicSessionRowsForSurface(state, style), rightWidth, style);
-  const boxHeight = Math.max(commandsBox.length, sessionBox.length);
+  const topRows = renderArabicStartupColumnsForSurface(
+    [
+      styleSectionLabel(startupLabel("ar", "Commands", "الأوامر"), style),
+      ...arabicCommandRowsForSurface(state.commands),
+    ],
+    [
+      styleSectionLabel(startupLabel("ar", "Session", "الجلسة"), style),
+      ...arabicSessionRowsForSurface(state, style),
+    ],
+    leftWidth,
+    rightWidth,
+    gapWidth,
+    bodyWidth,
+    width
+  );
   const infoRows = renderArabicInfoColumnsForSurface(state, leftWidth, rightWidth, gapWidth, bodyWidth, width, style);
-  const height = 1 + boxHeight + 1 + infoRows.length + 2;
-  const surfaces: PapyrusSurface[] = [
-    { x: 0, y: 0, text: renderTopBorder(`${state.productName}  𓂀  ${state.version}`, width, style), options: { bidi: "off" } },
-    { x: 2, y: 1, text: commandsBox.join("\n"), options: { bidi: "off" } },
-    { x: 2 + leftWidth + gapWidth, y: 1, text: sessionBox.join("\n"), options: { bidi: "off" } },
-    { x: 0, y: 1 + boxHeight, text: renderOuterRow("", bodyWidth, width), options: { bidi: "off" } },
-    { x: 0, y: 2 + boxHeight, text: infoRows.join("\n"), options: { bidi: "off" } },
-    {
-      x: 0,
-      y: 2 + boxHeight + infoRows.length,
-      text: renderOuterRow(styleSecondaryText(`☥ ${state.orgName} ☥`, style), bodyWidth, width),
-      options: { bidi: "off" },
-    },
-    { x: 0, y: height - 1, text: renderBottomBorder(width), options: { bidi: "off" } },
-  ];
 
-  return createPapyrusSurfaceController({ width, height })
-    .renderRows({ surfaces })
-    .rows.map((row) => truncateVisibleCells(row, width));
+  return [
+    renderTopBorder(`${state.productName}  𓂀  ${state.version}`, width, style),
+    ...topRows,
+    renderOuterRow("", bodyWidth, width),
+    renderOuterRow("", bodyWidth, width),
+    ...infoRows,
+    renderOuterRow(styleSecondaryText(`☥ ${state.orgName} ☥`, style), bodyWidth, width),
+    renderBottomBorder(width),
+  ];
 }
 
 function arabicSessionRowsForSurface(
@@ -174,9 +176,21 @@ function renderArabicInfoColumnsForSurface(
     styleSectionLabel(startupLabel("ar", "Tips", "تلميحات"), style),
     ...arabicTipRowsForSurface(),
   ];
-  const rowCount = Math.max(update.length, tips.length);
+  return renderArabicStartupColumnsForSurface(update, tips, leftWidth, rightWidth, gapWidth, bodyWidth, width);
+}
+
+function renderArabicStartupColumnsForSurface(
+  leftRows: readonly string[],
+  rightRows: readonly string[],
+  leftWidth: number,
+  rightWidth: number,
+  gapWidth: number,
+  bodyWidth: number,
+  width: number
+): readonly string[] {
+  const rowCount = Math.max(leftRows.length, rightRows.length);
   return Array.from({ length: rowCount }, (_, index) => renderOuterRow(
-    `${padVisibleEnd(update[index] ?? "", leftWidth)}${" ".repeat(gapWidth)}${padVisibleEnd(tips[index] ?? "", rightWidth)}`,
+    `${padVisibleEnd(leftRows[index] ?? "", leftWidth)}${" ".repeat(gapWidth)}${padVisibleEnd(rightRows[index] ?? "", rightWidth)}`,
     bodyWidth,
     width
   ));
