@@ -630,6 +630,95 @@ describe("raw prompt controller", () => {
     });
   });
 
+  it("removes the latest Operator Console attachment with Ctrl-U when prompt is empty", async () => {
+    const attachmentsSeen: Array<readonly AttachmentCardState[]> = [];
+    const read = startPendingOperatorConsoleRead({
+      operatorConsole: {
+        enabled: true,
+        terminal: { width: 72, height: 16, isTty: true },
+        onAttachmentsChange: (attachments) => {
+          attachmentsSeen.push(attachments);
+        },
+      },
+    });
+
+    read.input.send(`${PASTE_START}first pasted payload${PASTE_END}`);
+    read.input.send(`${PASTE_START}second pasted payload${PASTE_END}`);
+    await Promise.resolve();
+    read.input.send("\x15");
+    await Promise.resolve();
+
+    expect(read.isResolved()).toBe(false);
+    expect(attachmentsSeen.at(-1)?.map((attachment) => attachment.content)).toEqual(["first pasted payload"]);
+
+    read.input.send("\r");
+    expect(await read.pending).toEqual({
+      type: "submit",
+      text: ["[Pasted text 1]", "first pasted payload"].join("\n"),
+      displayText: ["Pasted text · 1 line · 20 chars", "first pasted payload"].join("\n"),
+    });
+  });
+
+  it("removes the focused Operator Console attachment with Ctrl-U when prompt is empty", async () => {
+    const attachmentsSeen: Array<readonly AttachmentCardState[]> = [];
+    const read = startPendingOperatorConsoleRead({
+      operatorConsole: {
+        enabled: true,
+        terminal: { width: 72, height: 16, isTty: true },
+        onAttachmentsChange: (attachments) => {
+          attachmentsSeen.push(attachments);
+        },
+      },
+    });
+
+    read.input.send(`${PASTE_START}first pasted payload${PASTE_END}`);
+    read.input.send(`${PASTE_START}second pasted payload${PASTE_END}`);
+    await Promise.resolve();
+    read.input.send("\t");
+    read.input.send("\x15");
+    await Promise.resolve();
+
+    expect(read.isResolved()).toBe(false);
+    expect(attachmentsSeen.at(-1)?.map((attachment) => attachment.content)).toEqual(["second pasted payload"]);
+
+    read.input.send("\x1b[Z");
+    read.input.send("\r");
+    expect(await read.pending).toEqual({
+      type: "submit",
+      text: ["[Pasted text 1]", "second pasted payload"].join("\n"),
+      displayText: ["Pasted text · 1 line · 21 chars", "second pasted payload"].join("\n"),
+    });
+  });
+
+  it("keeps Operator Console attachments when Ctrl-U clears non-empty prompt text", async () => {
+    const attachmentsSeen: Array<readonly AttachmentCardState[]> = [];
+    const read = startPendingOperatorConsoleRead({
+      operatorConsole: {
+        enabled: true,
+        terminal: { width: 72, height: 16, isTty: true },
+        onAttachmentsChange: (attachments) => {
+          attachmentsSeen.push(attachments);
+        },
+      },
+    });
+
+    read.input.send("summarize");
+    read.input.send(`${PASTE_START}full pasted payload${PASTE_END}`);
+    await Promise.resolve();
+    read.input.send("\x15");
+    await Promise.resolve();
+
+    expect(read.isResolved()).toBe(false);
+    expect(attachmentsSeen.at(-1)?.map((attachment) => attachment.content)).toEqual(["full pasted payload"]);
+
+    read.input.send("\r");
+    expect(await read.pending).toEqual({
+      type: "submit",
+      text: ["[Pasted text 1]", "full pasted payload"].join("\n"),
+      displayText: ["Pasted text · 1 line · 19 chars", "full pasted payload"].join("\n"),
+    });
+  });
+
   it("does not remove Operator Console attachments when Escape cancels from prompt focus", async () => {
     const attachmentsSeen: Array<readonly AttachmentCardState[]> = [];
     const read = startPendingOperatorConsoleRead({

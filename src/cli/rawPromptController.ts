@@ -343,6 +343,37 @@ export class RawPromptController {
         render();
       };
 
+      const removeAttachment = (attachmentId: string) => {
+        const nextState = removeAttachmentAndRepairFocus(createInitialOperatorConsoleState({
+          attachments,
+          focus: attachmentFocus,
+        }), attachmentId);
+        attachments = nextState.attachments;
+        attachmentFocus = nextState.focus;
+        this.#operatorConsole?.onAttachmentsChange?.(attachments);
+        render();
+      };
+
+      const handleEmptyPromptAttachmentClear = (event: ParsedKeypress) => {
+        if (
+          this.#operatorConsole?.enabled !== true
+          || attachments.length === 0
+          || state.text.length > 0
+          || event.type !== "key"
+          || event.ctrl !== true
+          || event.key !== "u"
+        ) {
+          return false;
+        }
+
+        const attachmentId = attachmentFocus.target.kind === "attachment"
+          ? attachmentFocus.target.attachmentId
+          : attachments.at(-1)?.id;
+        if (attachmentId === undefined) return false;
+        removeAttachment(attachmentId);
+        return true;
+      };
+
       const handleAttachmentKeypress = (event: ParsedKeypress) => {
         if (this.#operatorConsole?.enabled !== true || attachments.length === 0 || event.type !== "key") return false;
         if (attachmentFocus.target.kind === "prompt" && event.key !== "tab") return false;
@@ -368,11 +399,7 @@ export class RawPromptController {
         }
 
         if (intent.type === "remove") {
-          const nextState = removeAttachmentAndRepairFocus(routed.state, intent.attachmentId);
-          attachments = nextState.attachments;
-          attachmentFocus = nextState.focus;
-          this.#operatorConsole.onAttachmentsChange?.(attachments);
-          render();
+          removeAttachment(intent.attachmentId);
           return true;
         }
 
@@ -398,6 +425,7 @@ export class RawPromptController {
             addPasteAttachment(event.text);
             continue;
           }
+          if (handleEmptyPromptAttachmentClear(event)) continue;
           if (handleAttachmentKeypress(event)) continue;
           if (handleTypeaheadKeypress(event)) continue;
           if (vimKeymapState !== undefined) {
