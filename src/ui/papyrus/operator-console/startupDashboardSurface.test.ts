@@ -101,8 +101,8 @@ describe("Papyrus operator console startup dashboard surface", () => {
     expect(stripBidi(output.find((line) => line.includes("/home/idris/estacoda")) ?? "").trimEnd().endsWith("مساحة العمل")).toBe(true);
     const approvalLine = output.find((line) => line.includes("الموافقة")) ?? "";
     const evolutionLine = output.find((line) => line.includes("تطور الوكيل")) ?? "";
-    expect(approvalLine.indexOf("مفتوحة")).toBeLessThan(approvalLine.indexOf("الموافقة"));
-    expect(evolutionLine.indexOf("مفعّل")).toBeLessThan(evolutionLine.indexOf("تطور الوكيل"));
+    expect(approvalLine.indexOf("الموافقة")).toBeLessThan(approvalLine.indexOf("مفتوحة"));
+    expect(evolutionLine.indexOf("تطور الوكيل")).toBeLessThan(evolutionLine.indexOf("مفعّل"));
     expect(output.every((line) => stringWidth(line) <= 96)).toBe(true);
     expect(output.every((line) => line.startsWith(LRI) && line.endsWith(PDI))).toBe(true);
   });

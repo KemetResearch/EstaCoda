@@ -184,8 +184,8 @@ function arabicSessionRowsForStackedSurface(
     { label: "النموذج", value: formatModelValueForSurface(state.session.model, state.session.modelRoute, style) },
     { label: "الجلسة", value: state.sessionId },
     { label: "مساحة العمل", value: state.session.workspace },
-    { label: "الموافقة", value: localizeApprovalValue(state.session.security) },
-    { label: "تطور الوكيل", value: localizeStackedEvolutionValue(state.session.autonomy) },
+    { label: "الموافقة", value: localizeApprovalValue(state.session.security), order: "label-value" },
+    { label: "تطور الوكيل", value: localizeStackedEvolutionValue(state.session.autonomy), order: "label-value" },
   ];
 }
 
