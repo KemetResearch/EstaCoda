@@ -71,6 +71,10 @@ import {
   type ConfigEditorPostApplyActionId,
 } from "./prompts.js";
 import {
+  withSetupConsolePrompt,
+  type SetupConsolePromptAdapterOptions,
+} from "./setupConsolePromptAdapter.js";
+import {
   configEditorActions,
   isConfigEditorActionId,
   renderConfigEditor,
@@ -107,6 +111,7 @@ import { codexDeviceVerificationUrl, type FetchLike as CodexOAuthFetchLike } fro
 
 export type ConfigEditorRunnerOptions = CollectSetupRouteOptions & {
   readonly prompt: Prompt;
+  readonly setupConsole?: SetupConsolePromptAdapterOptions;
   readonly applyExecutor?: SetupApplyExecutor;
   readonly output?: { readonly write: (value: string) => void };
   readonly defaultActionId?: SetupEditorActionId | SetupRouteActionId;
@@ -282,7 +287,7 @@ async function runConfigEditorOnce(
   const localizedOptions: LocalizedConfigEditorRunnerOptions = {
     ...options,
     locale,
-    prompt: withPromptUiContext(options.prompt, promptUiContextForLocale(locale)),
+    prompt: setupEditorPromptForLocale(options, locale),
   };
   const session = initialDecision.setupEditorPlanSession;
 
@@ -337,6 +342,16 @@ async function runConfigEditorOnce(
   }
 
   return handleAction(localizedOptions, initialDecision, session, allowedAction);
+}
+
+function setupEditorPromptForLocale(
+  options: ConfigEditorRunnerOptions,
+  locale: SetupCopyLocale
+): Prompt {
+  const localizedPrompt = withPromptUiContext(options.prompt, promptUiContextForLocale(locale));
+  return options.setupConsole === undefined
+    ? localizedPrompt
+    : withSetupConsolePrompt(localizedPrompt, options.setupConsole);
 }
 
 async function resolveConfigEditorLocale(options: ConfigEditorRunnerOptions): Promise<SetupCopyLocale> {

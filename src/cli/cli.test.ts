@@ -18,6 +18,7 @@ const interactivePromptMock = vi.hoisted(() => ({
 const setupFlowMock = vi.hoisted(() => ({
   collectSetupRoute: vi.fn(),
   runFirstRunSetup: vi.fn(),
+  runConfigEditorSetup: vi.fn(),
 }));
 
 const updateCommandMock = vi.hoisted(() => ({
@@ -41,6 +42,14 @@ vi.mock("../setup/onboarding-wizard/runner.js", async (importOriginal) => {
   return {
     ...actual,
     runFirstRunSetup: setupFlowMock.runFirstRunSetup,
+  };
+});
+
+vi.mock("../setup/config-editor/runner.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../setup/config-editor/runner.js")>();
+  return {
+    ...actual,
+    runConfigEditorSetup: setupFlowMock.runConfigEditorSetup,
   };
 });
 
@@ -256,6 +265,13 @@ describe("runCliCommand setup prompt factory dispatch", () => {
       output: "setup ok",
       launchRequested: false,
     });
+    setupFlowMock.runConfigEditorSetup.mockReset();
+    setupFlowMock.runConfigEditorSetup.mockResolvedValue({
+      completed: true,
+      exitCode: 0,
+      output: "editor ok",
+      initialDecision: { kind: "configured-menu" },
+    });
     interactivePromptMock.prompt.mockReset();
     interactivePromptMock.close.mockReset();
     interactivePromptMock.createInteractivePrompt.mockReset();
@@ -288,6 +304,7 @@ describe("runCliCommand setup prompt factory dispatch", () => {
     expect(setupFlowMock.runFirstRunSetup).toHaveBeenCalledWith(expect.objectContaining({
       prompt: interactivePromptMock.prompt,
     }));
+    expect(setupFlowMock.runFirstRunSetup.mock.calls[0]?.[0]).not.toHaveProperty("setupConsole");
     expect(interactivePromptMock.close).toHaveBeenCalledOnce();
   });
 
@@ -311,6 +328,35 @@ describe("runCliCommand setup prompt factory dispatch", () => {
     expect(interactivePromptMock.createInteractivePrompt).toHaveBeenCalledOnce();
     expect(setupFlowMock.runFirstRunSetup).toHaveBeenCalledWith(expect.objectContaining({
       prompt: interactivePromptMock.prompt,
+    }));
+    expect(interactivePromptMock.close).toHaveBeenCalledOnce();
+  });
+
+  it("passes setup console wiring only to the setup editor path", async () => {
+    Object.defineProperty(process.stdin, "isTTY", {
+      configurable: true,
+      value: true,
+    });
+    setupFlowMock.collectSetupRoute.mockResolvedValue({ kind: "configured-menu" });
+
+    const result = await runCliCommand({
+      argv: ["setup"],
+      workspaceRoot: tempDir,
+      homeDir: tempDir,
+    });
+
+    expect(result).toMatchObject({
+      handled: true,
+      exitCode: 0,
+      output: "editor ok",
+    });
+    expect(setupFlowMock.runFirstRunSetup).not.toHaveBeenCalled();
+    expect(setupFlowMock.runConfigEditorSetup).toHaveBeenCalledWith(expect.objectContaining({
+      prompt: interactivePromptMock.prompt,
+      setupConsole: expect.objectContaining({
+        input: process.stdin,
+        output: process.stdout,
+      }),
     }));
     expect(interactivePromptMock.close).toHaveBeenCalledOnce();
   });

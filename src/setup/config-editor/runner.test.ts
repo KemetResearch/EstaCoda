@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { tmpdir } from "node:os";
+import { PassThrough, Writable } from "node:stream";
 import type { Prompt } from "../../cli/prompt-contract.js";
 import type { SelectPromptInput } from "../../cli/interactive-select.js";
 import { WorkspaceTrustStore } from "../../security/workspace-trust-store.js";
@@ -251,6 +252,45 @@ describe("runConfigEditor", () => {
     expect(prompts[0]?.groups[exitActionIndex]).toBe("navigation");
     expect(prompts[0]?.groups[prompts[0]?.labels.indexOf("التحقق من الإعداد") ?? -1]).toBeUndefined();
     expect(prompts[0]?.groups[prompts[0]?.labels.indexOf("التشخيصات") ?? -1]).toBeUndefined();
+  });
+
+  it("routes setup editor action selection through setup console when provided", async () => {
+    await writeUserConfig(tempDir, localReadyConfig());
+    await trustWorkspace(tempDir, workspaceRoot);
+    const output: string[] = [];
+    const input = createTtyInput();
+    const setupOutput = createTtyOutput();
+    const prompt = fakePrompt();
+    const select = vi.fn(async () => {
+      throw new Error("base prompt select should not run for setup console action selection");
+    });
+    prompt.select = select;
+
+    const pending = runConfigEditor({
+      homeDir: tempDir,
+      workspaceRoot,
+      prompt,
+      setupConsole: { input, output: setupOutput },
+      applyExecutor: createReviewedSetupApplyExecutor({
+        homeDir: tempDir,
+        workspaceRoot,
+      }),
+      renderInitialOverview: false,
+      output: { write: (value) => output.push(value) },
+    });
+    await Promise.resolve();
+    input.write("\x1b[F\r");
+    const result = await pending;
+    const liveText = stripAnsi(setupOutput.text());
+
+    expect(result.completed).toBe(true);
+    expect(result.selectedActionId).toBe("exit");
+    expect(select).not.toHaveBeenCalled();
+    expect(liveText).toContain("Setup Editor");
+    expect(liveText).toContain("Exit without changes");
+    expect(liveText).not.toContain("Selected:");
+    expect(setupOutput.text()).not.toMatch(/\x1b\[3J|\x1b\[2J|\x1b\[H|\x1b\[\d+;\d+H/u);
+    expect(output.join("")).toContain("Exited setup editor without applying changes.");
   });
 
   it("opts comparative setup editor selectors into columns without changing selected values", async () => {
@@ -4822,6 +4862,51 @@ function trackingPrompt(options: { readonly values?: readonly unknown[]; readonl
     value: () => secretPromptCount,
   });
   return prompt;
+}
+
+function createTtyInput(): PassThrough & {
+  isTTY: boolean;
+  isRaw: boolean;
+  setRawMode(mode: boolean): void;
+} {
+  const input = new PassThrough() as PassThrough & {
+    isTTY: boolean;
+    isRaw: boolean;
+    setRawMode(mode: boolean): void;
+  };
+  input.isTTY = true;
+  input.isRaw = false;
+  input.setRawMode = (mode: boolean) => {
+    input.isRaw = mode;
+  };
+  return input;
+}
+
+function createTtyOutput(): Writable & {
+  readonly columns: number;
+  readonly rows: number;
+  readonly isTTY: boolean;
+  text(): string;
+} {
+  const writes: string[] = [];
+  return new class extends Writable {
+    readonly columns = 88;
+    readonly rows = 24;
+    readonly isTTY = true;
+
+    _write(chunk: Buffer | string, _encoding: BufferEncoding, callback: (error?: Error | null) => void): void {
+      writes.push(typeof chunk === "string" ? chunk : chunk.toString("utf8"));
+      callback();
+    }
+
+    text(): string {
+      return writes.join("");
+    }
+  }();
+}
+
+function stripAnsi(value: string): string {
+  return value.replace(/\x1b\[[0-9;?]*[ -/]*[@-~]/gu, "");
 }
 
 function gatewayServiceActions(input: {

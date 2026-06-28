@@ -1,5 +1,6 @@
 import { mkdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
+import { stdin, stdout } from "node:process";
 import {
   createTelegramPairingCode,
   loadRuntimeConfig,
@@ -453,9 +454,13 @@ async function interactiveSetup(options: CliOptions, input: { readonly advanced:
       decision.kind === "repair-first-menu"
     ) {
       const chunks: string[] = [];
+      const setupConsole = options.prompt === undefined && options.output === undefined && canRunInteractive()
+        ? { input: stdin, output: stdout }
+        : undefined;
       const result = await runConfigEditorSetup({
         ...options,
         prompt,
+        ...(setupConsole === undefined ? {} : { setupConsole }),
         applyExecutor: createReviewedSetupApplyExecutor({
           workspaceRoot: options.workspaceRoot,
           homeDir: options.homeDir,
