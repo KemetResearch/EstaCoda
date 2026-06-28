@@ -1,25 +1,40 @@
 import type { LineEditorState } from "../../input/lineEditor.js";
-import { stringWidth } from "../screen/stringWidth.js";
+import type { FocusState } from "./focusModel.js";
 import {
   createInitialOperatorConsoleState,
+  type AttachmentCardState,
   type OperatorConsoleState,
+  type PromptSurfaceState,
+  type SlashMenuState,
   type StatusRailState,
+  type SteerState,
   type TerminalMetrics,
+  type ToolActivityState,
+  type TurnActivityState,
 } from "./operatorConsoleState.js";
 import { createOperatorConsoleLayout } from "./operatorConsoleLayout.js";
 import { getPromptSurfaceMetrics } from "./promptSurface.js";
 import { renderOperatorConsoleTextLines } from "./operatorConsoleRenderer.js";
-
-export type OperatorConsoleRawPromptOverlayRow = {
-  readonly text: string;
-};
+import {
+  type OperatorConsoleRuntimeFrame,
+  type OperatorConsoleRuntimeHost,
+} from "./operatorConsoleRuntimeHost.js";
+import type { OperatorConsoleStyle } from "./operatorConsoleStyle.js";
 
 export type OperatorConsoleRawPromptSnapshot = {
   readonly prompt: string;
   readonly state: LineEditorState;
   readonly status?: StatusRailState;
   readonly terminal?: Partial<TerminalMetrics>;
-  readonly overlayRows?: readonly OperatorConsoleRawPromptOverlayRow[];
+  readonly attachments?: readonly AttachmentCardState[];
+  readonly turnActivity?: TurnActivityState;
+  readonly slash?: SlashMenuState;
+  readonly activeWork?: ToolActivityState;
+  readonly steer?: SteerState;
+  readonly promptMode?: PromptSurfaceState["mode"];
+  readonly placeholder?: string;
+  readonly style?: OperatorConsoleStyle;
+  readonly focus?: FocusState;
 };
 
 export type OperatorConsoleRawPromptFrame = {
@@ -46,9 +61,17 @@ export function buildOperatorConsoleStateFromRawPrompt(
       cursorOffset: snapshot.state.cursor,
       multiline: snapshot.state.text.includes("\n"),
       scrollOffset: 0,
-      mode: "prompt",
+      mode: snapshot.promptMode ?? "prompt",
+      ...(snapshot.placeholder === undefined ? {} : { placeholder: snapshot.placeholder }),
     },
     status: snapshot.status ?? createDefaultOperatorConsoleRawPromptStatus(),
+    turnActivity: snapshot.turnActivity,
+    attachments: snapshot.attachments ?? [],
+    activeWork: snapshot.activeWork,
+    steer: snapshot.steer,
+    focus: snapshot.focus,
+    style: snapshot.style,
+    ...(snapshot.slash === undefined ? {} : { slash: snapshot.slash }),
   });
 }
 
@@ -58,18 +81,45 @@ export function buildOperatorConsoleRawPromptFrame(
   const state = buildOperatorConsoleStateFromRawPrompt(snapshot);
   const layout = createOperatorConsoleLayout(state, state.terminal);
   const renderedRows = renderOperatorConsoleTextLines(state, layout);
-  const rows = insertOverlayRowsBeforeStatus(renderedRows, snapshot.overlayRows ?? []);
   const promptRegion = layout.regions.find((region) => region.kind === "prompt");
   const cursor = promptRegion === undefined
     ? { row: 0, column: 0 }
     : getPromptCursorPosition(state, promptRegion.y, promptRegion.height);
 
   return {
-    rows,
+    rows: renderedRows,
     cursorRow: cursor.row,
     cursorColumn: cursor.column,
     state,
   };
+}
+
+export function buildOperatorConsoleRawPromptFrameWithRuntimeHost(
+  host: OperatorConsoleRuntimeHost,
+  snapshot: OperatorConsoleRawPromptSnapshot
+): OperatorConsoleRawPromptFrame {
+  const terminal = normalizeTerminal(snapshot.terminal);
+  host.clear();
+  host.setTerminal(terminal);
+  host.setStatus(snapshot.status ?? createDefaultOperatorConsoleRawPromptStatus());
+  host.setTurnActivity(snapshot.turnActivity);
+  host.setAttachments(snapshot.attachments ?? []);
+  host.setSlash(snapshot.slash);
+  host.setActiveWork(snapshot.activeWork ?? createInitialOperatorConsoleState().activeWork);
+  host.setSteer(snapshot.steer);
+  host.setFocus(snapshot.focus ?? createInitialOperatorConsoleState().focus);
+  if (snapshot.style !== undefined) {
+    host.setStyle(snapshot.style);
+  }
+  host.setPrompt({
+    text: snapshot.state.text,
+    cursorOffset: snapshot.state.cursor,
+    multiline: snapshot.state.text.includes("\n"),
+    scrollOffset: 0,
+    mode: snapshot.promptMode ?? "prompt",
+    placeholder: snapshot.placeholder,
+  });
+  return rawPromptFrameFromRuntimeFrame(host.render());
 }
 
 export function createDefaultOperatorConsoleRawPromptStatus(): StatusRailState {
@@ -77,6 +127,7 @@ export function createDefaultOperatorConsoleRawPromptStatus(): StatusRailState {
     model: {
       label: "",
       state: "idle",
+      route: "primary",
     },
     context: {
       usedTokens: 0,
@@ -87,18 +138,18 @@ export function createDefaultOperatorConsoleRawPromptStatus(): StatusRailState {
   };
 }
 
-function insertOverlayRowsBeforeStatus(
-  rows: readonly string[],
-  overlayRows: readonly OperatorConsoleRawPromptOverlayRow[]
-): readonly string[] {
-  if (overlayRows.length === 0) return rows;
-  if (rows.length === 0) return overlayRows.map((row) => row.text);
-  const statusIndex = rows.length - 1;
-  return [
-    ...rows.slice(0, statusIndex),
-    ...overlayRows.map((row) => row.text),
-    ...rows.slice(statusIndex),
-  ];
+function rawPromptFrameFromRuntimeFrame(frame: OperatorConsoleRuntimeFrame): OperatorConsoleRawPromptFrame {
+  const promptRegion = frame.layout.regions.find((region) => region.kind === "prompt");
+  const cursor = promptRegion === undefined
+    ? { row: 0, column: 0 }
+    : getPromptCursorPosition(frame.state, promptRegion.y, promptRegion.height);
+
+  return {
+    rows: frame.lines,
+    cursorRow: cursor.row,
+    cursorColumn: cursor.column,
+    state: frame.state,
+  };
 }
 
 function getPromptCursorPosition(
@@ -115,15 +166,8 @@ function getPromptCursorPosition(
   const visibleCursorRow = Math.max(0, metrics.cursorRow - metrics.scrollOffset);
   return {
     row: promptRegionY + 1 + visibleCursorRow,
-    column: 2 + promptLogicalCursorColumn(state.prompt.value, state.prompt.cursorOffset),
+    column: metrics.cursorColumn,
   };
-}
-
-function promptLogicalCursorColumn(value: string, cursorOffset: number): number {
-  const cursor = clampInteger(cursorOffset, 0, value.length);
-  const beforeCursor = value.slice(0, cursor);
-  const currentLine = beforeCursor.split(/\r\n|\n|\r/u).at(-1) ?? "";
-  return 2 + stringWidth(currentLine);
 }
 
 function normalizeTerminal(input: Partial<TerminalMetrics> | undefined): TerminalMetrics {

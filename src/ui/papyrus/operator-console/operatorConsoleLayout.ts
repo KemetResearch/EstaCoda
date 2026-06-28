@@ -11,7 +11,9 @@ import { getApprovalSurfaceDesiredHeight } from "./approvalSurface.js";
 import { getAttachmentSurfaceDesiredHeight } from "./attachmentSurface.js";
 import { getPromptSurfaceDesiredHeight } from "./promptSurface.js";
 import { getSetupPanelSurfaceDesiredHeight } from "./setupPanelSurface.js";
+import { getSlashSurfaceDesiredHeight } from "./slashSurface.js";
 import { getStartupDashboardSurfaceDesiredHeight } from "./startupDashboardSurface.js";
+import { getTurnActivitySurfaceDesiredHeight } from "./turnActivitySurface.js";
 import {
   getQueuedSteerSurfaceDesiredHeight,
   getSteerInputSurfaceDesiredHeight,
@@ -47,6 +49,7 @@ const PROMPT_PRIORITY = 1;
 const STATUS_PRIORITY = 2;
 const INTERACTIVE_OPTIONAL_PRIORITY = 3;
 const APPROVAL_PRIORITY = 3;
+const TURN_ACTIVITY_PRIORITY = 3;
 const ACTIVE_WORK_PRIORITY = 4;
 const ATTACHMENTS_PRIORITY = 5;
 const TRANSCRIPT_PRIORITY = 6;
@@ -94,7 +97,7 @@ function createRegionDescriptors(
       kind: "startupDashboard",
       priority: STARTUP_PRIORITY,
       minHeight: 1,
-      desiredHeight: getStartupDashboardSurfaceDesiredHeight(state.startup, terminal.width),
+      desiredHeight: getStartupDashboardSurfaceDesiredHeight(state.startup, terminal.width, state.locale),
     });
   }
 
@@ -122,6 +125,15 @@ function createRegionDescriptors(
       priority: APPROVAL_PRIORITY,
       minHeight: 1,
       desiredHeight: getApprovalSurfaceDesiredHeight(state.approvals),
+    });
+  }
+
+  if (state.turnActivity !== undefined) {
+    descriptors.push({
+      kind: "turnActivity",
+      priority: TURN_ACTIVITY_PRIORITY,
+      minHeight: 1,
+      desiredHeight: getTurnActivitySurfaceDesiredHeight(state.turnActivity),
     });
   }
 
@@ -166,7 +178,7 @@ function createRegionDescriptors(
       kind: "slashMenu",
       priority: INTERACTIVE_OPTIONAL_PRIORITY,
       minHeight: 1,
-      desiredHeight: Math.min(4, Math.max(1, state.slash.items.length + 1)),
+      desiredHeight: getSlashSurfaceDesiredHeight(state.slash),
     });
   }
 
@@ -224,18 +236,20 @@ function surfaceOrderIndex(kind: OperatorConsoleRegionKind): number {
       return 2;
     case "approvals":
       return 3;
-    case "activeWork":
+    case "turnActivity":
       return 4;
-    case "queuedSteer":
+    case "activeWork":
       return 5;
-    case "attachments":
+    case "queuedSteer":
       return 6;
-    case "prompt":
+    case "attachments":
       return 7;
-    case "slashMenu":
+    case "prompt":
       return 8;
-    case "statusRail":
+    case "slashMenu":
       return 9;
+    case "statusRail":
+      return 10;
   }
 }
 

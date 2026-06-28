@@ -22,7 +22,7 @@ This page maps the current source directories and the main dependency flow betwe
 | Memory | `src/memory/*` | Profile-local identity/memory files, shared memory, promotion, indexing, recall orchestration, and memory pressure controls. |
 | Skills | `src/skills/*`, `skills/official/**` | Skill loading, registry, playbooks, usage telemetry, proposals, mutation policy, bundled sync, and catalog generation. |
 | Workflow | `src/workflow/*`, `src/cli/workflow-commands.ts` | Explicit durable workflow runs, steps, events, checkpoints, locks, process registry, restart recovery, and operator commands. |
-| CLI/UI | `src/cli/*`, `src/ui/*`, `src/theme/*` | Command dispatch, interactive session loop, setup commands, view models, renderers, bottom chrome, bidi handling, and theme tokens. |
+| CLI/UI | `src/cli/*`, `src/ui/*`, `src/theme/*` | Command dispatch, interactive session loop, setup commands, view models, renderers, Operator Console surfaces, bidi handling, and theme tokens. |
 | Setup | `src/setup/**` | Onboarding Wizard, Setup Editor, review/apply pipeline, optional capability setup, verification, and setup copy. |
 | Browser/Web | `src/browser/**`, `src/tools/web-*.ts` | URL safety, local CDP, Browserbase backend, web extraction/search providers, and debug redaction. |
 | Cron | `src/cron/**` | Scheduled jobs, locks, safety checks, execution records, and delivery integration. |

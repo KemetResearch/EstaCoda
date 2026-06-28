@@ -17,6 +17,14 @@ describe("Papyrus Compositor", () => {
     expect(compositor.getScreen().rowText(0)).toBe(" abc ");
   });
 
+  it("treats Arabic combining marks as part of the same cell", () => {
+    const compositor = createCompositor({ width: 24, height: 1 });
+    compositor.write(0, 0, "المهارات المحمّلة");
+    compositor.write(18, 0, "│");
+
+    expect(compositor.getScreen().rowText(0)).toBe("المهارات المحمّلة  │     ");
+  });
+
   it("preserves ANSI style behavior supported by Output", () => {
     const compositor = createCompositor({ width: 4, height: 1 });
     compositor.write(0, 0, "\x1b[31mr\x1b[0mx");

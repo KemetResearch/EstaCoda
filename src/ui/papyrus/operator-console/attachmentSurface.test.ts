@@ -9,6 +9,7 @@ import {
   formatSubmittedPromptWithAttachmentReferences,
   getFocusedAttachment,
   renderAttachmentSurface,
+  removeAttachmentAndRepairFocus,
   routeAttachmentKey,
   type AttachmentCardState,
   type OperatorConsoleState,
@@ -117,6 +118,28 @@ describe("Papyrus operator console attachment surface", () => {
     expect(text).toContain(`${attachment.content.length} chars`);
   });
 
+  it("redacts secret-like values from generated and provided previews while preserving content", () => {
+    const generated = createPastedTextAttachment({
+      id: "paste-secret-generated",
+      content: "OPENAI_API_KEY=super-secret-value\nkeep this context",
+    });
+    const provided = createPastedTextAttachment({
+      id: "paste-secret-provided",
+      content: "full payload still contains super-secret-value",
+      preview: "Authorization: Bearer abcdefghijklmnopqrstuvwxyz123456",
+    });
+    const output = renderAttachmentSurface([generated, provided], { width: 120 }).join("\n");
+
+    expect(generated.content).toContain("super-secret-value");
+    expect(provided.content).toContain("super-secret-value");
+    expect(generated.preview).toContain("OPENAI_API_KEY=[REDACTED]");
+    expect(provided.preview).toContain("Authorization: Bearer [REDACTED]");
+    expect(output).not.toContain("super-secret-value");
+    expect(output).not.toContain("abcdefghijklmnopqrstuvwxyz123456");
+    expect(output).toContain("OPENAI_API_KEY=[REDACTED]");
+    expect(output).toContain("Authorization: Bearer [REDACTED]");
+  });
+
   it("truncates long file paths safely", () => {
     const output = renderAttachmentSurface([
       fileAttachment("file-long", "src/runtime/deeply/nested/provider-turn-loop-with-a-very-long-name.ts", 184),
@@ -127,6 +150,18 @@ describe("Papyrus operator console attachment surface", () => {
     expect(text).toContain("src/runtime/deeply");
     expect(text).not.toContain("provider-turn-loop-with-a-very-long-name.ts");
     expect(text).toContain("184 lines");
+  });
+
+  it("visually marks the focused attachment without changing stored content", () => {
+    const attachments = sampleAttachments();
+    const output = renderAttachmentSurface(attachments, {
+      width: 120,
+      focusedAttachmentId: "file-1",
+    }).join("\n");
+
+    expect(output).toContain("╭─ › file excerpt");
+    expect(output).toContain("╭─ pasted text");
+    expect(attachments[1]?.title).toBe("file excerpt");
   });
 
   it("moves focus from prompt to attachments and back", () => {
@@ -192,6 +227,20 @@ describe("Papyrus operator console attachment surface", () => {
       kind: "attachment",
       attachmentId: "paste-1",
     });
+  });
+
+  it("removes focused attachments and advances focus safely", () => {
+    const state = createState({
+      attachments: sampleAttachments(),
+      focus: {
+        target: { kind: "attachment", attachmentId: "paste-1" },
+      },
+    });
+    const next = removeAttachmentAndRepairFocus(state, "paste-1");
+
+    expect(next.attachments.map((attachment) => attachment.id)).toEqual(["file-1", "paste-2"]);
+    expect(next.focus.target).toEqual({ kind: "attachment", attachmentId: "file-1" });
+    expect(state.attachments.map((attachment) => attachment.id)).toEqual(["paste-1", "file-1", "paste-2"]);
   });
 
   it("submits prompt with Enter when prompt is focused", () => {
@@ -274,6 +323,20 @@ describe("Papyrus operator console attachment surface", () => {
       "Attachments:",
       "- pasted text · 2,481 chars",
       "- file excerpt · src/cli/session-loop.ts · 184 lines",
+    ].join("\n"));
+  });
+
+  it("formats attachment-only submitted references without a leading blank line", () => {
+    const transcript = formatSubmittedPromptWithAttachmentReferences("", [
+      createPastedTextAttachment({
+        id: "paste-1",
+        content: "line one\nline two",
+      }),
+    ]);
+
+    expect(transcript).toBe([
+      "Attachments:",
+      "- pasted text · 17 chars",
     ].join("\n"));
   });
 

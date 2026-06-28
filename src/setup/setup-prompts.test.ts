@@ -234,7 +234,7 @@ describe("setup prompt context", () => {
 
   it("localizes generic setup prompt helper columns and status lines", () => {
     expect(setupChoiceColumns("ar")).toEqual([
-      { key: "description", header: "التفاصيل", align: "right" },
+      { key: "description", header: "التفاصيل", align: "left" },
       { key: "name", header: "الاسم", align: "right" },
     ]);
     expect(setupChoiceColumns("en")).toEqual([

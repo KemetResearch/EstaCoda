@@ -25,7 +25,7 @@ import { defaultImageModel } from "../contracts/image-generation.js";
 import type { Prompt, PromptOptions } from "./prompt-contract.js";
 import { createInteractivePrompt } from "./create-interactive-prompt.js";
 import type { ToolExecutionRecord } from "../tools/tool-executor.js";
-import { renderToolsMenu, buildSlashCompletionViewModel, buildToolsMenuViewModel, buildSkillsMenuViewModel } from "./slash-menu.js";
+import { buildToolsMenuViewModel, buildSkillsMenuViewModel } from "./slash-menu.js";
 import { renderSessionHelp, buildSessionHelpViewModel } from "./session-help.js";
 import { commandRegistry } from "./command-registry.js";
 import { toolIcon } from "./tool-activity-renderer.js";
@@ -40,16 +40,30 @@ import {
   buildAssistantResponseViewModel,
   buildKeyValueBlockViewModel,
   buildStartupDashboardViewModel,
-  buildSessionStatusRailViewModel,
   buildUserPromptRailViewModel,
   buildToolActivityRailViewModel,
 } from "../ui/view-models/builders.js";
 import { createSessionRenderer, type SessionRenderer } from "./session-renderer.js";
 import type { ResolvedTokens } from "../contracts/ui-tokens.js";
-import { BottomChromeController, type BottomChromeState } from "./bottom-chrome-controller.js";
-import type { SessionStatusRailViewModel, ShortcutHintRailViewModel, SlashMenuViewModel, StatusViewModel, ToolActivityRailEvent, ViewModel } from "../contracts/view-model.js";
+import type { StartupDashboardViewModel, StatusViewModel, ToolActivityRailEvent, ViewModel } from "../contracts/view-model.js";
 import type { TerminalCapabilities } from "../contracts/ui.js";
-import { centerVisibleBlock, measureVisibleWidth, truncateVisible, wrapText } from "../ui/renderers/layout.js";
+import {
+  createSubmittedSteerTranscriptBlock,
+  createOperatorConsoleRuntimeHost,
+  createOperatorConsoleStyle,
+  mapStartupDashboardViewModelToOperatorConsoleState,
+  renderCompletedActiveWorkSurface,
+  renderOperatorConsoleLines,
+  routeSteerKey,
+  type ActiveWorkRuntimeEvent,
+  type OperatorConsoleStyle,
+  type OperatorConsoleRuntimeHost,
+  type QueuedSteerState,
+  type SteerState,
+  type TurnActivityState,
+} from "../ui/papyrus/operator-console/index.js";
+import { parseKeypress, type ParsedKeypress } from "../ui/input/parseKeypress.js";
+import { centerVisibleBlock, measureVisibleWidth, truncateVisible } from "../ui/renderers/layout.js";
 import { chromeCopy } from "../ui/cli-ui-copy.js";
 import { resolveShellHistoryMode } from "./shell-history-mode.js";
 import { resolveClipboardMode } from "./clipboard-mode.js";
@@ -69,10 +83,22 @@ import {
   type CliVoiceRecorder,
   type CliVoiceMode
 } from "./voice-mode.js";
-import { ActiveTurnCommandController } from "./active-turn-command-controller.js";
 import { createFilePasteReferenceStore } from "./paste-interceptor.js";
 import { beginExplicitWorkflowRun, beginSkillPlaybookWorkflowRun } from "../workflow/workflow-begin.js";
 import { summarizeProviderExecution } from "../runtime/provider-execution-summary.js";
+import { LiveOperatorConsoleController } from "./live-operator-console-controller.js";
+import {
+  configuredModelForRuntime,
+  elapsedSeconds,
+  modelContextWindow,
+  operatorConsoleStatusRailState,
+  providerServingStateFromSummary,
+  providerServingTransitionAlert,
+  sessionStatusRailViewModel,
+  type ContextUsageSnapshot,
+  type ProviderRouteServingState,
+  type StatusRailTiming,
+} from "./session-status-rail.js";
 
 export type SessionLoopOptions = {
   runtime: Runtime;
@@ -92,6 +118,10 @@ export type SessionLoopOptions = {
   capabilities?: TerminalCapabilities;
   env?: Record<string, string | undefined>;
   approvalPromptAdapter?: ApprovalPromptAdapter;
+  operatorConsole?: {
+    readonly enabled?: boolean;
+    readonly runtimeHost?: OperatorConsoleRuntimeHost;
+  };
   cliVoice?: {
     recorder?: CliVoiceRecorder;
     envOptions?: CliVoiceEnvironmentOptions;
@@ -99,36 +129,10 @@ export type SessionLoopOptions = {
   };
 };
 
-const PROMPT_REGION_SLASH_PANEL_ROWS = 10;
-const MAX_ACTIVE_TURN_PREVIEW_LINES = 4;
-const MAX_ACTIVE_TURN_QUEUED_LINES = 3;
+const OPERATOR_CONSOLE_ACTIVE_WORK_TERMINAL_HEIGHT = 16;
 
-type ContextUsageSnapshot = NonNullable<SessionStatusRailViewModel["contextUsage"]>;
 type ContextUsageSource = Extract<RuntimeEvent, { kind: "context-usage" }>["source"];
-type RuntimeModelInfo = ReturnType<NonNullable<Runtime["getModelInfo"]>>;
 type StatusRailTimerMode = "idle" | "active-turn" | "last-turn";
-type ProviderServingStatus = "primary" | "fallback" | "failed";
-
-type ProviderRouteServingState = {
-  readonly status: ProviderServingStatus;
-  readonly primary?: {
-    readonly provider: string;
-    readonly model: string;
-  };
-  readonly actual?: {
-    readonly provider: string;
-    readonly model: string;
-  };
-  readonly reason?: string;
-};
-
-type StatusRailTiming = {
-  readonly now: () => number;
-  readonly sessionStartedAtMs: number;
-  readonly mode: StatusRailTimerMode;
-  readonly activeTurnStartedAtMs?: number;
-  readonly lastCompletedTurnSeconds?: number;
-};
 
 type SubmittedCliInput = {
   text: string;
@@ -136,155 +140,6 @@ type SubmittedCliInput = {
   echoedText: string;
   clearSubmittedPrompt: boolean;
 };
-
-type TranscriptChrome = {
-  readonly enabled: boolean;
-  clearInlineSpinner(): void;
-  suspendChromeForTranscript<T>(fn: () => T | Promise<T>): Promise<T>;
-  suspendForPrompt?<T>(fn: () => T | Promise<T>): Promise<T>;
-};
-
-type RuntimeEventChrome = {
-  readonly enabled: boolean;
-  clearInlineSpinner(): void;
-};
-
-type ToolActivityRailAnimator = {
-  start(event: ToolActivityRailEvent): void;
-  complete(event: ToolActivityRailEvent): void;
-  cancel(): void;
-  dispose(): void;
-};
-
-export class ToolActivityAnimator implements ToolActivityRailAnimator {
-  readonly #output: NodeJS.WritableStream;
-  readonly #renderer: { render(viewModel: import("../contracts/view-model.js").ViewModel): string };
-  readonly #streamState: { lastWriteEndedWithNewline: boolean };
-  readonly #enabled: boolean;
-  readonly #tickMs = 200;
-  #timer?: ReturnType<typeof setInterval>;
-  #rows: Array<{ event: ToolActivityRailEvent; active: boolean }> = [];
-  #renderedRowCount = 0;
-
-  constructor(options: {
-    output: NodeJS.WritableStream;
-    renderer: { render(viewModel: import("../contracts/view-model.js").ViewModel): string };
-    streamState: { lastWriteEndedWithNewline: boolean };
-    enabled: boolean;
-  }) {
-    this.#output = options.output;
-    this.#renderer = options.renderer;
-    this.#streamState = options.streamState;
-    this.#enabled = options.enabled;
-  }
-
-  start(event: ToolActivityRailEvent): void {
-    if (!this.#enabled) {
-      this.#writeDurableRow(event);
-      return;
-    }
-    this.#upsertRow(event, true);
-    this.#redrawRows();
-    if (this.#timer === undefined) {
-      this.#timer = setInterval(() => this.#tick(), this.#tickMs);
-    }
-  }
-
-  complete(event: ToolActivityRailEvent): void {
-    if (!this.#enabled || this.#rows.length === 0) {
-      this.#writeDurableRow(event);
-      return;
-    }
-    this.#upsertRow(event, false);
-    this.#redrawRows();
-    if (!this.#hasActiveRows()) {
-      this.#stopTimer();
-      this.#rows = [];
-      this.#renderedRowCount = 0;
-    }
-  }
-
-  cancel(): void {
-    this.#stopTimer();
-    if (this.#enabled && this.#renderedRowCount > 0) {
-      this.#clearRows();
-    }
-    this.#rows = [];
-    this.#renderedRowCount = 0;
-  }
-
-  dispose(): void {
-    this.#stopTimer();
-    this.#rows = [];
-    this.#renderedRowCount = 0;
-  }
-
-  #tick(): void {
-    if (!this.#hasActiveRows() || this.#renderedRowCount === 0) return;
-    this.#redrawRows();
-  }
-
-  #upsertRow(event: ToolActivityRailEvent, active: boolean): void {
-    const index = this.#findRowIndex(event);
-    const row = { event, active };
-    if (index === -1) {
-      this.#rows.push(row);
-    } else {
-      this.#rows[index] = row;
-    }
-  }
-
-  #findRowIndex(event: ToolActivityRailEvent): number {
-    const key = toolActivityRowKey(event);
-    const exactIndex = this.#rows.findIndex((row) => toolActivityRowKey(row.event) === key);
-    if (exactIndex !== -1 || event.target !== undefined || event.activityId !== undefined) {
-      return exactIndex;
-    }
-    return this.#rows.findIndex((row) => row.active && row.event.tool === event.tool);
-  }
-
-  #hasActiveRows(): boolean {
-    return this.#rows.some((row) => row.active);
-  }
-
-  #redrawRows(): void {
-    // The animated terminal path owns a contiguous tool block at the bottom of the transcript;
-    // unrelated output must clear/cancel it before writing.
-    this.#clearRows();
-    const vm = buildToolActivityRailViewModel({ events: this.#rows.map((row) => row.event) });
-    this.#output.write(`${this.#renderer.render(vm)}\n`);
-    this.#renderedRowCount = this.#rows.length;
-    this.#streamState.lastWriteEndedWithNewline = true;
-  }
-
-  #clearRows(): void {
-    if (this.#renderedRowCount === 0) {
-      return;
-    }
-    if (this.#renderedRowCount === 1) {
-      this.#output.write(`\x1b[1A\x1b[2K\r`);
-      return;
-    }
-    this.#output.write(clearTranscriptBlock(this.#renderedRowCount));
-  }
-
-  #writeDurableRow(event: ToolActivityRailEvent): void {
-    const vm = buildToolActivityRailViewModel({ events: [event] });
-    this.#output.write(`${this.#renderer.render(vm)}\n`);
-    this.#streamState.lastWriteEndedWithNewline = true;
-  }
-
-  #stopTimer(): void {
-    if (this.#timer !== undefined) {
-      clearInterval(this.#timer);
-      this.#timer = undefined;
-    }
-  }
-}
-
-function toolActivityRowKey(event: ToolActivityRailEvent): string {
-  return event.activityId ?? `${event.tool}\0${event.target ?? ""}`;
-}
 
 async function buildSessionStartupViewModel(runtime: Runtime): Promise<ViewModel> {
   const legacyStartup = runtime.getStartup();
@@ -334,6 +189,79 @@ function formatStartupScreenText(input: {
   return `\x1b[2J\x1b[H${centerVisibleBlock(input.rendered, input.capabilities.terminalWidth)}`;
 }
 
+function renderStartupScreenText(input: {
+  viewModel: ViewModel;
+  rendered: string;
+  capabilities: TerminalCapabilities;
+  operatorConsoleRuntimeHost?: OperatorConsoleRuntimeHost;
+  contextWindow?: number;
+  style?: OperatorConsoleStyle;
+}): string {
+  if (!canRenderStartupThroughOperatorConsole(input)) {
+    return formatStartupScreenText({
+      viewModel: input.viewModel,
+      rendered: input.rendered,
+      capabilities: input.capabilities,
+    });
+  }
+
+  const startupText = renderOperatorConsoleStartupDashboard({
+    viewModel: input.viewModel,
+    contextWindow: input.contextWindow,
+    capabilities: input.capabilities,
+    operatorConsoleRuntimeHost: input.operatorConsoleRuntimeHost,
+    style: input.style,
+  });
+  return `\x1b[2J\x1b[H${startupText}`;
+}
+
+function canRenderStartupThroughOperatorConsole(input: {
+  viewModel: ViewModel;
+  capabilities: TerminalCapabilities;
+  operatorConsoleRuntimeHost?: OperatorConsoleRuntimeHost;
+  style?: OperatorConsoleStyle;
+}): input is {
+  viewModel: StartupDashboardViewModel;
+  capabilities: TerminalCapabilities;
+  operatorConsoleRuntimeHost: OperatorConsoleRuntimeHost;
+  style?: OperatorConsoleStyle;
+} {
+  return input.operatorConsoleRuntimeHost !== undefined &&
+    input.viewModel.kind === "startupDashboard" &&
+    input.capabilities.isTTY &&
+    !input.capabilities.isCI &&
+    !input.capabilities.isDumb &&
+    input.capabilities.supportsColor;
+}
+
+function renderOperatorConsoleStartupDashboard(input: {
+  viewModel: StartupDashboardViewModel;
+  contextWindow?: number;
+  capabilities: TerminalCapabilities;
+  operatorConsoleRuntimeHost: OperatorConsoleRuntimeHost;
+  style?: OperatorConsoleStyle;
+}): string {
+  const host = input.operatorConsoleRuntimeHost;
+  host.clear();
+  host.setTerminal({
+    width: input.capabilities.terminalWidth,
+    height: 40,
+    isTty: input.capabilities.isTTY,
+  });
+  host.setStyle(input.style);
+  host.setStartupDashboard(mapStartupDashboardViewModelToOperatorConsoleState({
+    viewModel: input.viewModel,
+    contextWindow: input.contextWindow,
+  }));
+  const frame = host.render();
+  const startupText = renderOperatorConsoleLines(frame.state, frame.layout)
+    .filter((line) => line.region === "startupDashboard")
+    .map((line) => line.text)
+    .join("\n");
+  host.clear();
+  return startupText;
+}
+
 export async function runSessionLoop(options: SessionLoopOptions): Promise<void> {
   const output = options.output ?? defaultOutput;
   const renderer = createSessionRenderer({ output, locale: options.locale, capabilities: options.capabilities });
@@ -346,66 +274,93 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
     tools: runtime.tools()
   });
   let activeTurn: AbortController | undefined;
-  let currentAnimator: ToolActivityAnimator | undefined;
   let clearActiveTurnChrome: () => void = () => undefined;
+  const operatorConsoleEnabled = options.operatorConsole?.enabled === true
+    && renderer.capabilities.isTTY
+    && !renderer.capabilities.isCI
+    && !renderer.capabilities.isDumb;
+  const operatorConsoleStyle = createOperatorConsoleStyle({
+    tokens: renderer.tokens,
+    capabilities: renderer.capabilities,
+  });
+  const operatorConsoleRuntimeHost = operatorConsoleEnabled
+    ? options.operatorConsole?.runtimeHost ?? createOperatorConsoleRuntimeHost({
+      locale: renderer.locale === "ar" ? "ar" : "en",
+      terminal: {
+        width: renderer.capabilities.terminalWidth,
+        height: OPERATOR_CONSOLE_ACTIVE_WORK_TERMINAL_HEIGHT,
+        isTty: renderer.capabilities.isTTY,
+      },
+      style: operatorConsoleStyle,
+    })
+    : undefined;
+  operatorConsoleRuntimeHost?.setStyle(operatorConsoleStyle);
+  let latestContextUsage: ContextUsageSnapshot | undefined;
+  let activeTurnContextUsageSource: ContextUsageSource | undefined;
+  let timerMode: StatusRailTimerMode = "idle";
+  let activeTurnStartedAtMs: number | undefined;
+  let lastCompletedTurnSeconds: number | undefined;
+  let pendingCompactionPostTokens: number | undefined;
+  let lastProviderExecutionSummary: ProviderExecutionSummary | undefined;
+  let providerServingState: ProviderRouteServingState | undefined;
+  const railTiming = (): StatusRailTiming => ({
+    now,
+    sessionStartedAtMs,
+    mode: timerMode,
+    activeTurnStartedAtMs,
+    lastCompletedTurnSeconds
+  });
+  const getOperatorConsoleStatus = () => operatorConsoleStatusRailState({
+    runtime,
+    renderer,
+    contextUsage: latestContextUsage,
+    timing: railTiming(),
+    providerExecutionSummary: lastProviderExecutionSummary
+  });
   const prompt = options.prompt ?? createInteractivePrompt({
     input: cliInput,
     output: output as NodeJS.WriteStream,
     env: options.env,
     uiContext: promptUiContextForLocale(renderer.locale),
+    useOperatorConsole: operatorConsoleEnabled,
+    ...(operatorConsoleRuntimeHost === undefined
+      ? {}
+      : {
+        operatorConsole: {
+          enabled: true,
+          terminal: {
+            width: renderer.capabilities.terminalWidth,
+            height: OPERATOR_CONSOLE_ACTIVE_WORK_TERMINAL_HEIGHT,
+            isTty: renderer.capabilities.isTTY,
+          },
+          getStatus: getOperatorConsoleStatus,
+          style: operatorConsoleStyle,
+        },
+      }),
   });
   const close = options.close ?? (() => prompt.close?.());
-  const bottomChrome = new BottomChromeController({
-    output,
-    capabilities: renderer.capabilities,
-    renderViewModel: (vm) => renderer.render(vm),
-    renderHorizontalRule: (width) => renderBottomChromeRule(
-      renderer.tokens,
-      renderer.capabilities.supportsColor && renderer.tokens.contract.behavior.allowAnsiColor,
-      renderer.capabilities.supportsUnicode,
-      width
-    ),
-    enabled: renderer.capabilities.isTTY && !renderer.capabilities.isCI && !renderer.capabilities.isDumb,
-  });
   const onSigint = () => {
-    currentAnimator?.cancel();
     if (activeTurn !== undefined) {
       clearActiveTurnChrome();
-      bottomChrome.clearActiveChrome();
       activeTurn.abort("SIGINT");
       output.write("\nCancelling current turn. Press Ctrl+C again or type /exit to leave.\n");
       return;
     }
 
-    bottomChrome.dispose();
     output.write("\nEnding EstaCoda session.\n");
     close();
   };
 
+  let stopIdleStatusTicker: () => void = () => undefined;
   process.once("SIGINT", onSigint);
 
   try {
-    let latestContextUsage: ContextUsageSnapshot | undefined;
-    let activeTurnContextUsageSource: ContextUsageSource | undefined;
-    let timerMode: StatusRailTimerMode = "idle";
-    let activeTurnStartedAtMs: number | undefined;
-    let lastCompletedTurnSeconds: number | undefined;
-    let pendingCompactionPostTokens: number | undefined;
-    let lastProviderExecutionSummary: ProviderExecutionSummary | undefined;
-    let providerServingState: ProviderRouteServingState | undefined;
     const resetTurnRailState = () => {
       timerMode = "idle";
       activeTurnStartedAtMs = undefined;
       lastCompletedTurnSeconds = undefined;
       pendingCompactionPostTokens = undefined;
     };
-    const railTiming = (): StatusRailTiming => ({
-      now,
-      sessionStartedAtMs,
-      mode: timerMode,
-      activeTurnStartedAtMs,
-      lastCompletedTurnSeconds
-    });
     const applyCompactionRailReset = (postTokens?: number) => {
       resetTurnRailState();
       activeTurnContextUsageSource = undefined;
@@ -419,94 +374,80 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
     };
     const startupVm = await buildSessionStartupViewModel(runtime);
     const renderedStartupText = renderer.render(startupVm);
-    const startupText = formatStartupScreenText({
+    const startupText = renderStartupScreenText({
       viewModel: startupVm,
       rendered: renderedStartupText,
       capabilities: renderer.capabilities,
+      operatorConsoleRuntimeHost,
+      contextWindow: modelContextWindow(runtime),
+      style: operatorConsoleStyle,
     });
-    output.write(`${startupText}\n\n`);
-    if (!bottomChrome.enabled) {
-      output.write(`${chromeCopy(renderer.locale).startupPromptHint}\n\n`);
-    }
-
     const promptPrefix = renderer.tokens.contract.branding.promptPrefix ?? `${renderer.tokens.contract.glyph.prompt} `;
     const useColor = renderer.capabilities.supportsColor && renderer.tokens.contract.behavior.allowAnsiColor;
     const useUnicode = renderer.capabilities.supportsUnicode;
     const termWidth = renderer.capabilities.terminalWidth;
-    let clearBottomChromeTranscriptSpinner: () => void = () => undefined;
-    const runtimeEventBottomChrome: RuntimeEventChrome = {
-      enabled: true,
-      clearInlineSpinner: () => clearBottomChromeTranscriptSpinner()
-    };
-    const writeAboveChrome = (fn: () => void) => {
-      if (bottomChrome.enabled) {
-        bottomChrome.writeAboveChromeSync(fn);
-        return;
-      }
-      fn();
-    };
-    let queuedSubmittedInput: SubmittedCliInput | undefined;
-
-    while (true) {
-      const inputPlaceholder = bottomChrome.enabled
-        ? promptInputPlaceholder(renderer, promptPrefix, useColor, termWidth)
-        : undefined;
-      const idleBottomState = () => buildBottomChromeState({
+    const managedTty = renderer.capabilities.isTTY && !renderer.capabilities.isCI && !renderer.capabilities.isDumb;
+    let idleStatusTicker: ReturnType<typeof setInterval> | undefined;
+    const writeSessionStatusRail = () => {
+      if (!managedTty || operatorConsoleRuntimeHost !== undefined) return;
+      output.write(`${renderer.render(sessionStatusRailViewModel({
         runtime,
         renderer,
         contextUsage: latestContextUsage,
         timing: railTiming(),
         providerExecutionSummary: lastProviderExecutionSummary
-      });
-      let submittedInput = queuedSubmittedInput;
-      queuedSubmittedInput = undefined;
+      }))}\n`);
+    };
+    stopIdleStatusTicker = () => {
+      if (idleStatusTicker === undefined) return;
+      clearInterval(idleStatusTicker);
+      idleStatusTicker = undefined;
+    };
+    output.write(`${startupText}\n\n`);
+    if (!managedTty) {
+      output.write(`${chromeCopy(renderer.locale).startupPromptHint}\n\n`);
+    }
+    while (true) {
+      const inputPlaceholder = managedTty
+        ? promptInputPlaceholder(renderer, operatorConsoleEnabled ? "" : promptPrefix, useColor, termWidth)
+        : undefined;
+      let submittedInput: SubmittedCliInput;
       let turnVoiceMode: CliVoiceMode = "off";
 
-      if (submittedInput === undefined) {
-        if (bottomChrome.enabled) {
-          bottomChrome.updateState(idleBottomState());
-          bottomChrome.startTicker(idleBottomState);
-        } else {
-          const topRule = renderHorizontalRule(renderer.tokens, useColor, useUnicode, termWidth);
-          output.write(`${topRule}\n`);
+      if (!operatorConsoleEnabled) {
+        const topRule = renderHorizontalRule(renderer.tokens, useColor, useUnicode, termWidth);
+        output.write(`${topRule}\n`);
+        writeSessionStatusRail();
+        if (managedTty && idleStatusTicker === undefined) {
+          idleStatusTicker = setInterval(writeSessionStatusRail, 1000);
         }
-
-        turnVoiceMode = await currentCliVoiceMode({
-          runtime,
-          homeDir: options.homeDir
-        });
-        submittedInput = await readNextCliInput({
-          voiceMode: turnVoiceMode,
-          prompt,
-          promptPrefix,
-          renderer,
-          useColor,
-          runtime,
-          output,
-          homeDir: options.homeDir,
-          workspaceRoot: options.workspaceRoot,
-          cliVoice: options.cliVoice,
-          inputPlaceholder,
-          onPromptResolved: () => {
-            if (bottomChrome.enabled) {
-              bottomChrome.stopTicker();
-            }
-          }
-        });
       }
+
+      turnVoiceMode = await currentCliVoiceMode({
+        runtime,
+        homeDir: options.homeDir
+      });
+      submittedInput = await readNextCliInput({
+        voiceMode: turnVoiceMode,
+        prompt,
+        promptPrefix,
+        renderer,
+        useColor,
+        runtime,
+        output,
+        homeDir: options.homeDir,
+        workspaceRoot: options.workspaceRoot,
+        cliVoice: options.cliVoice,
+        inputPlaceholder,
+      });
+      stopIdleStatusTicker();
 
       const text = submittedInput.text;
 
       if (submittedInput.clearSubmittedPrompt === true) {
-        if (bottomChrome.enabled) {
-          bottomChrome.stopTicker();
-        } else {
+        if (!operatorConsoleEnabled) {
           const topRule = renderHorizontalRule(renderer.tokens, useColor, useUnicode, termWidth);
           output.write(`${topRule}\n`);
-        }
-      } else {
-        if (bottomChrome.enabled) {
-          bottomChrome.stopTicker();
         }
       }
 
@@ -561,9 +502,7 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
       // Render submitted non-slash user prompts as lightweight transcript rails
       const userPromptRail = buildUserPromptRailViewModel({ text });
       const userPromptRailText = renderer.render(userPromptRail);
-      if (!bottomChrome.enabled) {
-        output.write(`${userPromptRailText}\n`);
-      }
+      output.write(`${userPromptRailText}\n`);
 
       let retryText: string | undefined = text;
       let wroteUserPromptRail = false;
@@ -578,111 +517,70 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
         timerMode = "active-turn";
         const streamState = { lastWriteEndedWithNewline: true };
         const turnOutput = { spinnerPhase: undefined as string | undefined, hasOutput: false, lastOutputWasSpinner: false };
-        const TOOL_SLOT_COUNT = 5;
-        const EMPTY_TOOL_SLOT = "\u00A0";
-        let bottomChromeTranscriptSpinnerTicker: ReturnType<typeof setInterval> | undefined;
-        let bottomChromeActiveChromeTicker: ReturnType<typeof setInterval> | undefined;
-        let bottomChromeTransientSpinnerLines: readonly string[] = [];
-        let bottomChromeToolActivityActive = false;
-        let bottomChromeToolActivityLines: string[] = [];
-        const completedBottomChromeToolRows: string[] = [];
-        let completedToolRowsFlushed = false;
-        let skippedPreResponseBottomChromeStateUpdate = false;
-        let activeTurnPromptLines: string[] = [];
-        let activeTurnCommandLines: string[] = [];
-        let activeTurnStatusLines: string[] = [];
-        let activeTurnSlashCompletion: SlashMenuViewModel | undefined;
-        let suppressActiveTurnChromeUpdates = false;
-        let currentPhase: string | undefined;
+        let operatorConsoleSteerState: SteerState | undefined;
+        let operatorConsoleSteerSequence = 0;
+        let disposeOperatorConsoleSteerInput: (() => void) | undefined;
+        const operatorConsoleLiveFrame = operatorConsoleRuntimeHost === undefined
+          ? undefined
+          : new LiveOperatorConsoleController({
+            output,
+            runtimeHost: operatorConsoleRuntimeHost,
+            terminal: {
+              width: termWidth,
+              height: OPERATOR_CONSOLE_ACTIVE_WORK_TERMINAL_HEIGHT,
+              isTty: renderer.capabilities.isTTY,
+            },
+            capabilities: {
+              supportsAnimation: renderer.capabilities.supportsAnimation,
+            },
+            getStatus: getOperatorConsoleStatus,
+          });
         let turnWasCancelled = false;
-        let activeTurnCommandController: ActiveTurnCommandController | undefined;
-        const runningBottomState = () => buildBottomChromeState({
-          runtime,
-          renderer,
-          slashMenu: activeTurnSlashCompletion,
-          slashMenuMinRows: activeTurnSlashCompletion === undefined ? undefined : PROMPT_REGION_SLASH_PANEL_ROWS,
-          contextUsage: latestContextUsage,
-          timing: railTiming(),
-          providerExecutionSummary: lastProviderExecutionSummary
-        });
 
-        currentAnimator = new ToolActivityAnimator({
-          output,
-          renderer,
-          streamState,
-          enabled: !bottomChrome.enabled && renderer.capabilities.isTTY && renderer.capabilities.supportsAnimation && !renderer.capabilities.isCI && !renderer.capabilities.isDumb,
-        });
-        const supportsBottomChromeTranscriptSpinnerAnimation =
-          renderer.capabilities.supportsAnimation
-          && !renderer.capabilities.isCI
-          && !renderer.capabilities.isDumb;
-
-        function activeTurnTransientLines(): string[] {
-          if (activeTurnPromptLines.length > 0) return activeTurnPromptLines;
-          if (activeTurnCommandLines.length > 0) return activeTurnCommandLines;
-          if (activeTurnStatusLines.length > 0) return activeTurnStatusLines;
-          return [];
+        function clearOperatorConsoleLiveFrame(): void {
+          operatorConsoleLiveFrame?.clear();
         }
 
-        function setActiveTurnPromptLines(lines: string[]): void {
-          activeTurnPromptLines = lines;
-          activeTurnCommandLines = [];
-          activeTurnStatusLines = [];
+        function refreshOperatorConsoleTransientSurface(): void {
+          operatorConsoleLiveFrame?.refresh();
         }
 
-        function setActiveTurnCommandLines(lines: string[]): void {
-          activeTurnPromptLines = [];
-          activeTurnCommandLines = lines;
-          activeTurnStatusLines = [];
+        function setOperatorConsoleSteerState(state: SteerState | undefined): void {
+          operatorConsoleSteerState = state;
+          operatorConsoleLiveFrame?.setSteer(state);
         }
 
-        function setActiveTurnStatusLines(lines: string[]): void {
-          activeTurnPromptLines = [];
-          activeTurnCommandLines = [];
-          activeTurnStatusLines = lines;
+        function activeWorkEventFromToolRail(
+          railEvent: ToolActivityRailEvent,
+          runtimeEvent: Extract<RuntimeEvent, { kind: "tool-start" | "tool-result" }>
+        ): ActiveWorkRuntimeEvent {
+          return {
+            id: railEvent.activityId,
+            toolName: railEvent.tool,
+            status: railEvent.status,
+            summary: railEvent.label,
+            target: railEvent.target,
+            durationMs: railEvent.elapsedMs,
+            detailsRef: railEvent.activityId,
+            riskClass: railEvent.riskClass,
+            fileChangeInspected: runtimeEvent.kind === "tool-result" && runtimeEvent.fileChangePreview !== undefined,
+          };
         }
 
-        function clearActiveTurnVisualLines(): void {
-          activeTurnPromptLines = [];
-          activeTurnCommandLines = [];
-          activeTurnStatusLines = [];
-        }
-
-        function fixedToolActivitySlots(): string[] {
-          if (!bottomChromeToolActivityActive) return [];
-          const recent = bottomChromeToolActivityLines.slice(-TOOL_SLOT_COUNT);
-          return [
-            ...recent,
-            ...Array.from({ length: TOOL_SLOT_COUNT - recent.length }, () => EMPTY_TOOL_SLOT),
-          ];
-        }
-
-        const updateActiveTurnTransientLines = () => {
-          if (!bottomChrome.enabled) return;
-          bottomChrome.updateTransientLines([
-            ...activeTurnTransientLines(),
-            ...fixedToolActivitySlots(),
-            ...bottomChromeTransientSpinnerLines,
-          ]);
-        };
-
-        function renderToolActivityLines(event: ToolActivityRailEvent): string[] {
-          return renderer.render(buildToolActivityRailViewModel({ events: [event] }))
-            .split("\n")
-            .filter((line) => line.length > 0);
-        }
-
-        function appendRenderedRows(rows: string[], rendered: string): void {
-          rows.push(...rendered.split("\n").filter((line) => line.length > 0));
-        }
-
-        function writeTurnBoundaryRows(rows: readonly string[]): void {
+        function writeTurnBoundaryRows(rows: readonly string[], options: { readonly redrawLiveFrame?: boolean } = {}): void {
           if (rows.length === 0) return;
-          if (!streamState.lastWriteEndedWithNewline) {
-            output.write("\n");
+          const writeRows = () => {
+            if (!streamState.lastWriteEndedWithNewline) {
+              output.write("\n");
+            }
+            output.write(`${rows.join("\n")}\n`);
+            streamState.lastWriteEndedWithNewline = true;
+          };
+          if (operatorConsoleLiveFrame === undefined) {
+            writeRows();
+            return;
           }
-          output.write(`${rows.join("\n")}\n`);
-          streamState.lastWriteEndedWithNewline = true;
+          operatorConsoleLiveFrame.withDurableWrite(writeRows, { redraw: options.redrawLiveFrame === true });
         }
 
         function isToolActivityRuntimeEvent(
@@ -691,90 +589,136 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
           return event.kind === "tool-start" || event.kind === "tool-result";
         }
 
-        function flushCompletedToolRowsNoRestore(): void {
-          if (
-            !bottomChrome.enabled ||
-            completedToolRowsFlushed ||
-            completedBottomChromeToolRows.length === 0
-          ) {
-            return;
-          }
-
-          completedToolRowsFlushed = true;
-          bottomChromeToolActivityActive = false;
-          bottomChromeToolActivityLines = [];
-
-          bottomChrome.writeAboveChromeNoRestore(() => {
-            writeTurnBoundaryRows(completedBottomChromeToolRows);
-          });
+        function createQueuedSteerState(text: string): QueuedSteerState {
+          operatorConsoleSteerSequence += 1;
+          return {
+            id: `active-turn-steer-${turnStartedAtMs}-${operatorConsoleSteerSequence}`,
+            text,
+            status: "queued",
+            submittedAtMs: now(),
+          };
         }
 
-        const resetBottomChromeTransientSpinnerState = () => {
-          if (bottomChromeTranscriptSpinnerTicker !== undefined) {
-            clearInterval(bottomChromeTranscriptSpinnerTicker);
-            bottomChromeTranscriptSpinnerTicker = undefined;
-          }
-          bottomChromeTransientSpinnerLines = [];
-          streamState.lastWriteEndedWithNewline = true;
-          turnOutput.lastOutputWasSpinner = false;
-        };
+        function writeSubmittedSteerTranscript(text: string): void {
+          const block = createSubmittedSteerTranscriptBlock({
+            id: `active-turn-steer-transcript-${turnStartedAtMs}-${operatorConsoleSteerSequence}`,
+            text,
+            createdAtMs: now(),
+          });
+          writeTurnBoundaryRows(block.text.split("\n"), { redrawLiveFrame: true });
+        }
 
-        const stopBottomChromeTransientSpinner = () => {
-          resetBottomChromeTransientSpinnerState();
-          updateActiveTurnTransientLines();
-        };
-        clearBottomChromeTranscriptSpinner = stopBottomChromeTransientSpinner;
+        function currentDraftSteerState(draft: string): SteerState {
+          return {
+            draft,
+            cursorOffset: draft.length,
+            mode: "drafting",
+          };
+        }
 
-        const updateActiveTurnTransientLinesUnlessSuppressed = () => {
-          if (suppressActiveTurnChromeUpdates) {
+        function currentQueuedSteerState(queued: QueuedSteerState): SteerState {
+          return {
+            draft: "",
+            cursorOffset: 0,
+            mode: "queued",
+            queued,
+          };
+        }
+
+        function handleOperatorConsoleSteerKey(event: ParsedKeypress): void {
+          if (event.type === "key" && event.ctrl === true && event.key === "c") {
+            process.emit("SIGINT");
             return;
           }
-          updateActiveTurnTransientLines();
-        };
 
-        const updateBottomChromeStateInPlaceUnlessSuppressed = () => {
-          if (!bottomChrome.enabled || suppressActiveTurnChromeUpdates) {
+          const current = operatorConsoleSteerState;
+          const queued = current?.queued?.status === "queued" ? current.queued : undefined;
+
+          if (event.type === "key" && event.key === "escape") {
+            if (queued !== undefined) {
+              pendingSteeringNote = undefined;
+              setOperatorConsoleSteerState(undefined);
+              return;
+            }
+            if (current?.mode === "drafting") {
+              setOperatorConsoleSteerState(undefined);
+            }
             return;
           }
-          bottomChrome.updateStateInPlace(runningBottomState());
-        };
 
-        const stopBottomChromeActiveChromeTicker = () => {
-          if (bottomChromeActiveChromeTicker !== undefined) {
-            clearInterval(bottomChromeActiveChromeTicker);
-            bottomChromeActiveChromeTicker = undefined;
-          }
-        };
-
-        const renderBottomChromeTranscriptSpinnerFrame = () => {
-          if (!bottomChrome.enabled || currentPhase === undefined) {
+          if (event.type === "key" && event.key === "backspace") {
+            if (current?.mode !== "drafting") return;
+            const nextDraft = current.draft.slice(0, -1);
+            setOperatorConsoleSteerState(nextDraft.length === 0 ? undefined : currentDraftSteerState(nextDraft));
             return;
           }
-          const spinnerText = renderer.render(buildActiveTurnSpinnerViewModel({ phase: currentPhase }));
-          bottomChromeTransientSpinnerLines = spinnerText.split("\n").filter((line) => line.length > 0);
-          updateActiveTurnTransientLines();
-          streamState.lastWriteEndedWithNewline = true;
-          turnOutput.hasOutput = true;
-          turnOutput.lastOutputWasSpinner = true;
-        };
 
-        const startBottomChromeTranscriptSpinner = (phase: string) => {
-          currentPhase = phase;
-          renderBottomChromeTranscriptSpinnerFrame();
-          if (!supportsBottomChromeTranscriptSpinnerAnimation || bottomChromeTranscriptSpinnerTicker !== undefined) {
+          if (event.type === "key" && event.ctrl === true && event.key === "u") {
+            if (current?.mode === "drafting") {
+              setOperatorConsoleSteerState(undefined);
+            }
             return;
           }
-          bottomChromeTranscriptSpinnerTicker = setInterval(() => {
-            renderBottomChromeTranscriptSpinnerFrame();
-          }, 200);
-        };
+
+          if (event.type === "key" && event.key === "enter") {
+            if (current === undefined) return;
+            const intent = routeSteerKey(current, event);
+            if (intent.type !== "submit") return;
+            if (queued !== undefined || steeringRetryUsed || pendingSteeringNote !== undefined) {
+              setOperatorConsoleSteerState(currentQueuedSteerState(queued ?? createQueuedSteerState(pendingSteeringNote ?? intent.text)));
+              return;
+            }
+            const queuedSteer = createQueuedSteerState(intent.text);
+            pendingSteeringNote = intent.text;
+            setOperatorConsoleSteerState(currentQueuedSteerState(queuedSteer));
+            writeSubmittedSteerTranscript(intent.text);
+            activeTurn?.abort("CLI steer");
+            return;
+          }
+
+          if (event.type !== "text" && event.type !== "paste") {
+            return;
+          }
+          if (queued !== undefined) {
+            setOperatorConsoleSteerState(currentQueuedSteerState(queued));
+            return;
+          }
+          const nextDraft = `${current?.mode === "drafting" ? current.draft : ""}${event.text}`;
+          setOperatorConsoleSteerState(currentDraftSteerState(nextDraft));
+        }
+
+        function startOperatorConsoleSteerInput(): (() => void) | undefined {
+          if (
+            operatorConsoleRuntimeHost === undefined ||
+            cliInput.isTTY !== true ||
+            renderer.capabilities.isCI ||
+            renderer.capabilities.isDumb
+          ) {
+            return undefined;
+          }
+
+          const wasRaw = cliInput.isRaw === true;
+          const onData = (chunk: string | Buffer | Uint8Array) => {
+            const textChunk = typeof chunk === "string" ? chunk : Buffer.from(chunk).toString("utf8");
+            for (const event of parseKeypress(textChunk)) {
+              handleOperatorConsoleSteerKey(event);
+            }
+          };
+          cliInput.on("data", onData);
+          cliInput.setRawMode?.(true);
+          cliInput.resume();
+          return () => {
+            cliInput.off("data", onData);
+            if (!wasRaw) {
+              cliInput.setRawMode?.(false);
+            }
+          };
+        }
 
         const renderSpinner = (phase: string) => {
-          currentPhase = phase;
-          if (bottomChrome.enabled) {
-            bottomChrome.updateStateInPlace(runningBottomState());
-            startBottomChromeTranscriptSpinner(phase);
+          if (operatorConsoleLiveFrame !== undefined) {
             turnOutput.spinnerPhase = phase;
+            operatorConsoleLiveFrame.setTurnActivity(operatorConsoleTurnActivityForPhase(phase));
             return;
           }
           if (turnOutput.spinnerPhase === phase) {
@@ -789,315 +733,131 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
         };
 
         const clearSpinner = () => {
-          if (bottomChrome.enabled) {
-            stopBottomChromeActiveChromeTicker();
-            stopBottomChromeTransientSpinner();
-            currentPhase = undefined;
-          }
+          operatorConsoleLiveFrame?.clearTurnActivity();
+          clearOperatorConsoleLiveFrame();
           turnOutput.spinnerPhase = undefined;
           turnOutput.lastOutputWasSpinner = false;
         };
         clearActiveTurnChrome = clearSpinner;
 
-        bottomChrome.setStateFactory(runningBottomState);
-        if (bottomChrome.enabled) {
-          bottomChrome.updateState(runningBottomState());
-          bottomChromeActiveChromeTicker = setInterval(() => {
-            bottomChrome.updateStateInPlace(runningBottomState());
-          }, 1000);
-          if (!wroteUserPromptRail) {
-            // Raw Papyrus prompt cleanup owns the submitted prompt rows; bottom
-            // chrome only clears/redraws its managed region around durable output.
-            bottomChrome.writeAboveChromeSync(() => {
-              output.write(`${userPromptRailText}\n\n`);
-            });
-            wroteUserPromptRail = true;
-          }
-        }
         if (!wroteUserPromptRail) {
           output.write("\n");
           wroteUserPromptRail = true;
         }
         renderSpinner("thinking");
 
-        activeTurnCommandController = new ActiveTurnCommandController({
-          input: cliInput,
-          enabled: renderer.capabilities.isTTY && !renderer.capabilities.isCI && !renderer.capabilities.isDumb,
-          onActiveInputPreviewChange: (preview) => {
-            if (!bottomChrome.enabled) {
-              clearActiveTurnVisualLines();
-              return;
-            }
-            if (preview?.kind === "message") {
-              setActiveTurnPromptLines(renderActiveTurnLabeledLines({
-                label: "> Follow up:",
-                text: preview.text,
-                terminalWidth: termWidth,
-                maxLines: MAX_ACTIVE_TURN_PREVIEW_LINES,
-                overflow: "tail",
-              }));
-            } else if (preview?.kind === "command") {
-              setActiveTurnCommandLines(renderActiveTurnCommandPreviewLines({
-                command: preview.text,
-                renderer,
-                terminalWidth: termWidth,
-              }));
-            } else {
-              clearActiveTurnVisualLines();
-            }
-            updateActiveTurnTransientLinesUnlessSuppressed();
-          },
-          onStatusMessage: (message) => {
-            if (!bottomChrome.enabled) {
-              clearActiveTurnVisualLines();
-              return;
-            }
-            setActiveTurnStatusLines(renderActiveTurnLabeledLines({
-              label: `${activeTurnGlyph(renderer, "command")} active command:`,
-              text: message,
-              terminalWidth: termWidth,
-              maxLines: 2,
-              overflow: "head",
-            }));
-            updateActiveTurnTransientLinesUnlessSuppressed();
-          },
-          onInputLineChange: (line) => {
-            activeTurnSlashCompletion = line?.startsWith("/") === true
-              ? buildActiveTurnSlashCompletionViewModel(runtime, line)
-              : undefined;
-            updateBottomChromeStateInPlaceUnlessSuppressed();
-          },
-          onQueueText: (queuedText) => {
-            if (queuedSubmittedInput !== undefined) {
-              if (bottomChrome.enabled) {
-                setActiveTurnStatusLines(renderActiveTurnLabeledLines({
-                  label: `${activeTurnGlyph(renderer, "queued")} Queued:`,
-                  text: "A message is already queued for the next turn.",
-                  terminalWidth: termWidth,
-                  maxLines: 2,
-                  overflow: "head",
-                }));
-              } else {
-                clearActiveTurnVisualLines();
-              }
-              updateActiveTurnTransientLinesUnlessSuppressed();
-              return;
-            }
-            queuedSubmittedInput = {
-              text: queuedText,
-              echoedPromptPrefix: "",
-              echoedText: queuedText,
-              clearSubmittedPrompt: false
-            };
-            if (bottomChrome.enabled) {
-              setActiveTurnStatusLines(renderActiveTurnLabeledLines({
-                label: `${activeTurnGlyph(renderer, "queued")} Queued:`,
-                text: queuedText,
-                terminalWidth: termWidth,
-                maxLines: MAX_ACTIVE_TURN_QUEUED_LINES,
-                overflow: "head",
-              }));
-            } else {
-              clearActiveTurnVisualLines();
-            }
-            updateActiveTurnTransientLines();
-          },
-          onInterrupt: () => {
-            activeTurn?.abort("CLI interrupt");
-          },
-          onSteer: (note) => {
-            if (steeringRetryUsed || pendingSteeringNote !== undefined) {
-              if (bottomChrome.enabled) {
-                setActiveTurnStatusLines(renderActiveTurnLabeledLines({
-                  label: `${activeTurnGlyph(renderer, "command")} active command:`,
-                  text: "Steering already queued for this turn.",
-                  terminalWidth: termWidth,
-                  maxLines: 2,
-                  overflow: "head",
-                }));
-              } else {
-                clearActiveTurnVisualLines();
-              }
-              updateActiveTurnTransientLines();
-              return;
-            }
-            pendingSteeringNote = note;
-            if (bottomChrome.enabled) {
-              setActiveTurnStatusLines(renderActiveTurnLabeledLines({
-                label: `${activeTurnGlyph(renderer, "steer")} Steer:`,
-                text: "Steering note queued; interrupting turn.",
-                terminalWidth: termWidth,
-                maxLines: 2,
-                overflow: "head",
-              }));
-            } else {
-              clearActiveTurnVisualLines();
-            }
-            updateActiveTurnTransientLines();
-            activeTurn?.abort("CLI steer");
-          },
-        });
+        disposeOperatorConsoleSteerInput = startOperatorConsoleSteerInput();
         const responsePromise = runtime.handle({
             text: retryText,
             channel: "cli",
             signal: activeTurn.signal,
-            onEvent: (event) => {
-              if (event.kind === "context-usage") {
+	            onEvent: (event) => {
+	              if (event.kind === "context-usage") {
                 const currentPriority = activeTurnContextUsageSource === undefined
                   ? 0
                   : contextUsagePriority(activeTurnContextUsageSource);
                 const incomingPriority = contextUsagePriority(event.source);
-                if (incomingPriority >= currentPriority) {
-                  latestContextUsage = { filled: event.filled, total: event.total };
-                  activeTurnContextUsageSource = event.source;
-                  if (bottomChrome.enabled && turnOutput.spinnerPhase !== undefined) {
-                    renderSpinner(turnOutput.spinnerPhase);
-                  }
-                }
-              }
-              if (event.kind === "session-compacted") {
+	                if (incomingPriority >= currentPriority) {
+	                  latestContextUsage = { filled: event.filled, total: event.total };
+	                  activeTurnContextUsageSource = event.source;
+	                  refreshOperatorConsoleTransientSurface();
+	                  writeSessionStatusRail();
+	                }
+	              }
+	              if (event.kind === "session-compacted") {
                 pendingCompactionPostTokens = event.postTokens;
                 activeTurnContextUsageSource = undefined;
-                const contextWindow = modelContextWindow(runtime);
-                const total = contextWindow ?? latestContextUsage?.total;
-                latestContextUsage = total === undefined ? undefined : { filled: event.postTokens, total };
-                if (bottomChrome.enabled && turnOutput.spinnerPhase !== undefined) {
-                  renderSpinner(turnOutput.spinnerPhase);
-                }
-              }
-              if (event.kind === "agent-cancelled") {
-                turnWasCancelled = true;
-              }
-              let newPhase: string | undefined;
-              if (bottomChrome.enabled && isToolActivityRuntimeEvent(event)) {
-                runtimeEventBottomChrome.clearInlineSpinner();
-
-                const railEvent = activityBuilder.buildToolActivityRailEvent(event);
-                const lines = renderToolActivityLines(railEvent);
-
-                bottomChromeToolActivityActive = true;
-                bottomChromeToolActivityLines.push(...lines);
-                bottomChromeToolActivityLines = bottomChromeToolActivityLines.slice(-TOOL_SLOT_COUNT);
-
-                if (event.kind === "tool-result") {
-                  completedBottomChromeToolRows.push(...lines);
-                  if (event.fileChangePreview !== undefined) {
-                    appendRenderedRows(completedBottomChromeToolRows, renderer.render(event.fileChangePreview));
+	                const contextWindow = modelContextWindow(runtime);
+	                const total = contextWindow ?? latestContextUsage?.total;
+	                latestContextUsage = total === undefined ? undefined : { filled: event.postTokens, total };
+	                refreshOperatorConsoleTransientSurface();
+	                writeSessionStatusRail();
+	              }
+	              if (event.kind === "agent-cancelled") {
+	                turnWasCancelled = true;
+	              }
+	              let newPhase: string | undefined;
+	              if (operatorConsoleLiveFrame !== undefined && isToolActivityRuntimeEvent(event)) {
+	                const railEvent = activityBuilder.buildToolActivityRailEvent(event);
+	                operatorConsoleLiveFrame.applyActiveWorkEvent(activeWorkEventFromToolRail(railEvent, event));
+	                newPhase = "tool";
+	              } else if (operatorConsoleLiveFrame !== undefined) {
+                  const operatorConsolePhase = operatorConsoleTransientPhaseForRuntimeEvent(event);
+                  if (operatorConsolePhase === null) {
+                    clearOperatorConsoleLiveFrame();
+                    newPhase = renderRuntimeEvent(output, event, activityBuilder, renderer, streamState, undefined, turnOutput);
+                  } else {
+                    newPhase = operatorConsolePhase;
                   }
-                }
-
-                updateActiveTurnTransientLines();
-                newPhase = "tool";
-              } else if (bottomChrome.enabled) {
-                bottomChrome.writeAboveChromeSync(() => {
-                  newPhase = renderRuntimeEvent(output, event, activityBuilder, renderer, streamState, runtimeEventBottomChrome, turnOutput);
-                });
-              } else {
-                newPhase = renderRuntimeEvent(output, event, activityBuilder, renderer, streamState, undefined, turnOutput, currentAnimator);
-              }
+	              } else {
+	                newPhase = renderRuntimeEvent(output, event, activityBuilder, renderer, streamState, undefined, turnOutput);
+	              }
               if (newPhase !== undefined) {
                 renderSpinner(newPhase);
               }
             }
           })
-          .finally(() => {
-            activeTurn = undefined;
-            activeTurnStartedAtMs = undefined;
-            suppressActiveTurnChromeUpdates = bottomChrome.enabled;
-            try {
-              activeTurnCommandController?.dispose();
-            } finally {
-              suppressActiveTurnChromeUpdates = false;
-            }
-            activeTurnCommandController = undefined;
-            clearActiveTurnVisualLines();
-            activeTurnSlashCompletion = undefined;
-            bottomChromeToolActivityActive = false;
-            bottomChromeToolActivityLines = [];
-            if (bottomChrome.enabled) {
-              stopBottomChromeActiveChromeTicker();
-              resetBottomChromeTransientSpinnerState();
-              currentPhase = undefined;
-              turnOutput.spinnerPhase = undefined;
-              turnOutput.lastOutputWasSpinner = false;
-            } else {
-              clearSpinner();
-            }
-            currentAnimator?.dispose();
-            currentAnimator = undefined;
-            clearBottomChromeTranscriptSpinner = () => undefined;
-            clearActiveTurnChrome = () => undefined;
-          });
-        activeTurnCommandController.start();
+	          .finally(() => {
+	            activeTurn = undefined;
+	            activeTurnStartedAtMs = undefined;
+	            disposeOperatorConsoleSteerInput?.();
+	            disposeOperatorConsoleSteerInput = undefined;
+	            operatorConsoleSteerState = undefined;
+	            operatorConsoleLiveFrame?.setSteer(undefined);
+	            clearSpinner();
+	            clearActiveTurnChrome = () => undefined;
+	          });
         const response = await responsePromise;
+        const completedActiveWork = operatorConsoleLiveFrame?.completeActiveWork();
+        if (completedActiveWork !== undefined) {
+          const completedRows = renderCompletedActiveWorkSurface(completedActiveWork, {
+            width: termWidth,
+            locale: renderer.locale,
+            style: operatorConsoleStyle,
+          });
+          writeTurnBoundaryRows(completedRows.length === 0 ? [] : completedRows);
+          operatorConsoleLiveFrame?.resetActiveWork();
+        }
         lastProviderExecutionSummary = response.providerExecution === undefined
           ? undefined
           : summarizeProviderExecution({
               configuredModel: configuredModelForRuntime(runtime),
               execution: response.providerExecution,
             });
-        if (pendingCompactionPostTokens !== undefined) {
-          applyCompactionRailReset(pendingCompactionPostTokens);
-          pendingCompactionPostTokens = undefined;
-        } else {
-          lastCompletedTurnSeconds = elapsedSeconds(turnStartedAtMs, now());
-          timerMode = "last-turn";
-        }
-        if (bottomChrome.enabled && completedBottomChromeToolRows.length === 0) {
-          updateActiveTurnTransientLines();
-          bottomChrome.updateState(buildBottomChromeState({
-            runtime,
-            renderer,
-            contextUsage: latestContextUsage,
-            timing: railTiming(),
-            providerExecutionSummary: lastProviderExecutionSummary
-          }));
-        } else if (bottomChrome.enabled) {
-          skippedPreResponseBottomChromeStateUpdate = true;
-        }
-
-        if (pendingSteeringNote !== undefined && !steeringRetryUsed) {
-          const steeringNote = pendingSteeringNote;
-          pendingSteeringNote = undefined;
-          steeringRetryUsed = true;
-          if (bottomChrome.enabled) {
-            updateActiveTurnTransientLines();
-          }
-          retryText = buildSteeredRetryText(text, steeringNote);
-          continue;
-        }
+	        if (pendingCompactionPostTokens !== undefined) {
+	          applyCompactionRailReset(pendingCompactionPostTokens);
+	          pendingCompactionPostTokens = undefined;
+	        } else {
+	          lastCompletedTurnSeconds = elapsedSeconds(turnStartedAtMs, now());
+	          timerMode = "last-turn";
+	        }
+	        writeSessionStatusRail();
+	        if (pendingSteeringNote !== undefined && !steeringRetryUsed) {
+	          const steeringNote = pendingSteeringNote;
+	          pendingSteeringNote = undefined;
+	          steeringRetryUsed = true;
+	          retryText = buildSteeredRetryText(text, steeringNote);
+	          continue;
+	        }
 
         const providerServingAlert = lastProviderExecutionSummary === undefined
           ? undefined
           : providerServingTransitionAlert(providerServingState, lastProviderExecutionSummary);
-        if (lastProviderExecutionSummary !== undefined) {
-          providerServingState = providerServingStateFromSummary(lastProviderExecutionSummary);
-        }
+	        if (lastProviderExecutionSummary !== undefined) {
+	          providerServingState = providerServingStateFromSummary(lastProviderExecutionSummary);
+	        }
+	        writeSessionStatusRail();
 
-        const assistantVm = buildAssistantResponseViewModel({
-          label: response.label,
+	        const assistantVm = buildAssistantResponseViewModel({
+	          label: response.label,
           text: response.text,
           matchedSkills: response.matchedSkills,
-          progress: options.showResponseProgress === true ? response.progress : undefined,
-        });
-        flushCompletedToolRowsNoRestore();
-        if (providerServingAlert !== undefined) {
-          writeAboveChrome(() => {
-            output.write(`${providerServingAlert}\n`);
-          });
-        }
-        writeAboveChrome(() => {
-          output.write(renderer.render(assistantVm));
-        });
-        if (skippedPreResponseBottomChromeStateUpdate && bottomChrome.enabled) {
-          bottomChrome.updateState(buildBottomChromeState({
-            runtime,
-            renderer,
-            contextUsage: latestContextUsage,
-            timing: railTiming(),
-            providerExecutionSummary: lastProviderExecutionSummary
-          }));
-        }
+	          progress: options.showResponseProgress === true ? response.progress : undefined,
+	        });
+	        if (providerServingAlert !== undefined) {
+	          output.write(`${providerServingAlert}\n`);
+	        }
+	        output.write(renderer.render(assistantVm));
         if (turnVoiceMode === "tts") {
           const playback = await playCliResponseIfEnabled({
             runtime,
@@ -1106,71 +866,59 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
             workspaceRoot: options.workspaceRoot,
             commandExists: options.cliVoice?.playbackCommandExists,
             signal: activeTurn?.signal
-          });
-          if (playback !== undefined && playback.played === false && playback.reason !== "empty-response") {
-            writeAboveChrome(() => {
-              output.write(`\nCLI voice playback skipped: ${playback.reason}\n`);
-            });
-          } else if (playback !== undefined && playback.played === true) {
-            writeAboveChrome(() => {
-              output.write(`\nCLI voice playback: ${playback.player}\n`);
-            });
-          }
-        }
+	          });
+	          if (playback !== undefined && playback.played === false && playback.reason !== "empty-response") {
+	            output.write(`\nCLI voice playback skipped: ${playback.reason}\n`);
+	          } else if (playback !== undefined && playback.played === true) {
+	            output.write(`\nCLI voice playback: ${playback.player}\n`);
+	          }
+	        }
 
         const setupResolution = await maybeHandleSetupNeeded({
           runtime,
           prompt,
-          output,
-          renderer,
-          chrome: bottomChrome,
-          homeDir: options.homeDir,
-          execution: response.toolExecutions.find(hasSetupNeededResult)
-        });
+	          output,
+	          renderer,
+	          homeDir: options.homeDir,
+	          execution: response.toolExecutions.find(hasSetupNeededResult)
+	        });
 
-        if (setupResolution.handled) {
-          writeAboveChrome(() => {
-            output.write(`${setupResolution.message}\n\n`);
-          });
-          retryText = undefined;
-          continue;
-        }
+	        if (setupResolution.handled) {
+	          output.write(`${setupResolution.message}\n\n`);
+	          retryText = undefined;
+	          continue;
+	        }
 
         const approvalResolution = await maybeHandleApprovalGate({
           runtime,
-          prompt,
-          output,
-          renderer,
-          chrome: bottomChrome,
-          approvalPromptAdapter,
-          execution: response.toolExecutions.find((execution) => execution.decision === "ask")
+	          prompt,
+          input: cliInput,
+	          output,
+	          renderer,
+	          approvalPromptAdapter,
+	          operatorConsoleHost: operatorConsoleRuntimeHost,
+	          execution: response.toolExecutions.find((execution) => execution.decision === "ask")
         });
 
-        if (approvalResolution.retry === false) {
-          if (approvalResolution.message !== undefined) {
-            writeAboveChrome(() => {
-              output.write(`${approvalResolution.message}\n`);
-            });
-          }
-          writeAboveChrome(() => {
-            output.write("\n");
-          });
-          retryText = undefined;
-          continue;
-        }
+	        if (approvalResolution.retry === false) {
+	          if (approvalResolution.message !== undefined) {
+	            output.write(`${approvalResolution.message}\n`);
+	          }
+	          output.write("\n");
+	          retryText = undefined;
+	          continue;
+	        }
 
-        writeAboveChrome(() => {
-          output.write(`${approvalResolution.message}\n\n`);
-        });
-        retryText = text;
+	        output.write(`${approvalResolution.message}\n\n`);
+	        retryText = text;
       }
     }
-  } finally {
-    process.removeListener("SIGINT", onSigint);
-    bottomChrome.dispose();
-    await runtime.dispose();
-    close();
-  }
+	  } finally {
+	    process.removeListener("SIGINT", onSigint);
+	    stopIdleStatusTicker();
+	    await runtime.dispose();
+	    close();
+	  }
 }
 
 async function currentCliVoiceMode(input: {
@@ -2204,9 +1952,10 @@ async function maybeHandleApprovalGate(input: {
   runtime: Runtime;
   prompt: (question: string) => Promise<string>;
   output: NodeJS.WritableStream;
+  input?: NodeJS.ReadStream;
   renderer: { render(viewModel: import("../contracts/view-model.js").ViewModel): string };
-  chrome: TranscriptChrome;
   approvalPromptAdapter: ApprovalPromptAdapter;
+  operatorConsoleHost?: OperatorConsoleRuntimeHost;
   execution: ToolExecutionRecord | undefined;
 }): Promise<{
   retry: boolean;
@@ -2224,11 +1973,12 @@ async function maybeHandleApprovalGate(input: {
     const answer = normalizeApprovalPromptAnswer(
       await input.approvalPromptAdapter({
         prompt: input.prompt,
+        input: input.input,
         output: input.output,
         renderer: input.renderer,
-        chrome: input.chrome,
         execution,
         allowPersistentApproval,
+        operatorConsoleHost: input.operatorConsoleHost,
       })
     );
     if (answer?.kind === "deny") {
@@ -2239,9 +1989,7 @@ async function maybeHandleApprovalGate(input: {
     }
 
     if (answer?.kind !== "approve") {
-      await writeDetachedInteraction(input.chrome, () => {
-        input.output.write("Enter one of: once, session, always, deny.\n\n");
-      });
+      input.output.write("Enter one of: once, session, always, deny.\n\n");
       continue;
     }
 
@@ -2268,7 +2016,6 @@ async function maybeHandleSetupNeeded(input: {
   prompt: Prompt;
   output: NodeJS.WritableStream;
   renderer: { render(viewModel: import("../contracts/view-model.js").ViewModel): string };
-  chrome: TranscriptChrome;
   homeDir?: string;
   execution: ToolExecutionRecord | undefined;
 }): Promise<{
@@ -2310,11 +2057,11 @@ async function maybeHandleSetupNeeded(input: {
     requiredSecret,
   });
 
-  const secret = await writeDetachedInteraction(input.chrome, async () => {
+  const secret = await (async () => {
     input.output.write(input.renderer.render(vm));
     input.output.write("\n\n");
     return await input.prompt(`Paste ${requiredSecret} (or type cancel): `, { secret: true });
-  });
+  })();
   if (secret.trim().length === 0 || ["cancel", "c", "no", "n"].includes(secret.trim().toLowerCase())) {
     return {
       handled: true,
@@ -2358,13 +2105,13 @@ async function maybeHandleSetupNeeded(input: {
     };
   }
 
-  await writeDetachedInteraction(input.chrome, async () => {
+  await (async () => {
     input.output.write("Image setup verified. Resuming the original image request...\n");
     await renderManualToolExecution(input.output, input.runtime, {
       tool: execution.tool.name,
       toolInput: execution.input ?? {}
     });
-  });
+  })();
 
   return {
     handled: true,
@@ -2406,19 +2153,6 @@ function setupNeededMetadata(result: ToolResult | undefined): SetupNeededMetadat
     return undefined;
   }
   return metadata as SetupNeededMetadata;
-}
-
-async function writeDetachedInteraction<T>(
-  chrome: TranscriptChrome,
-  fn: () => T | Promise<T>
-): Promise<T> {
-  if (chrome.suspendForPrompt !== undefined) {
-    return await chrome.suspendForPrompt(fn);
-  }
-  if (chrome.enabled) {
-    return await chrome.suspendChromeForTranscript(fn);
-  }
-  return await fn();
 }
 
 function normalizeApprovalPromptAnswer(value: string):
@@ -2677,9 +2411,8 @@ export function renderRuntimeEvent(
   activityBuilder: ToolActivityViewModelBuilder,
   renderer: { render(viewModel: import("../contracts/view-model.js").ViewModel): string },
   streamState: { lastWriteEndedWithNewline: boolean },
-  chrome: RuntimeEventChrome | undefined,
-  turnOutput: { spinnerPhase?: string; hasOutput: boolean; lastOutputWasSpinner: boolean },
-  animator?: ToolActivityRailAnimator
+  _legacyChrome: unknown,
+  turnOutput: { spinnerPhase?: string; hasOutput: boolean; lastOutputWasSpinner: boolean }
 ): string | undefined {
   function safeWrite(text: string): void {
     const endsWithNewline = text.endsWith("\n");
@@ -2698,10 +2431,6 @@ export function renderRuntimeEvent(
   }
 
   function clearActiveSpinnerLine(): void {
-    if (chrome?.enabled) {
-      chrome.clearInlineSpinner();
-      return;
-    }
     if (turnOutput.spinnerPhase !== undefined && turnOutput.lastOutputWasSpinner) {
       output.write(`\x1b[1A\x1b[2K\r`);
     }
@@ -2715,30 +2444,20 @@ export function renderRuntimeEvent(
     case "intent":
       return "routing";
     case "skill":
-      if (!chrome?.enabled) {
-        safeWrite(`\u2625 skill: ${event.name}\n`);
-      }
+      safeWrite(`\u2625 skill: ${event.name}\n`);
       return undefined;
     case "tool-start": {
       clearActiveSpinnerLine();
       const railEvent = activityBuilder.buildToolActivityRailEvent(event);
-      if (animator !== undefined) {
-        animator.start(railEvent);
-      } else {
-        const railVm = buildToolActivityRailViewModel({ events: [railEvent] });
-        safeWrite(`${renderer.render(railVm)}\n`);
-      }
+      const railVm = buildToolActivityRailViewModel({ events: [railEvent] });
+      safeWrite(`${renderer.render(railVm)}\n`);
       return "tool";
     }
     case "tool-result": {
       clearActiveSpinnerLine();
       const railEvent = activityBuilder.buildToolActivityRailEvent(event);
-      if (animator !== undefined) {
-        animator.complete(railEvent);
-      } else {
-        const railVm = buildToolActivityRailViewModel({ events: [railEvent] });
-        safeWrite(`${renderer.render(railVm)}\n`);
-      }
+      const railVm = buildToolActivityRailViewModel({ events: [railEvent] });
+      safeWrite(`${renderer.render(railVm)}\n`);
       if (event.fileChangePreview !== undefined) {
         safeWrite(`${renderer.render(event.fileChangePreview)}\n`);
       }
@@ -2747,26 +2466,20 @@ export function renderRuntimeEvent(
     case "provider-attempt":
       return "provider";
     case "provider-token": {
-      if (!chrome?.enabled) {
-        // Provider tokens stream directly; never inject newlines here.
-        output.write(event.text);
-        if (event.text.length > 0) {
-          turnOutput.hasOutput = true;
-          turnOutput.lastOutputWasSpinner = false;
-        }
-        streamState.lastWriteEndedWithNewline = event.text.endsWith("\n");
+      // Provider tokens stream directly; never inject newlines here.
+      output.write(event.text);
+      if (event.text.length > 0) {
+        turnOutput.hasOutput = true;
+        turnOutput.lastOutputWasSpinner = false;
       }
+      streamState.lastWriteEndedWithNewline = event.text.endsWith("\n");
       return "provider";
     }
     case "provider-tool-call":
       return "tool";
     case "provider-result":
-      if (!event.ok && !event.willFallback) {
-        animator?.cancel();
-      }
       return event.ok || !event.willFallback ? "finalizing" : "provider";
     case "provider-budget-exhausted":
-      animator?.cancel();
       clearActiveSpinnerLine();
       safeWrite(`\nprovider budget: ${event.reason}\n`);
       return undefined;
@@ -2775,12 +2488,50 @@ export function renderRuntimeEvent(
     case "session-compacted":
       return undefined;
     case "agent-cancelled":
-      animator?.cancel();
       clearActiveSpinnerLine();
       safeWrite(`\ncancelled: ${event.reason}\n`);
       return undefined;
     case "agent-final":
-      animator?.dispose();
+      return undefined;
+  }
+}
+
+function operatorConsoleTransientPhaseForRuntimeEvent(event: RuntimeEvent): string | undefined | null {
+  switch (event.kind) {
+    case "agent-start":
+      return "thinking";
+    case "intent":
+      return "routing";
+    case "provider-attempt":
+    case "provider-token":
+      return "provider";
+    case "provider-tool-call":
+      return "tool";
+    case "provider-result":
+      return event.ok || !event.willFallback ? "finalizing" : "provider";
+    case "context-usage":
+      return undefined;
+    case "session-compacted":
+      return "background";
+    case "agent-final":
+      return undefined;
+    default:
+      return null;
+  }
+}
+
+function operatorConsoleTurnActivityForPhase(phase: string): TurnActivityState | undefined {
+  switch (phase) {
+    case "thinking":
+    case "routing":
+    case "provider":
+    case "finalizing":
+      return { phase };
+    case "background":
+      return { phase: "background", backgroundKind: "compactingTranscript" };
+    case "tool":
+      return undefined;
+    default:
       return undefined;
   }
 }
@@ -2794,11 +2545,6 @@ function truncateSingleLine(value: string, maxLength: number): string {
   return `${singleLine.slice(0, Math.max(0, maxLength - 1))}…`;
 }
 
-function clearTranscriptBlock(lineCount: number): string {
-  const count = Math.max(1, Math.ceil(lineCount));
-  return `\x1b[${count}A\x1b[0J`;
-}
-
 function contextUsagePriority(source: ContextUsageSource): number {
   switch (source) {
     case "provider-actual":
@@ -2808,146 +2554,6 @@ function contextUsagePriority(source: ContextUsageSource): number {
     case "live-estimate":
       return 1;
   }
-}
-
-function buildPromptChromeState(
-  runtime: Runtime,
-  renderer: SessionRenderer,
-  activeSpinner?: import("../contracts/view-model.js").ActiveTurnSpinnerViewModel,
-  slashMenu?: SlashMenuViewModel,
-  contextUsage?: ContextUsageSnapshot,
-  timing?: StatusRailTiming,
-  providerExecutionSummary?: ProviderExecutionSummary
-) {
-  const modelInfo = typeof runtime.getModelInfo === "function" ? runtime.getModelInfo() : undefined;
-  const configuredModel = configuredModelFromInfo(modelInfo);
-  const providerRail = providerExecutionRailState(configuredModel, providerExecutionSummary);
-  const contextWindow = modelContextWindow(runtime, modelInfo);
-  const sessionElapsedMs = timing === undefined
-    ? undefined
-    : Math.max(0, timing.now() - timing.sessionStartedAtMs);
-  const currentTurnSeconds = currentTurnSecondsForTiming(timing);
-  const showTurnState = timing === undefined || timing.mode === "idle";
-
-  return {
-    statusRail: buildSessionStatusRailViewModel({
-      ...providerRail,
-      turnState: "idle",
-      showTurnState,
-      sessionElapsedMs,
-      currentTurnSeconds,
-      contextUsage: contextUsage ?? (contextWindow !== undefined
-        ? { filled: 0, total: contextWindow }
-        : undefined),
-    }),
-    activeSpinner,
-    slashMenu,
-  };
-}
-
-function buildBottomChromeState(input: {
-  runtime: Runtime;
-  renderer: SessionRenderer;
-  slashMenu?: SlashMenuViewModel;
-  slashMenuMinRows?: number;
-  shortcutRail?: ShortcutHintRailViewModel;
-  contextUsage?: ContextUsageSnapshot;
-  timing?: StatusRailTiming;
-  providerExecutionSummary?: ProviderExecutionSummary;
-}): BottomChromeState {
-  const chromeState = buildPromptChromeState(
-    input.runtime,
-    input.renderer,
-    undefined,
-    input.slashMenu,
-    input.contextUsage,
-    input.timing,
-    input.providerExecutionSummary
-  );
-  return {
-    statusRail: chromeState.statusRail,
-    activeSpinner: chromeState.activeSpinner,
-    shortcutRail: input.slashMenu === undefined ? input.shortcutRail : undefined,
-    slashMenu: chromeState.slashMenu,
-    slashMenuMinRows: input.slashMenuMinRows,
-  };
-}
-
-function buildActiveTurnSlashCompletionViewModel(runtime: Runtime, line: string): SlashMenuViewModel {
-  return buildSlashCompletionViewModel(runtime, line, {
-    includeActiveTurnCommands: true,
-    visibleRows: PROMPT_REGION_SLASH_PANEL_ROWS,
-  });
-}
-
-function renderActiveTurnCommandPreviewLines(input: {
-  command: string;
-  renderer: SessionRenderer;
-  terminalWidth: number;
-}): string[] {
-  if (input.command === "/interrupt") {
-    return renderActiveTurnLabeledLines({
-      label: `${activeTurnGlyph(input.renderer, "interrupt")} Interrupt`,
-      text: "",
-      terminalWidth: input.terminalWidth,
-      maxLines: 1,
-      overflow: "head",
-    });
-  }
-
-  if (input.command === "/steer" || input.command.startsWith("/steer ")) {
-    return renderActiveTurnLabeledLines({
-      label: `${activeTurnGlyph(input.renderer, "steer")} Steer:`,
-      text: input.command,
-      terminalWidth: input.terminalWidth,
-      maxLines: MAX_ACTIVE_TURN_PREVIEW_LINES,
-      overflow: "tail",
-    });
-  }
-
-  return renderActiveTurnLabeledLines({
-    label: `${activeTurnGlyph(input.renderer, "command")} active command:`,
-    text: input.command,
-    terminalWidth: input.terminalWidth,
-    maxLines: MAX_ACTIVE_TURN_PREVIEW_LINES,
-    overflow: "tail",
-  });
-}
-
-function renderActiveTurnLabeledLines(input: {
-  label: string;
-  text: string;
-  terminalWidth: number;
-  maxLines: number;
-  overflow: "head" | "tail";
-}): string[] {
-  const prefix = input.text.length > 0 ? `${input.label} ` : input.label;
-  const prefixWidth = measureVisibleWidth(prefix);
-  const width = Math.max(1, input.terminalWidth);
-  const continuationWidth = Math.max(1, width - prefixWidth);
-  const bodyLines = input.text.length === 0 ? [""] : wrapText(input.text, continuationWidth);
-  const lines = bodyLines.map((line, index) =>
-    index === 0 ? `${prefix}${line}` : `${" ".repeat(prefixWidth)}${line}`
-  );
-  return capActiveTurnLines(lines, input.maxLines, input.overflow);
-}
-
-function capActiveTurnLines(lines: string[], maxLines: number, overflow: "head" | "tail"): string[] {
-  const limit = Math.max(1, maxLines);
-  if (lines.length <= limit) return lines;
-  if (overflow === "head" || limit === 1) return lines.slice(0, limit);
-  return [lines[0], ...lines.slice(-(limit - 1))];
-}
-
-function activeTurnGlyph(
-  renderer: SessionRenderer,
-  kind: "queued" | "steer" | "interrupt" | "command"
-): string {
-  const unicode = renderer.capabilities.supportsUnicode;
-  if (kind === "queued") return unicode ? "↳" : "->";
-  if (kind === "steer") return unicode ? "↯" : "!";
-  if (kind === "interrupt") return unicode ? "✕" : "x";
-  return unicode ? "⌘" : "$";
 }
 
 function promptInputPlaceholder(
@@ -2964,209 +2570,12 @@ function promptInputPlaceholder(
   return colorPromptPlaceholder(text, renderer.tokens, useColor);
 }
 
-function currentTurnSecondsForTiming(timing: StatusRailTiming | undefined): number | undefined {
-  if (timing === undefined) {
-    return undefined;
-  }
-  if (timing.mode === "active-turn" && timing.activeTurnStartedAtMs !== undefined) {
-    return elapsedSeconds(timing.activeTurnStartedAtMs, timing.now());
-  }
-  if (timing.mode === "last-turn") {
-    return timing.lastCompletedTurnSeconds;
-  }
-  return undefined;
-}
-
-function elapsedSeconds(startedAtMs: number, finishedAtMs: number): number {
-  return Math.max(0, Math.floor((finishedAtMs - startedAtMs) / 1000));
-}
-
-function configuredModelForRuntime(runtime: Runtime): { provider: string; id: string } | undefined {
-  const modelInfo = typeof runtime.getModelInfo === "function" ? runtime.getModelInfo() : undefined;
-  const configured = configuredModelFromInfo(modelInfo);
-  if (configured.id === "unknown" && configured.provider === undefined) {
-    return undefined;
-  }
-  return {
-    provider: configured.provider ?? "unknown",
-    id: configured.id,
-  };
-}
-
-function configuredModelFromInfo(modelInfo?: RuntimeModelInfo): {
-  provider?: string;
-  id: string;
-  label: string;
-} {
-  if (modelInfo?.kind !== "kv") {
-    return { id: "unknown", label: "unknown" };
-  }
-
-  const model = String(modelInfo.entries.find((entry) => entry.key === "model")?.value ?? "unknown");
-  const providerValue = modelInfo.entries.find((entry) => entry.key === "provider")?.value;
-  const provider = providerValue === undefined ? undefined : String(providerValue);
-  return {
-    provider,
-    id: model,
-    label: model,
-  };
-}
-
-function providerExecutionRailState(
-  configuredModel: { label: string },
-  summary?: ProviderExecutionSummary
-): {
-  modelLabel: string;
-  modelState: NonNullable<SessionStatusRailViewModel["modelState"]>;
-  configuredModelLabel?: string;
-  servingModelLabel?: string;
-} {
-  if (summary === undefined || summary.status === "not-run") {
-    return {
-      modelLabel: configuredModel.label,
-      modelState: "configured",
-    };
-  }
-
-  if (summary.status === "failed") {
-    return {
-      modelLabel: configuredModel.label,
-      modelState: "failed",
-    };
-  }
-
-  if (summary.actual === undefined) {
-    return {
-      modelLabel: configuredModel.label,
-      modelState: "configured",
-    };
-  }
-
-  return {
-    modelLabel: summary.actual.model,
-    modelState: summary.status === "fallback-success" ? "fallback-serving" : "primary-serving",
-    configuredModelLabel: summary.configuredPrimary?.model,
-    servingModelLabel: summary.actual.model,
-  };
-}
-
-function providerServingTransitionAlert(
-  previous: ProviderRouteServingState | undefined,
-  summary: ProviderExecutionSummary
-): string | undefined {
-  const next = providerServingStateFromSummary(summary);
-  if (next === undefined) {
-    return undefined;
-  }
-
-  if (next.status === "primary") {
-    if (previous?.status === "fallback" || previous?.status === "failed") {
-      return `primary model available again: ${routeModelLabel(next.actual ?? next.primary)}`;
-    }
-    return undefined;
-  }
-
-  if (next.status === "fallback") {
-    if (previous?.status === "failed") {
-      return `provider recovered via fallback: ${routeModelLabel(next.actual)}; primary ${routeModelLabel(next.primary)} failed with ${formatProviderFailureReason(next.reason)}`;
-    }
-    if (previous?.status !== "fallback") {
-      return `primary model failed: ${routeModelLabel(next.primary)} ${formatProviderFailureReason(next.reason)}; using fallback ${routeModelLabel(next.actual)}`;
-    }
-    return undefined;
-  }
-
-  if (previous?.status !== "failed") {
-    return `provider failed: ${routeModelLabel(next.primary ?? next.actual)} ${formatProviderFailureReason(next.reason)}`;
-  }
-
-  return undefined;
-}
-
-function providerServingStateFromSummary(
-  summary: ProviderExecutionSummary
-): ProviderRouteServingState | undefined {
-  if (summary.status === "not-run") {
-    return undefined;
-  }
-
-  if (summary.status === "failed") {
-    const primary = firstProviderSummaryRoute(summary) ?? summary.configuredPrimary;
-    return {
-      status: "failed",
-      primary,
-      reason: summary.primaryFailureClass ?? firstProviderFailureReason(summary),
-    };
-  }
-
-  if (summary.actual === undefined) {
-    return undefined;
-  }
-
-  if (summary.status === "fallback-success") {
-    return {
-      status: "fallback",
-      primary: firstProviderSummaryRoute(summary) ?? summary.configuredPrimary,
-      actual: summary.actual,
-      reason: summary.primaryFailureClass ?? firstProviderFailureReason(summary),
-    };
-  }
-
-  return {
-    status: "primary",
-    primary: summary.configuredPrimary,
-    actual: summary.actual,
-  };
-}
-
-function firstProviderSummaryRoute(
-  summary: ProviderExecutionSummary
-): { provider: string; model: string } | undefined {
-  const attempt = summary.attempts.find((candidate) => candidate.attemptedRouteIndex === 0) ?? summary.attempts[0];
-  return attempt === undefined
-    ? undefined
-    : {
-        provider: attempt.provider,
-        model: attempt.model,
-      };
-}
-
-function firstProviderFailureReason(summary: ProviderExecutionSummary): string | undefined {
-  return summary.attempts.find((attempt) => !attempt.ok)?.errorClass;
-}
-
-function routeModelLabel(route: { model: string } | undefined): string {
-  return route?.model ?? "unknown";
-}
-
-function formatProviderFailureReason(reason: string | undefined): string {
-  return reason ?? "unknown";
-}
-
-function modelContextWindow(
-  runtime: Runtime,
-  modelInfo = typeof runtime.getModelInfo === "function" ? runtime.getModelInfo() : undefined
-): number | undefined {
-  const contextWindow = modelInfo?.kind === "kv"
-    ? Number(modelInfo.entries.find((e) => e.key === "context window")?.value)
-    : Number.NaN;
-  return Number.isFinite(contextWindow) && contextWindow > 0 ? contextWindow : undefined;
-}
-
 export function renderHorizontalRule(tokens: ResolvedTokens, useColor: boolean, useUnicode: boolean, width: number): string {
   const ruleChar = useUnicode ? "─" : "-";
   const ruleLen = Math.max(0, width);
   const rule = ruleChar.repeat(ruleLen);
   if (!useColor) return rule;
   return ansiColor(rule, tokens.contract.surface.borderSubtle);
-}
-
-export function renderBottomChromeRule(tokens: ResolvedTokens, useColor: boolean, useUnicode: boolean, width: number): string {
-  const ruleChar = useUnicode ? "─" : "-";
-  const ruleLen = Math.max(0, width);
-  const rule = ruleChar.repeat(ruleLen);
-  if (!useColor) return rule;
-  return ansiColor(rule, tokens.contract.text.secondary);
 }
 
 export function colorPromptPrefix(prefix: string, tokens: ResolvedTokens, useColor: boolean): string {

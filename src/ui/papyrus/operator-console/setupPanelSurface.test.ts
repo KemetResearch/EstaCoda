@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 import { stringWidth } from "../screen/stringWidth.js";
+import { resolveTokens } from "../../../theme/token-resolver.js";
+import { LRI, RLI } from "../../../ui/bidi.js";
 import {
+  createOperatorConsoleStyle,
   renderSetupPanelSurface,
   type SecretEntryPanelState,
   type SetupPanelState,
@@ -11,7 +14,8 @@ describe("Papyrus operator console setup panel surface", () => {
     const output = renderSetupPanelSurface(modelRoutePanel(), { width: 72 });
     const text = output.join("\n");
 
-    expect(output[0]).toContain("Model route");
+    expect(output[0]).toContain("𓂀  Model Route");
+    expect(text).not.toContain("│ Model route");
     expect(text).toContain("Choose the active provider and model route.");
     expect(text).toContain("Provider");
     expect(text).toContain("Model");
@@ -23,6 +27,7 @@ describe("Papyrus operator console setup panel surface", () => {
     expect(text).toContain("ready");
     expect(text).toContain("API key set");
     expect(text).toContain("↑↓ navigate · Enter select · / filter · Esc back");
+    expect(output.slice(1, -1).every((line) => !line.trimStart().startsWith("│"))).toBe(true);
     expect(output.every((line) => stringWidth(line) <= 72)).toBe(true);
   });
 
@@ -55,7 +60,7 @@ describe("Papyrus operator console setup panel surface", () => {
     expect(output.every((line) => stringWidth(line) <= 42)).toBe(true);
   });
 
-  it("renders Arabic setup labels while preserving technical tokens", () => {
+  it("renders Arabic route choices as right-anchored stacked blocks", () => {
     const output = renderSetupPanelSurface({
       kind: "table",
       title: "إعداد النموذج",
@@ -69,9 +74,8 @@ describe("Papyrus operator console setup panel surface", () => {
     const text = output.join("\n");
 
     expect(text).toContain("إعداد النموذج");
-    expect(text).toContain("المزود");
-    expect(text).toContain("النموذج");
-    expect(text).toContain("الحالة");
+    expect(text).not.toContain("المزود");
+    expect(text).not.toContain("الحالة");
     expect(text).toContain("OpenAI");
     expect(text).toContain("gpt-5.5");
     expect(text).toContain("Local");
@@ -79,14 +83,134 @@ describe("Papyrus operator console setup panel surface", () => {
     expect(text).toContain("URL");
     expect(text).toContain("Enter");
     expect(text).toContain("Esc");
+    expect(visibleColumn(output[0]!, "𓂀  إعداد النموذج")).toBeGreaterThan(24);
     expect(output.every((line) => stringWidth(line) <= 72)).toBe(true);
+  });
+
+  it("renders Arabic setup choices as stable stacked Papyrus blocks", () => {
+    const output = renderSetupPanelSurface({
+      kind: "table",
+      layout: "choiceMenu",
+      title: "محرّر الإعدادات",
+      description: "اختار اللي تحب تضبطه:",
+      locale: "ar",
+      rows: [
+        {
+          id: "primary",
+          provider: "النموذج الأساسي",
+          model: "",
+          status: "النموذج الافتراضي الذي يستخدمه الوكيل.",
+          notes: "",
+        },
+        {
+          id: "fallback",
+          provider: "النماذج الاحتياطية",
+          model: "",
+          status: "نماذج احتياطية تُستخدم إذا فشل النموذج الأساسي.",
+          notes: "",
+        },
+        {
+          id: "search",
+          provider: "البحث",
+          model: "",
+          status: "اضبط كيف تعثر EstaCoda على نتائج الويب وتسترجعها.",
+          notes: "",
+        },
+        {
+          id: "exit",
+          provider: "الخروج دون تغييرات",
+          model: "",
+          status: "غادر الإعداد دون تعديل التكوين.",
+          notes: "",
+          group: "navigation",
+        },
+      ],
+      selectedRowId: "fallback",
+    }, { width: 120 });
+    const text = output.join("\n");
+    const fallbackLabelLine = output.find((line) => line.includes("النماذج الاحتياطية") && line.includes("◂")) ?? "";
+    const fallbackDetailLine = output.find((line) => line.includes("نماذج احتياطية")) ?? "";
+    const descriptionLine = output.find((line) => line.includes("اختار اللي تحب تضبطه")) ?? "";
+
+    expect(output[0]).toContain("𓂀  محرّر الإعدادات");
+    expect(text).toContain("محرّر الإعدادات");
+    expect(text).toContain("◂");
+    expect(text).not.toContain("المزود");
+    expect(text).not.toContain("الحالة");
+    expect(fallbackLabelLine).toContain("◂");
+    expect(fallbackDetailLine).toContain("نماذج احتياطية");
+    expect(visibleColumn(output[0]!, "𓂀  محرّر الإعدادات")).toBeGreaterThan(70);
+    expect(descriptionLine).toContain(`${RLI}اختار اللي تحب تضبطه:`);
+    expect(visibleColumn(descriptionLine, "اختار اللي تحب تضبطه")).toBeGreaterThan(70);
+    expect(visibleColumn(fallbackLabelLine, "النماذج الاحتياطية")).toBeGreaterThan(80);
+    expect(output.every((line) => stringWidth(line) <= 120)).toBe(true);
+  });
+
+  it("isolates and colors the selected Arabic setup choice when styled", () => {
+    const tokens = resolveTokens("standard", "dark", "kemetBlue");
+    const output = renderSetupPanelSurface(arabicChoiceMenu(), {
+      width: 120,
+      style: createOperatorConsoleStyle({
+        tokens,
+        capabilities: { supportsColor: true, supportsTrueColor: true },
+      }),
+    });
+    const selectedLine = output.find((line) => line.includes("النماذج الاحتياطية") && line.includes("◂")) ?? "";
+    const selectedDetailLine = output.find((line) => line.includes("نماذج احتياطية")) ?? "";
+
+    expect(selectedLine).toContain(ansiFg(tokens.contract.palette.action));
+    expect(selectedLine).toContain("\x1b[1m");
+    expect(selectedLine).toContain(`${RLI}النماذج الاحتياطية`);
+    expect(selectedLine).toMatch(/النماذج الاحتياطية.*◂.*\x1b\[0m/u);
+    expect(selectedDetailLine).toContain(ansiFg(tokens.contract.text.secondary));
+    expect(selectedDetailLine).not.toContain(ansiFg(tokens.contract.palette.action));
+    expect(selectedDetailLine).not.toContain("\x1b[1m");
+    expect(selectedDetailLine).toContain(`${RLI}نماذج احتياطية`);
+  });
+
+  it("colors the selected setup route row when styled", () => {
+    const tokens = resolveTokens("standard", "dark", "kemetBlue");
+    const output = renderSetupPanelSurface(modelRoutePanel(), {
+      width: 72,
+      style: createOperatorConsoleStyle({
+        tokens,
+        capabilities: { supportsColor: true, supportsTrueColor: true },
+      }),
+    });
+    const selectedLine = output.find((line) => line.includes("OpenAI")) ?? "";
+    const unselectedLine = output.find((line) => line.includes("Anthropic")) ?? "";
+
+    expect(selectedLine).toContain(ansiFg(tokens.contract.palette.action));
+    expect(selectedLine).toContain("❯");
+    expect(selectedLine).toMatch(/OpenAI.*gpt-5\.5.*\x1b\[0m/u);
+    expect(unselectedLine).not.toContain(ansiFg(tokens.contract.palette.action));
+  });
+
+  it("colors setup shell title, current status, and footer when styled", () => {
+    const tokens = resolveTokens("standard", "dark", "kemetBlue");
+    const output = renderSetupPanelSurface({
+      ...modelRoutePanel(),
+      statusLines: [{ text: "Current: OpenAI", tone: "active", direction: "ltr" }],
+      footer: "↑↓ navigate   ENTER select   CTRL+C exit",
+    }, {
+      width: 72,
+      style: createOperatorConsoleStyle({
+        tokens,
+        capabilities: { supportsColor: true, supportsTrueColor: true },
+      }),
+    }).join("\n");
+
+    expect(output).toContain(`${ansiFg(tokens.contract.palette.brand)}\x1b[1m𓂀  Model Route\x1b[0m\x1b[0m`);
+    expect(output).toContain(`${ansiFg(tokens.contract.severity.ok)}Current: OpenAI\x1b[0m`);
+    expect(output).toContain(`${ansiFg(tokens.contract.text.secondary)}↑↓ navigate   ENTER select   CTRL+C exit\x1b[0m`);
   });
 
   it("renders required API key panel with masked value and env var only", () => {
     const output = renderSetupPanelSurface(requiredSecretPanel(), { width: 72 });
     const text = output.join("\n");
 
-    expect(text).toContain("API key · OpenAI");
+    expect(output[0]).toContain("API Key · OpenAI");
+    expect(text).not.toContain("│ API key · OpenAI");
     expect(text).toContain("Enter API key for OpenAI.");
     expect(text).toContain("sk-••••••••••••••••");
     expect(text).toContain("Stored as: OPENAI_API_KEY");
@@ -139,6 +263,48 @@ describe("Papyrus operator console setup panel surface", () => {
     expect(JSON.stringify(state)).toBe(before);
   });
 });
+
+function visibleColumn(line: string, text: string): number {
+  const index = line.indexOf(text);
+  expect(index).toBeGreaterThanOrEqual(0);
+  return stringWidth(line.slice(0, index));
+}
+
+function arabicChoiceMenu(): SetupPanelState {
+  return {
+    kind: "table",
+    layout: "choiceMenu",
+    title: "محرّر الإعدادات",
+    description: "اختار اللي تحب تضبطه:",
+    locale: "ar",
+    rows: [
+      {
+        id: "primary",
+        provider: "النموذج الأساسي",
+        model: "",
+        status: "النموذج الافتراضي الذي يستخدمه الوكيل.",
+        notes: "",
+      },
+      {
+        id: "fallback",
+        provider: "النماذج الاحتياطية",
+        model: "",
+        status: "نماذج احتياطية تُستخدم إذا فشل النموذج الأساسي.",
+        notes: "",
+      },
+    ],
+    selectedRowId: "fallback",
+  };
+}
+
+function ansiFg(hex: string): string {
+  const clean = hex.replace("#", "");
+  const bigint = Number.parseInt(clean, 16);
+  const r = (bigint >> 16) & 255;
+  const g = (bigint >> 8) & 255;
+  const b = bigint & 255;
+  return `\x1b[38;2;${r};${g};${b}m`;
+}
 
 function modelRoutePanel(): SetupPanelState {
   return {

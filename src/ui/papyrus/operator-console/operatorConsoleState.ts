@@ -4,6 +4,7 @@ import {
   type FocusState,
 } from "./focusModel.js";
 import type { OperatorConsoleLocale } from "./activeWorkCopy.js";
+import type { OperatorConsoleStyle } from "./operatorConsoleStyle.js";
 
 export type TranscriptBlock = {
   readonly id: string;
@@ -26,6 +27,7 @@ export type StatusRailState = {
   readonly model: {
     readonly label: string;
     readonly state: "idle" | "working" | "degraded";
+    readonly route?: "primary" | "fallback" | "failed";
   };
   readonly context: {
     readonly usedTokens: number;
@@ -38,6 +40,30 @@ export type StatusRailState = {
   };
 };
 
+export type TurnActivityPhase =
+  | "thinking"
+  | "routing"
+  | "provider"
+  | "finalizing"
+  | "background";
+
+export type BackgroundActivityKind =
+  | "indexingSkills"
+  | "indexingFiles"
+  | "loadingWorkspaceMap"
+  | "refreshingModelCatalog"
+  | "syncingSessionState"
+  | "compactingTranscript"
+  | "rebuildingSearchIndex"
+  | "scanningAttachments";
+
+export type TurnActivityState = {
+  readonly phase: TurnActivityPhase;
+  readonly backgroundKind?: BackgroundActivityKind;
+  readonly label?: string;
+  readonly frameIndex?: number;
+};
+
 export type StartupDashboardState = {
   readonly productName: string;
   readonly orgName: string;
@@ -46,11 +72,13 @@ export type StartupDashboardState = {
   readonly sessionId: string;
   readonly session: {
     readonly model: string;
+    readonly modelRoute?: "primary" | "fallback" | "failed";
     readonly context: string;
     readonly workspace: string;
     readonly security: string;
     readonly autonomy: string;
   };
+  readonly updateStatus?: string;
   readonly commands: readonly StartupCommandState[];
   readonly tips: readonly string[];
 };
@@ -100,6 +128,10 @@ export type ToolActivityState = {
   readonly items: readonly ActiveWorkItem[];
   readonly scrollOffset: number;
   readonly expanded: boolean;
+  readonly startedAtMs?: number;
+  readonly updatedAtMs?: number;
+  readonly completedAtMs?: number;
+  readonly frameIndex?: number;
 };
 
 export type ApprovalControl = ApprovalFocusControl;
@@ -148,12 +180,20 @@ export type SetupSurfaceState = SetupPanelState | SecretEntryPanelState;
 
 export type SetupPanelState = {
   readonly kind: "table";
+  readonly layout?: "routeTable" | "choiceMenu";
   readonly title: string;
   readonly description?: string;
+  readonly statusLines?: readonly SetupPanelStatusLine[];
   readonly locale?: OperatorConsoleLocale;
   readonly rows: readonly SetupTableRow[];
   readonly selectedRowId?: string;
   readonly footer?: string;
+};
+
+export type SetupPanelStatusLine = {
+  readonly text: string;
+  readonly tone?: "active" | "default" | "muted" | "warning";
+  readonly direction?: "auto" | "ltr" | "rtl";
 };
 
 export type SetupTableRow = {
@@ -162,6 +202,7 @@ export type SetupTableRow = {
   readonly model: string;
   readonly status: string;
   readonly notes: string;
+  readonly group?: "main" | "navigation";
 };
 
 export type SecretEntryPanelState = {
@@ -189,6 +230,7 @@ export type OperatorConsoleState = {
   readonly transcript: readonly TranscriptBlock[];
   readonly prompt: PromptSurfaceState;
   readonly status: StatusRailState;
+  readonly turnActivity?: TurnActivityState;
   readonly attachments: readonly AttachmentCardState[];
   readonly activeWork: ToolActivityState;
   readonly approvals: readonly ApprovalCardState[];
@@ -196,6 +238,7 @@ export type OperatorConsoleState = {
   readonly steer?: SteerState;
   readonly focus: FocusState;
   readonly terminal: TerminalMetrics;
+  readonly style?: OperatorConsoleStyle;
 };
 
 export type OperatorConsoleSurface =
@@ -203,6 +246,7 @@ export type OperatorConsoleSurface =
   | "setupPanel"
   | "transcript"
   | "approvals"
+  | "turnActivity"
   | "activeWork"
   | "queuedSteer"
   | "attachments"
@@ -215,6 +259,7 @@ export const OPERATOR_CONSOLE_SURFACE_ORDER: readonly OperatorConsoleSurface[] =
   "setupPanel",
   "transcript",
   "approvals",
+  "turnActivity",
   "activeWork",
   "queuedSteer",
   "attachments",
@@ -230,6 +275,7 @@ export type CreateInitialOperatorConsoleStateInput = {
   readonly transcript?: readonly TranscriptBlock[];
   readonly prompt?: PromptSurfaceState;
   readonly status?: StatusRailState;
+  readonly turnActivity?: TurnActivityState;
   readonly attachments?: readonly AttachmentCardState[];
   readonly activeWork?: ToolActivityState;
   readonly approvals?: readonly ApprovalCardState[];
@@ -237,6 +283,7 @@ export type CreateInitialOperatorConsoleStateInput = {
   readonly steer?: SteerState;
   readonly focus?: FocusState;
   readonly terminal?: TerminalMetrics;
+  readonly style?: OperatorConsoleStyle;
 };
 
 export function getOperatorConsoleSurfaceOrder(): readonly OperatorConsoleSurface[] {
@@ -253,6 +300,7 @@ export function createInitialOperatorConsoleState(
     transcript: input.transcript ?? [],
     prompt: input.prompt ?? createDefaultPromptSurfaceState(),
     status: input.status ?? createDefaultStatusRailState(),
+    ...(input.turnActivity === undefined ? {} : { turnActivity: input.turnActivity }),
     attachments: input.attachments ?? [],
     activeWork: input.activeWork ?? createDefaultToolActivityState(),
     approvals: input.approvals ?? [],
@@ -260,6 +308,7 @@ export function createInitialOperatorConsoleState(
     ...(input.steer === undefined ? {} : { steer: input.steer }),
     focus: input.focus ?? createInitialFocusState(),
     terminal: input.terminal ?? createDefaultTerminalMetrics(),
+    ...(input.style === undefined ? {} : { style: input.style }),
   };
 }
 

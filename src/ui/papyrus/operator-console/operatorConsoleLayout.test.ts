@@ -25,6 +25,7 @@ describe("Papyrus operator console layout", () => {
       "setupPanel",
       "transcript",
       "approvals",
+      "turnActivity",
       "activeWork",
       "queuedSteer",
       "attachments",
@@ -64,6 +65,15 @@ describe("Papyrus operator console layout", () => {
       },
     }));
     expect(regionKinds(layout)).toContain("activeWork");
+  });
+
+  it("includes turn activity only when turn activity state exists", () => {
+    expect(regionKinds(createOperatorConsoleLayout(createState()))).not.toContain("turnActivity");
+
+    const layout = createOperatorConsoleLayout(createState({
+      turnActivity: { phase: "thinking" },
+    }));
+    expect(regionKinds(layout)).toContain("turnActivity");
   });
 
   it("includes approvals only when approval state is non-empty", () => {
@@ -142,6 +152,20 @@ describe("Papyrus operator console layout", () => {
     expect(regionKinds(layout)).toContain("slashMenu");
   });
 
+  it("allocates up to fourteen slash menu rows when enough commands match", () => {
+    const layout = createOperatorConsoleLayout(createState({
+      slash: {
+        query: "/",
+        items: Array.from({ length: 16 }, (_, index) => ({
+          id: `cmd-${index + 1}`,
+          label: `/cmd${index + 1}`,
+        })),
+      },
+    }), { width: 80, height: 24, isTty: true });
+
+    expect(region(layout, "slashMenu")).toMatchObject({ height: 14, visible: true });
+  });
+
   it("keeps prompt and status rail allocated under constrained height", () => {
     const layout = createOperatorConsoleLayout(createFullState(), { width: 60, height: 2, isTty: true });
 
@@ -203,6 +227,7 @@ describe("Papyrus operator console layout", () => {
 
     expect(visibleRegionKinds(layout)).toEqual(["prompt", "statusRail"]);
     expect(region(layout, "activeWork")).toMatchObject({ height: 0, visible: false });
+    expect(region(layout, "turnActivity")).toMatchObject({ height: 0, visible: false });
     expect(region(layout, "approvals")).toMatchObject({ height: 0, visible: false });
     expect(region(layout, "attachments")).toMatchObject({ height: 0, visible: false });
     expect(region(layout, "startupDashboard")).toMatchObject({ height: 0, visible: false });
@@ -246,6 +271,7 @@ function createFullState(): OperatorConsoleState {
     setupPanel: setupPanel(),
     transcript: [{ id: "t1", role: "assistant", text: "Ready." }],
     approvals: [approval("approval-1")],
+    turnActivity: { phase: "thinking" },
     activeWork: {
       items: [toolItem("tool-1", "running")],
       scrollOffset: 0,

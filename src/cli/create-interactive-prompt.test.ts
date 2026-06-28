@@ -99,4 +99,25 @@ describe("createInteractivePrompt", () => {
       uiContext,
     });
   });
+
+  it("forwards Operator Console routing to the Papyrus prompt factory when enabled", () => {
+    const input = { isTTY: true } as NodeJS.ReadStream;
+    const output = { write: vi.fn() } as unknown as NodeJS.WriteStream;
+    const createPapyrus = vi.fn(() => fakePrompt("papyrus"));
+
+    createInteractivePrompt({
+      input,
+      output,
+      useOperatorConsole: true,
+      createPapyrus,
+    });
+
+    expect(createPapyrus).toHaveBeenCalledWith({
+      input,
+      output,
+      env: undefined,
+      uiContext: undefined,
+      useOperatorConsole: true,
+    });
+  });
 });

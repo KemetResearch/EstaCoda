@@ -377,9 +377,8 @@ describe("createPapyrusPrompt", () => {
     input.send("hello\r");
 
     await expect(pending).resolves.toBe("hello");
-    expect(output.writes.join("")).toContain("╭─ Prompt");
-    expect(output.writes.join("")).toContain("│ › hello");
-    expect(output.writes.join("")).toContain("session 00:00");
+    expect(output.writes.join("")).toContain("› hello");
+    expect(output.writes.join("")).toContain("◷ 00:00");
     expect(lifecycle.calls).toEqual(["start", "stop"]);
   });
 
@@ -397,6 +396,25 @@ describe("createPapyrusPrompt", () => {
     input.send("\x03");
 
     await expect(pending).resolves.toBe("/exit");
+    expect(lifecycle.calls).toEqual(["start", "stop"]);
+  });
+
+  it("does not treat Escape as a raw prompt session exit", async () => {
+    const input = new FakeInput();
+    const output = fakeOutput();
+    const lifecycle = fakeLifecycle();
+    const prompt = createPapyrusPrompt({
+      input,
+      output,
+      createRaw: (options) => createRawPrompt({ ...options, lifecycle: lifecycle.lifecycle }),
+    });
+
+    const pending = prompt("> ");
+    input.send("draft");
+    input.send("\x1b");
+    input.send("\r");
+
+    await expect(pending).resolves.toBe("draft");
     expect(lifecycle.calls).toEqual(["start", "stop"]);
   });
 

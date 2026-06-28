@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { stringWidth } from "../screen/stringWidth.js";
+import { resolveTokens } from "../../../theme/token-resolver.js";
 import {
+  createOperatorConsoleStyle,
   createDefaultStatusRailState,
   renderContextBar,
   renderStatusRailSurface,
@@ -10,7 +12,7 @@ import {
 describe("Papyrus operator console status rail surface", () => {
   it("renders full rail with model, context bar, context numbers, percent, and session timer", () => {
     expect(renderStatusRailSurface(status(), { width: 80 })).toBe(
-      "kimi-k2.7-code ● │ ctx [▰▱▱▱▱▱▱▱▱▱] 18.4k/262k 7% │ session 01:12"
+      "kimi-k2.7-code ● │ ctx [▰▱▱▱▱▱▱▱▱▱] 18.4k/262k 7% │ ◷ 01:12"
     );
   });
 
@@ -47,14 +49,14 @@ describe("Papyrus operator console status rail surface", () => {
 
   it("uses deterministic empty model fallback", () => {
     expect(renderStatusRailSurface(createDefaultStatusRailState(), { width: 80 })).toBe(
-      "model pending ○ │ ctx [▱▱▱▱▱▱▱▱▱▱] 0 0% │ session 00:00"
+      "model pending ● │ ctx [▱▱▱▱▱▱▱▱▱▱] 0 0% │ ◷ 00:00"
     );
   });
 
   it("formats session timer deterministically", () => {
     expect(renderStatusRailSurface(status({
       sessionTimer: { elapsedMs: 125_900 },
-    }), { width: 80 })).toContain("session 02:05");
+    }), { width: 80 })).toContain("◷ 02:05");
   });
 
   it("emits no ANSI or cursor-control sequences", () => {
@@ -67,6 +69,21 @@ describe("Papyrus operator console status rail surface", () => {
     expect(output).not.toMatch(/\b(moveCursor|clearLine|clearScreenDown|cursorTo|setRawMode)\b/u);
     expect(output).not.toMatch(/\[[0-9;?]*[A-Za-z]/u);
   });
+
+  it("colors primary and fallback model status dots from semantic tokens when styled", () => {
+    const tokens = resolveTokens("standard", "dark", "kemetBlue");
+    const style = createOperatorConsoleStyle({
+      tokens,
+      capabilities: { supportsColor: true, supportsTrueColor: true },
+    });
+
+    expect(renderStatusRailSurface(status({
+      model: { label: "kimi-k2.7-code", state: "idle", route: "primary" },
+    }), { width: 80, style })).toContain(`${ansiFg(tokens.contract.severity.ok)}●\x1b[0m`);
+    expect(renderStatusRailSurface(status({
+      model: { label: "kimi-k2.7-code", state: "idle", route: "fallback" },
+    }), { width: 80, style })).toContain(`${ansiFg(tokens.contract.palette.caution)}●\x1b[0m`);
+  });
 });
 
 function status(input: Partial<StatusRailState> = {}): StatusRailState {
@@ -76,4 +93,13 @@ function status(input: Partial<StatusRailState> = {}): StatusRailState {
     sessionTimer: { elapsedMs: 72_000 },
     ...input,
   };
+}
+
+function ansiFg(hex: string): string {
+  const clean = hex.replace("#", "");
+  const bigint = Number.parseInt(clean, 16);
+  const r = (bigint >> 16) & 255;
+  const g = (bigint >> 8) & 255;
+  const b = bigint & 255;
+  return `\x1b[38;2;${r};${g};${b}m`;
 }

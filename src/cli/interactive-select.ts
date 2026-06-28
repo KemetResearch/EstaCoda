@@ -16,6 +16,14 @@ import {
 } from "../ui/papyrus/widgets/selectKeymap.js";
 import type { PapyrusOption } from "../ui/papyrus/widgets/optionMap.js";
 import { parseKeypress, type ParsedKeypress } from "../ui/input/parseKeypress.js";
+import {
+  createOperatorConsoleStyle,
+  mapSetupSelectToSetupPanelState,
+  renderSetupPanelSurface,
+} from "../ui/papyrus/operator-console/index.js";
+
+const HIDE_CURSOR = "\x1b[?25l";
+const SHOW_CURSOR = "\x1b[?25h";
 
 export type SelectPromptInput<T> = {
   title: string;
@@ -83,28 +91,41 @@ async function ttySelect<T>(input: Readable, output: Writable, selection: Select
     const ttyInput = input as NodeJS.ReadStream;
     let selectState = createPapyrusSelectState(selection);
     let settled = false;
+    let restored = false;
+    let cursorHidden = false;
     const wasRaw = ttyInput.isRaw === true;
-    const saveCursor = "\x1B7";
-    const restoreCursor = "\x1B8";
-    const clearDown = "\x1B[J";
 
     const renderer = createSessionRenderer({ output: output as NodeJS.WriteStream, locale: selection.locale });
+    const renderLoop = new TtySelectRenderLoop(output);
 
     const render = () => {
       const selectedIndex = focusedSelectionIndex(selectState);
-      const vm = buildSelectionViewModel(selection, selectedIndex);
-      const text = renderer.render(vm);
+      const text = renderTtySelection(selection, selectedIndex, renderer);
+      renderLoop.render(text);
+    };
 
-      output.write(`${restoreCursor}${clearDown}`);
-      output.write(text);
+    const renderSafely = () => {
+      try {
+        render();
+      } catch (error) {
+        restoreTerminal();
+        throw error;
+      }
     };
 
     const restoreTerminal = () => {
+      if (restored) {
+        return;
+      }
+      restored = true;
       ttyInput.off("data", onData);
       if (!wasRaw) {
         ttyInput.setRawMode(false);
       }
-      output.write("\x1B[?25h");
+      if (cursorHidden) {
+        output.write(SHOW_CURSOR);
+        cursorHidden = false;
+      }
     };
 
     const finish = (value: T, selectedIndex: number) => {
@@ -138,7 +159,7 @@ async function ttySelect<T>(input: Readable, output: Writable, selection: Select
           return;
         }
         if (result.intent?.type === "focus-changed" || result.intent === undefined) {
-          render();
+          renderSafely();
         }
       }
     };
@@ -146,14 +167,86 @@ async function ttySelect<T>(input: Readable, output: Writable, selection: Select
     ttyInput.on("data", onData);
     ttyInput.setRawMode(true);
     ttyInput.resume();
+    output.write(HIDE_CURSOR);
+    cursorHidden = true;
 
-    const vm = buildSelectionViewModel(selection, focusedSelectionIndex(selectState));
-    const initialText = renderer.render(vm);
-    const reserveLines = Math.max(1, initialText.split("\n").length - 1);
-    output.write("\n".repeat(reserveLines));
-    output.write(`\x1B[${reserveLines}A`);
-    output.write(`\x1B[?25l${saveCursor}`);
-    render();
+    renderSafely();
+  });
+}
+
+class TtySelectRenderLoop {
+  #renderedRows = 0;
+
+  constructor(private readonly output: Writable) {}
+
+  render(text: string): void {
+    const rows = text.length === 0 ? [""] : text.split("\n");
+    // Select frames intentionally leave the cursor on the bottom row. If focus
+    // later moves inside the frame, this anchor must track that cursor row.
+    this.#moveToFirstRenderedRow();
+
+    const physicalRows = Math.max(this.#renderedRows, rows.length);
+    for (let row = 0; row < physicalRows; row += 1) {
+      this.output.write("\x1b[0K");
+      if (row < rows.length) this.output.write(rows[row]!);
+      if (row < physicalRows - 1) this.output.write("\n");
+    }
+
+    this.#renderedRows = rows.length;
+  }
+
+  #moveToFirstRenderedRow(): void {
+    if (this.#renderedRows > 1) this.output.write(`\x1b[${this.#renderedRows - 1}A`);
+    if (this.#renderedRows > 0) this.output.write("\r");
+  }
+}
+
+function renderTtySelection<T>(
+  selection: SelectPromptInput<T>,
+  selectedIndex: number,
+  renderer: ReturnType<typeof createSessionRenderer>
+): string {
+  const setupPanel = mapTtySetupSelection(selection, selectedIndex);
+  if (setupPanel !== undefined) {
+    return renderSetupPanelSurface(setupPanel, {
+      width: renderer.capabilities.terminalWidth,
+      style: createOperatorConsoleStyle({
+        tokens: renderer.tokens,
+        capabilities: renderer.capabilities,
+      }),
+    }).join("\n");
+  }
+  const vm = buildSelectionViewModel(selection, selectedIndex);
+  return renderer.render(vm);
+}
+
+function mapTtySetupSelection<T>(
+  selection: SelectPromptInput<T>,
+  selectedIndex: number
+) {
+  if (
+    selection.surface !== "promptCard" ||
+    selection.columns === undefined
+  ) {
+    return undefined;
+  }
+  return mapSetupSelectToSetupPanelState({
+    title: selection.title,
+    body: selection.body,
+    hint: selection.hint ?? selection.instruction,
+    statusLines: selection.statusLines,
+    locale: selection.locale === "ar" ? "ar" : "en",
+    columns: selection.columns,
+    options: selection.options.map((option) => ({
+      id: option.id,
+      label: option.label,
+      description: option.description,
+      group: option.group,
+      cells: option.cells,
+      badges: option.badges,
+      current: option.current,
+    })),
+    selectedIndex,
   });
 }
 

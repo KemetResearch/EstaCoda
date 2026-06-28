@@ -3,6 +3,7 @@ import type { UiTokenContract } from "../contracts/ui-tokens.js";
 export const lightTheme: UiTokenContract = {
   palette: {
     brand: "#666666",
+    accent: "#666666",
     action: "#666666",
     caution: "#666666",
   },
@@ -42,7 +43,9 @@ export const lightTheme: UiTokenContract = {
     arrow: "→",
     spinner: {
       waiting: ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"],
-      thinking: ["◐", "◓", "◑", "◒"],
+      thinking: ["⣾⣷", "⣽⣯", "⣻⣟", "⢿⡿", "⡿⢿", "⣟⣻", "⣯⣽", "⣷⣾"],
+      tool: ["⣾⣷", "⣽⣯", "⣻⣟", "⢿⡿", "⡿⢿", "⣟⣻", "⣯⣽", "⣷⣾"],
+      background: ["⡀", "⠄", "⠂", "⠁", "⠈", "⠐", "⠠", "⢀"],
     },
     progress: {
       filled: "█",

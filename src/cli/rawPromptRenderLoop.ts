@@ -1,9 +1,22 @@
 import { stringWidth } from "../ui/papyrus/screen/stringWidth.js";
 import type { LineEditorState } from "../ui/input/lineEditor.js";
 import {
-  buildOperatorConsoleRawPromptFrame,
+  buildOperatorConsoleRawPromptFrameWithRuntimeHost,
   type OperatorConsoleRawPromptSnapshot,
 } from "../ui/papyrus/operator-console/operatorConsoleHost.js";
+import {
+  createOperatorConsoleRuntimeHost,
+  type OperatorConsoleRuntimeHost,
+} from "../ui/papyrus/operator-console/operatorConsoleRuntimeHost.js";
+import type {
+  AttachmentCardState,
+  PromptSurfaceState,
+  SlashMenuState,
+  SteerState,
+  ToolActivityState,
+  TurnActivityState,
+} from "../ui/papyrus/operator-console/operatorConsoleState.js";
+import type { FocusState } from "../ui/papyrus/operator-console/focusModel.js";
 
 export type RawPromptRenderOutput = {
   write(chunk: string): unknown;
@@ -25,12 +38,21 @@ export type RawPromptRenderSnapshot = {
   readonly prompt: string;
   readonly state: LineEditorState;
   readonly ghostText?: RawPromptGhostText;
-  readonly overlayRows?: readonly RawPromptOverlayRow[];
+  readonly fallbackRows?: readonly RawPromptOverlayRow[];
   readonly operatorConsole?: RawPromptOperatorConsoleOptions;
 };
 
-export type RawPromptOperatorConsoleOptions = Omit<OperatorConsoleRawPromptSnapshot, "prompt" | "state" | "overlayRows"> & {
+export type RawPromptOperatorConsoleOptions = Omit<OperatorConsoleRawPromptSnapshot, "prompt" | "state"> & {
   readonly enabled: boolean;
+  readonly onAttachmentsChange?: (attachments: readonly AttachmentCardState[]) => void;
+  readonly onAttachmentPreview?: (attachment: AttachmentCardState) => void;
+  readonly getStatus?: () => OperatorConsoleRawPromptSnapshot["status"];
+  readonly focus?: FocusState;
+  readonly slash?: SlashMenuState;
+  readonly activeWork?: ToolActivityState;
+  readonly turnActivity?: TurnActivityState;
+  readonly steer?: SteerState;
+  readonly promptMode?: PromptSurfaceState["mode"];
 };
 
 export class RawPromptOverlayHost {
@@ -51,22 +73,37 @@ export class RawPromptOverlayHost {
 
 export class RawPromptRenderLoop {
   readonly #output: RawPromptRenderOutput;
+  readonly #operatorConsoleHostFactory: () => OperatorConsoleRuntimeHost;
+  #operatorConsoleHost: OperatorConsoleRuntimeHost | undefined;
   #renderedRows = 0;
+  #cursorRow = 0;
 
-  constructor(output: RawPromptRenderOutput) {
+  constructor(
+    output: RawPromptRenderOutput,
+    options: { readonly operatorConsoleHostFactory?: () => OperatorConsoleRuntimeHost } = {}
+  ) {
     this.#output = output;
+    this.#operatorConsoleHostFactory = options.operatorConsoleHostFactory ?? createOperatorConsoleRuntimeHost;
   }
 
   render(snapshot: RawPromptRenderSnapshot): number {
     const frame = snapshot.operatorConsole?.enabled === true
-      ? buildOperatorConsoleRawPromptFrame({
+      ? buildOperatorConsoleRawPromptFrameWithRuntimeHost(this.#getOperatorConsoleHost(), {
         prompt: snapshot.prompt,
         state: snapshot.state,
-        status: snapshot.operatorConsole.status,
+        status: snapshot.operatorConsole.getStatus?.() ?? snapshot.operatorConsole.status,
+        turnActivity: snapshot.operatorConsole.turnActivity,
         terminal: snapshot.operatorConsole.terminal,
-        overlayRows: snapshot.overlayRows,
+        attachments: snapshot.operatorConsole.attachments,
+        slash: snapshot.operatorConsole.slash,
+        activeWork: snapshot.operatorConsole.activeWork,
+        steer: snapshot.operatorConsole.steer,
+        promptMode: snapshot.operatorConsole.promptMode,
+        placeholder: snapshot.operatorConsole.placeholder,
+        style: snapshot.operatorConsole.style,
+        focus: snapshot.operatorConsole.focus,
       })
-      : buildRawPromptFrame(snapshot);
+      : buildFallbackRawPromptFrame(snapshot);
     this.#moveToFirstRenderedRow();
 
     const physicalRows = Math.max(this.#renderedRows, frame.rows.length);
@@ -78,6 +115,7 @@ export class RawPromptRenderLoop {
 
     this.#moveToFrameCursor(physicalRows, frame.cursorRow, frame.cursorColumn);
     this.#renderedRows = frame.rows.length;
+    this.#cursorRow = frame.cursorRow;
     return frame.rows.length;
   }
 
@@ -90,10 +128,18 @@ export class RawPromptRenderLoop {
     }
     this.#moveToFrameCursor(this.#renderedRows, 0, 0);
     this.#renderedRows = 0;
+    this.#cursorRow = 0;
+  }
+
+  #getOperatorConsoleHost(): OperatorConsoleRuntimeHost {
+    if (this.#operatorConsoleHost === undefined) {
+      this.#operatorConsoleHost = this.#operatorConsoleHostFactory();
+    }
+    return this.#operatorConsoleHost;
   }
 
   #moveToFirstRenderedRow(): void {
-    if (this.#renderedRows > 1) this.#output.write(`\x1b[${this.#renderedRows - 1}A`);
+    if (this.#cursorRow > 0) this.#output.write(`\x1b[${this.#cursorRow}A`);
     if (this.#renderedRows > 0) this.#output.write("\r");
   }
 
@@ -105,7 +151,7 @@ export class RawPromptRenderLoop {
   }
 }
 
-export function buildRawPromptFrame(snapshot: RawPromptRenderSnapshot): {
+function buildFallbackRawPromptFrame(snapshot: RawPromptRenderSnapshot): {
   readonly rows: readonly string[];
   readonly cursorRow: number;
   readonly cursorColumn: number;
@@ -121,8 +167,8 @@ export function buildRawPromptFrame(snapshot: RawPromptRenderSnapshot): {
       : line;
     return index === 0 ? `${snapshot.prompt}${renderedLine}` : renderedLine;
   });
-  const overlayRows = (snapshot.overlayRows ?? []).map((row) => row.text);
-  const rows = [...promptRows, ...overlayRows];
+  const fallbackRows = (snapshot.fallbackRows ?? []).map((row) => row.text);
+  const rows = [...promptRows, ...fallbackRows];
   const cursorRow = cursorLineIndex;
   const cursorLinePrefix = beforeCursorLines[beforeCursorLines.length - 1] ?? "";
   const cursorColumn = (cursorRow === 0 ? stringWidth(snapshot.prompt) : 0) + stringWidth(cursorLinePrefix);

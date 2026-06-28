@@ -20,6 +20,7 @@ import type {
   TypeaheadProviderRouter,
   TypeaheadProviderSelection,
 } from "../ui/papyrus/input/typeaheadProviderRouter.js";
+import type { AttachmentCardState } from "../ui/papyrus/operator-console/index.js";
 
 const PASTE_START = "\x1b[200~";
 const PASTE_END = "\x1b[201~";
@@ -219,6 +220,36 @@ describe("raw prompt controller", () => {
     expect(lifecycle.calls).toEqual(["start", "stop"]);
   });
 
+  it("refreshes Operator Console status from the live supplier while idle", async () => {
+    vi.useFakeTimers();
+    try {
+      let elapsedMs = 0;
+      const { input, output, pending } = startPendingOperatorConsoleRead({
+        operatorConsole: {
+          enabled: true,
+          terminal: { width: 72, height: 16, isTty: true },
+          getStatus: () => ({
+            model: { label: "live-model", state: "idle" },
+            context: { usedTokens: 42, totalTokens: 100, percent: 42 },
+            sessionTimer: { elapsedMs },
+          }),
+        },
+      });
+
+      elapsedMs = 61_000;
+      vi.advanceTimersByTime(1000);
+      input.send("\r");
+
+      await expect(pending).resolves.toEqual({ type: "submit", text: "" });
+      const rendered = output.writes.join("");
+      expect(rendered).toContain("live-model");
+      expect(rendered).toContain("42%");
+      expect(rendered).toContain("01:01");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("captures input that becomes readable immediately on resume", async () => {
     const input = new BufferedResumeInput("buffered\r");
     const output = fakeOutput();
@@ -313,6 +344,223 @@ describe("raw prompt controller", () => {
     read.input.send("\r");
     expect(await read.pending).toEqual({ type: "submit", text: largePaste });
     expect(read.lifecycle.calls).toEqual(["start", "stop"]);
+  });
+
+  it("routes Operator Console bracketed paste into attachment cards instead of prompt text", async () => {
+    const read = startPendingOperatorConsoleRead();
+    const pasted = `${"MVP known issue ".repeat(20)}\nSECRET full pasted payload should stay out of prompt chrome`;
+
+    read.input.send("summarize this");
+    read.input.send(`${PASTE_START}${pasted}${PASTE_END}`);
+    await Promise.resolve();
+
+    const rendered = read.output.writes.join("");
+    expect(read.isResolved()).toBe(false);
+    expect(rendered).toContain("Attachments");
+    expect(rendered).toContain("pasted text");
+    expect(rendered).not.toContain("SECRET full pasted payload");
+    expect(rendered).toContain("› summarize this");
+
+    read.input.send("\r");
+    expect(await read.pending).toEqual({
+      type: "submit",
+      text: [
+        "summarize this",
+        "Attachments:",
+        `- pasted text · ${pasted.length.toLocaleString("en-US")} chars`,
+      ].join("\n"),
+    });
+  });
+
+  it("stores full Operator Console pasted content in attachment state with preserved newlines", async () => {
+    const attachmentsSeen: Array<readonly AttachmentCardState[]> = [];
+    const read = startPendingOperatorConsoleRead({
+      operatorConsole: {
+        enabled: true,
+        terminal: { width: 72, height: 16, isTty: true },
+        onAttachmentsChange: (attachments) => {
+          attachmentsSeen.push(attachments);
+        },
+      },
+    });
+
+    read.input.send(`${PASTE_START}line one\nline two${PASTE_END}`);
+    await Promise.resolve();
+    read.input.send("\r");
+
+    expect(await read.pending).toEqual({
+      type: "submit",
+      text: ["Attachments:", "- pasted text · 17 chars"].join("\n"),
+    });
+    expect(attachmentsSeen.at(-1)).toHaveLength(1);
+    expect(attachmentsSeen.at(-1)?.[0]).toMatchObject({
+      kind: "pastedText",
+      title: "pasted text",
+      content: "line one\nline two",
+      metadata: { chars: 17 },
+    });
+  });
+
+  it("redacts secret-like Operator Console paste previews while preserving full attachment content", async () => {
+    const attachmentsSeen: Array<readonly AttachmentCardState[]> = [];
+    const pasted = "OPENAI_API_KEY=super-secret-value\ncontext after secret";
+    const read = startPendingOperatorConsoleRead({
+      operatorConsole: {
+        enabled: true,
+        terminal: { width: 72, height: 16, isTty: true },
+        onAttachmentsChange: (attachments) => {
+          attachmentsSeen.push(attachments);
+        },
+      },
+    });
+
+    read.input.send("summarize");
+    read.input.send(`${PASTE_START}${pasted}${PASTE_END}`);
+    await Promise.resolve();
+
+    const rendered = read.output.writes.join("");
+    expect(rendered).toContain("OPENAI_API_KEY=[REDACTED]");
+    expect(rendered).not.toContain("super-secret-value");
+    expect(attachmentsSeen.at(-1)?.[0]?.content).toBe(pasted);
+
+    read.input.send("\r");
+    const result = await read.pending;
+    expect(result.type).toBe("submit");
+    if (result.type !== "submit") throw new Error("expected submit result");
+    expect(result).toEqual({
+      type: "submit",
+      text: [
+        "summarize",
+        "Attachments:",
+        `- pasted text · ${pasted.length} chars`,
+      ].join("\n"),
+    });
+    expect(result.text).not.toContain("super-secret-value");
+  });
+
+  it("allows multiple Operator Console paste attachments and does not dump payloads into the result", async () => {
+    const attachmentsSeen: Array<readonly AttachmentCardState[]> = [];
+    const read = startPendingOperatorConsoleRead({
+      operatorConsole: {
+        enabled: true,
+        terminal: { width: 72, height: 16, isTty: true },
+        onAttachmentsChange: (attachments) => {
+          attachmentsSeen.push(attachments);
+        },
+      },
+    });
+
+    read.input.send("summarize");
+    read.input.send(`${PASTE_START}first pasted payload${PASTE_END}`);
+    read.input.send(`${PASTE_START}second pasted payload${PASTE_END}`);
+    await Promise.resolve();
+    read.input.send("\r");
+
+    expect(attachmentsSeen.at(-1)?.map((attachment) => attachment.content)).toEqual([
+      "first pasted payload",
+      "second pasted payload",
+    ]);
+    expect(await read.pending).toEqual({
+      type: "submit",
+      text: [
+        "summarize",
+        "Attachments:",
+        "- pasted text · 20 chars",
+        "- pasted text · 21 chars",
+      ].join("\n"),
+    });
+  });
+
+  it("focuses Operator Console attachment cards and opens preview without submitting", async () => {
+    const previews: AttachmentCardState[] = [];
+    const read = startPendingOperatorConsoleRead({
+      operatorConsole: {
+        enabled: true,
+        terminal: { width: 72, height: 16, isTty: true },
+        onAttachmentPreview: (attachment) => {
+          previews.push(attachment);
+        },
+      },
+    });
+
+    read.input.send("summarize");
+    read.input.send(`${PASTE_START}full pasted payload${PASTE_END}`);
+    await Promise.resolve();
+    read.input.send("\t");
+    await Promise.resolve();
+
+    expect(read.output.writes.join("")).toContain("╭─ › pasted text");
+
+    read.input.send("\r");
+    await Promise.resolve();
+
+    expect(read.isResolved()).toBe(false);
+    expect(previews.map((attachment) => attachment.content)).toEqual(["full pasted payload"]);
+
+    read.input.send("\x1b[Z");
+    read.input.send("\r");
+
+    expect(await read.pending).toEqual({
+      type: "submit",
+      text: ["summarize", "Attachments:", "- pasted text · 19 chars"].join("\n"),
+    });
+  });
+
+  it("removes focused Operator Console attachments and omits them from submitted refs", async () => {
+    const attachmentsSeen: Array<readonly AttachmentCardState[]> = [];
+    const read = startPendingOperatorConsoleRead({
+      operatorConsole: {
+        enabled: true,
+        terminal: { width: 72, height: 16, isTty: true },
+        onAttachmentsChange: (attachments) => {
+          attachmentsSeen.push(attachments);
+        },
+      },
+    });
+
+    read.input.send("summarize");
+    read.input.send(`${PASTE_START}first pasted payload${PASTE_END}`);
+    read.input.send(`${PASTE_START}second pasted payload${PASTE_END}`);
+    await Promise.resolve();
+    read.input.send("\t");
+    read.input.send("\x1b");
+    await Promise.resolve();
+
+    expect(read.isResolved()).toBe(false);
+    expect(attachmentsSeen.at(-1)?.map((attachment) => attachment.content)).toEqual(["second pasted payload"]);
+    expect(read.output.writes.join("")).toContain("╭─ › pasted text");
+
+    read.input.send("\x1b[Z");
+    read.input.send("\r");
+
+    expect(await read.pending).toEqual({
+      type: "submit",
+      text: [
+        "summarize",
+        "Attachments:",
+        "- pasted text · 21 chars",
+      ].join("\n"),
+    });
+  });
+
+  it("does not remove Operator Console attachments when Escape cancels from prompt focus", async () => {
+    const attachmentsSeen: Array<readonly AttachmentCardState[]> = [];
+    const read = startPendingOperatorConsoleRead({
+      operatorConsole: {
+        enabled: true,
+        terminal: { width: 72, height: 16, isTty: true },
+        onAttachmentsChange: (attachments) => {
+          attachmentsSeen.push(attachments);
+        },
+      },
+    });
+
+    read.input.send(`${PASTE_START}full pasted payload${PASTE_END}`);
+    await Promise.resolve();
+    read.input.send("\x1b");
+
+    expect(await read.pending).toEqual({ type: "cancel" });
+    expect(attachmentsSeen.at(-1)?.map((attachment) => attachment.content)).toEqual(["full pasted payload"]);
   });
 
   it("returns cancel for Ctrl-C and Escape", async () => {
@@ -459,9 +707,8 @@ describe("raw prompt controller", () => {
 
     expect(await read.pending).toEqual({ type: "submit", text: "review the Papyrus rollout plan" });
     const output = read.output.writes.join("");
-    expect(output).toContain("╭─ Prompt");
-    expect(output).toContain("│ › review the Papyrus rollout plan");
-    expect(output).toContain("kimi-k2.7-code ● │ ctx [▰▱▱▱▱▱▱▱▱▱] 18.4k/262k 7% │ session 01:12");
+    expect(output).toContain("› review the Papyrus rollout plan");
+    expect(output).toContain("kimi-k2.7-code ● │ ctx [▰▱▱▱▱▱▱▱▱▱] 18.4k/262k 7% │ ◷ 01:12");
     expect(output).not.toMatch(/\b(tool|approval|workspace|trust|steering|setup|channel)\b/iu);
     expect(output).not.toMatch(forbiddenManagedRegionOutput);
   });
@@ -472,7 +719,7 @@ describe("raw prompt controller", () => {
     read.input.send("hello\r");
 
     expect(await read.pending).toEqual({ type: "submit", text: "hello" });
-    expect(countOccurrences(read.output.writes.join(""), "│ › hello")).toBe(1);
+    expect(countOccurrences(read.output.writes.join(""), "› hello")).toBe(1);
   });
 
   it("keeps Alt+Enter multiline insertion under Operator Console routing", async () => {
@@ -482,27 +729,31 @@ describe("raw prompt controller", () => {
     await flushPromises();
 
     expect(read.isResolved()).toBe(false);
-    expect(read.output.writes.join("")).toContain("Prompt · multiline");
-    expect(read.output.writes.join("")).toContain("│ › hello");
-    expect(read.output.writes.join("")).toContain("│   world");
+    expect(read.output.writes.join("")).toContain("› hello");
+    expect(read.output.writes.join("")).toContain("  world");
 
     read.input.send("\r");
     expect(await read.pending).toEqual({ type: "submit", text: "hello\nworld" });
   });
 
-  it("preserves multiline paste under Operator Console routing", async () => {
+  it("routes multiline paste into attachments under Operator Console routing", async () => {
     const read = startPendingOperatorConsoleRead();
 
     read.input.send(`${PASTE_START}line one\nline two${PASTE_END}`);
     await flushPromises();
 
     expect(read.isResolved()).toBe(false);
-    expect(read.output.writes.join("")).toContain("Prompt · multiline");
-    expect(read.output.writes.join("")).toContain("│ › line one");
-    expect(read.output.writes.join("")).toContain("│   line two");
+    expect(read.output.writes.join("")).toContain("Attachments");
+    expect(read.output.writes.join("")).toContain("pasted text");
+    expect(read.output.writes.join("")).toContain("17 chars");
+    expect(read.output.writes.join("")).not.toContain("Prompt · multiline");
+    expect(read.output.writes.join("")).not.toContain("› line one");
 
     read.input.send("\r");
-    expect(await read.pending).toEqual({ type: "submit", text: "line one\nline two" });
+    expect(await read.pending).toEqual({
+      type: "submit",
+      text: ["Attachments:", "- pasted text · 17 chars"].join("\n"),
+    });
   });
 
   it("keeps Escape cancel behavior unchanged under Operator Console routing", async () => {
@@ -919,12 +1170,48 @@ describe("raw prompt controller", () => {
     read.input.send("\r");
     await flushPromises();
 
-    expect(read.output.writes.join("")).toContain("> /help - Show help");
-    expect(read.output.writes.join("")).toContain("│ › /help");
+    expect(read.output.writes.join("")).toContain("Command palette");
+    expect(read.output.writes.join("")).toContain("❯ /help  Show help");
+    expect(read.output.writes.join("")).not.toContain("> /help - Show help");
+    expect(read.output.writes.join("")).toContain("› /help");
     expect(read.isResolved()).toBe(false);
 
     read.input.send("\r");
     expect(await read.pending).toEqual({ type: "submit", text: "/help" });
+  });
+
+  it("renders Operator Console slash menu below prompt and clears it after submit", async () => {
+    const provider = providerFor(SLASH_COMMAND_SUGGESTION_PROVIDER_ID, [slashSuggestion, statusSlashSuggestion]);
+    const typeahead = fakeTypeahead(provider);
+    const overlayHost = new RawPromptOverlayHost();
+    const read = startPendingOperatorConsoleRead({
+      overlayHost,
+      typeahead: {
+        router: typeahead.router,
+      },
+    });
+
+    read.input.send("/h");
+    await flushPromises();
+
+    const openRender = read.output.writes.join("");
+    expect(openRender.indexOf("╭─ Prompt")).toBeLessThan(openRender.indexOf("╭─ Command palette"));
+    expect(openRender.indexOf("╭─ Command palette")).toBeLessThan(openRender.lastIndexOf("◷"));
+    expect(openRender).toContain("❯ /help    Show help");
+    expect(openRender).toContain("  /status  Show status");
+    expect(openRender).not.toMatch(/\b(slash|command palette|help)\b.*◷/iu);
+    expect(overlayHost.getRows()).toEqual([]);
+
+    read.input.send("\x1b[B");
+    await flushPromises();
+    expect(read.output.writes.join("")).toContain("❯ /status  Show status");
+
+    read.input.send("\r");
+    await flushPromises();
+    read.input.send("\r");
+
+    expect(await read.pending).toEqual({ type: "submit", text: "/status" });
+    expect(overlayHost.getRows()).toEqual([]);
   });
 
   it("inserts Alt+Enter instead of accepting an open slash suggestion", async () => {
@@ -980,8 +1267,10 @@ describe("raw prompt controller", () => {
     await flushPromises();
 
     expect(read.isResolved()).toBe(false);
-    expect(read.output.writes.join("")).toContain("Prompt · multiline");
-    expect(read.output.writes.join("")).toContain("│ › /h");
+    const multilineRender = read.output.writes.join("");
+    const finalFrame = multilineRender.slice(multilineRender.lastIndexOf("› /h"));
+    expect(finalFrame).toContain("› /h");
+    expect(finalFrame).not.toContain("❯ /help");
     expect(overlayHost.getRows()).toEqual([]);
 
     read.input.send("\r");

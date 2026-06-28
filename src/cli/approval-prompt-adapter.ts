@@ -1,6 +1,16 @@
 import type { ViewModel } from "../contracts/view-model.js";
 import type { ToolExecutionRecord } from "../tools/tool-executor.js";
 import {
+  approvalCardStateFromToolExecution,
+  createApprovalFocusTarget,
+  createInitialOperatorConsoleState,
+  routeApprovalKey,
+  type ApprovalCardState,
+  type ApprovalIntent,
+  type OperatorConsoleRuntimeHost,
+} from "../ui/papyrus/operator-console/index.js";
+import { parseKeypress, type ParsedKeypress } from "../ui/input/parseKeypress.js";
+import {
   buildApprovalCardRenderRows,
   createApprovalCardState,
   type ApprovalCardAction,
@@ -11,41 +21,192 @@ import { buildApprovalPromptViewModel } from "./tool-activity-view-models.js";
 export type ApprovalPromptChrome = {
   readonly enabled: boolean;
   clearInlineSpinner(): void;
-  suspendChromeForTranscript<T>(fn: () => T | Promise<T>): Promise<T>;
-  suspendForPrompt?<T>(fn: () => T | Promise<T>): Promise<T>;
 };
 
 export type ApprovalPromptAdapterInput = {
   readonly prompt: (question: string) => Promise<string>;
+  readonly input?: NodeJS.ReadStream;
   readonly output: Pick<NodeJS.WritableStream, "write">;
   readonly renderer: { render(viewModel: ViewModel): string };
-  readonly chrome: ApprovalPromptChrome;
+  readonly chrome?: ApprovalPromptChrome;
   readonly execution: ToolExecutionRecord;
   readonly allowPersistentApproval: boolean;
+  readonly operatorConsoleHost?: OperatorConsoleRuntimeHost;
 };
 
 export type ApprovalPromptAdapter = (input: ApprovalPromptAdapterInput) => Promise<string>;
 
 export const papyrusApprovalPromptAdapter: ApprovalPromptAdapter = async (input) => {
+  if (input.operatorConsoleHost !== undefined) {
+    return await operatorConsoleApprovalPromptAdapter(input);
+  }
+
   const promptText = "approval action > ";
   const cardText = renderPapyrusApprovalPromptCard(input.execution, input.allowPersistentApproval);
-  if (input.chrome.suspendForPrompt !== undefined) {
-    return await input.chrome.suspendForPrompt(async () => {
-      input.output.write(`${cardText}\n`);
-      return mapPapyrusApprovalAnswer(await input.prompt(promptText), input.allowPersistentApproval);
+  input.chrome?.clearInlineSpinner();
+  input.output.write(`${cardText}\n`);
+  return mapPapyrusApprovalAnswer(await input.prompt(promptText), input.allowPersistentApproval);
+};
+
+async function operatorConsoleApprovalPromptAdapter(input: ApprovalPromptAdapterInput): Promise<string> {
+  const host = input.operatorConsoleHost;
+  if (host === undefined) {
+    return mapPapyrusApprovalAnswer(await input.prompt("approval action > "), input.allowPersistentApproval);
+  }
+
+  const approval = approvalCardStateFromToolExecution(input.execution, { focused: true });
+  if (input.input?.isTTY === true) {
+    return await readInlineOperatorConsoleApproval({
+      input: input.input,
+      output: input.output,
+      host,
+      approval,
     });
   }
 
-  input.chrome.clearInlineSpinner();
-  if (input.chrome.enabled) {
-    await input.chrome.suspendChromeForTranscript(() => {
-      input.output.write(`${cardText}\n`);
-    });
-  } else {
-    input.output.write(`${cardText}\n`);
+  host.setApprovals([approval]);
+  const frame = host.render();
+  input.output.write(`${frame.lines.join("\n")}\n`);
+
+  const answer = await input.prompt("approval action > ");
+  const intent = approvalIntentFromAnswer(answer, approval.id);
+  if (intent !== undefined) {
+    return mapOperatorConsoleApprovalIntent(intent);
   }
-  return mapPapyrusApprovalAnswer(await input.prompt(promptText), input.allowPersistentApproval);
-};
+  return mapPapyrusApprovalAnswer(answer, input.allowPersistentApproval);
+}
+
+async function readInlineOperatorConsoleApproval(input: {
+  readonly input: NodeJS.ReadStream;
+  readonly output: Pick<NodeJS.WritableStream, "write">;
+  readonly host: OperatorConsoleRuntimeHost;
+  readonly approval: ApprovalCardState;
+}): Promise<string> {
+  let state = createInitialOperatorConsoleState({
+    terminal: input.host.getState().terminal,
+    status: input.host.getState().status,
+    approvals: [input.approval],
+    focus: {
+      target: createApprovalFocusTarget(input.approval.id, input.approval.focusedControl ?? "approve"),
+    },
+  });
+  let renderedRows = 0;
+  const wasRaw = input.input.isRaw === true;
+
+  // This inline card leaves the cursor on the bottom row after every render.
+  // If a future version moves focus inside the frame, this anchor must track
+  // the cursor row like RawPromptRenderLoop does.
+  const moveToFirstRenderedRow = () => {
+    if (renderedRows > 1) input.output.write(`\x1b[${renderedRows - 1}A`);
+    if (renderedRows > 0) input.output.write("\r");
+  };
+  const render = () => {
+    input.host.clear();
+    input.host.setApprovals(state.approvals);
+    const frame = input.host.render();
+    moveToFirstRenderedRow();
+    const physicalRows = Math.max(renderedRows, frame.lines.length);
+    for (let row = 0; row < physicalRows; row += 1) {
+      input.output.write("\x1b[0K");
+      if (row < frame.lines.length) input.output.write(frame.lines[row]!);
+      if (row < physicalRows - 1) input.output.write("\n");
+    }
+    input.output.write("\r");
+    renderedRows = frame.lines.length;
+  };
+  const clear = () => {
+    if (renderedRows === 0) return;
+    moveToFirstRenderedRow();
+    for (let row = 0; row < renderedRows; row += 1) {
+      input.output.write("\x1b[0K");
+      if (row < renderedRows - 1) input.output.write("\n");
+    }
+    input.output.write("\r");
+    renderedRows = 0;
+  };
+
+  return await new Promise<string>((resolve) => {
+    let settled = false;
+    const finish = (answer: string) => {
+      if (settled) return;
+      settled = true;
+      input.input.off("data", onData);
+      if (!wasRaw) {
+        input.input.setRawMode?.(false);
+      }
+      clear();
+      input.host.setApprovals([]);
+      resolve(answer);
+    };
+    const handleKeypress = (event: ParsedKeypress) => {
+      const result = routeApprovalKey(state, event);
+      state = result.state;
+      if (result.intent.type !== "none") {
+        finish(mapOperatorConsoleApprovalIntent(result.intent));
+        return;
+      }
+      render();
+    };
+    const onData = (chunk: string | Buffer | Uint8Array) => {
+      const text = typeof chunk === "string" ? chunk : Buffer.from(chunk).toString("utf8");
+      for (const keypress of parseKeypress(text)) {
+        handleKeypress(keypress);
+        if (settled) return;
+      }
+    };
+
+    input.input.on("data", onData);
+    input.input.setRawMode?.(true);
+    input.input.resume();
+    render();
+  });
+}
+
+function approvalIntentFromAnswer(answer: string, approvalId: string): ApprovalIntent | undefined {
+  const normalized = answer.trim().toLowerCase().replace(/\s+/gu, " ");
+  const key = normalized === "1" || normalized === "approve" || normalized === "approve once" || normalized === "approve-once"
+    ? "enter"
+    : normalized === "2" || normalized === "reject" || normalized === "deny"
+      ? "enter"
+      : normalized === "3" || normalized === "inspect"
+        ? "enter"
+        : normalized === "escape" || normalized === "esc" || normalized === "cancel"
+          ? "escape"
+          : undefined;
+  if (key === undefined) return undefined;
+
+  const focusedControl = normalized === "2" || normalized === "reject" || normalized === "deny"
+    ? "reject"
+    : normalized === "3" || normalized === "inspect"
+      ? "inspect"
+      : "approve";
+  const state = createInitialOperatorConsoleState({
+    approvals: [{
+      id: approvalId,
+      status: "pending",
+      action: "approval",
+      target: "approval",
+      focusedControl,
+    }],
+    focus: {
+      target: createApprovalFocusTarget(approvalId, focusedControl),
+    },
+  });
+  return routeApprovalKey(state, { type: "key", key }).intent;
+}
+
+function mapOperatorConsoleApprovalIntent(intent: ApprovalIntent): string {
+  switch (intent.type) {
+    case "approve":
+      return "once";
+    case "reject":
+      return "deny";
+    case "inspect":
+      return "inspect";
+    case "none":
+      return "";
+  }
+}
 
 function renderPapyrusApprovalPromptCard(
   execution: ToolExecutionRecord,

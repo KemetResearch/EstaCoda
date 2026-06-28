@@ -28,6 +28,17 @@ import {
   createPapyrusVimKeymapState,
   type PapyrusVimKeymapState,
 } from "../ui/papyrus/input/vim/vimKeymap.js";
+import {
+  createInitialFocusState,
+  createInitialOperatorConsoleState,
+  createPastedTextAttachment,
+  formatSubmittedPromptWithAttachmentReferences,
+  removeAttachmentAndRepairFocus,
+  routeAttachmentKey,
+  type AttachmentCardState,
+  type FocusState,
+  type SlashMenuState,
+} from "../ui/papyrus/operator-console/index.js";
 
 type RawPromptDataListener = (chunk: string | Buffer | Uint8Array) => void;
 
@@ -68,6 +79,7 @@ export type RawPromptControllerOptions = {
   ghostText?: RawPromptGhostTextOptions;
   keymap?: RawPromptKeymapOptions;
   operatorConsole?: RawPromptOperatorConsoleOptions;
+  escapeCancels?: boolean;
 };
 
 export type RawPromptTypeaheadOptions = {
@@ -93,6 +105,7 @@ export class RawPromptController {
   readonly #ghostText: RawPromptGhostTextOptions | undefined;
   readonly #keymap: RawPromptKeymapOptions | undefined;
   readonly #operatorConsole: RawPromptOperatorConsoleOptions | undefined;
+  readonly #escapeCancels: boolean;
 
   constructor(options: RawPromptControllerOptions) {
     this.#input = options.input;
@@ -102,6 +115,7 @@ export class RawPromptController {
     this.#ghostText = options.ghostText;
     this.#keymap = options.keymap;
     this.#operatorConsole = options.operatorConsole;
+    this.#escapeCancels = options.escapeCancels ?? true;
     this.#lifecycle = options.lifecycle ?? createTerminalLifecycle({
       stdin: options.input,
       stdout: options.output,
@@ -111,16 +125,28 @@ export class RawPromptController {
   async read(question: string, options?: PromptOptions): Promise<RawPromptResult> {
     const renderLoop = new RawPromptRenderLoop(this.#output);
     let state = createLineEditorState();
+    let attachmentSequence = 0;
+    let attachments: readonly AttachmentCardState[] = [];
+    let attachmentFocus: FocusState = createInitialFocusState();
     let vimKeymapState: PapyrusVimKeymapState | undefined =
       this.#keymap?.mode === "vim" ? createPapyrusVimKeymapState() : undefined;
     let typeaheadState: TypeaheadState<SlashCommandSuggestionMetadata> = createTypeaheadControllerState();
+    let statusTicker: ReturnType<typeof setInterval> | undefined;
+    const stopStatusTicker = () => {
+      if (statusTicker === undefined) return;
+      clearInterval(statusTicker);
+      statusTicker = undefined;
+    };
     const render = () => {
-      const overlayRows = this.#overlayHost.getRows();
+      const slashMenu = this.#operatorConsole?.enabled === true
+        ? typeaheadStateToSlashMenu(typeaheadState)
+        : undefined;
+      const fallbackRows = this.#operatorConsole?.enabled === true ? [] : this.#overlayHost.getRows();
       const rows = renderLoop.render({
         prompt: question,
         state,
-        ghostText: overlayRows.length === 0 ? ghostTextForRender(this.#ghostText, state) : undefined,
-        overlayRows,
+        ghostText: fallbackRows.length === 0 && slashMenu === undefined ? ghostTextForRender(this.#ghostText, state) : undefined,
+        fallbackRows,
         operatorConsole: this.#operatorConsole?.enabled === true
           ? {
             ...this.#operatorConsole,
@@ -129,6 +155,10 @@ export class RawPromptController {
               height: this.#operatorConsole.terminal?.height ?? this.#output.rows ?? 24,
               isTty: this.#operatorConsole.terminal?.isTty ?? this.#output.isTTY ?? true,
             },
+            attachments,
+            slash: slashMenu,
+            placeholder: options?.placeholder,
+            focus: attachmentFocus,
           }
           : undefined,
       });
@@ -140,16 +170,24 @@ export class RawPromptController {
     try {
       this.#lifecycle.start();
     } catch (error) {
+      stopStatusTicker();
       renderLoop.clear();
       this.#lifecycle.stop();
       throw error;
+    }
+    if (this.#operatorConsole?.enabled === true && this.#operatorConsole.getStatus !== undefined) {
+      statusTicker = setInterval(render, 1000);
     }
 
     return await new Promise<RawPromptResult>((resolve, reject) => {
       let settled = false;
 
       const notifyTypeahead = () => {
-        this.#overlayHost.setRows(buildRawPromptSlashAutocompleteRows(typeaheadState));
+        if (this.#operatorConsole?.enabled === true) {
+          this.#overlayHost.clear();
+        } else {
+          this.#overlayHost.setRows(buildRawPromptSlashAutocompleteRows(typeaheadState));
+        }
         this.#typeahead?.onStateChange?.(typeaheadState);
       };
 
@@ -254,6 +292,7 @@ export class RawPromptController {
       };
 
       const cleanup = () => {
+        stopStatusTicker();
         detachDataListener(this.#input, onData);
         dismissCurrentTypeahead();
         this.#overlayHost.clear();
@@ -285,10 +324,71 @@ export class RawPromptController {
         render();
       };
 
+      const addPasteAttachment = (text: string) => {
+        attachmentSequence += 1;
+        attachments = [
+          ...attachments,
+          createPastedTextAttachment({
+            id: `paste-${attachmentSequence}`,
+            content: text,
+          }),
+        ];
+        this.#operatorConsole?.onAttachmentsChange?.(attachments);
+        render();
+      };
+
+      const handleAttachmentKeypress = (event: ParsedKeypress) => {
+        if (this.#operatorConsole?.enabled !== true || attachments.length === 0 || event.type !== "key") return false;
+        if (attachmentFocus.target.kind === "prompt" && event.key !== "tab") return false;
+        if (attachmentFocus.target.kind === "prompt" && event.key === "tab" && isTypeaheadActive()) return false;
+
+        const routed = routeAttachmentKey(createInitialOperatorConsoleState({
+          attachments,
+          focus: attachmentFocus,
+        }), event);
+        attachmentFocus = routed.state.focus;
+        const intent = routed.intent;
+
+        if (intent.type === "none") {
+          render();
+          return true;
+        }
+
+        if (intent.type === "openPreview") {
+          const attachment = attachments.find((candidate) => candidate.id === intent.attachmentId);
+          if (attachment !== undefined) this.#operatorConsole.onAttachmentPreview?.(attachment);
+          render();
+          return true;
+        }
+
+        if (intent.type === "remove") {
+          const nextState = removeAttachmentAndRepairFocus(routed.state, intent.attachmentId);
+          attachments = nextState.attachments;
+          attachmentFocus = nextState.focus;
+          this.#operatorConsole.onAttachmentsChange?.(attachments);
+          render();
+          return true;
+        }
+
+        finish({ type: "submit", text: formatSubmittedText(state.text) });
+        return true;
+      };
+
+      const formatSubmittedText = (text: string) => {
+        return this.#operatorConsole?.enabled === true && attachments.length > 0
+          ? formatSubmittedPromptWithAttachmentReferences(text, attachments)
+          : text;
+      };
+
       const onData = (chunk: string | Buffer | Uint8Array) => {
         if (settled) return;
         const text = typeof chunk === "string" ? chunk : Buffer.from(chunk).toString("utf8");
         for (const event of parseKeypress(text)) {
+          if (this.#operatorConsole?.enabled === true && event.type === "paste") {
+            addPasteAttachment(event.text);
+            continue;
+          }
+          if (handleAttachmentKeypress(event)) continue;
           if (handleTypeaheadKeypress(event)) continue;
           if (vimKeymapState !== undefined) {
             const vimResult = applyPapyrusVimKeymap(vimKeymapState, state, event);
@@ -298,9 +398,13 @@ export class RawPromptController {
               continue;
             }
           }
+          if (this.#escapeCancels && event.type === "key" && event.key === "escape") {
+            finish({ type: "cancel" });
+            return;
+          }
           const result = applyKeypress(state, event);
           if (result.intent?.type === "submit") {
-            finish({ type: "submit", text: result.intent.text });
+            finish({ type: "submit", text: formatSubmittedText(result.intent.text) });
             return;
           }
           if (result.intent?.type === "cancel") {
@@ -372,4 +476,47 @@ function ghostTextForRender(
     ? ghost.suggestionText.slice(currentText.length)
     : ghost.suggestionText;
   return text.length === 0 ? undefined : { text };
+}
+
+function typeaheadStateToSlashMenu(
+  state: TypeaheadState<SlashCommandSuggestionMetadata>
+): SlashMenuState | undefined {
+  switch (state.status) {
+    case "loading":
+      return {
+        query: state.context?.token ?? "",
+        items: [{ id: "slash.loading", label: "Loading slash commands..." }],
+        activeItemId: "slash.loading",
+      };
+    case "empty":
+      return {
+        query: state.context?.token ?? "",
+        items: [{ id: "slash.empty", label: "No slash commands found" }],
+        activeItemId: "slash.empty",
+      };
+    case "error":
+      return {
+        query: state.context?.token ?? "",
+        items: [{ id: "slash.error", label: `Slash suggestions unavailable: ${state.error?.message ?? "unknown error"}` }],
+        activeItemId: "slash.error",
+      };
+    case "open": {
+      const activeItemId = state.focusedIndex === undefined ? undefined : state.items[state.focusedIndex]?.id;
+      return {
+        query: state.context?.token ?? "",
+        items: state.items.map((item) => ({
+          id: item.id,
+          label: item.label,
+          ...(item.description === undefined && item.detail === undefined
+            ? {}
+            : { detail: item.description ?? item.detail }),
+        })),
+        ...(activeItemId === undefined ? {} : { activeItemId }),
+      };
+    }
+    case "closed":
+    case "canceled":
+    case "dismissed":
+      return undefined;
+  }
 }

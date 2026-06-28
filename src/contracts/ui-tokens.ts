@@ -9,6 +9,7 @@ export type SkinName = "kemetBlue";
 
 export interface TokenColors {
   brand: string;        // identity / live state
+  accent: string;       // section/accent labels
   action: string;       // turquoise - main action/selection accent
   caution: string;      // amber - rare caution/approval accent
 }
@@ -46,6 +47,8 @@ export interface TokenInteractive {
 export interface TokenSpinner {
   waiting: readonly string[];
   thinking: readonly string[];
+  tool: readonly string[];
+  background: readonly string[];
 }
 
 export interface TokenGlyph {

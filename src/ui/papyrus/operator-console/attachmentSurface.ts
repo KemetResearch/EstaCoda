@@ -1,4 +1,5 @@
 import type { ParsedKeypress } from "../../input/parseKeypress.js";
+import { redactSensitiveText } from "../../../utils/redaction.js";
 import { stringWidth } from "../screen/stringWidth.js";
 import { setFocus } from "./focusModel.js";
 import type {
@@ -10,6 +11,7 @@ export type AttachmentSurfaceRenderOptions = {
   readonly width: number;
   readonly height?: number;
   readonly maxCardRows?: number;
+  readonly focusedAttachmentId?: string;
 };
 
 export type AttachmentIntent =
@@ -38,7 +40,7 @@ export function createPastedTextAttachment(input: {
     id: input.id,
     kind: "pastedText",
     title: input.title ?? "pasted text",
-    preview: input.preview ?? createAttachmentPreview(input.content),
+    preview: createAttachmentPreview(input.preview ?? input.content),
     content: input.content,
     metadata: {
       chars: input.content.length,
@@ -57,7 +59,7 @@ export function createFileExcerptAttachment(input: {
     id: input.id,
     kind: "fileExcerpt",
     title: input.title ?? "file excerpt",
-    preview: input.preview ?? input.path,
+    preview: createAttachmentPreview(input.preview ?? input.path),
     content: input.content,
     metadata: {
       path: input.path,
@@ -94,7 +96,12 @@ export function renderAttachmentSurface(
 
   for (let index = 0; index < visibleAttachments.length; index += columns) {
     const rowAttachments = visibleAttachments.slice(index, index + columns);
-    const renderedCards = rowAttachments.map((attachment) => renderAttachmentCard(attachment, cardWidth, columns === 1));
+    const renderedCards = rowAttachments.map((attachment) => renderAttachmentCard(
+      attachment,
+      cardWidth,
+      columns === 1,
+      attachment.id === options.focusedAttachmentId
+    ));
     for (let lineIndex = 0; lineIndex < CARD_HEIGHT; lineIndex += 1) {
       rows.push(truncateVisibleCells(renderedCards.map((card) => card[lineIndex] ?? "").join(" ".repeat(CARD_GAP)), width));
     }
@@ -163,14 +170,43 @@ export function routeAttachmentKey(
   return { state, intent: { type: "none" } };
 }
 
+export function removeAttachmentAndRepairFocus(
+  state: OperatorConsoleState,
+  attachmentId: string
+): OperatorConsoleState {
+  const removeIndex = state.attachments.findIndex((attachment) => attachment.id === attachmentId);
+  if (removeIndex === -1) return state;
+
+  const attachments = state.attachments.filter((attachment) => attachment.id !== attachmentId);
+  if (state.focus.target.kind !== "attachment" || state.focus.target.attachmentId !== attachmentId) {
+    return {
+      ...state,
+      attachments,
+    };
+  }
+
+  const replacement = attachments[removeIndex] ?? attachments[removeIndex - 1];
+  return {
+    ...state,
+    attachments,
+    focus: setFocus(
+      state.focus,
+      replacement === undefined
+        ? { kind: "prompt" }
+        : { kind: "attachment", attachmentId: replacement.id }
+    ),
+  };
+}
+
 export function formatSubmittedPromptWithAttachmentReferences(
   prompt: string,
   attachments: readonly AttachmentCardState[]
 ): string {
   const trimmedPrompt = prompt.trimEnd();
   if (attachments.length === 0) return trimmedPrompt;
+  const promptRows = trimmedPrompt.length === 0 ? [] : [trimmedPrompt];
   return [
-    trimmedPrompt,
+    ...promptRows,
     "Attachments:",
     ...attachments.map((attachment) => `- ${formatSubmittedAttachmentReference(attachment)}`),
   ].join("\n");
@@ -214,14 +250,16 @@ function moveAttachmentFocus(state: OperatorConsoleState, direction: 1 | -1): Op
 function renderAttachmentCard(
   attachment: AttachmentCardState,
   width: number,
-  includeControls: boolean
+  includeControls: boolean,
+  focused: boolean
 ): readonly string[] {
   const contentWidth = Math.max(0, width - 4);
   const metadata = includeControls
     ? `${formatAttachmentMetadata(attachment)} · Enter open · Esc remove`
     : formatAttachmentMetadata(attachment);
+  const title = focused ? `› ${attachment.title}` : attachment.title;
   return [
-    renderTopBorder(attachment.title, width),
+    renderTopBorder(title, width),
     renderContentRow(attachment.preview, contentWidth, width),
     renderContentRow(metadata, contentWidth, width),
     renderBottomBorder(width),
@@ -268,7 +306,7 @@ function formatAttachmentMetadata(attachment: AttachmentCardState): string {
 }
 
 function createAttachmentPreview(content: string): string {
-  const collapsed = content.replace(/\s+/gu, " ").trim();
+  const collapsed = redactSensitiveText(content).replace(/\s+/gu, " ").trim();
   return collapsed.length === 0 ? "(empty)" : collapsed;
 }
 

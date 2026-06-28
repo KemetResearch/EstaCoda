@@ -1,9 +1,15 @@
 import { stringWidth } from "../screen/stringWidth.js";
+import { closeOpenBidiIsolates, isolateLtr } from "../../bidi.js";
+import type { UiLocale } from "../../cli-ui-copy.js";
+import { padVisibleEnd, padVisibleStart, truncateVisible } from "../../renderers/layout.js";
 import type { StartupCommandState, StartupDashboardState } from "./operatorConsoleState.js";
+import { styleBold, styleColor, type OperatorConsoleStyle } from "./operatorConsoleStyle.js";
 
 export type StartupDashboardRenderOptions = {
   readonly width: number;
   readonly height?: number;
+  readonly locale?: UiLocale;
+  readonly style?: OperatorConsoleStyle;
 };
 
 const WIDE_LAYOUT_MIN_WIDTH = 72;
@@ -22,12 +28,13 @@ export function createDefaultStartupDashboardState(): StartupDashboardState {
       security: "adaptive",
       autonomy: "manual",
     },
+    updateStatus: "Unknown.",
     commands: [
       { command: "/tools", description: "inspect tools" },
       { command: "/skills", description: "loaded skills" },
-      { command: "/model", description: "active model route" },
+      { command: "/model", description: "switch primary model" },
       { command: "/status", description: "runtime state" },
-      { command: "/setup", description: "setup editor" },
+      { command: "/compact", description: "compact session context" },
     ],
     tips: ["Paste large context as attachments.", "Use /model to switch routes."],
   };
@@ -35,13 +42,18 @@ export function createDefaultStartupDashboardState(): StartupDashboardState {
 
 export function getStartupDashboardSurfaceDesiredHeight(
   state: StartupDashboardState,
-  width: number
+  width: number,
+  locale: UiLocale = "en"
 ): number {
   const normalizedWidth = normalizeDimension(width);
+  if (locale === "ar" && normalizedWidth >= WIDE_LAYOUT_MIN_WIDTH) {
+    return renderWideArabicStartupDashboard(state, normalizedWidth, undefined).length;
+  }
   const panelRows = normalizedWidth >= WIDE_LAYOUT_MIN_WIDTH
-    ? Math.max(7, Math.max(sessionRows(state).length, commandRows(state.commands).length) + 2)
-    : sessionRows(state).length + commandRows(state.commands).length + 6;
-  return 4 + panelRows + Math.min(Math.max(1, state.tips.length), normalizedWidth >= WIDE_LAYOUT_MIN_WIDTH ? 3 : 2) + 3;
+    ? Math.max(7, Math.max(sessionRows(state, "en", undefined).length, commandRows(state.commands, "en").length) + 2)
+    : sessionRows(state, "en", undefined).length + commandRows(state.commands, "en").length + 6;
+  const infoRows = normalizedWidth >= WIDE_LAYOUT_MIN_WIDTH ? 3 : 4;
+  return 1 + panelRows + 1 + infoRows + 2;
 }
 
 export function renderStartupDashboardSurface(
@@ -52,93 +64,344 @@ export function renderStartupDashboardSurface(
   if (width <= 0) return [];
 
   const state = input ?? createDefaultStartupDashboardState();
+  const locale = options.locale ?? "en";
   const rows = width >= WIDE_LAYOUT_MIN_WIDTH
-    ? renderWideStartupDashboard(state, width)
-    : renderNarrowStartupDashboard(state, width);
+    ? renderWideStartupDashboard(state, width, locale, options.style)
+    : renderNarrowStartupDashboard(state, width, locale, options.style);
   const height = options.height === undefined ? rows.length : normalizeDimension(options.height);
-  return rows.slice(0, height);
+  const visibleRows = rows.slice(0, height);
+  return locale === "ar" ? visibleRows.map(stabilizeTerminalBidiLine) : visibleRows;
 }
 
-function renderWideStartupDashboard(state: StartupDashboardState, width: number): readonly string[] {
+function renderWideStartupDashboard(
+  state: StartupDashboardState,
+  width: number,
+  locale: UiLocale,
+  style: OperatorConsoleStyle | undefined
+): readonly string[] {
+  if (locale === "ar") return renderWideArabicStartupDashboard(state, width, style);
+
   const bodyWidth = Math.max(0, width - 4);
-  const leftWidth = Math.max(3, Math.floor((bodyWidth - 1) / 2));
-  const rightWidth = Math.max(3, bodyWidth - leftWidth - 1);
-  const session = renderInnerBox("Session", sessionRows(state), leftWidth);
-  const commands = renderInnerBox("Commands", commandRows(state.commands), rightWidth);
-  const boxHeight = Math.max(session.length, commands.length);
+  const gapWidth = 2;
+  const leftWidth = Math.max(3, Math.floor((bodyWidth - gapWidth) / 2));
+  const rightWidth = Math.max(3, bodyWidth - leftWidth - gapWidth);
+  const leftBox = renderInnerBox(startupLabel(locale, "Session", "الجلسة"), sessionRows(state, locale, style), leftWidth, style);
+  const rightBox = renderInnerBox(startupLabel(locale, "Commands", "الأوامر"), commandRows(state.commands, locale), rightWidth, style);
+  const boxHeight = Math.max(leftBox.length, rightBox.length);
   const output = [
-    centerText(state.productName, width),
-    centerText(`𓋹 ${state.orgName} 𓋹`, width),
-    centerText(state.tagline, width),
-    centerMarker(`${state.version}  ☂ session ${state.sessionId}`, width),
-    renderTopBorder(width),
+    renderTopBorder(`${state.productName}  𓂀  ${state.version}`, width, style),
   ];
 
   for (let index = 0; index < boxHeight; index += 1) {
-    output.push(renderOuterRow(`${session[index] ?? padVisibleEnd("", leftWidth)} ${commands[index] ?? padVisibleEnd("", rightWidth)}`, bodyWidth, width));
+    output.push(renderOuterRow(
+      `${leftBox[index] ?? padVisibleEnd("", leftWidth)}${" ".repeat(gapWidth)}${rightBox[index] ?? padVisibleEnd("", rightWidth)}`,
+      bodyWidth,
+      width
+    ));
   }
 
   output.push(renderOuterRow("", bodyWidth, width));
-  output.push(renderOuterRow("Tips", bodyWidth, width));
-  for (const tip of state.tips.slice(0, 2)) output.push(renderOuterRow(tip, bodyWidth, width));
+  for (const row of renderInfoColumns(state, locale, leftWidth, rightWidth, gapWidth, bodyWidth, width, style)) {
+    output.push(row);
+  }
+  output.push(renderOuterRow(styleSecondaryText(`☥ ${state.orgName} ☥`, style), bodyWidth, width));
   output.push(renderBottomBorder(width));
   return output;
 }
 
-function renderNarrowStartupDashboard(state: StartupDashboardState, width: number): readonly string[] {
+function renderWideArabicStartupDashboard(
+  state: StartupDashboardState,
+  width: number,
+  style: OperatorConsoleStyle | undefined
+): readonly string[] {
+  const bodyWidth = Math.max(0, width - 4);
+  const blockWidth = Math.min(bodyWidth, 56);
+  const sectionGap = renderOuterRow("", bodyWidth, width);
+  const output = [
+    renderTopBorder(`${state.productName}  𓂀  ${state.version}`, width, style),
+    sectionGap,
+    ...renderArabicStackedSection(
+      startupLabel("ar", "Session", "الجلسة"),
+      arabicSessionRowsForStackedSurface(state, style),
+      blockWidth,
+      bodyWidth,
+      width,
+      style
+    ),
+    sectionGap,
+    ...renderArabicStackedSection(
+      startupLabel("ar", "Commands", "الأوامر"),
+      arabicCommandRowsForStackedSurface(state.commands),
+      blockWidth,
+      bodyWidth,
+      width,
+      style
+    ),
+    sectionGap,
+    ...renderArabicStackedSection(
+      startupLabel("ar", "Update", "التحديث"),
+      arabicUpdateRowsForStackedSurface(state),
+      blockWidth,
+      bodyWidth,
+      width,
+      style
+    ),
+    sectionGap,
+    ...renderArabicStackedSection(
+      startupLabel("ar", "Tips", "تلميحات"),
+      arabicTipRowsForStackedSurface(),
+      blockWidth,
+      bodyWidth,
+      width,
+      style
+    ),
+    sectionGap,
+    renderOuterRow(padVisibleStart(styleSecondaryText(`☥ ${state.orgName} ☥`, style), bodyWidth), bodyWidth, width),
+    renderBottomBorder(width),
+  ];
+
+  return output;
+}
+
+type ArabicStackedRow = {
+  readonly value: string;
+  readonly label?: string;
+  readonly order?: "value-label" | "label-value";
+};
+
+function arabicSessionRowsForStackedSurface(
+  state: StartupDashboardState,
+  style: OperatorConsoleStyle | undefined
+): readonly ArabicStackedRow[] {
+  return [
+    { label: "النموذج", value: formatModelValueForSurface(state.session.model, state.session.modelRoute, style) },
+    { label: "الجلسة", value: state.sessionId },
+    { label: "مساحة العمل", value: state.session.workspace },
+    { label: "الموافقة", value: localizeApprovalValue(state.session.security), order: "label-value" },
+    { label: "تطوّر الوكيل", value: localizeStackedEvolutionValue(state.session.autonomy), order: "label-value" },
+  ];
+}
+
+function arabicCommandRowsForStackedSurface(commands: readonly StartupCommandState[]): readonly ArabicStackedRow[] {
+  return commands.map((command) => ({
+    label: localizeCommandDescription(command, "ar"),
+    value: command.command,
+  }));
+}
+
+function arabicUpdateRowsForStackedSurface(state: StartupDashboardState): readonly ArabicStackedRow[] {
+  const status = state.updateStatus ?? "Unknown.";
+  switch (status) {
+    case "Up to date.":
+      return [{ value: "محدّث" }];
+    case "Update available.":
+      return [
+        { value: "يوجد تحديث متاح" },
+        { label: "شغّل", value: "estacoda update" },
+      ];
+    case "Unknown.":
+      return [{ value: "حالة التحديث غير معروفة" }];
+    default:
+      return [{ value: status }];
+  }
+}
+
+function arabicTipRowsForStackedSurface(): readonly ArabicStackedRow[] {
+  return [
+    { value: "الصق السياق الكبير كمرفقات" },
+    { label: "لتغيير المسارات استخدم", value: "/model" },
+  ];
+}
+
+function renderArabicStackedSection(
+  title: string,
+  rows: readonly ArabicStackedRow[],
+  blockWidth: number,
+  bodyWidth: number,
+  width: number,
+  style: OperatorConsoleStyle | undefined
+): readonly string[] {
+  return [
+    renderArabicStackedLine(styleSectionLabel(title, style), blockWidth, bodyWidth, width),
+    ...rows.map((row) => renderArabicStackedLine(formatArabicStackedRow(row, blockWidth), blockWidth, bodyWidth, width)),
+  ];
+}
+
+function renderArabicStackedLine(
+  row: string,
+  blockWidth: number,
+  bodyWidth: number,
+  width: number
+): string {
+  return renderOuterRow(padVisibleStart(truncateVisibleCells(row, blockWidth), bodyWidth), bodyWidth, width);
+}
+
+function formatArabicStackedRow(row: ArabicStackedRow, blockWidth: number): string {
+  if (row.label === undefined) return row.value;
+  const gapWidth = 4;
+  const labelWidth = 24;
+  const valueWidth = Math.max(1, blockWidth - labelWidth - gapWidth);
+  const value = truncateVisibleCells(row.value, valueWidth);
+  const label = truncateVisibleCells(row.label, labelWidth);
+  if (row.order === "label-value") {
+    return `${padVisibleEnd(label, labelWidth)}${" ".repeat(gapWidth)}${padVisibleStart(value, valueWidth)}`;
+  }
+  return `${padVisibleStart(value, valueWidth)}${" ".repeat(gapWidth)}${padVisibleStart(label, labelWidth)}`;
+}
+
+function localizeApprovalValue(value: string): string {
+  switch (value.toLowerCase()) {
+    case "open":
+      return "مفتوحة";
+    case "adaptive":
+      return "تكيفية";
+    case "strict":
+    case "high":
+      return "صارمة";
+    default:
+      return value;
+  }
+}
+
+function localizeStackedEvolutionValue(value: string): string {
+  switch (value.toLowerCase()) {
+    case "autonomous":
+    case "proactive":
+    case "suggest":
+      return "مفعّل";
+    case "manual":
+      return "يدوي";
+    case "off":
+      return "متوقف";
+    default:
+      return value;
+  }
+}
+
+function renderNarrowStartupDashboard(
+  state: StartupDashboardState,
+  width: number,
+  locale: UiLocale,
+  style: OperatorConsoleStyle | undefined
+): readonly string[] {
   const bodyWidth = Math.max(0, width - 4);
   const output = [
-    centerText(state.productName, width),
-    centerText(state.orgName, width),
-    centerText(state.tagline, width),
-    truncateVisibleCells(`${state.version} · session ${state.sessionId}`, width),
-    renderTopBorder(width),
+    renderTopBorder(`${state.productName}  𓂀  ${state.version}`, width, style),
   ];
-  for (const row of renderInnerBox("Session", sessionRows(state).slice(0, 4), bodyWidth)) {
+  for (const row of renderInnerBox(startupLabel(locale, "Session", "الجلسة"), sessionRows(state, locale, style).slice(0, 4), bodyWidth, style)) {
     output.push(renderOuterRow(row, bodyWidth, width));
   }
-  for (const row of renderInnerBox("Commands", commandRows(state.commands).slice(0, 4), bodyWidth)) {
+  for (const row of renderInnerBox(startupLabel(locale, "Commands", "الأوامر"), commandRows(state.commands, locale).slice(0, 4), bodyWidth, style)) {
     output.push(renderOuterRow(row, bodyWidth, width));
   }
   output.push(renderOuterRow("", bodyWidth, width));
-  output.push(renderOuterRow("Tips", bodyWidth, width));
-  if (state.tips[0] !== undefined) output.push(renderOuterRow(state.tips[0], bodyWidth, width));
+  output.push(renderOuterRow(styleSectionLabel(startupLabel(locale, "Update", "التحديث"), style), bodyWidth, width));
+  for (const row of updateRows(state, locale).slice(0, 2)) {
+    output.push(renderOuterRow(row, bodyWidth, width));
+  }
+  output.push(renderOuterRow(styleSectionLabel(startupLabel(locale, "Tips", "تلميحات"), style), bodyWidth, width));
+  if (tipRows(state, locale)[0] !== undefined) output.push(renderOuterRow(tipRows(state, locale)[0], bodyWidth, width));
+  output.push(renderOuterRow(styleSecondaryText(`☥ ${state.orgName} ☥`, style), bodyWidth, width));
   output.push(renderBottomBorder(width));
   return output;
 }
 
-function sessionRows(state: StartupDashboardState): readonly string[] {
+function sessionRows(
+  state: StartupDashboardState,
+  locale: UiLocale,
+  style: OperatorConsoleStyle | undefined
+): readonly string[] {
+  const labels = locale === "ar"
+    ? {
+      model: "النموذج",
+      session: "الجلسة",
+      workspace: "مساحة العمل",
+      security: "الأمان",
+      evolution: "التطوّر",
+    }
+    : {
+      model: "model",
+      session: "session",
+      workspace: "workspace",
+      security: "security",
+      evolution: "evolution",
+    };
   return [
-    formatKeyValue("model", state.session.model),
-    formatKeyValue("context", state.session.context),
-    formatKeyValue("workspace", state.session.workspace),
-    formatKeyValue("security", state.session.security),
-    formatKeyValue("autonomy", state.session.autonomy),
+    formatKeyValue(labels.model, formatModelValue(state.session.model, state.session.modelRoute, locale, style)),
+    formatKeyValue(labels.session, localizeTechnicalValue(state.sessionId, locale)),
+    formatKeyValue(labels.workspace, localizeTechnicalValue(state.session.workspace, locale)),
+    formatKeyValue(labels.security, localizeSecurityValue(state.session.security, locale)),
+    formatKeyValue(labels.evolution, localizeEvolutionValue(state.session.autonomy, locale)),
   ];
 }
 
-function commandRows(commands: readonly StartupCommandState[]): readonly string[] {
-  return commands.map((command) => formatKeyValue(command.command, command.description));
+function commandRows(commands: readonly StartupCommandState[], locale: UiLocale): readonly string[] {
+  return commands.map((command) => formatKeyValue(
+    localizeTechnicalValue(command.command, locale),
+    localizeCommandDescription(command, locale)
+  ));
 }
 
 function formatKeyValue(key: string, value: string): string {
   return `${padVisibleEnd(key, 11)}${value}`;
 }
 
-function renderInnerBox(title: string, rows: readonly string[], width: number): readonly string[] {
+function renderInnerBox(
+  title: string,
+  rows: readonly string[],
+  width: number,
+  style: OperatorConsoleStyle | undefined
+): readonly string[] {
   if (width <= 0) return [];
   if (width < 3) return [truncateVisibleCells(title, width)];
   const contentWidth = Math.max(0, width - 4);
   return [
-    renderTitledTopBorder(title, width),
+    renderTitledTopBorder(title, width, style),
     ...rows.map((row) => renderContentRow(row, contentWidth, width)),
     renderInnerBottomBorder(width),
   ];
 }
 
-function renderTopBorder(width: number): string {
+function renderInfoColumns(
+  state: StartupDashboardState,
+  locale: UiLocale,
+  leftWidth: number,
+  rightWidth: number,
+  gapWidth: number,
+  bodyWidth: number,
+  width: number,
+  style: OperatorConsoleStyle | undefined
+): readonly string[] {
+  const update = [
+    styleSectionLabel(startupLabel(locale, "Update", "التحديث"), style),
+    ...updateRows(state, locale),
+  ];
+  const tips = [
+    styleSectionLabel(startupLabel(locale, "Tips", "تلميحات"), style),
+    ...tipRows(state, locale).slice(0, 2),
+  ];
+  const leftRows = update;
+  const rightRows = tips;
+  const rowCount = Math.max(leftRows.length, rightRows.length);
+  return Array.from({ length: rowCount }, (_, index) => renderOuterRow(
+    `${padVisibleEnd(leftRows[index] ?? "", leftWidth)}${" ".repeat(gapWidth)}${padVisibleEnd(rightRows[index] ?? "", rightWidth)}`,
+    bodyWidth,
+    width
+  ));
+}
+
+function renderTopBorder(
+  labelText: string,
+  width: number,
+  style: OperatorConsoleStyle | undefined
+): string {
   if (width <= 1) return "╭".slice(0, width);
-  return `╭${"─".repeat(Math.max(0, width - 2))}╮`;
+  const styledLabel = styleColor(style, styleBold(style, labelText), style?.tokens.contract.palette.brand ?? "");
+  const label = ` ${styledLabel} `;
+  const remaining = Math.max(0, width - 2 - stringWidth(label));
+  const left = Math.floor(remaining / 2);
+  const right = remaining - left;
+  return truncateVisibleCells(`╭${"─".repeat(left)}${label}${"─".repeat(right)}╮`, width);
 }
 
 function renderBottomBorder(width: number): string {
@@ -146,11 +409,102 @@ function renderBottomBorder(width: number): string {
   return `╰${"─".repeat(Math.max(0, width - 2))}╯`;
 }
 
-function renderTitledTopBorder(title: string, width: number): string {
+function renderTitledTopBorder(title: string, width: number, style: OperatorConsoleStyle | undefined): string {
   if (width <= 1) return "╭".slice(0, width);
-  const label = `─ ${title} `;
+  const styledTitle = styleSectionLabel(title, style);
+  const label = `─ ${styledTitle} `;
   const remaining = Math.max(0, width - 2 - stringWidth(label));
   return truncateVisibleCells(`╭${label}${"─".repeat(remaining)}╮`, width);
+}
+
+function styleSectionLabel(title: string, style: OperatorConsoleStyle | undefined): string {
+  return styleColor(style, title, style?.tokens.contract.palette.accent ?? "");
+}
+
+function styleSecondaryText(text: string, style: OperatorConsoleStyle | undefined): string {
+  return styleColor(style, text, style?.tokens.contract.text.secondary ?? "");
+}
+
+function startupLabel(locale: UiLocale, english: string, arabic: string): string {
+  return locale === "ar" ? arabic : english;
+}
+
+function localizeTechnicalValue(value: string, locale: UiLocale): string {
+  return locale === "ar" ? isolateLtr(value) : value;
+}
+
+function localizeCommandDescription(command: StartupCommandState, locale: UiLocale): string {
+  if (locale !== "ar") return command.description;
+  switch (command.command) {
+    case "/tools":
+      return "فحص الأدوات";
+    case "/skills":
+      return "المهارات المحمّلة";
+    case "/model":
+      return "تغيير النموذج الأساسي";
+    case "/status":
+      return "حالة التشغيل";
+    case "/compact":
+      return "ضغط سياق الجلسة";
+    default:
+      return command.description;
+  }
+}
+
+function localizeSecurityValue(value: string, locale: UiLocale): string {
+  if (locale !== "ar") return value;
+  switch (value.toLowerCase()) {
+    case "open":
+      return "مفتوح";
+    case "adaptive":
+      return "تكيفي";
+    case "strict":
+    case "high":
+      return "صارم";
+    default:
+      return value;
+  }
+}
+
+function localizeEvolutionValue(value: string, locale: UiLocale): string {
+  if (locale !== "ar") return value;
+  switch (value.toLowerCase()) {
+    case "autonomous":
+      return "تلقائي";
+    case "proactive":
+      return "استباقي";
+    case "suggest":
+      return "اقتراح";
+    case "manual":
+      return "يدوي";
+    case "off":
+      return "متوقف";
+    default:
+      return value;
+  }
+}
+
+function updateRows(state: StartupDashboardState, locale: UiLocale): readonly string[] {
+  const status = state.updateStatus ?? "Unknown.";
+  if (locale !== "ar") return [status];
+  switch (status) {
+    case "Up to date.":
+      return ["محدّث."];
+    case "Update available.":
+      return ["يوجد تحديث متاح.", `شغّل ${isolateLtr("estacoda update")}.`];
+    case "Unknown.":
+      return ["حالة التحديث غير معروفة."];
+    default:
+      return [status];
+  }
+}
+
+function tipRows(state: StartupDashboardState, locale: UiLocale): readonly string[] {
+  if (locale !== "ar") return state.tips;
+  return [
+    "الصق السياق الكبير كمرفقات.",
+    `استخدم ${isolateLtr("/model")} لتغيير المسارات.`,
+  ];
 }
 
 function renderInnerBottomBorder(width: number): string {
@@ -165,28 +519,46 @@ function renderContentRow(row: string, contentWidth: number, width: number): str
 }
 
 function renderOuterRow(row: string, contentWidth: number, width: number): string {
-  if (width <= 1) return "│".slice(0, width);
+  if (width <= 0) return "";
   const content = padVisibleEnd(truncateVisibleCells(row, contentWidth), contentWidth);
-  return truncateVisibleCells(`│ ${content} │`, width);
+  return truncateVisibleCells(`  ${content}`, width);
 }
 
-function centerMarker(text: string, width: number): string {
-  if (width <= 0) return "";
-  const label = ` ${text} `;
-  const side = Math.max(0, Math.floor((width - stringWidth(label)) / 2));
-  return truncateVisibleCells(`${"─".repeat(side)}${label}${"─".repeat(Math.max(0, width - side - stringWidth(label)))}`, width);
+function formatModelValue(
+  value: string,
+  route: StartupDashboardState["session"]["modelRoute"],
+  locale: UiLocale,
+  style: OperatorConsoleStyle | undefined
+): string {
+  const match = value.trimEnd().match(/^(.*?)([●◐○])$/u);
+  if (match === null) return localizeTechnicalValue(value, locale);
+  const color = modelRouteColor(route, style);
+  const model = localizeTechnicalValue(match[1].trimEnd(), locale);
+  const dot = color === undefined ? match[2] : styleColor(style, match[2], color);
+  return `${model} ${dot}`;
 }
 
-function centerText(text: string, width: number): string {
-  if (width <= 0) return "";
-  const truncated = truncateVisibleCells(text, width);
-  const pad = Math.max(0, Math.floor((width - stringWidth(truncated)) / 2));
-  return truncateVisibleCells(`${" ".repeat(pad)}${truncated}`, width);
+function formatModelValueForSurface(
+  value: string,
+  route: StartupDashboardState["session"]["modelRoute"],
+  style: OperatorConsoleStyle | undefined
+): string {
+  const match = value.trimEnd().match(/^(.*?)([●◐○])$/u);
+  if (match === null) return value;
+  const color = modelRouteColor(route, style);
+  const dot = color === undefined ? match[2] : styleColor(style, match[2], color);
+  return `${match[1].trimEnd()} ${dot}`;
 }
 
-function padVisibleEnd(value: string, width: number): string {
-  const padCells = Math.max(0, width - stringWidth(value));
-  return `${value}${" ".repeat(padCells)}`;
+function modelRouteColor(
+  route: StartupDashboardState["session"]["modelRoute"],
+  style: OperatorConsoleStyle | undefined
+): string | undefined {
+  const tokens = style?.tokens.contract;
+  if (tokens === undefined) return undefined;
+  if (route === "fallback") return tokens.palette.caution;
+  if (route === "failed") return tokens.severity.warn;
+  return tokens.severity.ok;
 }
 
 function truncateVisibleCells(value: string, maxCells: number): string {
@@ -194,12 +566,11 @@ function truncateVisibleCells(value: string, maxCells: number): string {
   if (width <= 0) return "";
   if (stringWidth(value) <= width) return value;
 
-  let output = "";
-  for (const char of value) {
-    if (stringWidth(output + char) > width) break;
-    output += char;
-  }
-  return output;
+  return closeOpenBidiIsolates(truncateVisible(value, width, ""));
+}
+
+function stabilizeTerminalBidiLine(value: string): string {
+  return isolateLtr(closeOpenBidiIsolates(value));
 }
 
 function normalizeDimension(value: number): number {

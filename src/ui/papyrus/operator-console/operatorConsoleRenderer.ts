@@ -15,8 +15,10 @@ import {
   renderQueuedSteerSurface,
   renderSteerInputSurface,
 } from "./steerSurface.js";
+import { renderSlashSurface } from "./slashSurface.js";
 import { renderStartupDashboardSurface } from "./startupDashboardSurface.js";
 import { renderStatusRailSurface } from "./statusRailSurface.js";
+import { renderTurnActivitySurface } from "./turnActivitySurface.js";
 
 export type OperatorConsoleRenderedLine = {
   readonly region: OperatorConsoleRegion["kind"];
@@ -46,12 +48,15 @@ function renderRegionLines(
     return renderStartupDashboardSurface(state.startup, {
       width: region.width,
       height: region.height,
+      locale: state.locale,
+      style: state.style,
     }).map((text) => ({ region: region.kind, text }));
   }
   if (region.kind === "setupPanel" && state.setupPanel !== undefined) {
     return renderSetupPanelSurface(state.setupPanel, {
       width: region.width,
       height: region.height,
+      style: state.style,
     }).map((text) => ({ region: region.kind, text }));
   }
   if (region.kind === "prompt") {
@@ -65,12 +70,14 @@ function renderRegionLines(
       width: region.width,
       height: region.height,
       terminalHeight: layoutHeightForRegion(region),
+      style: state.style,
     }).map((text) => ({ region: region.kind, text }));
   }
   if (region.kind === "attachments") {
     return renderAttachmentSurface(state.attachments, {
       width: region.width,
       height: region.height,
+      focusedAttachmentId: state.focus.target.kind === "attachment" ? state.focus.target.attachmentId : undefined,
     }).map((text) => ({ region: region.kind, text }));
   }
   if (region.kind === "activeWork") {
@@ -78,6 +85,14 @@ function renderRegionLines(
       width: region.width,
       height: region.height,
       locale: state.locale,
+      style: state.style,
+    }).map((text) => ({ region: region.kind, text }));
+  }
+  if (region.kind === "turnActivity") {
+    return renderTurnActivitySurface(state.turnActivity, {
+      width: region.width,
+      locale: state.locale,
+      style: state.style,
     }).map((text) => ({ region: region.kind, text }));
   }
   if (region.kind === "approvals") {
@@ -92,8 +107,15 @@ function renderRegionLines(
       height: region.height,
     }).map((text) => ({ region: region.kind, text }));
   }
+  if (region.kind === "slashMenu") {
+    return renderSlashSurface(state.slash, {
+      width: region.width,
+      height: region.height,
+      style: state.style,
+    }).map((text) => ({ region: region.kind, text }));
+  }
   if (region.kind === "statusRail") {
-    return [{ region: region.kind, text: renderStatusRailSurface(state.status, { width: region.width }) }];
+    return [{ region: region.kind, text: renderStatusRailSurface(state.status, { width: region.width, style: state.style }) }];
   }
   const lines: OperatorConsoleRenderedLine[] = [];
   for (let row = 0; row < region.height; row += 1) {
@@ -120,6 +142,8 @@ function regionLabel(
       return `Transcript: ${state.transcript.length} block${plural(state.transcript.length)}`;
     case "approvals":
       return `Approvals: ${state.approvals.length}`;
+    case "turnActivity":
+      return `Turn activity: ${state.turnActivity?.phase ?? ""}`;
     case "queuedSteer":
       return `Queued steer: ${state.steer?.queued?.text ?? ""}`;
     case "attachments":
@@ -129,7 +153,7 @@ function regionLabel(
     case "slashMenu":
       return `Slash menu: ${state.slash?.query ?? ""}`;
     case "statusRail":
-      return renderStatusRailSurface(state.status, { width: region.width });
+      return renderStatusRailSurface(state.status, { width: region.width, style: state.style });
     case "activeWork":
       return "";
   }

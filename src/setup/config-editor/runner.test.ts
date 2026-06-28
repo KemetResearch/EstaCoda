@@ -212,7 +212,7 @@ describe("runConfigEditor", () => {
     expect(prompts[0]?.body).not.toContain("\x1b[");
     expect(prompts[0]?.bodyLineStyles).toEqual([{ emphasis: "strong" }]);
     expect(prompts[0]?.columns).toEqual([
-      { key: "description", header: "التفاصيل", align: "right" },
+      { key: "description", header: "التفاصيل", align: "left" },
       { key: "name", header: "الاسم", align: "right" },
     ]);
     expect(prompts[0]?.tableDirection).toBe("rtl");
@@ -532,10 +532,18 @@ describe("runConfigEditor", () => {
     expect(securityMode).toBe("strict");
     expect(workflowLearning).toBe("proactive");
     expect(securityInput?.statusLines).toEqual([{ text: "Current: Strict", tone: "active", direction: "ltr" }]);
+    expect(securityInput?.columns).toEqual([
+      { key: "name", header: "Name", align: "left" },
+      { key: "description", header: "Details", align: "left" },
+    ]);
     expect(securityInput?.showCurrentBadge).toBe(false);
     expect(securityInput?.defaultIndex).toBe(0);
     expect(securityInput?.options.find((option) => option.id === "strict")?.current).toBe(true);
     expect(workflowInput?.statusLines).toEqual([{ text: "Current: Proactive", tone: "active", direction: "ltr" }]);
+    expect(workflowInput?.columns).toEqual([
+      { key: "name", header: "Name", align: "left" },
+      { key: "description", header: "Details", align: "left" },
+    ]);
     expect(workflowInput?.showCurrentBadge).toBe(false);
     expect(workflowInput?.options.map((option) => option.id)).toEqual([
       "suggest",
@@ -621,7 +629,7 @@ describe("runConfigEditor", () => {
     );
     expect(webSearch).toEqual({ provider: "none" });
     expect(searchInput?.columns).toEqual([
-      { key: "description", header: "التفاصيل", align: "right" },
+      { key: "description", header: "التفاصيل", align: "left" },
       { key: "name", header: "الاسم", align: "right" },
     ]);
     expect(searchInput?.tableDirection).toBe("rtl");

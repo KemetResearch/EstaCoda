@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { stringWidth } from "../screen/stringWidth.js";
+import { resolveTokens } from "../../../theme/token-resolver.js";
 import {
+  createOperatorConsoleStyle,
   createDefaultPromptSurfaceState,
   getPromptSurfaceDesiredHeight,
   getPromptSurfaceMetrics,
@@ -9,37 +11,56 @@ import {
 } from "./index.js";
 
 describe("Papyrus operator console prompt surface", () => {
-  it("renders a boxed single-line prompt", () => {
+  it("renders a minimal upper/lower prompt frame", () => {
     const output = renderPromptSurface(prompt({ value: "review the Papyrus rollout plan" }), {
       width: 72,
       height: 3,
     });
 
-    expect(output[0]).toMatch(/^╭─ Prompt ─+╮$/u);
-    expect(output[1]).toContain("│ › review the Papyrus rollout plan");
-    expect(output[2]).toMatch(/^╰─+╯$/u);
+    expect(output[0]).toMatch(/^─+$/u);
+    expect(output[1]).toContain("› review the Papyrus rollout plan");
+    expect(output[2]).toMatch(/^─+$/u);
     expect(output).toHaveLength(3);
   });
 
   it("renders an empty prompt marker", () => {
     const output = renderPromptSurface(prompt({ value: "" }), { width: 40, height: 3 });
 
-    expect(output[1]).toContain("│ ›");
+    expect(output[1]).toContain("›");
   });
 
   it("renders slash input as normal prompt content", () => {
     const output = renderPromptSurface(prompt({ value: "/mo" }), { width: 40, height: 3 });
 
-    expect(output[1]).toContain("│ › /mo");
+    expect(output[1]).toContain("› /mo");
   });
 
-  it("uses multiline title for multiline prompt state", () => {
+  it("renders multiline content without a title", () => {
     const output = renderPromptSurface(prompt({
       multiline: true,
       value: "write a migration plan for:\n- approval cards",
     }), { width: 72, height: 4 });
 
-    expect(output[0]).toContain("Prompt · multiline");
+    expect(output[0]).toMatch(/^─+$/u);
+    expect(output[1]).toContain("› write a migration plan for:");
+    expect(output[2]).toContain("  - approval cards");
+  });
+
+  it("soft-wraps long typed lines and keeps the cursor on the wrapped row", () => {
+    const value = "review our src code and explain memory compaction";
+    const state = prompt({
+      value,
+      cursorOffset: value.length,
+    });
+    const output = renderPromptSurface(state, { width: 24, height: 5 });
+    const metrics = getPromptSurfaceMetrics(state, { width: 24, height: 5 });
+
+    expect(output).toHaveLength(5);
+    expect(output.join("\n")).toContain("› review our src code");
+    expect(output.join("\n")).toContain("  and explain memory");
+    expect(metrics.cursorRow).toBeGreaterThan(0);
+    expect(metrics.cursorColumn).toBeGreaterThan(2);
+    expect(output.every((line) => stringWidth(line) <= 24)).toBe(true);
   });
 
   it("expands multiline prompts by visible rows", () => {
@@ -168,6 +189,26 @@ describe("Papyrus operator console prompt surface", () => {
     expect(output).not.toMatch(/\[[0-9;?]*[A-Za-z]/u);
   });
 
+  it("colors empty prompt tips with the muted token and hides them while typing", () => {
+    const tokens = resolveTokens("standard", "dark", "kemetBlue");
+    const style = createOperatorConsoleStyle({
+      tokens,
+      capabilities: { supportsColor: true, supportsTrueColor: true },
+    });
+    const empty = renderPromptSurface(prompt({
+      value: "",
+      placeholder: "/help · /tools · /model · /status · /compact · Ctrl+C exit",
+    }), { width: 72, height: 3, style }).join("\n");
+    const typed = renderPromptSurface(prompt({
+      value: "hello",
+      placeholder: "/help · /tools",
+    }), { width: 72, height: 3, style }).join("\n");
+
+    expect(empty).toContain(`${ansiFg(tokens.contract.text.muted)}› /help`);
+    expect(typed).not.toContain("/tools");
+    expect(typed).not.toContain(ansiFg(tokens.contract.text.muted));
+  });
+
   it("is deterministic and does not mutate state", () => {
     const state = prompt({ value: "review plan" });
     const snapshot = JSON.stringify(state);
@@ -182,6 +223,15 @@ function prompt(input: Partial<PromptSurfaceState>): PromptSurfaceState {
     ...createDefaultPromptSurfaceState(),
     ...input,
   };
+}
+
+function ansiFg(hex: string): string {
+  const clean = hex.replace("#", "");
+  const bigint = Number.parseInt(clean, 16);
+  const r = (bigint >> 16) & 255;
+  const g = (bigint >> 8) & 255;
+  const b = bigint & 255;
+  return `\x1b[38;2;${r};${g};${b}m`;
 }
 
 function numberedLines(count: number): string {

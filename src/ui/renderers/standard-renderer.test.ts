@@ -129,6 +129,12 @@ function visibleTextEndColumn(line: string, text: string): number {
   return measureVisibleWidth(line.slice(0, textIndex)) + measureVisibleWidth(text);
 }
 
+function visibleTextStartColumn(line: string, text: string): number {
+  const textIndex = line.indexOf(text);
+  expect(textIndex).toBeGreaterThanOrEqual(0);
+  return measureVisibleWidth(line.slice(0, textIndex));
+}
+
 function countBidiControl(line: string, control: string): number {
   return [...line].filter((char) => char === control).length;
 }
@@ -149,6 +155,11 @@ function hexToRgbForTest(hex: string): { r: number; g: number; b: number } {
 function ansiFgForHex(hex: string): string {
   const { r, g, b } = hexToRgbForTest(hex);
   return `\x1b[38;2;${r};${g};${b}m`;
+}
+
+function ansiBgForHex(hex: string): string {
+  const { r, g, b } = hexToRgbForTest(hex);
+  return `\x1b[48;2;${r};${g};${b}m`;
 }
 
 function escapeRegExp(value: string): string {
@@ -989,7 +1000,7 @@ describe("StandardRenderer — dark theme", () => {
       tableMaxWidth: 88,
       tableAlign: "right" as const,
       columns: [
-        { key: "description", header: "التفاصيل", align: "right" as const },
+        { key: "description", header: "التفاصيل", align: "left" as const },
         { key: "name", header: "الاسم", align: "right" as const },
       ],
       options: [
@@ -1036,7 +1047,7 @@ describe("StandardRenderer — dark theme", () => {
       tableMaxWidth: 88,
       tableAlign: "right" as const,
       columns: [
-        { key: "description", header: "التفاصيل", align: "right" as const },
+        { key: "description", header: "التفاصيل", align: "left" as const },
         { key: "name", header: "الاسم", align: "right" as const },
       ],
       options: [
@@ -1097,12 +1108,14 @@ describe("StandardRenderer — dark theme", () => {
     expect(searchLine).toContain(isolateLtr("EstaCoda"));
     expect(searchLine.indexOf("اضبط كيف")).toBeLessThan(searchLine.indexOf("البحث"));
     expect(visibleMarkerColumn(searchLine, "◂")).toBe(visibleMarkerColumn(auxiliaryLine, "◂"));
+    expect(visibleTextStartColumn(searchLine, "اضبط كيف")).toBe(visibleTextStartColumn(auxiliaryLine, "نماذج تُستخدم"));
     expect(visibleTextEndColumn(searchLine, "البحث")).toBe(visibleTextEndColumn(auxiliaryLine, "النماذج المساعدة"));
 
     const evolutionLine = markerLineFor(5);
     expect(evolutionLine).toContain(isolateLtr("Agent Evolution"));
     expect(evolutionLine.indexOf("مقترحات تحسين")).toBeLessThan(evolutionLine.indexOf("Agent Evolution"));
     expect(visibleMarkerColumn(evolutionLine, "◂")).toBe(visibleMarkerColumn(auxiliaryLine, "◂"));
+    expect(visibleTextStartColumn(evolutionLine, "مقترحات تحسين")).toBe(visibleTextStartColumn(auxiliaryLine, "نماذج تُستخدم"));
     expect(visibleTextEndColumn(evolutionLine, "Agent Evolution")).toBe(visibleTextEndColumn(auxiliaryLine, "النماذج المساعدة"));
 
     const channelLine = renderedFor(2).split("\n").find((line) => line.includes("Telegram"));
@@ -2557,7 +2570,7 @@ describe("StandardRenderer — prompt chrome rails", () => {
     expect(status).toContain("deepseek-reasoner");
     expect(status).toContain("idle");
     expect(status.split("\n")).toHaveLength(1);
-    expect(shortcuts).toContain("/help · /tools · /model · /status · Ctrl+C exit");
+    expect(shortcuts).toContain("/help · /tools · /model · /status · /compact · Ctrl+C exit");
     expect(shortcuts.split("\n")).toHaveLength(1);
     expect(hasAnsi(status)).toBe(true);
     expect(hasAnsi(shortcuts)).toBe(true);
@@ -2588,7 +2601,7 @@ describe("StandardRenderer — prompt chrome rails", () => {
     const r = renderer("dark", fullCaps());
     const vm = buildShortcutHintRailViewModel({ hints: [] });
     const out = r.render(vm);
-    expect(out).toContain("/help · /tools · /model · /status · Ctrl+C exit");
+    expect(out).toContain("/help · /tools · /model · /status · /compact · Ctrl+C exit");
     expect(out.split("\n")).toHaveLength(1);
   });
 
@@ -2704,17 +2717,21 @@ describe("StandardRenderer — prompt chrome rails", () => {
   });
 
   it("renders user prompt rail with Unicode marker", () => {
+    const tokens = resolveTokens("standard", "dark", "kemetBlue");
     const r = renderer("dark", fullCaps());
     const vm = buildUserPromptRailViewModel({ text: "Hello, world!" });
     const out = r.render(vm);
-    expect(out).toBe("↳ Hello, world!");
+    expect(stripAnsi(out)).toBe("↳ Hello, world!");
+    expect(out).toContain(ansiBgForHex(tokens.contract.surface.bgElevated));
   });
 
   it("renders user prompt rail with ASCII fallback when Unicode is disabled", () => {
+    const tokens = resolveTokens("standard", "dark", "kemetBlue");
     const r = renderer("dark", noUnicodeCaps());
     const vm = buildUserPromptRailViewModel({ text: "Hello, world!" });
     const out = r.render(vm);
-    expect(out).toBe("> Hello, world!");
+    expect(stripAnsi(out)).toBe("> Hello, world!");
+    expect(out).toContain(ansiBgForHex(tokens.contract.surface.bgElevated));
   });
 
   it("renders user prompt rail within narrow terminal width", () => {
@@ -2722,10 +2739,9 @@ describe("StandardRenderer — prompt chrome rails", () => {
     const vm = buildUserPromptRailViewModel({ text: "This is a very long user prompt that should be truncated to fit within the narrow terminal width of forty characters" });
     const out = r.render(vm);
     const lines = out.split("\n");
-    expect(lines).toHaveLength(1);
+    expect(lines.length).toBeGreaterThan(1);
     expect(lines[0]).toContain("↳");
-    expect(lines[0].length).toBeLessThanOrEqual(40);
-    expect(measureVisibleWidth(lines[0] ?? "")).toBeLessThanOrEqual(40);
+    expect(lines.every((line) => measureVisibleWidth(line) <= 40)).toBe(true);
   });
 
   it("produces no ANSI for user prompt rail in no-color mode", () => {
@@ -2740,14 +2756,14 @@ describe("StandardRenderer — prompt chrome rails", () => {
     const r = renderer("dark", fullCaps());
     const vm = buildUserPromptRailViewModel({ text: "line one\nline two" });
     const out = r.render(vm);
-    expect(out).toBe("↳ line one\n  line two");
+    expect(stripAnsi(out)).toBe("↳ line one\n  line two");
   });
 
   it("renders active turn spinner with brand eye and localized label", () => {
     const r = renderer("dark", { ...fullCaps(), supportsAnimation: false });
     const vm = buildActiveTurnSpinnerViewModel({ phase: "thinking" });
     const out = stripAnsi(r.render(vm));
-    expect(out).toContain("⌦");
+    expect(out).toContain("⣾⣷");
     expect(out).not.toContain("𓇠");
     expect(out).toContain("contemplating");
   });
@@ -2777,13 +2793,13 @@ describe("StandardRenderer — prompt chrome rails", () => {
     expect(hasAnsi(out)).toBe(true);
   });
 
-  it("renders running tool activity with tokenized waiting spinner", () => {
+  it("renders running tool activity with tokenized tool spinner", () => {
     const r = renderer("dark", { ...fullCaps(), supportsAnimation: false });
     const vm = buildToolActivityRailViewModel({
       events: [toolActivityRailEvent("readFile", "running", { label: "preparing" })],
     });
     const out = stripAnsi(r.render(vm));
-    expect(out).toContain("⌦");
+    expect(out).toContain("⣾⣷");
     expect(out).not.toContain("𓇠");
     expect(out).toContain("preparing");
   });

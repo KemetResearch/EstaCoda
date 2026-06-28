@@ -682,7 +682,7 @@ export const SETUP_COPY_ENTRIES = [
   copy("setupEditor.prompt.vision.apiKeyEnv", "Image-generation API key environment variable", "متغير بيئة مفتاح API لتوليد الصور", [], "optional-capability"),
   copy("setupEditor.prompt.vision.useGateway", "Use the configured image gateway setting", "استخدم إعداد image gateway المهيأ", [], "optional-capability"),
   copy("setupEditor.prompt.webSearch.provider.title", "Search provider", "مزوّد بحث الويب", [], "optional-capability"),
-  copy("setupEditor.prompt.webSearch.provider.body", "Choose the provider EstaCoda should use for web.search. Setup records configuration only; it will not run a search during review.", "اختر المزوّد الذي ستستخدمه EstaCoda لـ web.search. يسجّل الإعداد التكوين فقط؛ ولن يشغّل بحثًا أثناء المراجعة.", [], "optional-capability"),
+  copy("setupEditor.prompt.webSearch.provider.body", "Choose the provider EstaCoda should use for web.search.", "اختر المزوّد الذي ستستخدمه EstaCoda لـ web.search.", [], "optional-capability"),
   copy("setupEditor.prompt.webSearch.provider.brave", "Brave Search", "Brave Search", [], "optional-capability"),
   copy("setupEditor.prompt.webSearch.provider.brave.description", "Use the Brave Search API with an API key", "استخدم Brave Search API مع مفتاح API.", ["API"], "optional-capability"),
   copy("setupEditor.prompt.webSearch.provider.ddgs", "DuckDuckGo / DDGS", "DuckDuckGo / DDGS", [], "optional-capability"),

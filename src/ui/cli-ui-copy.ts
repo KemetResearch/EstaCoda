@@ -31,6 +31,14 @@ export interface CliUiChromeCopy {
   readonly provider: string;
   readonly tool: string;
   readonly finalizing: string;
+  readonly indexingSkills: string;
+  readonly indexingFiles: string;
+  readonly loadingWorkspaceMap: string;
+  readonly refreshingModelCatalog: string;
+  readonly syncingSessionState: string;
+  readonly compactingTranscript: string;
+  readonly rebuildingSearchIndex: string;
+  readonly scanningAttachments: string;
 
   // Permission card (Pass 10+)
   readonly permissionRequired: string;
@@ -115,14 +123,22 @@ const en: CliUiChromeCopy = {
   blocked: "blocked",
   error: "error",
 
-  shortcuts: "/help · /tools · /model · /status · Ctrl+C exit",
-  inputPlaceholder: "/help · /tools · /model · /status · Ctrl+C exit",
+  shortcuts: "/help · /tools · /model · /status · /compact · Ctrl+C exit",
+  inputPlaceholder: "/help · /tools · /model · /status · /compact · Ctrl+C exit",
 
   thinking: "contemplating",
   routing: "plotting",
   provider: "scribbling",
   tool: "tinkering",
   finalizing: "polishing",
+  indexingSkills: "indexing skills",
+  indexingFiles: "indexing files",
+  loadingWorkspaceMap: "loading workspace map",
+  refreshingModelCatalog: "refreshing model catalog",
+  syncingSessionState: "syncing session state",
+  compactingTranscript: "compacting transcript",
+  rebuildingSearchIndex: "rebuilding search index",
+  scanningAttachments: "scanning attachments",
 
   permissionRequired: "Permission required",
   cardTool: "Tool",
@@ -203,14 +219,22 @@ const ar: CliUiChromeCopy = {
   error: "خطأ",
 
   // Technical tokens inside Arabic shortcuts must stay LTR-stable
-  shortcuts: `${isolateLtr("/help")} · ${isolateLtr("/tools")} · ${isolateLtr("/model")} · ${isolateLtr("/status")} · ${isolateLtr("Ctrl+C")} خروج`,
-  inputPlaceholder: `${isolateLtr("/help")} · ${isolateLtr("/tools")} · ${isolateLtr("/model")} · ${isolateLtr("/status")} · ${isolateLtr("Ctrl+C")} خروج`,
+  shortcuts: `${isolateLtr("/help")} · ${isolateLtr("/tools")} · ${isolateLtr("/model")} · ${isolateLtr("/status")} · ${isolateLtr("/compact")} · ${isolateLtr("Ctrl+C")} خروج`,
+  inputPlaceholder: `${isolateLtr("/help")} · ${isolateLtr("/tools")} · ${isolateLtr("/model")} · ${isolateLtr("/status")} · ${isolateLtr("/compact")} · ${isolateLtr("Ctrl+C")} خروج`,
 
   thinking: "بفكر",
   routing: "بحدد",
   provider: "بكتب",
   tool: "شغال",
   finalizing: "بخلص",
+  indexingSkills: "بفهرس المهارات",
+  indexingFiles: "بفهرس الملفات",
+  loadingWorkspaceMap: "بحمّل خريطة مساحة العمل",
+  refreshingModelCatalog: "بحدّث كتالوج النماذج",
+  syncingSessionState: "بزامن حالة الجلسة",
+  compactingTranscript: "بضغط سياق الجلسة",
+  rebuildingSearchIndex: "بعيد بناء فهرس البحث",
+  scanningAttachments: "بفحص المرفقات",
 
   permissionRequired: "مطلوب إذن",
   cardTool: "الأداة",
