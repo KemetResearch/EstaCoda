@@ -1,7 +1,8 @@
 import type { Readable, Writable } from "node:stream";
 import type { SelectPromptInput } from "../../cli/interactive-select.js";
 import type { Prompt, PromptOptions, PromptSubmission } from "../../cli/prompt-contract.js";
-import { parseKeypress, type ParsedKeypress } from "../../ui/input/parseKeypress.js";
+import { createKeypressStreamDispatcher } from "../../ui/input/keyPressStreamDispatcher.js";
+import type { ParsedKeypress } from "../../ui/input/parseKeypress.js";
 import { SecretPromptController } from "../../ui/papyrus/input/secretPromptController.js";
 import { mapSetupSelectToSetupPanelState } from "../../ui/papyrus/operator-console/setupSelectRuntimeMapper.js";
 import {
@@ -150,6 +151,7 @@ async function selectWithSetupConsole<T>(
   const restoreTerminal = () => {
     if (restored) return;
     restored = true;
+    keypressDispatcher.dispose();
     ttyInput.off("data", onData);
     if (!wasRaw) {
       ttyInput.setRawMode?.(false);
@@ -179,9 +181,7 @@ async function selectWithSetupConsole<T>(
   };
 
   const onData = (chunk: string | Buffer | Uint8Array) => {
-    const text = typeof chunk === "string" ? chunk : Buffer.from(chunk).toString("utf8");
-    pendingKeypresses.push(...parseKeypress(text));
-    drainKeypresses();
+    keypressDispatcher.handle(chunk);
   };
 
   const pendingKeypresses: ParsedKeypress[] = [];
@@ -210,6 +210,13 @@ async function selectWithSetupConsole<T>(
       }
     }
   };
+
+  const keypressDispatcher = createKeypressStreamDispatcher({
+    onEvents: (events) => {
+      pendingKeypresses.push(...events);
+      drainKeypresses();
+    },
+  });
 
   return await new Promise<T>((resolve, reject) => {
     resolveSelection = resolve;
@@ -264,6 +271,7 @@ async function readSecretWithSetupConsole(
   const restoreTerminal = () => {
     if (restored) return;
     restored = true;
+    keypressDispatcher.dispose();
     ttyInput.off("data", onData);
     if (!wasRaw) {
       ttyInput.setRawMode?.(false);
@@ -283,9 +291,7 @@ async function readSecretWithSetupConsole(
   };
 
   const onData = (chunk: string | Buffer | Uint8Array) => {
-    const text = typeof chunk === "string" ? chunk : Buffer.from(chunk).toString("utf8");
-    pendingKeypresses.push(...parseKeypress(text));
-    drainKeypresses();
+    keypressDispatcher.handle(chunk);
   };
 
   const pendingKeypresses: ParsedKeypress[] = [];
@@ -306,6 +312,13 @@ async function readSecretWithSetupConsole(
       }
     }
   };
+
+  const keypressDispatcher = createKeypressStreamDispatcher({
+    onEvents: (events) => {
+      pendingKeypresses.push(...events);
+      drainKeypresses();
+    },
+  });
 
   return await new Promise<string>((resolve) => {
     resolveSecret = resolve;
