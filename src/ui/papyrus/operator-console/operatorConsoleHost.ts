@@ -3,8 +3,10 @@ import type { FocusState } from "./focusModel.js";
 import {
   createInitialOperatorConsoleState,
   type AttachmentCardState,
+  type OperatorConsoleMode,
   type OperatorConsoleState,
   type PromptSurfaceState,
+  type SetupSurfaceState,
   type SlashMenuState,
   type StatusRailState,
   type SteerState,
@@ -22,9 +24,11 @@ import {
 import type { OperatorConsoleStyle } from "./operatorConsoleStyle.js";
 
 export type OperatorConsoleRawPromptSnapshot = {
+  readonly mode?: OperatorConsoleMode;
   readonly prompt: string;
   readonly state: LineEditorState;
   readonly status?: StatusRailState;
+  readonly setupPanel?: SetupSurfaceState;
   readonly terminal?: Partial<TerminalMetrics>;
   readonly attachments?: readonly AttachmentCardState[];
   readonly turnActivity?: TurnActivityState;
@@ -55,7 +59,9 @@ export function buildOperatorConsoleStateFromRawPrompt(
 ): OperatorConsoleState {
   const terminal = normalizeTerminal(snapshot.terminal);
   return createInitialOperatorConsoleState({
+    mode: snapshot.mode,
     terminal,
+    setupPanel: snapshot.setupPanel,
     prompt: {
       value: snapshot.state.text,
       cursorOffset: snapshot.state.cursor,
@@ -100,8 +106,10 @@ export function buildOperatorConsoleRawPromptFrameWithRuntimeHost(
 ): OperatorConsoleRawPromptFrame {
   const terminal = normalizeTerminal(snapshot.terminal);
   host.clear();
+  host.setMode(snapshot.mode ?? "session");
   host.setTerminal(terminal);
   host.setStatus(snapshot.status ?? createDefaultOperatorConsoleRawPromptStatus());
+  host.setSetupPanel(snapshot.setupPanel);
   host.setTurnActivity(snapshot.turnActivity);
   host.setAttachments(snapshot.attachments ?? []);
   host.setSlash(snapshot.slash);

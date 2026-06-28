@@ -9,6 +9,7 @@ import {
   createOperatorConsoleRuntimeHost,
   createOperatorConsoleStyle,
   createPastedTextAttachment,
+  type SetupSurfaceState,
 } from "./index.js";
 
 describe("Papyrus operator console raw prompt host", () => {
@@ -61,6 +62,22 @@ describe("Papyrus operator console raw prompt host", () => {
     expect(state.status).not.toHaveProperty("trust");
     expect(state.status).not.toHaveProperty("steering");
     expect(state.status).not.toHaveProperty("setup");
+  });
+
+  it("maps setup mode and setup panel into raw prompt state", () => {
+    const state = buildOperatorConsoleStateFromRawPrompt({
+      mode: "setup",
+      prompt: "> ",
+      state: createLineEditorState(""),
+      setupPanel: setupPanel(),
+    });
+
+    expect(state.mode).toBe("setup");
+    expect(state.setupPanel).toMatchObject({
+      kind: "table",
+      title: "Setup editor",
+      selectedRowId: "primary",
+    });
   });
 
   it("renders prompt box with status rail below", () => {
@@ -207,6 +224,55 @@ describe("Papyrus operator console raw prompt host", () => {
     expect(frame.state.style).toBe(style);
     expect(frame.rows.join("\n")).toContain(`${ansiFg(tokens.contract.palette.caution)}●\x1b[0m`);
   });
+
+  it("renders setup panel through a persistent runtime host without session chrome", () => {
+    const host = createOperatorConsoleRuntimeHost({
+      terminal: { width: 72, height: 16, isTty: true },
+    });
+
+    const frame = buildOperatorConsoleRawPromptFrameWithRuntimeHost(host, {
+      mode: "setup",
+      prompt: "",
+      state: createLineEditorState(""),
+      terminal: { width: 72, height: 16, isTty: true },
+      setupPanel: setupPanel(),
+    });
+    const text = frame.rows.join("\n");
+
+    expect(frame.state.mode).toBe("setup");
+    expect(frame.state.setupPanel?.kind).toBe("table");
+    expect(text).toContain("Setup Editor");
+    expect(text).toContain("Primary model");
+    expect(text).not.toContain("›");
+    expect(text).not.toContain("ctx");
+    expect(text).not.toContain("◷");
+    expect(frame.rows.every((line) => stringWidth(line) <= 72)).toBe(true);
+  });
+
+  it("resets a persistent runtime host to session mode when raw prompt snapshots omit mode", () => {
+    const host = createOperatorConsoleRuntimeHost({
+      terminal: { width: 72, height: 16, isTty: true },
+    });
+
+    buildOperatorConsoleRawPromptFrameWithRuntimeHost(host, {
+      mode: "setup",
+      prompt: "",
+      state: createLineEditorState(""),
+      terminal: { width: 72, height: 16, isTty: true },
+      setupPanel: setupPanel(),
+    });
+    const frame = buildOperatorConsoleRawPromptFrameWithRuntimeHost(host, {
+      prompt: "> ",
+      state: createLineEditorState("hello"),
+      terminal: { width: 72, height: 16, isTty: true },
+    });
+    const text = frame.rows.join("\n");
+
+    expect(frame.state.mode).toBe("session");
+    expect(frame.state.setupPanel).toBeUndefined();
+    expect(text).toContain("hello");
+    expect(text).toContain("›");
+  });
 });
 
 function ansiFg(hex: string): string {
@@ -216,4 +282,31 @@ function ansiFg(hex: string): string {
   const g = (value >> 8) & 255;
   const b = value & 255;
   return `\x1b[38;2;${r};${g};${b}m`;
+}
+
+function setupPanel(): SetupSurfaceState {
+  return {
+    kind: "table",
+    layout: "choiceMenu",
+    title: "Setup editor",
+    description: "Choose what to configure:",
+    rows: [
+      {
+        id: "primary",
+        provider: "Primary model",
+        model: "",
+        status: "Default model used by the agent.",
+        notes: "",
+      },
+      {
+        id: "security",
+        provider: "Security mode",
+        model: "",
+        status: "Review policy for risky actions.",
+        notes: "",
+      },
+    ],
+    selectedRowId: "primary",
+    footer: "↑↓ navigate   ENTER select",
+  };
 }

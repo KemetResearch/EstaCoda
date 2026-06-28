@@ -12,6 +12,7 @@ import {
   type ApprovalCardState,
   type AttachmentCardState,
   type CreateInitialOperatorConsoleStateInput,
+  type OperatorConsoleMode,
   type OperatorConsoleState,
   type PromptSurfaceState,
   type SetupSurfaceState,
@@ -45,6 +46,14 @@ export class OperatorConsoleRuntimeHost {
 
   getState(): OperatorConsoleState {
     return this.#state;
+  }
+
+  setMode(mode: OperatorConsoleMode): void {
+    if (this.#disposed) return;
+    this.#state = {
+      ...this.#state,
+      mode,
+    };
   }
 
   setPrompt(input: OperatorConsoleRuntimePromptInput): void {

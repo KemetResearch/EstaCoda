@@ -7,7 +7,7 @@ import {
   type RawPromptRenderOutput,
 } from "./rawPromptRenderLoop.js";
 import { createOperatorConsoleRuntimeHost } from "../ui/papyrus/operator-console/operatorConsoleRuntimeHost.js";
-import type { StatusRailState } from "../ui/papyrus/operator-console/operatorConsoleState.js";
+import type { SetupSurfaceState, StatusRailState } from "../ui/papyrus/operator-console/operatorConsoleState.js";
 import { createPastedTextAttachment } from "../ui/papyrus/operator-console/index.js";
 
 const forbiddenManagedRegionOutput = /\x1b\[3J|\x1b\[2J|\x1b\[H|\x1b\[\d+;\d+H/u;
@@ -425,6 +425,41 @@ describe("raw prompt render loop", () => {
     expect(output.text()).toContain("╭─ › pasted text");
   });
 
+  it("passes setup panel state through the persistent Operator Console host", () => {
+    const output = fakeOutput();
+    const host = createOperatorConsoleRuntimeHost();
+    const setSetupPanel = vi.spyOn(host, "setSetupPanel");
+    const loop = new RawPromptRenderLoop(output, {
+      operatorConsoleHostFactory: () => host,
+    });
+
+    const rows = loop.render({
+      prompt: "",
+      state: createLineEditorState(""),
+      operatorConsole: {
+        enabled: true,
+        mode: "setup",
+        terminal: { width: 72, height: 16, isTty: true },
+        setupPanel: setupPanel(),
+      },
+    });
+    const text = output.text();
+
+    expect(rows).toBeGreaterThan(1);
+    expect(setSetupPanel).toHaveBeenCalledWith(expect.objectContaining({
+      kind: "table",
+      title: "Setup editor",
+    }));
+    expect(host.getState().mode).toBe("setup");
+    expect(host.getState().setupPanel?.kind).toBe("table");
+    expect(text).toContain("Setup Editor");
+    expect(text).toContain("Primary model");
+    expect(text).not.toContain("›");
+    expect(text).not.toContain("ctx");
+    expect(text).not.toContain("◷");
+    expect(text).not.toMatch(forbiddenManagedRegionOutput);
+  });
+
   it("redraws after edits without full-screen or scrollback clear sequences", () => {
     const output = fakeOutput();
     const loop = new RawPromptRenderLoop(output);
@@ -590,5 +625,32 @@ function status(input: { readonly usedTokens: number; readonly elapsedMs: number
     model: { label: "kimi-k2.7-code", state: "working" },
     context: { usedTokens: input.usedTokens, totalTokens: 262_000, percent: 7 },
     sessionTimer: { elapsedMs: input.elapsedMs },
+  };
+}
+
+function setupPanel(): SetupSurfaceState {
+  return {
+    kind: "table",
+    layout: "choiceMenu",
+    title: "Setup editor",
+    description: "Choose what to configure:",
+    rows: [
+      {
+        id: "primary",
+        provider: "Primary model",
+        model: "",
+        status: "Default model used by the agent.",
+        notes: "",
+      },
+      {
+        id: "browser",
+        provider: "Browser",
+        model: "",
+        status: "Configure browser control.",
+        notes: "",
+      },
+    ],
+    selectedRowId: "primary",
+    footer: "↑↓ navigate   ENTER select",
   };
 }
