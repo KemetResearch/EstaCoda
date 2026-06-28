@@ -99,12 +99,12 @@ describe("Papyrus operator console startup dashboard surface", () => {
     expect(stripBidi(output.find((line) => line.includes("kimi-k2.7-code")) ?? "").trimEnd().endsWith("النموذج")).toBe(true);
     expect(stripBidi(output.find((line) => line.includes("53007044")) ?? "").trimEnd().endsWith("الجلسة")).toBe(true);
     expect(stripBidi(output.find((line) => line.includes("/home/idris/estacoda")) ?? "").trimEnd().endsWith("مساحة العمل")).toBe(true);
-    const approvalLine = output.find((line) => line.includes("الموافقة")) ?? "";
-    const evolutionLine = output.find((line) => line.includes("تطور الوكيل")) ?? "";
-    expect(approvalLine.indexOf("الموافقة")).toBeLessThan(approvalLine.indexOf("مفتوحة"));
-    expect(evolutionLine.indexOf("تطور الوكيل")).toBeLessThan(evolutionLine.indexOf("مفعّل"));
-    expect(approvalLine.indexOf("مفتوحة") - approvalLine.indexOf("الموافقة")).toBeLessThan(24);
-    expect(evolutionLine.indexOf("مفعّل") - evolutionLine.indexOf("تطور الوكيل")).toBeLessThan(24);
+    const approvalLine = stripBidi(output.find((line) => line.includes("الموافقة")) ?? "");
+    const evolutionLine = stripBidi(output.find((line) => line.includes("تطور الوكيل")) ?? "");
+    expect(approvalLine.trimEnd().endsWith("الموافقة")).toBe(true);
+    expect(evolutionLine.trimEnd().endsWith("تطور الوكيل")).toBe(true);
+    expect(visibleGapBetween(approvalLine, "مفتوحة", "الموافقة")).toBe(4);
+    expect(visibleGapBetween(evolutionLine, "مفعّل", "تطور الوكيل")).toBe(4);
     expect(output.every((line) => stringWidth(line) <= 96)).toBe(true);
     expect(output.every((line) => line.startsWith(LRI) && line.endsWith(PDI))).toBe(true);
   });
@@ -212,4 +212,10 @@ function ansiFg(hex: string): string {
 
 function stripBidi(value: string): string {
   return value.replaceAll(LRI, "").replaceAll(PDI, "");
+}
+
+function visibleGapBetween(line: string, left: string, right: string): number {
+  const leftEnd = line.indexOf(left) + left.length;
+  const rightStart = line.indexOf(right);
+  return stringWidth(line.slice(leftEnd, rightStart));
 }

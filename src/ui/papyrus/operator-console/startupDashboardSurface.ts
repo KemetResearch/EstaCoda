@@ -173,7 +173,7 @@ function renderWideArabicStartupDashboard(
 type ArabicStackedRow = {
   readonly value: string;
   readonly label?: string;
-  readonly order?: "value-label" | "label-value" | "compact-label-value";
+  readonly order?: "value-label" | "label-value" | "tight-value-label";
 };
 
 function arabicSessionRowsForStackedSurface(
@@ -184,8 +184,8 @@ function arabicSessionRowsForStackedSurface(
     { label: "النموذج", value: formatModelValueForSurface(state.session.model, state.session.modelRoute, style) },
     { label: "الجلسة", value: state.sessionId },
     { label: "مساحة العمل", value: state.session.workspace },
-    { label: "الموافقة", value: localizeApprovalValue(state.session.security), order: "compact-label-value" },
-    { label: "تطور الوكيل", value: localizeStackedEvolutionValue(state.session.autonomy), order: "compact-label-value" },
+    { label: "الموافقة", value: localizeApprovalValue(state.session.security), order: "tight-value-label" },
+    { label: "تطور الوكيل", value: localizeStackedEvolutionValue(state.session.autonomy), order: "tight-value-label" },
   ];
 }
 
@@ -266,8 +266,8 @@ function formatArabicStackedRow(row: ArabicStackedRow, blockWidth: number, label
   const valueWidth = Math.max(1, blockWidth - labelWidth - gapWidth);
   const value = truncateVisibleCells(row.value, valueWidth);
   const label = truncateVisibleCells(row.label, labelWidth);
-  if (row.order === "compact-label-value") {
-    return centerVisible(`${label}${" ".repeat(gapWidth)}${value}`, blockWidth);
+  if (row.order === "tight-value-label") {
+    return padVisibleStart(`${value}${" ".repeat(gapWidth)}${label}`, blockWidth);
   }
   if (row.order === "label-value") {
     return `${padVisibleEnd(label, labelWidth)}${" ".repeat(gapWidth)}${padVisibleStart(value, valueWidth)}`;
