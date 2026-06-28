@@ -16,6 +16,7 @@ const WIDE_LAYOUT_MIN_WIDTH = 72;
 const ARABIC_WIDE_FRAME_MAX_WIDTH = 78;
 const ARABIC_STACKED_BLOCK_MAX_WIDTH = 54;
 const ARABIC_STACKED_LABEL_MAX_WIDTH = 24;
+const ARABIC_TWO_COLUMN_ROW_LEFT_BIAS = 8;
 
 export function createDefaultStartupDashboardState(): StartupDashboardState {
   return {
@@ -231,7 +232,13 @@ function renderArabicStackedSection(
   return [
     renderArabicCenteredLine(styleSectionLabel(title, style), bodyWidth, width),
     renderOuterRow("", bodyWidth, width),
-    ...rows.map((row) => renderArabicStackedLine(formatArabicStackedRow(row, blockWidth, labelWidth), blockWidth, bodyWidth, width)),
+    ...rows.map((row) => renderArabicStackedLine(
+      formatArabicStackedRow(row, blockWidth, labelWidth),
+      blockWidth,
+      bodyWidth,
+      width,
+      row.label === undefined ? 0 : ARABIC_TWO_COLUMN_ROW_LEFT_BIAS
+    )),
   ];
 }
 
@@ -247,9 +254,10 @@ function renderArabicStackedLine(
   row: string,
   blockWidth: number,
   bodyWidth: number,
-  width: number
+  width: number,
+  leftBias: number = 0
 ): string {
-  return renderOuterRow(centerVisible(padVisibleEnd(truncateVisibleCells(row, blockWidth), blockWidth), bodyWidth), bodyWidth, width);
+  return renderOuterRow(centerVisibleWithLeftBias(padVisibleEnd(truncateVisibleCells(row, blockWidth), blockWidth), bodyWidth, leftBias), bodyWidth, width);
 }
 
 function formatArabicStackedRow(row: ArabicStackedRow, blockWidth: number, labelWidth: number): string {
@@ -539,9 +547,13 @@ function renderContentRow(row: string, contentWidth: number, width: number): str
 }
 
 function centerVisible(value: string, width: number): string {
+  return centerVisibleWithLeftBias(value, width, 0);
+}
+
+function centerVisibleWithLeftBias(value: string, width: number, leftBias: number): string {
   const clipped = truncateVisibleCells(value, width);
   const remaining = Math.max(0, width - stringWidth(clipped));
-  const left = Math.floor(remaining / 2);
+  const left = Math.max(0, Math.floor(remaining / 2) - Math.max(0, Math.floor(leftBias)));
   const right = remaining - left;
   return `${" ".repeat(left)}${clipped}${" ".repeat(right)}`;
 }
