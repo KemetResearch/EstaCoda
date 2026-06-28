@@ -1,5 +1,5 @@
 import { stringWidth } from "../screen/stringWidth.js";
-import { isolateLtr } from "../../bidi.js";
+import { closeOpenBidiIsolates, isolateLtr } from "../../bidi.js";
 import type { UiLocale } from "../../cli-ui-copy.js";
 import { padVisibleEnd, truncateVisible } from "../../renderers/layout.js";
 import type { StartupCommandState, StartupDashboardState } from "./operatorConsoleState.js";
@@ -60,11 +60,13 @@ export function renderStartupDashboardSurface(
   if (width <= 0) return [];
 
   const state = input ?? createDefaultStartupDashboardState();
+  const locale = options.locale ?? "en";
   const rows = width >= WIDE_LAYOUT_MIN_WIDTH
-    ? renderWideStartupDashboard(state, width, options.locale ?? "en", options.style)
-    : renderNarrowStartupDashboard(state, width, options.locale ?? "en", options.style);
+    ? renderWideStartupDashboard(state, width, locale, options.style)
+    : renderNarrowStartupDashboard(state, width, locale, options.style);
   const height = options.height === undefined ? rows.length : normalizeDimension(options.height);
-  return rows.slice(0, height);
+  const visibleRows = rows.slice(0, height);
+  return locale === "ar" ? visibleRows.map(stabilizeTerminalBidiLine) : visibleRows;
 }
 
 function renderWideStartupDashboard(
@@ -379,7 +381,11 @@ function truncateVisibleCells(value: string, maxCells: number): string {
   if (width <= 0) return "";
   if (stringWidth(value) <= width) return value;
 
-  return truncateVisible(value, width, "");
+  return closeOpenBidiIsolates(truncateVisible(value, width, ""));
+}
+
+function stabilizeTerminalBidiLine(value: string): string {
+  return isolateLtr(closeOpenBidiIsolates(value));
 }
 
 function normalizeDimension(value: number): number {

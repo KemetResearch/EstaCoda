@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { stringWidth } from "../screen/stringWidth.js";
+import { LRI, PDI } from "../../bidi.js";
 import { resolveTokens } from "../../../theme/token-resolver.js";
 import {
   createOperatorConsoleStyle,
@@ -82,6 +83,7 @@ describe("Papyrus operator console startup dashboard surface", () => {
     expect(text).toContain("الصق السياق الكبير كمرفقات.");
     expect(text).toContain("/model");
     expect(output.every((line) => stringWidth(line) <= 96)).toBe(true);
+    expect(output.every((line) => line.startsWith(LRI) && line.endsWith(PDI))).toBe(true);
   });
 
   it("truncates long model, session, and tip text safely", () => {
