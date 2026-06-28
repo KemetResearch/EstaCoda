@@ -109,6 +109,24 @@ describe("createPapyrusPrompt", () => {
     await expect(pending).resolves.toBe("y");
   });
 
+  it("preserves Alt+Enter multiline input through the raw prompt path", async () => {
+    const input = new FakeInput();
+    const output = fakeOutput();
+    const lifecycle = fakeLifecycle();
+    const prompt = createPapyrusPrompt({
+      input,
+      output,
+      createRaw: (options) => createRawPrompt({ ...options, lifecycle: lifecycle.lifecycle }),
+      createSecretPrompt: () => fakeSecretPrompt().prompt,
+    });
+
+    const pending = prompt("> ");
+    input.send("hello\x1b\rworld\r");
+
+    await expect(pending).resolves.toBe("hello\nworld");
+    expect(lifecycle.calls).toEqual(["start", "stop"]);
+  });
+
   it("routes secret input through the Papyrus-native no-echo path without paste previews", async () => {
     const input = new FakeInput();
     const output = fakeOutput();
@@ -307,6 +325,62 @@ describe("createPapyrusPrompt", () => {
     expect(rawOptions[0]?.keymap).toBeUndefined();
     expect(rawOptions[1]?.keymap).toBeUndefined();
     expect(rawOptions[2]?.keymap).toEqual({ mode: "vim" });
+  });
+
+  it("passes Operator Console routing to raw prompt only when explicitly selected", async () => {
+    const rawOptions: RawPromptControllerOptions[] = [];
+    const createRaw = vi.fn((options: RawPromptControllerOptions) => {
+      rawOptions.push(options);
+      return Object.assign(vi.fn(async () => "raw"), { close: vi.fn() });
+    });
+
+    await createPapyrusPrompt({
+      input: new FakeInput(),
+      output: fakeOutput(),
+      createRaw,
+      createSecretPrompt: () => fakeSecretPrompt().prompt,
+    })("> ");
+    await createPapyrusPrompt({
+      input: new FakeInput(),
+      output: fakeOutput(),
+      useOperatorConsole: true,
+      createRaw,
+      createSecretPrompt: () => fakeSecretPrompt().prompt,
+    })("> ");
+
+    expect(rawOptions[0]?.operatorConsole).toBeUndefined();
+    expect(rawOptions[1]?.operatorConsole).toEqual({ enabled: true });
+  });
+
+  it("can render Papyrus prompt through the Operator Console host when enabled", async () => {
+    const input = new FakeInput();
+    const output = fakeOutput();
+    output.columns = 72;
+    output.rows = 16;
+    const lifecycle = fakeLifecycle();
+    const prompt = createPapyrusPrompt({
+      input,
+      output,
+      useOperatorConsole: true,
+      createRaw: (options) => createRawPrompt({
+        ...options,
+        lifecycle: lifecycle.lifecycle,
+        operatorConsole: {
+          enabled: true,
+          terminal: { width: 72, height: 16, isTty: true },
+        },
+      }),
+      createSecretPrompt: () => fakeSecretPrompt().prompt,
+    });
+
+    const pending = prompt("> ");
+    input.send("hello\r");
+
+    await expect(pending).resolves.toBe("hello");
+    expect(output.writes.join("")).toContain("╭─ Prompt");
+    expect(output.writes.join("")).toContain("│ › hello");
+    expect(output.writes.join("")).toContain("session 00:00");
+    expect(lifecycle.calls).toEqual(["start", "stop"]);
   });
 
   it("runs raw prompt cleanup on cancel", async () => {

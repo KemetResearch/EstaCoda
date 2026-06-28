@@ -1,0 +1,279 @@
+import { stringWidth } from "../screen/stringWidth.js";
+import {
+  resolveActiveWorkCopy,
+  type OperatorConsoleLocale,
+} from "./activeWorkCopy.js";
+import type {
+  ActiveWorkItem,
+  ActiveWorkItemStatus,
+  ToolActivityState,
+} from "./operatorConsoleState.js";
+
+export type ActiveWorkSurfaceRenderOptions = {
+  readonly width: number;
+  readonly height?: number;
+  readonly locale?: OperatorConsoleLocale;
+};
+
+export type ActiveWorkSummaryOptions = {
+  readonly locale?: OperatorConsoleLocale;
+};
+
+export const ACTIVE_WORK_STATUS_SYMBOLS: Readonly<Record<ActiveWorkItemStatus, string>> = {
+  queued: "·",
+  running: "◷",
+  succeeded: "✓",
+  failed: "✗",
+  cancelled: "×",
+  awaitingApproval: "!",
+};
+
+const DEFAULT_COLLAPSED_HEIGHT = 8;
+const DEFAULT_EXPANDED_HEIGHT = 10;
+const DURATION_CELLS = 5;
+const LTR_ISOLATE_START = "\u2068";
+const LTR_ISOLATE_END = "\u2069";
+
+export function hasActiveWork(state: ToolActivityState): boolean {
+  return state.items.length > 0;
+}
+
+export function sortActiveWorkItems(state: ToolActivityState): readonly ActiveWorkItem[] {
+  return state.items
+    .map((item, index) => ({ item, index }))
+    .sort((left, right) => {
+      const priority = statusPriority(left.item.status) - statusPriority(right.item.status);
+      return priority === 0 ? left.index - right.index : priority;
+    })
+    .map(({ item }) => item);
+}
+
+export function getActiveWorkSurfaceDesiredHeight(state: ToolActivityState): number {
+  if (!hasActiveWork(state)) return 0;
+  const desired = state.expanded ? DEFAULT_EXPANDED_HEIGHT : DEFAULT_COLLAPSED_HEIGHT;
+  return Math.min(desired, Math.max(3, state.items.length + 2));
+}
+
+export function renderActiveWorkSurface(
+  state: ToolActivityState,
+  options: ActiveWorkSurfaceRenderOptions
+): readonly string[] {
+  const width = normalizeDimension(options.width);
+  if (width <= 0 || !hasActiveWork(state)) return [];
+
+  const height = normalizeDimension(options.height ?? getActiveWorkSurfaceDesiredHeight(state));
+  if (height <= 0) return [];
+  const copy = resolveActiveWorkCopy(options.locale);
+  if (height < 3) return [truncateVisibleCells(`${copy.activeWork}: ${state.items.length}`, width)];
+
+  const contentWidth = Math.max(0, width - 4);
+  const contentRows = Math.max(1, height - 2);
+  const sorted = sortActiveWorkItems(state);
+  const activeCount = sorted.filter(isActiveStatusItem).length;
+  const completedCount = sorted.length - activeCount;
+  const title = state.expanded
+    ? `${copy.activeWork} · ${formatNumber(activeCount)} ${copy.running} · ${formatNumber(completedCount)} ${copy.completed}`
+    : copy.activeWork;
+
+  return [
+    renderTopBorder(title, width),
+    ...renderActiveWorkContentRows(state, sorted, contentRows, contentWidth, options.locale)
+      .map((row) => renderContentRow(row, contentWidth, width)),
+    renderBottomBorder(width),
+  ];
+}
+
+export function formatActiveWorkSummary(
+  state: ToolActivityState,
+  options: ActiveWorkSummaryOptions = {}
+): string {
+  const copy = resolveActiveWorkCopy(options.locale);
+  const activeCount = state.items.filter(isActiveStatusItem).length;
+  const inspectedFileChanges = state.items.filter((item) => item.fileChangeInspected === true).length;
+  const parts = [
+    copy.runningStepsResolved(activeCount),
+    `${formatNumber(state.items.length)} ${copy.totalToolEvents}`,
+  ];
+  if (inspectedFileChanges > 0) {
+    parts.push(`${formatNumber(inspectedFileChanges)} ${copy.fileChangeInspected}`);
+  }
+  return `${copy.completedToolWork}: ${parts.join(", ")}.`;
+}
+
+function renderActiveWorkContentRows(
+  state: ToolActivityState,
+  sortedItems: readonly ActiveWorkItem[],
+  contentRows: number,
+  contentWidth: number,
+  locale: OperatorConsoleLocale | undefined
+): readonly string[] {
+  if (state.expanded) {
+    const footerRows = contentRows >= 3 ? 2 : 0;
+    const itemRows = Math.max(1, contentRows - footerRows);
+    const maxOffset = Math.max(0, sortedItems.length - itemRows);
+    const offset = clampInteger(state.scrollOffset, 0, maxOffset);
+    const visibleItems = sortedItems.slice(offset, offset + itemRows);
+    const rows = visibleItems.map((item) => formatActiveWorkRow(item, contentWidth, locale));
+    if (footerRows > 0) {
+      rows.push("");
+      rows.push(formatExpandedFooter(contentWidth, locale));
+    }
+    return padRows(rows, contentRows);
+  }
+
+  const overflow = sortedItems.length > contentRows;
+  const itemRows = overflow ? Math.max(1, contentRows - 1) : contentRows;
+  const visibleItems = sortedItems.slice(0, itemRows);
+  const rows = visibleItems.map((item) => formatActiveWorkRow(item, contentWidth, locale));
+  if (overflow) {
+    const visibleIds = new Set(visibleItems.map((item) => item.id));
+    const remainingCompleted = sortedItems
+      .filter((item) => !visibleIds.has(item.id) && !isActiveStatusItem(item))
+      .length;
+    rows.push(formatCollapsedOverflow(remainingCompleted, contentWidth, locale));
+  }
+  return padRows(rows, contentRows);
+}
+
+function formatActiveWorkRow(
+  item: ActiveWorkItem,
+  contentWidth: number,
+  locale: OperatorConsoleLocale | undefined
+): string {
+  const width = normalizeDimension(contentWidth);
+  if (width <= 0) return "";
+
+  const symbol = ACTIVE_WORK_STATUS_SYMBOLS[item.status];
+  const rawTool = item.toolName.trim().length === 0 ? "tool" : item.toolName.trim();
+  const rawDetail = (item.target ?? item.summary).trim();
+  const duration = formatDuration(resolveDurationMs(item));
+  if (width <= 8) return truncateVisibleCells(`${symbol} ${rawTool}`, width);
+
+  const prefixCells = stringWidth(symbol) + 1;
+  const durationPartCells = width >= 16 ? DURATION_CELLS + 1 : 0;
+  const availableMainCells = Math.max(0, width - prefixCells - durationPartCells);
+  if (availableMainCells <= 0) return truncateVisibleCells(`${symbol} ${rawTool}`, width);
+
+  const toolCells = Math.min(16, Math.max(1, Math.min(availableMainCells, Math.floor(availableMainCells * 0.35))));
+  const detailGapCells = availableMainCells > toolCells ? 1 : 0;
+  const detailCells = Math.max(0, availableMainCells - toolCells - detailGapCells);
+  const tool = isolateIfNeeded(truncateVisibleCells(rawTool, toolCells), locale);
+  const detail = isolateIfNeeded(truncateVisibleCells(rawDetail, detailCells), locale);
+  const left = `${symbol} ${padVisibleEnd(tool, toolCells)}${detailGapCells > 0 ? ` ${padVisibleEnd(detail, detailCells)}` : ""}`;
+
+  if (durationPartCells === 0) return truncateVisibleCells(left, width);
+  const row = `${left} ${isolateIfNeeded(duration, locale)}`;
+  return truncateVisibleCells(row, width);
+}
+
+function formatCollapsedOverflow(
+  remainingCompleted: number,
+  contentWidth: number,
+  locale: OperatorConsoleLocale | undefined
+): string {
+  const copy = resolveActiveWorkCopy(locale);
+  const count = Math.max(0, remainingCompleted);
+  return truncateVisibleCells(`... ${copy.moreCompletedThisTurn(count)}`, contentWidth);
+}
+
+function formatExpandedFooter(
+  contentWidth: number,
+  locale: OperatorConsoleLocale | undefined
+): string {
+  const copy = resolveActiveWorkCopy(locale);
+  return truncateVisibleCells(`↑↓ ${copy.scroll} · Enter ${copy.inspect} · Esc ${copy.collapse}`, contentWidth);
+}
+
+function isActiveStatusItem(item: ActiveWorkItem): boolean {
+  return item.status === "queued" || item.status === "running" || item.status === "awaitingApproval";
+}
+
+function statusPriority(status: ActiveWorkItemStatus): number {
+  switch (status) {
+    case "running":
+      return 0;
+    case "queued":
+      return 1;
+    case "awaitingApproval":
+      return 2;
+    case "succeeded":
+      return 3;
+    case "failed":
+      return 4;
+    case "cancelled":
+      return 5;
+  }
+}
+
+function resolveDurationMs(item: ActiveWorkItem): number {
+  if (item.durationMs !== undefined) return item.durationMs;
+  if (item.startedAtMs !== undefined && item.endedAtMs !== undefined) return item.endedAtMs - item.startedAtMs;
+  return 0;
+}
+
+function formatDuration(durationMs: number): string {
+  const totalSeconds = Math.max(0, Math.floor(durationMs / 1000));
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  return `${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
+}
+
+function renderTopBorder(title: string, width: number): string {
+  if (width <= 1) return "╭".slice(0, width);
+  const label = `─ ${title} `;
+  const remaining = Math.max(0, width - 2 - stringWidth(label));
+  return truncateVisibleCells(`╭${label}${"─".repeat(remaining)}╮`, width);
+}
+
+function renderBottomBorder(width: number): string {
+  if (width <= 1) return "╰".slice(0, width);
+  return `╰${"─".repeat(Math.max(0, width - 2))}╯`;
+}
+
+function renderContentRow(row: string, contentWidth: number, width: number): string {
+  if (width <= 1) return "│".slice(0, width);
+  const content = padVisibleEnd(truncateVisibleCells(row, contentWidth), contentWidth);
+  return truncateVisibleCells(`│ ${content} │`, width);
+}
+
+function padRows(rows: readonly string[], count: number): readonly string[] {
+  if (rows.length >= count) return rows.slice(0, count);
+  return [...rows, ...Array.from({ length: count - rows.length }, () => "")];
+}
+
+function padVisibleEnd(value: string, width: number): string {
+  const padCells = Math.max(0, width - stringWidth(value));
+  return `${value}${" ".repeat(padCells)}`;
+}
+
+function isolateIfNeeded(value: string, locale: OperatorConsoleLocale | undefined): string {
+  if (locale !== "ar" || value.length === 0) return value;
+  return `${LTR_ISOLATE_START}${value}${LTR_ISOLATE_END}`;
+}
+
+function truncateVisibleCells(value: string, maxCells: number): string {
+  const width = normalizeDimension(maxCells);
+  if (width <= 0) return "";
+  if (stringWidth(value) <= width) return value;
+
+  let output = "";
+  for (const char of value) {
+    if (stringWidth(output + char) > width) break;
+    output += char;
+  }
+  return output;
+}
+
+function clampInteger(value: number, min: number, max: number): number {
+  if (!Number.isFinite(value)) return min;
+  return Math.min(max, Math.max(min, Math.floor(value)));
+}
+
+function normalizeDimension(value: number): number {
+  if (!Number.isFinite(value)) return 0;
+  return Math.max(0, Math.floor(value));
+}
+
+function formatNumber(value: number): string {
+  return Math.max(0, Math.floor(value)).toLocaleString("en-US");
+}

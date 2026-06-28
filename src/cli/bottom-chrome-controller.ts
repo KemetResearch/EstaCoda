@@ -128,7 +128,7 @@ export class BottomChromeController {
     return fn();
   }
 
-  async writeAboveChrome<T>(fn: () => T | Promise<T>): Promise<T> {
+  async suspendChromeForTranscript<T>(fn: () => T | Promise<T>): Promise<T> {
     if (!this.#enabled || this.#disposed) {
       return await fn();
     }
@@ -151,10 +151,6 @@ export class BottomChromeController {
         this.#writingAboveChrome = false;
       }
     }
-  }
-
-  async suspendChromeForTranscript<T>(fn: () => T | Promise<T>): Promise<T> {
-    return await this.writeAboveChrome(fn);
   }
 
   async suspendForPrompt<T>(fn: () => T | Promise<T>): Promise<T> {

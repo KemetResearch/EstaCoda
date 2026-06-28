@@ -248,6 +248,26 @@ describe("BottomChromeController", () => {
     expect(chunks.join("")).not.toContain("tool two");
   });
 
+  it("suspends chrome for transcript output and redraws afterward", async () => {
+    const { chunks, stream } = mockOutput();
+    const ctrl = makeController(stream);
+    ctrl.updateState({ statusRail: status("status") });
+    ctrl.updateTransientLines(["spinner:thinking"]);
+
+    chunks.length = 0;
+    const result = await ctrl.suspendChromeForTranscript(async () => {
+      stream.write("approval required\n");
+      return "done";
+    });
+
+    expect(result).toBe("done");
+    expect(chunks).toEqual([
+      "\x1b[3A\x1b[1G\x1b[0J",
+      "approval required\n",
+      "spinner:thinking\nstatus | idle\n────────────────────────────────────────\n",
+    ]);
+  });
+
   it("suspends chrome for nested prompts and redraws afterward", async () => {
     const { chunks, stream } = mockOutput();
     const ctrl = makeController(stream);

@@ -19,7 +19,7 @@ import {
   createTypeaheadProviderRouter,
   type TypeaheadProviderRouter,
 } from "../ui/papyrus/input/typeaheadProviderRouter.js";
-import { RawPromptOverlayHost, RawPromptRenderLoop } from "./rawPromptRenderLoop.js";
+import { RawPromptOverlayHost, RawPromptRenderLoop, type RawPromptOperatorConsoleOptions } from "./rawPromptRenderLoop.js";
 import { buildRawPromptSlashAutocompleteRows } from "./rawPromptSlashAutocomplete.js";
 import type { Prompt, PromptOptions } from "./prompt-contract.js";
 import { type GhostTextState, isGhostTextVisible } from "../ui/papyrus/input/ghostTextController.js";
@@ -43,6 +43,8 @@ export type RawPromptInput = {
 
 export type RawPromptOutput = Pick<Writable, "write"> & {
   isTTY?: boolean;
+  columns?: number;
+  rows?: number;
 };
 
 export type RawPromptResult =
@@ -65,6 +67,7 @@ export type RawPromptControllerOptions = {
   typeahead?: RawPromptTypeaheadOptions;
   ghostText?: RawPromptGhostTextOptions;
   keymap?: RawPromptKeymapOptions;
+  operatorConsole?: RawPromptOperatorConsoleOptions;
 };
 
 export type RawPromptTypeaheadOptions = {
@@ -89,6 +92,7 @@ export class RawPromptController {
   readonly #typeahead: RawPromptTypeaheadOptions | undefined;
   readonly #ghostText: RawPromptGhostTextOptions | undefined;
   readonly #keymap: RawPromptKeymapOptions | undefined;
+  readonly #operatorConsole: RawPromptOperatorConsoleOptions | undefined;
 
   constructor(options: RawPromptControllerOptions) {
     this.#input = options.input;
@@ -97,6 +101,7 @@ export class RawPromptController {
     this.#typeahead = options.typeahead;
     this.#ghostText = options.ghostText;
     this.#keymap = options.keymap;
+    this.#operatorConsole = options.operatorConsole;
     this.#lifecycle = options.lifecycle ?? createTerminalLifecycle({
       stdin: options.input,
       stdout: options.output,
@@ -116,6 +121,16 @@ export class RawPromptController {
         state,
         ghostText: overlayRows.length === 0 ? ghostTextForRender(this.#ghostText, state) : undefined,
         overlayRows,
+        operatorConsole: this.#operatorConsole?.enabled === true
+          ? {
+            ...this.#operatorConsole,
+            terminal: {
+              width: this.#operatorConsole.terminal?.width ?? this.#output.columns ?? 80,
+              height: this.#operatorConsole.terminal?.height ?? this.#output.rows ?? 24,
+              isTty: this.#operatorConsole.terminal?.isTty ?? this.#output.isTTY ?? true,
+            },
+          }
+          : undefined,
       });
       options?.onRowsChange?.(rows);
     };
@@ -231,7 +246,7 @@ export class RawPromptController {
           return true;
         }
 
-        if (event.key === "enter" || event.key === "tab") {
+        if ((event.key === "enter" && event.alt !== true) || event.key === "tab") {
           return acceptFocusedTypeaheadSuggestion();
         }
 
@@ -284,7 +299,6 @@ export class RawPromptController {
             }
           }
           const result = applyKeypress(state, event);
-          updateState(result.state);
           if (result.intent?.type === "submit") {
             finish({ type: "submit", text: result.intent.text });
             return;
@@ -297,6 +311,7 @@ export class RawPromptController {
             finish({ type: "eof" });
             return;
           }
+          updateState(result.state);
         }
       };
 
