@@ -166,6 +166,7 @@ function renderWideArabicStartupDashboard(
 type ArabicStackedRow = {
   readonly value: string;
   readonly label?: string;
+  readonly order?: "value-label" | "label-value";
 };
 
 function arabicSessionRowsForStackedSurface(
@@ -176,8 +177,8 @@ function arabicSessionRowsForStackedSurface(
     { label: "النموذج", value: formatModelValueForSurface(state.session.model, state.session.modelRoute, style) },
     { label: "الجلسة", value: state.sessionId },
     { label: "مساحة العمل", value: state.session.workspace },
-    { label: "الموافقة", value: localizeApprovalValue(state.session.security) },
-    { label: "التطوّر", value: localizeStackedEvolutionValue(state.session.autonomy) },
+    { label: "الموافقة", value: localizeApprovalValue(state.session.security), order: "label-value" },
+    { label: "تطوّر الوكيل", value: localizeStackedEvolutionValue(state.session.autonomy), order: "label-value" },
   ];
 }
 
@@ -192,14 +193,14 @@ function arabicUpdateRowsForStackedSurface(state: StartupDashboardState): readon
   const status = state.updateStatus ?? "Unknown.";
   switch (status) {
     case "Up to date.":
-      return [{ value: "محدّث." }];
+      return [{ value: "محدّث" }];
     case "Update available.":
       return [
-        { value: "يوجد تحديث متاح." },
-        { value: "شغّل: estacoda update" },
+        { value: "يوجد تحديث متاح" },
+        { label: "شغّل", value: "estacoda update" },
       ];
     case "Unknown.":
-      return [{ value: "حالة التحديث غير معروفة." }];
+      return [{ value: "حالة التحديث غير معروفة" }];
     default:
       return [{ value: status }];
   }
@@ -207,8 +208,8 @@ function arabicUpdateRowsForStackedSurface(state: StartupDashboardState): readon
 
 function arabicTipRowsForStackedSurface(): readonly ArabicStackedRow[] {
   return [
-    { value: "الصق السياق الكبير كمرفقات." },
-    { value: "استخدم /model لتغيير المسارات." },
+    { value: "الصق السياق الكبير كمرفقات" },
+    { label: "لتغيير المسارات استخدم", value: "/model" },
   ];
 }
 
@@ -242,6 +243,9 @@ function formatArabicStackedRow(row: ArabicStackedRow, blockWidth: number): stri
   const valueWidth = Math.max(1, blockWidth - labelWidth - gapWidth);
   const value = truncateVisibleCells(row.value, valueWidth);
   const label = truncateVisibleCells(row.label, labelWidth);
+  if (row.order === "label-value") {
+    return `${padVisibleEnd(label, labelWidth)}${" ".repeat(gapWidth)}${padVisibleStart(value, valueWidth)}`;
+  }
   return `${padVisibleStart(value, valueWidth)}${" ".repeat(gapWidth)}${padVisibleStart(label, labelWidth)}`;
 }
 
