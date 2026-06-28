@@ -52,7 +52,7 @@ describe("Papyrus operator console startup dashboard surface", () => {
     expect(output.every((line) => stringWidth(line) <= 46)).toBe(true);
   });
 
-  it("renders Arabic startup dashboard with mirrored panels and localized copy", () => {
+  it("renders Arabic startup dashboard as stacked right-aligned sections", () => {
     const output = renderStartupDashboardSurface({
       ...startupState(),
       sessionId: "53007044",
@@ -65,25 +65,34 @@ describe("Papyrus operator console startup dashboard surface", () => {
       },
     }, { width: 96, locale: "ar" });
     const text = output.join("\n");
-    const panelTitleLine = output.find((line) => line.includes("الأوامر") && line.includes("الجلسة")) ?? "";
-    const infoTitleLine = output.find((line) => line.includes("تلميحات") && line.includes("التحديث")) ?? "";
+    const sessionIndex = output.findIndex((line) => line.includes("الجلسة"));
+    const commandsIndex = output.findIndex((line) => line.includes("الأوامر"));
+    const updateIndex = output.findIndex((line) => line.includes("التحديث"));
+    const tipsIndex = output.findIndex((line) => line.includes("تلميحات"));
 
-    expect(panelTitleLine.indexOf("الأوامر")).toBeLessThan(panelTitleLine.indexOf("الجلسة"));
-    expect(infoTitleLine.indexOf("التحديث")).toBeLessThan(infoTitleLine.indexOf("تلميحات"));
+    expect(sessionIndex).toBeGreaterThan(0);
+    expect(commandsIndex).toBeGreaterThan(sessionIndex);
+    expect(updateIndex).toBeGreaterThan(commandsIndex);
+    expect(tipsIndex).toBeGreaterThan(updateIndex);
     expect(text).not.toContain("╭─ الأوامر");
     expect(text).not.toContain("╭─ الجلسة");
     expect(text).toContain("النموذج");
     expect(text).toContain("مساحة العمل");
-    expect(text).toContain("الأمان");
+    expect(text).toContain("الموافقة");
     expect(text).toContain("التطوّر");
-    expect(text).toContain("مفتوح");
-    expect(text).toContain("تلقائي");
+    expect(text).toContain("مفتوحة");
+    expect(text).toContain("مفعّل");
     expect(text).toContain("فحص الأدوات");
     expect(text).toContain("تغيير النموذج الأساسي");
     expect(text).toContain("يوجد تحديث متاح.");
+    expect(text).toContain("شغّل:");
     expect(text).toContain("estacoda update");
     expect(text).toContain("الصق السياق الكبير كمرفقات.");
     expect(text).toContain("/model");
+    expect(output.some((line) => line.includes("الأوامر") && line.includes("الجلسة"))).toBe(false);
+    expect(output.find((line) => line.includes("kimi-k2.7-code"))?.endsWith(`النموذج${PDI}`)).toBe(true);
+    expect(output.find((line) => line.includes("53007044"))?.endsWith(`الجلسة${PDI}`)).toBe(true);
+    expect(output.find((line) => line.includes("/home/idris/estacoda"))?.endsWith(`مساحة العمل${PDI}`)).toBe(true);
     expect(output.every((line) => stringWidth(line) <= 96)).toBe(true);
     expect(output.every((line) => line.startsWith(LRI) && line.endsWith(PDI))).toBe(true);
   });

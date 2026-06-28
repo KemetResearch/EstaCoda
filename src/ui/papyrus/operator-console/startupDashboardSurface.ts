@@ -1,7 +1,7 @@
 import { stringWidth } from "../screen/stringWidth.js";
 import { closeOpenBidiIsolates, isolateLtr } from "../../bidi.js";
 import type { UiLocale } from "../../cli-ui-copy.js";
-import { padVisibleEnd, truncateVisible } from "../../renderers/layout.js";
+import { padVisibleEnd, padVisibleStart, truncateVisible } from "../../renderers/layout.js";
 import type { StartupCommandState, StartupDashboardState } from "./operatorConsoleState.js";
 import { styleBold, styleColor, type OperatorConsoleStyle } from "./operatorConsoleStyle.js";
 
@@ -42,9 +42,13 @@ export function createDefaultStartupDashboardState(): StartupDashboardState {
 
 export function getStartupDashboardSurfaceDesiredHeight(
   state: StartupDashboardState,
-  width: number
+  width: number,
+  locale: UiLocale = "en"
 ): number {
   const normalizedWidth = normalizeDimension(width);
+  if (locale === "ar" && normalizedWidth >= WIDE_LAYOUT_MIN_WIDTH) {
+    return renderWideArabicStartupDashboard(state, normalizedWidth, undefined).length;
+  }
   const panelRows = normalizedWidth >= WIDE_LAYOUT_MIN_WIDTH
     ? Math.max(7, Math.max(sessionRows(state, "en", undefined).length, commandRows(state.commands, "en").length) + 2)
     : sessionRows(state, "en", undefined).length + commandRows(state.commands, "en").length + 6;
@@ -111,110 +115,163 @@ function renderWideArabicStartupDashboard(
   style: OperatorConsoleStyle | undefined
 ): readonly string[] {
   const bodyWidth = Math.max(0, width - 4);
-  const gapWidth = 2;
-  const leftWidth = Math.max(3, Math.floor((bodyWidth - gapWidth) / 2));
-  const rightWidth = Math.max(3, bodyWidth - leftWidth - gapWidth);
-  const topRows = renderArabicStartupColumnsForSurface(
-    [
-      styleSectionLabel(startupLabel("ar", "Commands", "الأوامر"), style),
-      ...arabicCommandRowsForSurface(state.commands),
-    ],
-    [
-      styleSectionLabel(startupLabel("ar", "Session", "الجلسة"), style),
-      ...arabicSessionRowsForSurface(state, style),
-    ],
-    leftWidth,
-    rightWidth,
-    gapWidth,
-    bodyWidth,
-    width
-  );
-  const infoRows = renderArabicInfoColumnsForSurface(state, leftWidth, rightWidth, gapWidth, bodyWidth, width, style);
-
-  return [
+  const blockWidth = Math.min(bodyWidth, 56);
+  const sectionGap = renderOuterRow("", bodyWidth, width);
+  const output = [
     renderTopBorder(`${state.productName}  𓂀  ${state.version}`, width, style),
-    ...topRows,
-    renderOuterRow("", bodyWidth, width),
-    renderOuterRow("", bodyWidth, width),
-    ...infoRows,
-    renderOuterRow(styleSecondaryText(`☥ ${state.orgName} ☥`, style), bodyWidth, width),
+    sectionGap,
+    ...renderArabicStackedSection(
+      startupLabel("ar", "Session", "الجلسة"),
+      arabicSessionRowsForStackedSurface(state, style),
+      blockWidth,
+      bodyWidth,
+      width,
+      style
+    ),
+    sectionGap,
+    ...renderArabicStackedSection(
+      startupLabel("ar", "Commands", "الأوامر"),
+      arabicCommandRowsForStackedSurface(state.commands),
+      blockWidth,
+      bodyWidth,
+      width,
+      style
+    ),
+    sectionGap,
+    ...renderArabicStackedSection(
+      startupLabel("ar", "Update", "التحديث"),
+      arabicUpdateRowsForStackedSurface(state),
+      blockWidth,
+      bodyWidth,
+      width,
+      style
+    ),
+    sectionGap,
+    ...renderArabicStackedSection(
+      startupLabel("ar", "Tips", "تلميحات"),
+      arabicTipRowsForStackedSurface(),
+      blockWidth,
+      bodyWidth,
+      width,
+      style
+    ),
+    sectionGap,
+    renderOuterRow(padVisibleStart(styleSecondaryText(`☥ ${state.orgName} ☥`, style), bodyWidth), bodyWidth, width),
     renderBottomBorder(width),
   ];
+
+  return output;
 }
 
-function arabicSessionRowsForSurface(
+type ArabicStackedRow = {
+  readonly value: string;
+  readonly label?: string;
+};
+
+function arabicSessionRowsForStackedSurface(
   state: StartupDashboardState,
   style: OperatorConsoleStyle | undefined
-): readonly string[] {
+): readonly ArabicStackedRow[] {
   return [
-    formatArabicKeyValue("النموذج", formatModelValueForSurface(state.session.model, state.session.modelRoute, style)),
-    formatArabicKeyValue("الجلسة", state.sessionId),
-    formatArabicKeyValue("مساحة العمل", state.session.workspace),
-    formatArabicKeyValue("الأمان", localizeSecurityValue(state.session.security, "ar")),
-    formatArabicKeyValue("التطوّر", localizeEvolutionValue(state.session.autonomy, "ar")),
+    { label: "النموذج", value: formatModelValueForSurface(state.session.model, state.session.modelRoute, style) },
+    { label: "الجلسة", value: state.sessionId },
+    { label: "مساحة العمل", value: state.session.workspace },
+    { label: "الموافقة", value: localizeApprovalValue(state.session.security) },
+    { label: "التطوّر", value: localizeStackedEvolutionValue(state.session.autonomy) },
   ];
 }
 
-function arabicCommandRowsForSurface(commands: readonly StartupCommandState[]): readonly string[] {
-  return commands.map((command) => formatArabicKeyValue(command.command, localizeCommandDescription(command, "ar")));
+function arabicCommandRowsForStackedSurface(commands: readonly StartupCommandState[]): readonly ArabicStackedRow[] {
+  return commands.map((command) => ({
+    label: localizeCommandDescription(command, "ar"),
+    value: command.command,
+  }));
 }
 
-function renderArabicInfoColumnsForSurface(
-  state: StartupDashboardState,
-  leftWidth: number,
-  rightWidth: number,
-  gapWidth: number,
+function arabicUpdateRowsForStackedSurface(state: StartupDashboardState): readonly ArabicStackedRow[] {
+  const status = state.updateStatus ?? "Unknown.";
+  switch (status) {
+    case "Up to date.":
+      return [{ value: "محدّث." }];
+    case "Update available.":
+      return [
+        { value: "يوجد تحديث متاح." },
+        { value: "شغّل: estacoda update" },
+      ];
+    case "Unknown.":
+      return [{ value: "حالة التحديث غير معروفة." }];
+    default:
+      return [{ value: status }];
+  }
+}
+
+function arabicTipRowsForStackedSurface(): readonly ArabicStackedRow[] {
+  return [
+    { value: "الصق السياق الكبير كمرفقات." },
+    { value: "استخدم /model لتغيير المسارات." },
+  ];
+}
+
+function renderArabicStackedSection(
+  title: string,
+  rows: readonly ArabicStackedRow[],
+  blockWidth: number,
   bodyWidth: number,
   width: number,
   style: OperatorConsoleStyle | undefined
 ): readonly string[] {
-  const update = [
-    styleSectionLabel(startupLabel("ar", "Update", "التحديث"), style),
-    ...arabicUpdateRowsForSurface(state),
+  return [
+    renderArabicStackedLine(styleSectionLabel(title, style), blockWidth, bodyWidth, width),
+    ...rows.map((row) => renderArabicStackedLine(formatArabicStackedRow(row, blockWidth), blockWidth, bodyWidth, width)),
   ];
-  const tips = [
-    styleSectionLabel(startupLabel("ar", "Tips", "تلميحات"), style),
-    ...arabicTipRowsForSurface(),
-  ];
-  return renderArabicStartupColumnsForSurface(update, tips, leftWidth, rightWidth, gapWidth, bodyWidth, width);
 }
 
-function renderArabicStartupColumnsForSurface(
-  leftRows: readonly string[],
-  rightRows: readonly string[],
-  leftWidth: number,
-  rightWidth: number,
-  gapWidth: number,
+function renderArabicStackedLine(
+  row: string,
+  blockWidth: number,
   bodyWidth: number,
   width: number
-): readonly string[] {
-  const rowCount = Math.max(leftRows.length, rightRows.length);
-  return Array.from({ length: rowCount }, (_, index) => renderOuterRow(
-    `${padVisibleEnd(leftRows[index] ?? "", leftWidth)}${" ".repeat(gapWidth)}${padVisibleEnd(rightRows[index] ?? "", rightWidth)}`,
-    bodyWidth,
-    width
-  ));
+): string {
+  return renderOuterRow(padVisibleStart(truncateVisibleCells(row, blockWidth), bodyWidth), bodyWidth, width);
 }
 
-function arabicUpdateRowsForSurface(state: StartupDashboardState): readonly string[] {
-  const status = state.updateStatus ?? "Unknown.";
-  switch (status) {
-    case "Up to date.":
-      return ["محدّث."];
-    case "Update available.":
-      return ["يوجد تحديث متاح.", "شغّل estacoda update."];
-    case "Unknown.":
-      return ["حالة التحديث غير معروفة."];
+function formatArabicStackedRow(row: ArabicStackedRow, blockWidth: number): string {
+  if (row.label === undefined) return row.value;
+  const gapWidth = 4;
+  const labelWidth = 24;
+  const valueWidth = Math.max(1, blockWidth - labelWidth - gapWidth);
+  const value = truncateVisibleCells(row.value, valueWidth);
+  const label = truncateVisibleCells(row.label, labelWidth);
+  return `${padVisibleStart(value, valueWidth)}${" ".repeat(gapWidth)}${padVisibleStart(label, labelWidth)}`;
+}
+
+function localizeApprovalValue(value: string): string {
+  switch (value.toLowerCase()) {
+    case "open":
+      return "مفتوحة";
+    case "adaptive":
+      return "تكيفية";
+    case "strict":
+    case "high":
+      return "صارمة";
     default:
-      return [status];
+      return value;
   }
 }
 
-function arabicTipRowsForSurface(): readonly string[] {
-  return [
-    "الصق السياق الكبير كمرفقات.",
-    "استخدم /model لتغيير المسارات.",
-  ];
+function localizeStackedEvolutionValue(value: string): string {
+  switch (value.toLowerCase()) {
+    case "autonomous":
+    case "proactive":
+    case "suggest":
+      return "مفعّل";
+    case "manual":
+      return "يدوي";
+    case "off":
+      return "متوقف";
+    default:
+      return value;
+  }
 }
 
 function renderNarrowStartupDashboard(
@@ -283,10 +340,6 @@ function commandRows(commands: readonly StartupCommandState[], locale: UiLocale)
 
 function formatKeyValue(key: string, value: string): string {
   return `${padVisibleEnd(key, 11)}${value}`;
-}
-
-function formatArabicKeyValue(key: string, value: string): string {
-  return `${padVisibleEnd(key, 11)} ${value}`;
 }
 
 function renderInnerBox(

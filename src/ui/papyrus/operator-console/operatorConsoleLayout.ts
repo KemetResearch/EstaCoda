@@ -97,7 +97,7 @@ function createRegionDescriptors(
       kind: "startupDashboard",
       priority: STARTUP_PRIORITY,
       minHeight: 1,
-      desiredHeight: getStartupDashboardSurfaceDesiredHeight(state.startup, terminal.width),
+      desiredHeight: getStartupDashboardSurfaceDesiredHeight(state.startup, terminal.width, state.locale),
     });
   }
 
