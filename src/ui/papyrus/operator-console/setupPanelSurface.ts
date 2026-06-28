@@ -477,7 +477,7 @@ function stylePrimaryChoiceRow(
   selected: boolean,
   style: OperatorConsoleStyle | undefined
 ): string {
-  return styleSelectedChoiceRow(stylePrimary(line, style), selected, style);
+  return selected ? styleSelectedChoiceRow(line, selected, style) : stylePrimary(line, style);
 }
 
 function formatFrameTitle(title: string, locale: SetupPanelState["locale"]): string {

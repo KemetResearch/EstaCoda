@@ -103,6 +103,8 @@ describe("Papyrus operator console startup dashboard surface", () => {
     const evolutionLine = output.find((line) => line.includes("تطور الوكيل")) ?? "";
     expect(approvalLine.indexOf("الموافقة")).toBeLessThan(approvalLine.indexOf("مفتوحة"));
     expect(evolutionLine.indexOf("تطور الوكيل")).toBeLessThan(evolutionLine.indexOf("مفعّل"));
+    expect(approvalLine.indexOf("مفتوحة") - approvalLine.indexOf("الموافقة")).toBeLessThan(24);
+    expect(evolutionLine.indexOf("مفعّل") - evolutionLine.indexOf("تطور الوكيل")).toBeLessThan(24);
     expect(output.every((line) => stringWidth(line) <= 96)).toBe(true);
     expect(output.every((line) => line.startsWith(LRI) && line.endsWith(PDI))).toBe(true);
   });
