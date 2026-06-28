@@ -1,5 +1,6 @@
 import { mkdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
+import { stdin, stdout } from "node:process";
 import {
   createTelegramPairingCode,
   loadRuntimeConfig,
@@ -38,10 +39,13 @@ import {
 } from "../config/runtime-config.js";
 import type { Prompt } from "./prompt-contract.js";
 import { canRunInteractive } from "../ui/terminal-capabilities.js";
+import { createOperatorConsoleStyle } from "../ui/papyrus/operator-console/index.js";
 import { createInteractivePrompt } from "./create-interactive-prompt.js";
+import { createSessionRenderer } from "./session-renderer.js";
 import { promptUiContextForLocale } from "../contracts/ui.js";
 import { runFirstRunSetup } from "../setup/onboarding-wizard/runner.js";
 import { runConfigEditorSetup } from "../setup/config-editor/runner.js";
+import { isSetupConsoleExit } from "../setup/config-editor/setupConsolePromptAdapter.js";
 import { selectProviderModelRoute } from "../setup/provider-model-route-prompt.js";
 import { createReviewedSetupApplyExecutor } from "../setup/review/apply-executor.js";
 import { collectSetupEntryState } from "../setup/setup-entry-state.js";
@@ -453,9 +457,23 @@ async function interactiveSetup(options: CliOptions, input: { readonly advanced:
       decision.kind === "repair-first-menu"
     ) {
       const chunks: string[] = [];
+      const setupRenderer = options.prompt === undefined && options.output === undefined && canRunInteractive()
+        ? createSessionRenderer({ output: stdout })
+        : undefined;
+      const setupConsole = setupRenderer === undefined
+        ? undefined
+        : {
+            input: stdin,
+            output: stdout,
+            style: createOperatorConsoleStyle({
+              tokens: setupRenderer.tokens,
+              capabilities: setupRenderer.capabilities,
+            }),
+          };
       const result = await runConfigEditorSetup({
         ...options,
         prompt,
+        ...(setupConsole === undefined ? {} : { setupConsole }),
         applyExecutor: createReviewedSetupApplyExecutor({
           workspaceRoot: options.workspaceRoot,
           homeDir: options.homeDir,
@@ -467,11 +485,16 @@ async function interactiveSetup(options: CliOptions, input: { readonly advanced:
           write: (value) => chunks.push(value),
         },
       });
+      const output = setupConsole !== undefined && result.setupConsoleRenderedOutput === true
+        ? ""
+        : chunks.length > 0
+        ? chunks.join("")
+        : result.output;
 
       return {
         handled: true,
         exitCode: result.exitCode,
-        output: chunks.length > 0 ? chunks.join("") : result.output,
+        output,
       };
     }
 
@@ -480,6 +503,15 @@ async function interactiveSetup(options: CliOptions, input: { readonly advanced:
       exitCode: 0,
       output: renderSetupRouteSummary({ decision, advanced: input.advanced }),
     };
+  } catch (error) {
+    if (isSetupConsoleExit(error)) {
+      return {
+        handled: true,
+        exitCode: 0,
+        output: "",
+      };
+    }
+    throw error;
   } finally {
     if (options.prompt === undefined) {
       prompt.close?.();

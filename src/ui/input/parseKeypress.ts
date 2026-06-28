@@ -65,12 +65,141 @@ export type ParsedKeypress =
       sequence: string;
     };
 
+export type KeypressParseState = {
+  mode: "normal" | "paste";
+  incomplete: string;
+  pasteBuffer: string;
+};
+
+export type KeypressParseResult = {
+  events: ParsedKeypress[];
+  state: KeypressParseState;
+};
+
 const ESC = "\x1b";
 const BRACKETED_PASTE_START = "\x1b[200~";
 const BRACKETED_PASTE_END = "\x1b[201~";
+const INCOMPLETE_ESCAPE_FLUSH_MS = 50;
+const INCOMPLETE_PASTE_FLUSH_MS = 500;
 
 const graphemeSegmenter =
   typeof Intl.Segmenter === "function" ? new Intl.Segmenter(undefined, { granularity: "grapheme" }) : undefined;
+
+export function createInitialKeypressParseState(): KeypressParseState {
+  return { mode: "normal", incomplete: "", pasteBuffer: "" };
+}
+
+export function keypressParseStateNeedsFlush(state: KeypressParseState): boolean {
+  return state.incomplete.length > 0 || state.mode === "paste";
+}
+
+export function keypressParseFlushDelayMs(state: KeypressParseState): number {
+  return state.mode === "paste" ? INCOMPLETE_PASTE_FLUSH_MS : INCOMPLETE_ESCAPE_FLUSH_MS;
+}
+
+export function parseKeypressStream(prevState: KeypressParseState, input: string | Buffer | null): KeypressParseResult {
+  const isFlush = input === null;
+  const inputText = input === null ? "" : typeof input === "string" ? input : input.toString("utf8");
+  const events: ParsedKeypress[] = [];
+  let mode = prevState.mode;
+  let pasteBuffer = prevState.pasteBuffer;
+  let incomplete = "";
+  let text = `${prevState.incomplete}${inputText}`;
+  let index = 0;
+
+  if (
+    !isFlush
+    && prevState.incomplete === ESC
+    && prevState.mode === "normal"
+    && inputText.length > 0
+    && inputText[0] !== "["
+    && inputText[0] !== "O"
+  ) {
+    events.push({ type: "key", key: "escape" });
+    text = inputText;
+  }
+
+  while (index < text.length || (isFlush && mode === "paste")) {
+    if (mode === "paste") {
+      const pasteEnd = text.indexOf(BRACKETED_PASTE_END, index);
+      if (pasteEnd !== -1) {
+        pasteBuffer += text.slice(index, pasteEnd);
+        events.push({ type: "paste", text: pasteBuffer });
+        pasteBuffer = "";
+        mode = "normal";
+        index = pasteEnd + BRACKETED_PASTE_END.length;
+        continue;
+      }
+
+      const remainder = text.slice(index);
+      if (!isFlush) {
+        const suffixLength = longestSuffixPrefixLength(remainder, BRACKETED_PASTE_END);
+        pasteBuffer += remainder.slice(0, remainder.length - suffixLength);
+        incomplete = remainder.slice(remainder.length - suffixLength);
+        index = text.length;
+        break;
+      }
+
+      pasteBuffer += remainder;
+      if (pasteBuffer.length > 0) events.push({ type: "paste", text: pasteBuffer });
+      pasteBuffer = "";
+      mode = "normal";
+      index = text.length;
+      break;
+    }
+
+    if (text.startsWith(BRACKETED_PASTE_START, index)) {
+      mode = "paste";
+      pasteBuffer = "";
+      index += BRACKETED_PASTE_START.length;
+      continue;
+    }
+
+    if (!isFlush && isIncompletePrefixAtEnd(text, index, BRACKETED_PASTE_START)) {
+      incomplete = text.slice(index);
+      index = text.length;
+      break;
+    }
+
+    const char = text[index]!;
+
+    if (char === ESC) {
+      if (!isFlush && isIncompleteEscapeAtEnd(text, index)) {
+        incomplete = text.slice(index);
+        index = text.length;
+        break;
+      }
+      const parsed = parseEscapeSequence(text, index);
+      events.push(parsed.event);
+      index += parsed.length;
+      continue;
+    }
+
+    const control = parseControl(text, index);
+    if (control !== undefined) {
+      events.push(control.event);
+      index += control.length;
+      continue;
+    }
+
+    const textStart = index;
+    while (index < text.length) {
+      if (text.startsWith(BRACKETED_PASTE_START, index)) break;
+      if (!isFlush && isIncompletePrefixAtEnd(text, index, BRACKETED_PASTE_START)) break;
+      const nextChar = text[index]!;
+      if (nextChar === ESC || parseControl(text, index) !== undefined) break;
+      index += readGrapheme(text, index).length;
+    }
+    if (index > textStart) {
+      events.push({ type: "text", text: text.slice(textStart, index) });
+    }
+  }
+
+  return {
+    events,
+    state: { mode, incomplete, pasteBuffer },
+  };
+}
 
 export function parseKeypress(input: string): ParsedKeypress[] {
   const events: ParsedKeypress[] = [];
@@ -116,6 +245,27 @@ export function parseKeypress(input: string): ParsedKeypress[] {
   }
 
   return events;
+}
+
+function isIncompletePrefixAtEnd(input: string, index: number, sequence: string): boolean {
+  const remainder = input.slice(index);
+  return remainder.length > 0 && remainder.length < sequence.length && sequence.startsWith(remainder);
+}
+
+function longestSuffixPrefixLength(input: string, sequence: string): number {
+  const maxLength = Math.min(input.length, sequence.length - 1);
+  for (let length = maxLength; length > 0; length -= 1) {
+    if (sequence.startsWith(input.slice(input.length - length))) return length;
+  }
+  return 0;
+}
+
+function isIncompleteEscapeAtEnd(input: string, index: number): boolean {
+  const next = input[index + 1];
+  if (next === undefined) return true;
+  if (next === "[") return readCsiSequence(input, index) === undefined;
+  if (next === "O") return input.length - index < 3;
+  return false;
 }
 
 function parseControl(input: string, index: number): { event: ParsedKeypress; length: number } | undefined {

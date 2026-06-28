@@ -3,6 +3,7 @@ import { promptForApiKeyInput } from "../../cli/secret-prompt.js";
 import type { BrowserBackendKind, BrowserCloudProviderKind } from "../../contracts/browser.js";
 import type { AuxiliaryModelTask } from "../../contracts/provider.js";
 import type { SecurityApprovalMode } from "../../contracts/security.js";
+import type { PromptCardStatusLine } from "../../contracts/view-model.js";
 import type { BrowserEngineKind, ImageGenerationProvider, SttProvider, TtsProvider } from "../../config/runtime-config.js";
 import type { ModelFallbackConfig } from "../../config/runtime-config.js";
 import type { SkillAutonomy } from "../../skills/skill-learning.js";
@@ -147,7 +148,10 @@ export async function promptConfigEditorAction(
   prompt: Prompt,
   actions: readonly ConfigEditorRenderedAction[],
   defaultActionId?: string,
-  locale: SetupCopyLocale = "en"
+  locale: SetupCopyLocale = "en",
+  options: {
+    readonly statusLines?: readonly PromptCardStatusLine[];
+  } = {}
 ): Promise<ConfigEditorRenderedAction | undefined> {
   if (actions.length === 0) {
     return undefined;
@@ -164,6 +168,7 @@ export async function promptConfigEditorAction(
     tableMaxWidth: setupChoiceTableMaxWidth(locale),
     tableAlign: setupChoiceTableAlign(locale),
     showColumnHeaders: false,
+    ...(options.statusLines === undefined ? {} : { statusLines: options.statusLines }),
     choices: actions.map((action) => ({
       id: action.id,
       label: action.label,
@@ -375,6 +380,13 @@ export async function promptConfigEditorReviewApproval(
       formatSetupCopy(locale, "setupEditor.review.selectedArea", { selectedArea }),
       "",
     ].join("\n"),
+    statusLines: [
+      {
+        text: `${setupCopyText(locale, "setupEditor.status.pendingChanges")}: ${selectedArea}`,
+        tone: "warning",
+        direction: locale === "ar" ? "rtl" : "ltr",
+      },
+    ],
     choices: [
       {
         id: "approve",

@@ -9,7 +9,8 @@ import {
   type ApprovalIntent,
   type OperatorConsoleRuntimeHost,
 } from "../ui/papyrus/operator-console/index.js";
-import { parseKeypress, type ParsedKeypress } from "../ui/input/parseKeypress.js";
+import type { ParsedKeypress } from "../ui/input/parseKeypress.js";
+import { createKeypressStreamDispatcher } from "../ui/input/keyPressStreamDispatcher.js";
 import {
   buildApprovalCardRenderRows,
   createApprovalCardState,
@@ -130,6 +131,7 @@ async function readInlineOperatorConsoleApproval(input: {
     const finish = (answer: string) => {
       if (settled) return;
       settled = true;
+      keypressDispatcher.dispose();
       input.input.off("data", onData);
       if (!wasRaw) {
         input.input.setRawMode?.(false);
@@ -147,12 +149,18 @@ async function readInlineOperatorConsoleApproval(input: {
       }
       render();
     };
+
+    const keypressDispatcher = createKeypressStreamDispatcher({
+      onEvents: (events) => {
+        for (const keypress of events) {
+          handleKeypress(keypress);
+          if (settled) return;
+        }
+      },
+    });
+
     const onData = (chunk: string | Buffer | Uint8Array) => {
-      const text = typeof chunk === "string" ? chunk : Buffer.from(chunk).toString("utf8");
-      for (const keypress of parseKeypress(text)) {
-        handleKeypress(keypress);
-        if (settled) return;
-      }
+      keypressDispatcher.handle(chunk);
     };
 
     input.input.on("data", onData);

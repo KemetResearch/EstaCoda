@@ -139,6 +139,46 @@ describe("Papyrus operator console renderer", () => {
     expect(first.every((line) => stringWidth(line) <= 72)).toBe(true);
   });
 
+  it("renders only setup-owned surfaces in setup mode", () => {
+    const state = createFullState({
+      mode: "setup",
+      setupPanel: setupPanel(),
+    });
+    const layout = createOperatorConsoleLayout(state, { width: 72, height: 26, isTty: true });
+    const output = renderOperatorConsoleTextLines(state, layout);
+    const text = output.join("\n");
+
+    expect(text).toContain("Model Route");
+    expect(text).toContain("gpt-5.5");
+    expect(text).toContain("↑↓ navigate");
+    expect(text).not.toContain("›");
+    expect(text).not.toContain("ctx");
+    expect(text).not.toContain("◷");
+    expect(text).not.toContain("Transcript:");
+    expect(text).not.toContain("Running tools");
+    expect(text).not.toContain("Attachments");
+    expect(output.every((line) => stringWidth(line) <= 72)).toBe(true);
+  });
+
+  it("renders Arabic setup mode without session prompt or status rail", () => {
+    const state = createState({
+      mode: "setup",
+      setupPanel: arabicSetupPanel(),
+    });
+    const layout = createOperatorConsoleLayout(state, { width: 80, height: 18, isTty: true });
+    const output = renderOperatorConsoleTextLines(state, layout);
+    const text = output.join("\n");
+
+    expect(text).toContain("إعداد النموذج");
+    expect(text).toContain("OpenAI");
+    expect(text).toContain("gpt-5.5");
+    expect(text).toContain("◂");
+    expect(text).not.toContain("›");
+    expect(text).not.toContain("ctx");
+    expect(text).not.toContain("◷");
+    expect(output.every((line) => stringWidth(line) <= 80)).toBe(true);
+  });
+
   it("renders attachments above steer input and status rail", () => {
     const state = createFullState();
     const layout = createOperatorConsoleLayout(state, { width: 120, height: 20, isTty: true });
@@ -483,7 +523,7 @@ function createState(input: Partial<OperatorConsoleState> = {}): OperatorConsole
   });
 }
 
-function createFullState(): OperatorConsoleState {
+function createFullState(input: Partial<OperatorConsoleState> = {}): OperatorConsoleState {
   return createState({
     transcript: [{ id: "t1", role: "assistant", text: "Ready." }],
     prompt: {
@@ -532,6 +572,7 @@ function createFullState(): OperatorConsoleState {
       query: "/mo",
       items: [{ id: "model", label: "/model" }],
     },
+    ...input,
   });
 }
 
@@ -572,6 +613,33 @@ function setupPanel() {
       { id: "openai", provider: "OpenAI", model: "gpt-5.5", status: "ready", notes: "API key set" },
       { id: "anthropic", provider: "Anthropic", model: "claude-sonnet-4.5", status: "ready", notes: "API key set" },
       { id: "local", provider: "Local", model: "qwen3-coder", status: "offline", notes: "endpoint unset" },
+    ],
+    selectedRowId: "openai",
+  };
+}
+
+function arabicSetupPanel() {
+  return {
+    kind: "table" as const,
+    layout: "choiceMenu" as const,
+    title: "إعداد النموذج",
+    description: "اختار المزوّد الأساسي.",
+    locale: "ar" as const,
+    rows: [
+      {
+        id: "openai",
+        provider: "OpenAI",
+        model: "",
+        status: "نماذج GPT مع مفتاح API.",
+        notes: "gpt-5.5",
+      },
+      {
+        id: "local",
+        provider: "Local",
+        model: "",
+        status: "نقطة نهاية خاصة.",
+        notes: "qwen3-coder",
+      },
     ],
     selectedRowId: "openai",
   };

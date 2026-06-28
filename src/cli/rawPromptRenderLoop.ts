@@ -89,9 +89,11 @@ export class RawPromptRenderLoop {
   render(snapshot: RawPromptRenderSnapshot): number {
     const frame = snapshot.operatorConsole?.enabled === true
       ? buildOperatorConsoleRawPromptFrameWithRuntimeHost(this.#getOperatorConsoleHost(), {
+        mode: snapshot.operatorConsole.mode,
         prompt: snapshot.prompt,
         state: snapshot.state,
         status: snapshot.operatorConsole.getStatus?.() ?? snapshot.operatorConsole.status,
+        setupPanel: snapshot.operatorConsole.setupPanel,
         turnActivity: snapshot.operatorConsole.turnActivity,
         terminal: snapshot.operatorConsole.terminal,
         attachments: snapshot.operatorConsole.attachments,

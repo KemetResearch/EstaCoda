@@ -84,6 +84,10 @@ function makeTtyInput(): NodeJS.ReadStream & {
   return input;
 }
 
+async function flushKeypressTimers(): Promise<void> {
+  await new Promise((resolve) => setTimeout(resolve, 60));
+}
+
 function createMockRuntime(overrides: Partial<Runtime> = {}): Runtime {
   const sessionDb = new InMemorySessionDB();
   const runtime: Runtime = {
@@ -2642,6 +2646,69 @@ describe("runSessionLoop — active turn spinner", () => {
     await loop;
   });
 
+  it("keeps split active-turn paste as steer draft text without queueing", async () => {
+    const input = makeTtyInput();
+    const outputChunks: string[] = [];
+    const handleInputs: string[] = [];
+    const host = createOperatorConsoleRuntimeHost({
+      terminal: { width: 96, height: 16, isTty: true },
+    });
+    let releaseTurn: (() => void) | undefined;
+    let handleStarted: (() => void) | undefined;
+    const handleStartedPromise = new Promise<void>((resolve) => {
+      handleStarted = resolve;
+    });
+    const runtime = createMockRuntime({
+      handle: async ({ text }: { text: string }) => {
+        handleInputs.push(text);
+        handleStarted?.();
+        await new Promise<void>((resolve) => {
+          releaseTurn = resolve;
+        });
+        return mockResponse();
+      },
+    });
+    let promptIndex = 0;
+    const loop = runSessionLoop({
+      runtime,
+      input,
+      output: {
+        write(chunk: string | Uint8Array): boolean {
+          outputChunks.push(String(chunk));
+          return true;
+        },
+        isTTY: true,
+        columns: 96,
+      } as unknown as NodeJS.WritableStream,
+      capabilities: interactiveCaps({ terminalWidth: 96, supportsAnimation: false }),
+      operatorConsole: { enabled: true, runtimeHost: host },
+      prompt: Object.assign(
+        async () => {
+          const values = ["build feature", "/exit"];
+          return values[promptIndex++] ?? "/exit";
+        },
+        { close: () => {} }
+      ),
+      close: () => {},
+    });
+
+    await handleStartedPromise;
+    input.press("\x1b[200~focus line one\n");
+    await Promise.resolve();
+    expect(host.getState().steer).toBeUndefined();
+
+    input.press("focus line two\x1b[201~");
+    await Promise.resolve();
+    expect(host.getState().steer).toMatchObject({
+      mode: "drafting",
+      draft: "focus line one\nfocus line two",
+    });
+    expect(handleInputs).toEqual(["build feature"]);
+
+    releaseTurn?.();
+    await loop;
+  });
+
   it("submits Operator Console steer draft as active-turn guidance", async () => {
     const input = makeTtyInput();
     const outputChunks: string[] = [];
@@ -2856,6 +2923,7 @@ describe("runSessionLoop — active turn spinner", () => {
     }
     expect(host.getState().steer?.mode).toBe("drafting");
     input.press("\u001b", { name: "escape" });
+    await flushKeypressTimers();
     expect(host.getState().steer).toBeUndefined();
     releaseTurn?.();
     await loop;
@@ -2925,6 +2993,7 @@ describe("runSessionLoop — active turn spinner", () => {
       text: "focus only on approvals",
     });
     input.press("\u001b", { name: "escape" });
+    await flushKeypressTimers();
     expect(host.getState().steer).toBeUndefined();
     releaseTurn?.();
     await loop;

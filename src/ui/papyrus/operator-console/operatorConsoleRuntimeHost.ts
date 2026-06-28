@@ -12,6 +12,7 @@ import {
   type ApprovalCardState,
   type AttachmentCardState,
   type CreateInitialOperatorConsoleStateInput,
+  type OperatorConsoleMode,
   type OperatorConsoleState,
   type PromptSurfaceState,
   type SetupSurfaceState,
@@ -45,6 +46,14 @@ export class OperatorConsoleRuntimeHost {
 
   getState(): OperatorConsoleState {
     return this.#state;
+  }
+
+  setMode(mode: OperatorConsoleMode): void {
+    if (this.#disposed) return;
+    this.#state = {
+      ...this.#state,
+      mode,
+    };
   }
 
   setPrompt(input: OperatorConsoleRuntimePromptInput): void {
@@ -185,6 +194,7 @@ export class OperatorConsoleRuntimeHost {
   clear(): void {
     if (this.#disposed) return;
     this.#state = createInitialOperatorConsoleState({
+      mode: this.#state.mode,
       locale: this.#state.locale,
       terminal: this.#state.terminal,
       status: this.#state.status,
@@ -205,6 +215,7 @@ export function createOperatorConsoleRuntimeHost(
 
 function cloneOperatorConsoleState(state: OperatorConsoleState): OperatorConsoleState {
   return createInitialOperatorConsoleState({
+    mode: state.mode,
     locale: state.locale,
     startup: state.startup === undefined ? undefined : cloneStartupDashboardState(state.startup),
     setupPanel: state.setupPanel === undefined ? undefined : cloneSetupSurfaceState(state.setupPanel),

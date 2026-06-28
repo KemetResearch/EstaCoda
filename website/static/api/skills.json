@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "generatedAt": "2026-06-14T20:16:43.624Z",
+  "generatedAt": "2026-06-28T20:08:45.586Z",
   "skills": [
     {
       "id": "official.ascii-video",
@@ -175,6 +175,54 @@
       }
     },
     {
+      "id": "official.hyperframes",
+      "slug": "hyperframes",
+      "name": "Hyperframes",
+      "description": "Create rendered MP4/WebM motion graphics from HTML, CSS, JavaScript, GSAP, audio, and media assets.",
+      "overview": "HyperFrames is a video rendering engine that uses HTML as its native format. You author compositions as standard HTML files: CSS handles the look, GSAP handles the motion, and `data-*` attributes declare the timing. The engine then frame-captures the page and encodes the sequence into MP4 or WebM via FFmpeg.",
+      "labels": [
+        "hyperframes",
+        "video",
+        "animation",
+        "html",
+        "gsap",
+        "motion-graphics"
+      ],
+      "triggerPatterns": [
+        "hyperframes",
+        "html video",
+        "motion graphics",
+        "animated title card",
+        "video overlay"
+      ],
+      "requiredToolsets": [
+        "files",
+        "shell-write"
+      ],
+      "optionalToolsets": [
+        "browser",
+        "web",
+        "media",
+        "coding"
+      ],
+      "playbookSteps": 3,
+      "evaluationCount": 1,
+      "routing": {
+        "confirmation": "policy"
+      },
+      "source": {
+        "type": "official",
+        "label": "Official",
+        "path": "skills/official/hyperframes/SKILL.md",
+        "githubUrl": "https://github.com/KemetResearch/EstaCoda/blob/main/skills/official/hyperframes/SKILL.md"
+      },
+      "trust": {
+        "level": "official",
+        "reviewed": true,
+        "governed": true
+      }
+    },
+    {
       "id": "official.infographics",
       "slug": "infographics",
       "name": "Infographics",
@@ -208,6 +256,52 @@
         "label": "Official",
         "path": "skills/official/infographics/SKILL.md",
         "githubUrl": "https://github.com/KemetResearch/EstaCoda/blob/main/skills/official/infographics/SKILL.md"
+      },
+      "trust": {
+        "level": "official",
+        "reviewed": true,
+        "governed": true
+      }
+    },
+    {
+      "id": "official.manim-video",
+      "slug": "manim-video",
+      "name": "Manim Video",
+      "description": "Create mathematical, algorithmic, and technical explainer videos with Manim Community Edition.",
+      "overview": "Deploy this skill when the user requests animated explanations, mathematical visualizations, algorithm walkthroughs, equation derivations, architecture diagrams, or data stories. The output is 3Blue1Brown-style educational video rendered through Manim Community Edition.",
+      "labels": [
+        "manim",
+        "animation",
+        "math",
+        "3blue1brown",
+        "video",
+        "explainer"
+      ],
+      "triggerPatterns": [
+        "manim",
+        "3blue1brown",
+        "math video",
+        "math animation",
+        "algorithm visualization"
+      ],
+      "requiredToolsets": [
+        "files",
+        "shell-write"
+      ],
+      "optionalToolsets": [
+        "coding",
+        "media"
+      ],
+      "playbookSteps": 3,
+      "evaluationCount": 1,
+      "routing": {
+        "confirmation": "policy"
+      },
+      "source": {
+        "type": "official",
+        "label": "Official",
+        "path": "skills/official/manim-video/SKILL.md",
+        "githubUrl": "https://github.com/KemetResearch/EstaCoda/blob/main/skills/official/manim-video/SKILL.md"
       },
       "trust": {
         "level": "official",
@@ -779,6 +873,52 @@
         "label": "Official",
         "path": "skills/official/wiki-builder/SKILL.md",
         "githubUrl": "https://github.com/KemetResearch/EstaCoda/blob/main/skills/official/wiki-builder/SKILL.md"
+      },
+      "trust": {
+        "level": "official",
+        "reviewed": true,
+        "governed": true
+      }
+    },
+    {
+      "id": "official.xurl",
+      "slug": "xurl",
+      "name": "Xurl",
+      "description": "Operate X/Twitter through the official xurl CLI for posts, search, timelines, DMs, media, and raw API calls.",
+      "overview": "xurl is the first-party command-line tool from the X developer platform. It wraps the X API v2 surface with convenient shortcuts for common tasks, while still allowing raw curl-style access to any endpoint when you need something the shortcuts don't cover. All output is JSON on stdout.",
+      "labels": [
+        "twitter",
+        "x",
+        "social-media",
+        "xurl",
+        "official-api"
+      ],
+      "triggerPatterns": [
+        "xurl",
+        "twitter",
+        "x.com",
+        "tweet",
+        "post on x",
+        "post to x"
+      ],
+      "requiredToolsets": [
+        "shell-readonly",
+        "shell-write"
+      ],
+      "optionalToolsets": [
+        "files",
+        "media"
+      ],
+      "playbookSteps": 3,
+      "evaluationCount": 1,
+      "routing": {
+        "confirmation": "policy"
+      },
+      "source": {
+        "type": "official",
+        "label": "Official",
+        "path": "skills/official/xurl/SKILL.md",
+        "githubUrl": "https://github.com/KemetResearch/EstaCoda/blob/main/skills/official/xurl/SKILL.md"
       },
       "trust": {
         "level": "official",

@@ -35,14 +35,14 @@ export function mapSetupSelectToSetupPanelState(
   const selectedIndex = clampIndex(input.selectedIndex, input.options.length);
   return {
     kind: "table",
-    layout: isChoiceMenu(input.columns) ? "choiceMenu" : "routeTable",
+    layout: isChoiceMenu(input.columns, input.options) ? "choiceMenu" : "routeTable",
     title: input.title,
     description: firstBodyLine(input.body),
     ...(input.statusLines === undefined ? {} : { statusLines: input.statusLines }),
     locale: input.locale,
     rows: input.options.map((option, index) => mapOptionToRow(option, index)),
     selectedRowId: optionId(input.options[selectedIndex], selectedIndex),
-    footer: input.hint ?? defaultFooter(input.locale),
+    footer: defaultFooter(),
   };
 }
 
@@ -58,10 +58,26 @@ function mapOptionToRow(option: SetupSelectRuntimeOption, index: number): SetupP
   };
 }
 
-function isChoiceMenu(columns: readonly SetupSelectRuntimeColumn[] | undefined): boolean {
-  if (columns === undefined || columns.length !== 2) return false;
+function isChoiceMenu(
+  columns: readonly SetupSelectRuntimeColumn[] | undefined,
+  options: readonly SetupSelectRuntimeOption[]
+): boolean {
+  if (columns === undefined) return !options.some(hasRouteTableCells);
+  if (columns.length !== 2) return false;
   const keys = new Set(columns.map((column) => column.key));
   return keys.has("name") && (keys.has("description") || keys.has("details"));
+}
+
+function hasRouteTableCells(option: SetupSelectRuntimeOption): boolean {
+  const cells = option.cells;
+  if (cells === undefined) return false;
+  return cells.provider !== undefined ||
+    cells.model !== undefined ||
+    cells.route !== undefined ||
+    cells.value !== undefined ||
+    cells.status !== undefined ||
+    cells.state !== undefined ||
+    cells.notes !== undefined;
 }
 
 function optionId(option: SetupSelectRuntimeOption | undefined, index: number): string {
@@ -80,10 +96,8 @@ function firstNonEmpty(...values: readonly (string | undefined)[]): string {
   return values.find((value) => value !== undefined && value.trim().length > 0) ?? "";
 }
 
-function defaultFooter(locale: OperatorConsoleLocale | undefined): string {
-  return locale === "ar"
-    ? "↑↓ تنقل · Enter اختيار · / بحث · Esc رجوع"
-    : "↑↓ navigate · Enter select · / filter · Esc back";
+function defaultFooter(): string {
+  return "↑↓ navigate   ENTER select   CTRL+C exit";
 }
 
 function clampIndex(index: number, optionCount: number): number {

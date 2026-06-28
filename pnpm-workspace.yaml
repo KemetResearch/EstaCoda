@@ -1,3 +1,6 @@
+overrides:
+  esbuild: 0.28.1
+
 allowBuilds:
   '@whiskeysockets/baileys': false
   better-sqlite3: true

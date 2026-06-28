@@ -13,9 +13,10 @@ export type StartupDashboardRenderOptions = {
 };
 
 const WIDE_LAYOUT_MIN_WIDTH = 72;
-const ARABIC_WIDE_FRAME_MAX_WIDTH = 92;
-const ARABIC_STACKED_BLOCK_MAX_WIDTH = 60;
+const ARABIC_WIDE_FRAME_MAX_WIDTH = 78;
+const ARABIC_STACKED_BLOCK_MAX_WIDTH = 54;
 const ARABIC_STACKED_LABEL_MAX_WIDTH = 24;
+const ARABIC_TWO_COLUMN_ROW_LEFT_BIAS = 8;
 
 export function createDefaultStartupDashboardState(): StartupDashboardState {
   return {
@@ -72,7 +73,8 @@ export function renderStartupDashboardSurface(
     ? renderWideStartupDashboard(state, width, locale, options.style)
     : renderNarrowStartupDashboard(state, width, locale, options.style);
   const height = options.height === undefined ? rows.length : normalizeDimension(options.height);
-  const visibleRows = rows.slice(0, height);
+  const centeredRows = locale === "ar" ? centerRowsVertically(rows, height) : rows;
+  const visibleRows = centeredRows.slice(0, height);
   return locale === "ar" ? visibleRows.map(stabilizeTerminalBidiLine) : visibleRows;
 }
 
@@ -171,7 +173,7 @@ function renderWideArabicStartupDashboard(
 type ArabicStackedRow = {
   readonly value: string;
   readonly label?: string;
-  readonly order?: "value-label" | "label-value";
+  readonly order?: "value-label" | "label-value" | "tight-value-label";
 };
 
 function arabicSessionRowsForStackedSurface(
@@ -182,8 +184,8 @@ function arabicSessionRowsForStackedSurface(
     { label: "النموذج", value: formatModelValueForSurface(state.session.model, state.session.modelRoute, style) },
     { label: "الجلسة", value: state.sessionId },
     { label: "مساحة العمل", value: state.session.workspace },
-    { label: "الموافقة", value: localizeApprovalValue(state.session.security), order: "label-value" },
-    { label: "تطوّر الوكيل", value: localizeStackedEvolutionValue(state.session.autonomy), order: "label-value" },
+    { label: "الموافقة", value: localizeApprovalValue(state.session.security), order: "tight-value-label" },
+    { label: "تطور الوكيل", value: localizeStackedEvolutionValue(state.session.autonomy), order: "tight-value-label" },
   ];
 }
 
@@ -228,18 +230,34 @@ function renderArabicStackedSection(
 ): readonly string[] {
   const labelWidth = resolveArabicStackedLabelWidth(rows);
   return [
-    renderArabicStackedLine(styleSectionLabel(title, style), blockWidth, bodyWidth, width),
-    ...rows.map((row) => renderArabicStackedLine(formatArabicStackedRow(row, blockWidth, labelWidth), blockWidth, bodyWidth, width)),
+    renderArabicCenteredLine(styleSectionLabel(title, style), bodyWidth, width),
+    renderOuterRow("", bodyWidth, width),
+    ...rows.map((row) => renderArabicStackedLine(
+      formatArabicStackedRow(row, blockWidth, labelWidth),
+      blockWidth,
+      bodyWidth,
+      width,
+      row.label === undefined ? 0 : ARABIC_TWO_COLUMN_ROW_LEFT_BIAS
+    )),
   ];
+}
+
+function renderArabicCenteredLine(
+  row: string,
+  bodyWidth: number,
+  width: number
+): string {
+  return renderOuterRow(centerVisible(row, bodyWidth), bodyWidth, width);
 }
 
 function renderArabicStackedLine(
   row: string,
   blockWidth: number,
   bodyWidth: number,
-  width: number
+  width: number,
+  leftBias: number = 0
 ): string {
-  return renderOuterRow(centerVisible(padVisibleEnd(truncateVisibleCells(row, blockWidth), blockWidth), bodyWidth), bodyWidth, width);
+  return renderOuterRow(centerVisibleWithLeftBias(padVisibleEnd(truncateVisibleCells(row, blockWidth), blockWidth), bodyWidth, leftBias), bodyWidth, width);
 }
 
 function formatArabicStackedRow(row: ArabicStackedRow, blockWidth: number, labelWidth: number): string {
@@ -248,6 +266,9 @@ function formatArabicStackedRow(row: ArabicStackedRow, blockWidth: number, label
   const valueWidth = Math.max(1, blockWidth - labelWidth - gapWidth);
   const value = truncateVisibleCells(row.value, valueWidth);
   const label = truncateVisibleCells(row.label, labelWidth);
+  if (row.order === "tight-value-label") {
+    return padVisibleStart(`${value}${" ".repeat(gapWidth)}${label}`, blockWidth);
+  }
   if (row.order === "label-value") {
     return `${padVisibleEnd(label, labelWidth)}${" ".repeat(gapWidth)}${padVisibleStart(value, valueWidth)}`;
   }
@@ -529,11 +550,27 @@ function renderContentRow(row: string, contentWidth: number, width: number): str
 }
 
 function centerVisible(value: string, width: number): string {
+  return centerVisibleWithLeftBias(value, width, 0);
+}
+
+function centerVisibleWithLeftBias(value: string, width: number, leftBias: number): string {
   const clipped = truncateVisibleCells(value, width);
   const remaining = Math.max(0, width - stringWidth(clipped));
-  const left = Math.floor(remaining / 2);
+  const left = Math.max(0, Math.floor(remaining / 2) - Math.max(0, Math.floor(leftBias)));
   const right = remaining - left;
   return `${" ".repeat(left)}${clipped}${" ".repeat(right)}`;
+}
+
+function centerRowsVertically(rows: readonly string[], height: number): readonly string[] {
+  if (height <= rows.length) return rows;
+  const extraRows = height - rows.length;
+  const topRows = Math.floor(extraRows / 2);
+  const bottomRows = extraRows - topRows;
+  return [
+    ...Array.from({ length: topRows }, () => ""),
+    ...rows,
+    ...Array.from({ length: bottomRows }, () => ""),
+  ];
 }
 
 function renderOuterRow(row: string, contentWidth: number, width: number): string {

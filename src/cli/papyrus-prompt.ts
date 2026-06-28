@@ -3,7 +3,8 @@ import type { Readable, Writable } from "node:stream";
 import type { PromptUiContext } from "../contracts/ui.js";
 import { promptUiContextForLocale } from "../contracts/ui.js";
 import { createLineEditorState } from "../ui/input/lineEditor.js";
-import { parseKeypress } from "../ui/input/parseKeypress.js";
+import { createKeypressStreamDispatcher, type KeypressStreamDispatcher } from "../ui/input/keyPressStreamDispatcher.js";
+import type { ParsedKeypress } from "../ui/input/parseKeypress.js";
 import { createTerminalLifecycle, type TerminalLifecycle } from "../ui/input/terminalLifecycle.js";
 import { SecretPromptController } from "../ui/papyrus/input/secretPromptController.js";
 import { buildOnboardingPromptCardViewModel, type BuildOnboardingPromptCardInput } from "../ui/view-models/builders.js";
@@ -149,6 +150,7 @@ async function readPapyrusSecret(options: {
     let settled = false;
 
     const cleanup = () => {
+      keypressDispatcher?.dispose();
       detachSecretDataListener(options.input, onData);
       controller.clear();
       renderLoop.clear();
@@ -178,10 +180,11 @@ async function readPapyrusSecret(options: {
       }
     };
 
-    const onData = (chunk: string | Buffer | Uint8Array) => {
+    let keypressDispatcher: KeypressStreamDispatcher | undefined;
+
+    const dispatchParsedEvents = (events: readonly ParsedKeypress[]) => {
       if (settled) return;
-      const text = typeof chunk === "string" ? chunk : Buffer.from(chunk).toString("utf8");
-      for (const event of parseKeypress(text)) {
+      for (const event of events) {
         const result = controller.apply(event);
         render();
         if (result.intent?.type === "submit") {
@@ -193,6 +196,13 @@ async function readPapyrusSecret(options: {
           return;
         }
       }
+    };
+
+    keypressDispatcher = createKeypressStreamDispatcher({ onEvents: dispatchParsedEvents });
+
+    const onData = (chunk: string | Buffer | Uint8Array) => {
+      if (settled) return;
+      keypressDispatcher?.handle(chunk);
     };
 
     options.input.on("data", onData);

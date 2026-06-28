@@ -159,7 +159,7 @@ describe("interactive-select prompt card surface", () => {
     expect(rendered).toContain("Notes");
     expect(rendered).toContain("gpt-5.5");
     expect(rendered).toContain("qwen3-coder");
-    expect(rendered).toContain("↑↓ navigate · Enter select · / filter · Esc back");
+    expect(rendered).toContain("↑↓ navigate   ENTER select   CTRL+C exit");
     expect(latestFrame).toContain("❯ Local");
     expect(latestFrame).not.toContain("❯ OpenAI");
     expect(rendered).toContain("Selected: Local");
@@ -237,8 +237,8 @@ describe("interactive-select prompt card surface", () => {
     expect(latestFrame).toContain("qwen3-coder");
     expect(latestFrame).toContain("URL");
     expect(latestFrame).toContain("API key");
-    expect(latestFrame).toContain("Enter");
-    expect(latestFrame).toContain("Esc");
+    expect(latestFrame).toContain("ENTER");
+    expect(latestFrame).toContain("CTRL+C");
   });
 
   it("routes two-column setup choices without cells through the Papyrus setup menu", async () => {

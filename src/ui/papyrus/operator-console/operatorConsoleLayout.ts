@@ -90,14 +90,19 @@ function createRegionDescriptors(
   state: OperatorConsoleState,
   terminal: TerminalMetrics
 ): readonly RegionDescriptor[] {
+  if (state.mode === "setup") {
+    return createSetupRegionDescriptors(state, terminal);
+  }
+
   const descriptors: RegionDescriptor[] = [];
 
   if (state.startup !== undefined) {
+    const surfaceHeight = getStartupDashboardSurfaceDesiredHeight(state.startup, terminal.width, state.locale);
     descriptors.push({
       kind: "startupDashboard",
       priority: STARTUP_PRIORITY,
       minHeight: 1,
-      desiredHeight: getStartupDashboardSurfaceDesiredHeight(state.startup, terminal.width, state.locale),
+      desiredHeight: state.locale === "ar" ? Math.max(surfaceHeight, terminal.height - 2) : surfaceHeight,
     });
   }
 
@@ -188,6 +193,24 @@ function createRegionDescriptors(
     minHeight: 1,
     desiredHeight: 1,
   });
+
+  return descriptors;
+}
+
+function createSetupRegionDescriptors(
+  state: OperatorConsoleState,
+  terminal: TerminalMetrics
+): readonly RegionDescriptor[] {
+  const descriptors: RegionDescriptor[] = [];
+
+  if (state.setupPanel !== undefined) {
+    descriptors.push({
+      kind: "setupPanel",
+      priority: PROMPT_PRIORITY,
+      minHeight: 1,
+      desiredHeight: getSetupPanelSurfaceDesiredHeight(state.setupPanel, terminal.width),
+    });
+  }
 
   return descriptors;
 }

@@ -6,6 +6,8 @@ import {
 import type { OperatorConsoleLocale } from "./activeWorkCopy.js";
 import type { OperatorConsoleStyle } from "./operatorConsoleStyle.js";
 
+export type OperatorConsoleMode = "session" | "setup";
+
 export type TranscriptBlock = {
   readonly id: string;
   readonly role: "startup" | "user" | "assistant" | "system" | "tool" | "approval" | "summary";
@@ -209,6 +211,7 @@ export type SecretEntryPanelState = {
   readonly kind: "secret";
   readonly title: string;
   readonly description: string;
+  readonly locale?: OperatorConsoleLocale;
   readonly maskedValue?: string;
   readonly rawValue?: string;
   readonly envVar?: string;
@@ -224,6 +227,7 @@ export type TerminalMetrics = {
 };
 
 export type OperatorConsoleState = {
+  readonly mode: OperatorConsoleMode;
   readonly locale: OperatorConsoleLocale;
   readonly startup?: StartupDashboardState;
   readonly setupPanel?: SetupSurfaceState;
@@ -269,6 +273,7 @@ export const OPERATOR_CONSOLE_SURFACE_ORDER: readonly OperatorConsoleSurface[] =
 ] as const;
 
 export type CreateInitialOperatorConsoleStateInput = {
+  readonly mode?: OperatorConsoleMode;
   readonly locale?: OperatorConsoleLocale;
   readonly startup?: StartupDashboardState;
   readonly setupPanel?: SetupSurfaceState;
@@ -294,6 +299,7 @@ export function createInitialOperatorConsoleState(
   input: CreateInitialOperatorConsoleStateInput = {}
 ): OperatorConsoleState {
   return {
+    mode: input.mode ?? "session",
     locale: input.locale ?? "en",
     ...(input.startup === undefined ? {} : { startup: input.startup }),
     ...(input.setupPanel === undefined ? {} : { setupPanel: input.setupPanel }),

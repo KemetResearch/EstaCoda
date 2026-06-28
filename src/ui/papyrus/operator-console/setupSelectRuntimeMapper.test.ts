@@ -40,7 +40,7 @@ describe("Operator Console setup select runtime mapper", () => {
       statusLines: [{ text: "Current: OpenAI", tone: "active", direction: "ltr" }],
       locale: undefined,
       selectedRowId: "local",
-      footer: "↑↓ navigate · Enter select · / filter · Esc back",
+      footer: "↑↓ navigate   ENTER select   CTRL+C exit",
       rows: [
         { id: "openai", provider: "OpenAI", model: "gpt-5.5", status: "ready", notes: "API key set" },
         { id: "local", provider: "Local", model: "qwen3-coder", status: "offline", notes: "endpoint unset" },
@@ -103,6 +103,49 @@ describe("Operator Console setup select runtime mapper", () => {
     });
   });
 
+  it("maps columnless setup choices without route cells into a choice menu", () => {
+    const state = mapSetupSelectToSetupPanelState({
+      title: "Finalize configuration",
+      body: "Review the changes before applying.\n",
+      statusLines: [{ text: "Pending changes: Security", tone: "warning", direction: "ltr" }],
+      selectedIndex: 1,
+      options: [
+        {
+          id: "approve",
+          label: "Apply changes",
+          description: "Write reviewed setup changes.",
+        },
+        {
+          id: "cancel",
+          label: "Cancel",
+          description: "Leave setup unchanged.",
+          group: "navigation",
+        },
+      ],
+    });
+
+    expect(state).toMatchObject({
+      kind: "table",
+      layout: "choiceMenu",
+      title: "Finalize configuration",
+      statusLines: [{ text: "Pending changes: Security", tone: "warning", direction: "ltr" }],
+      selectedRowId: "cancel",
+      rows: [
+        {
+          id: "approve",
+          provider: "Apply changes",
+          status: "Write reviewed setup changes.",
+        },
+        {
+          id: "cancel",
+          provider: "Cancel",
+          status: "Leave setup unchanged.",
+          group: "navigation",
+        },
+      ],
+    });
+  });
+
   it("maps existing setup name/details cells without changing semantic option values", () => {
     const state = mapSetupSelectToSetupPanelState({
       title: "Primary provider",
@@ -131,7 +174,7 @@ describe("Operator Console setup select runtime mapper", () => {
         notes: "current",
       },
     ]);
-    expect(state?.footer).toBe("↑↓ navigate   ENTER select");
+    expect(state?.footer).toBe("↑↓ navigate   ENTER select   CTRL+C exit");
   });
 
   it("preserves Arabic copy and technical tokens", () => {
@@ -175,7 +218,7 @@ describe("Operator Console setup select runtime mapper", () => {
       model: "qwen3-coder",
       notes: "URL غير مضبوط",
     });
-    expect(state?.footer).toContain("Enter");
-    expect(state?.footer).toContain("Esc");
+    expect(state?.footer).toContain("ENTER");
+    expect(state?.footer).toContain("CTRL+C");
   });
 });

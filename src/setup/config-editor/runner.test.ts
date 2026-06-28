@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { tmpdir } from "node:os";
+import { PassThrough, Writable } from "node:stream";
 import type { Prompt } from "../../cli/prompt-contract.js";
 import type { SelectPromptInput } from "../../cli/interactive-select.js";
 import { WorkspaceTrustStore } from "../../security/workspace-trust-store.js";
@@ -159,6 +160,7 @@ describe("runConfigEditor", () => {
       tableMaxWidth: SelectPromptInput<unknown>["tableMaxWidth"];
       tableAlign: SelectPromptInput<unknown>["tableAlign"];
       showColumnHeaders: SelectPromptInput<unknown>["showColumnHeaders"];
+      statusLines: SelectPromptInput<unknown>["statusLines"];
       hint: string | undefined;
       values: unknown[];
     }> = [];
@@ -177,6 +179,7 @@ describe("runConfigEditor", () => {
         tableMaxWidth: input.tableMaxWidth,
         tableAlign: input.tableAlign,
         showColumnHeaders: input.showColumnHeaders,
+        statusLines: input.statusLines,
         hint: input.hint,
         values: input.options.map((option) => option.value),
       });
@@ -220,6 +223,7 @@ describe("runConfigEditor", () => {
     expect(prompts[0]?.tableMaxWidth).toBe(88);
     expect(prompts[0]?.tableAlign).toBe("right");
     expect(prompts[0]?.showColumnHeaders).toBe(false);
+    expect(prompts[0]?.statusLines).toBeUndefined();
     expect(prompts[0]?.hint).toBe("↑↓ navigate   ENTER select   CTRL+C exit");
     expect(prompts[0]?.labels).toContain("النموذج الأساسي");
     expect(prompts[0]?.descriptions).toContain("النموذج الافتراضي الذي يستخدمه الوكيل.");
@@ -251,6 +255,366 @@ describe("runConfigEditor", () => {
     expect(prompts[0]?.groups[exitActionIndex]).toBe("navigation");
     expect(prompts[0]?.groups[prompts[0]?.labels.indexOf("التحقق من الإعداد") ?? -1]).toBeUndefined();
     expect(prompts[0]?.groups[prompts[0]?.labels.indexOf("التشخيصات") ?? -1]).toBeUndefined();
+  });
+
+  it("routes setup editor action selection through setup console when provided", async () => {
+    await writeUserConfig(tempDir, localReadyConfig());
+    await trustWorkspace(tempDir, workspaceRoot);
+    const output: string[] = [];
+    const input = createTtyInput();
+    const setupOutput = createTtyOutput();
+    const prompt = fakePrompt();
+    const select = vi.fn(async () => {
+      throw new Error("base prompt select should not run for setup console action selection");
+    });
+    prompt.select = select;
+
+    const pending = runConfigEditor({
+      homeDir: tempDir,
+      workspaceRoot,
+      prompt,
+      setupConsole: { input, output: setupOutput },
+      applyExecutor: createReviewedSetupApplyExecutor({
+        homeDir: tempDir,
+        workspaceRoot,
+      }),
+      renderInitialOverview: false,
+      output: { write: (value) => output.push(value) },
+    });
+    await Promise.resolve();
+    input.write("\x1b[F\r");
+    const result = await pending;
+    const liveText = stripAnsi(setupOutput.text());
+
+    expect(result.completed).toBe(true);
+    expect(result.selectedActionId).toBe("exit");
+    expect(select).not.toHaveBeenCalled();
+    expect(liveText).toContain("Setup Editor");
+    expect(liveText).not.toContain("No changes applied");
+    expect(liveText).not.toContain("Workspace: trusted");
+    expect(liveText).not.toContain("Profile: default");
+    expect(liveText).not.toContain("Current: local/local-test-model");
+    expect(liveText).toContain("Exit without changes");
+    expect(liveText).not.toContain("Selected:");
+    expect(setupOutput.text()).not.toMatch(/\x1b\[3J|\x1b\[2J|\x1b\[H|\x1b\[\d+;\d+H/u);
+    expect(output.join("")).toContain("Exited setup editor without applying changes.");
+  });
+
+  it("routes provider Back through setup console and returns to the setup menu in place", async () => {
+    await writeUserConfig(tempDir, localReadyConfig());
+    await trustWorkspace(tempDir, workspaceRoot);
+    const output: string[] = [];
+    const input = createTtyInput();
+    const setupOutput = createTtyOutput();
+    const prompt = fakePrompt();
+    const select = vi.fn(async () => {
+      throw new Error("base prompt select should not run for setup console route cards");
+    });
+    prompt.select = select;
+
+    const pending = runConfigEditor({
+      homeDir: tempDir,
+      workspaceRoot,
+      prompt,
+      setupConsole: { input, output: setupOutput },
+      defaultActionId: "edit-primary-model-route",
+      flowEngine: flowEngine({ credentialAction: "collect", envVarName: "PR8_OPENAI_KEY" }),
+      output: { write: (value) => output.push(value) },
+    });
+    await Promise.resolve();
+    input.write("\x1b[F\x1b[A\r");
+    await vi.waitFor(() => {
+      expect(stripAnsi(setupOutput.text())).toContain("Setup Editor");
+    });
+    input.write("\x1b[F\r");
+
+    const result = await pending;
+    const liveText = stripAnsi(setupOutput.text());
+
+    expect(result.completed).toBe(true);
+    expect(result.selectedActionId).toBe("exit");
+    expect(select).not.toHaveBeenCalled();
+    expect(liveText).toContain("Primary Provider");
+    expect(liveText).toContain("Back");
+    expect(liveText).toContain("Setup Editor");
+    expect(liveText).toContain("Exit without changes");
+    expect(liveText).not.toContain("Selected:");
+    expect(setupOutput.text()).not.toMatch(/\x1b\[3J|\x1b\[2J|\x1b\[H|\x1b\[\d+;\d+H/u);
+    await expect(readFile(profileConfigPath(tempDir), "utf8")).resolves.toContain("\"provider\": \"local\"");
+  });
+
+  it("routes review confirmation cards through setup console without columns", async () => {
+    await writeUserConfig(tempDir, {
+      ...localReadyConfig(),
+      security: { approvalMode: "adaptive" },
+    });
+    await trustWorkspace(tempDir, workspaceRoot);
+    const output: string[] = [];
+    const input = createTtyInput();
+    const setupOutput = createTtyOutput();
+    const prompt = fakePrompt();
+    const select = vi.fn(async () => {
+      throw new Error("base prompt select should not run for setup console review cards");
+    });
+    prompt.select = select;
+
+    const pending = runConfigEditor({
+      homeDir: tempDir,
+      workspaceRoot,
+      prompt,
+      setupConsole: { input, output: setupOutput },
+      defaultActionId: "edit-security-mode",
+      applyExecutor: createReviewedSetupApplyExecutor({
+        homeDir: tempDir,
+        workspaceRoot,
+        collectVerification: () => readyVerification(profileConfigPath(tempDir)),
+      }),
+      output: { write: (value) => output.push(value) },
+    });
+    await vi.waitFor(() => {
+      expect(stripAnsi(setupOutput.text())).toContain("Security Mode");
+    });
+    input.write("\x1b[H\r");
+    await vi.waitFor(() => {
+      expect(stripAnsi(setupOutput.text())).toContain("Finalize Configuration");
+    });
+    input.write("\r");
+
+    const result = await pending;
+    const liveText = stripAnsi(setupOutput.text());
+    const config = JSON.parse(await readFile(profileConfigPath(tempDir), "utf8")) as {
+      security?: { approvalMode?: string };
+    };
+
+    expect(result.completed).toBe(true);
+    expect(result.selectedActionId).toBe("edit-security-mode");
+    expect(select).not.toHaveBeenCalled();
+    expect(liveText).toContain("Security Mode");
+    expect(liveText).toContain("Finalize Configuration");
+    expect(liveText).toContain("Pending changes: Security");
+    expect(liveText).toContain("Confirm");
+    expect(liveText).not.toContain("Selected:");
+    expect(setupOutput.text()).not.toMatch(/\x1b\[3J|\x1b\[2J|\x1b\[H|\x1b\[\d+;\d+H/u);
+    expect(config.security?.approvalMode).toBe("strict");
+  });
+
+  it("renders read-only verification output through setup console without changing command output", async () => {
+    await writeUserConfig(tempDir, localReadyConfig());
+    await trustWorkspace(tempDir, workspaceRoot);
+    const output: string[] = [];
+    const input = createTtyInput();
+    const setupOutput = createTtyOutput();
+
+    const result = await runConfigEditor({
+      homeDir: tempDir,
+      workspaceRoot,
+      prompt: fakePrompt(),
+      setupConsole: { input, output: setupOutput },
+      defaultActionId: "run-readonly-verification",
+      renderInitialOverview: false,
+      output: { write: (value) => output.push(value) },
+    });
+    const liveText = stripAnsi(setupOutput.text());
+
+    expect(result.completed).toBe(true);
+    expect(result.selectedActionId).toBe("verify-setup");
+    expect(result.finalDecision?.kind).toBe("verify-readonly");
+    expect(result.setupConsoleRenderedOutput).toBe(true);
+    expect(result.output).toContain("Setup verification prepared");
+    expect(output.join("")).toBe("Setup verification prepared.\n");
+    expect(liveText).toContain("EstaCoda Verify");
+    expect(liveText).toContain("Review setup output without applying changes.");
+    expect(liveText).toContain("Read-only diagnostics");
+    expect(liveText).toContain("State");
+    expect(liveText).toContain("configured-ready");
+    expect(liveText).toContain("Setup path");
+    expect(liveText).toContain("verify-readonly");
+    expect(liveText).toContain("Read-only output");
+    expect(liveText).not.toContain("Selected:");
+    expect(setupOutput.text()).not.toMatch(/\x1b\[3J|\x1b\[2J|\x1b\[H|\x1b\[\d+;\d+H/u);
+  });
+
+  it("renders diagnostics output through setup console without changing diagnostic text", async () => {
+    await writeUserConfig(tempDir, localReadyConfig());
+    await trustWorkspace(tempDir, workspaceRoot);
+    const output: string[] = [];
+    const input = createTtyInput();
+    const setupOutput = createTtyOutput();
+
+    const result = await runConfigEditor({
+      homeDir: tempDir,
+      workspaceRoot,
+      prompt: fakePrompt(),
+      setupConsole: { input, output: setupOutput },
+      defaultActionId: "show-diagnostics",
+      renderInitialOverview: false,
+      output: { write: (value) => output.push(value) },
+    });
+    const liveText = stripAnsi(setupOutput.text());
+
+    expect(result.completed).toBe(true);
+    expect(result.selectedActionId).toBe("show-diagnostics");
+    expect(result.setupConsoleRenderedOutput).toBe(true);
+    expect(result.output).toContain("Setup diagnostics");
+    expect(result.output).toContain("State: configured-ready");
+    expect(output.join("")).toContain("Setup diagnostics");
+    expect(output.join("")).toContain("State: configured-ready");
+    expect(liveText).toContain("Setup Diagnostics");
+    expect(liveText).toContain("Review setup output without applying changes.");
+    expect(liveText).toContain("Read-only diagnostics");
+    expect(liveText).toContain("State");
+    expect(liveText).toContain("configured-ready");
+    expect(liveText).toContain("Setup path");
+    expect(liveText).toContain("configured-menu");
+    expect(liveText).toContain("Read-only output");
+    expect(liveText).not.toContain("Selected:");
+    expect(setupOutput.text()).not.toMatch(/\x1b\[3J|\x1b\[2J|\x1b\[H|\x1b\[\d+;\d+H/u);
+  });
+
+  it("routes setup credential entry through masked setup console secret panel", async () => {
+    await writeUserConfig(tempDir, localReadyConfig());
+    await trustWorkspace(tempDir, workspaceRoot);
+    const output: string[] = [];
+    const input = createTtyInput();
+    const setupOutput = createTtyOutput();
+    const rawSecret = "sk-live-setup-console-secret";
+    const select = vi.fn(async () => {
+      throw new Error("base prompt select should not run for setup console credential flow");
+    });
+    const prompt = Object.assign(
+      async (_question: string, promptOptions?: { secret?: boolean }) => {
+        if (promptOptions?.secret === true) {
+          throw new Error("base secret prompt should not run for setup console credential flow");
+        }
+        return "";
+      },
+      {
+        uiContext: { locale: "en" as const, direction: "ltr" as const },
+        select,
+      }
+    ) as Prompt;
+
+    const pending = runConfigEditor({
+      homeDir: tempDir,
+      workspaceRoot,
+      prompt,
+      setupConsole: { input, output: setupOutput },
+      defaultActionId: "edit-primary-model-route",
+      flowEngine: flowEngine({ credentialAction: "collect", envVarName: "PR8_CONSOLE_KEY" }),
+      applyExecutor: createReviewedSetupApplyExecutor({
+        homeDir: tempDir,
+        workspaceRoot,
+        collectVerification: () => readyVerification(profileConfigPath(tempDir)),
+      }),
+      output: { write: (value) => output.push(value) },
+    });
+
+    await vi.waitFor(() => {
+      expect(stripAnsi(setupOutput.text())).toContain("Primary Provider");
+    });
+    input.write("\r");
+    await vi.waitFor(() => {
+      expect(stripAnsi(setupOutput.text())).toContain("OpenAI Setup");
+    });
+    input.write("\r");
+    await vi.waitFor(() => {
+      expect(stripAnsi(setupOutput.text())).toContain("Primary Model");
+    });
+    input.write("\r");
+    await vi.waitFor(() => {
+      expect(stripAnsi(setupOutput.text())).toContain("API Key");
+    });
+    input.write(`${rawSecret}\r`);
+    await vi.waitFor(() => {
+      expect(stripAnsi(setupOutput.text())).toContain("Finalize Configuration");
+    });
+    input.write("\r");
+
+    const result = await pending;
+    const liveText = stripAnsi(setupOutput.text());
+    const envFile = await readFile(profileEnvPath(tempDir), "utf8");
+
+    expect(result.completed).toBe(true);
+    expect(result.selectedActionId).toBe("edit-primary-model-route");
+    expect(select).not.toHaveBeenCalled();
+    expect(envFile).toContain(`PR8_CONSOLE_KEY="${rawSecret}"`);
+    expect(liveText).toContain("API Key");
+    expect(liveText).toContain("••••••••");
+    expect(liveText).not.toContain(rawSecret);
+    expect(output.join("")).not.toContain(rawSecret);
+    expect(JSON.stringify(result)).not.toContain(rawSecret);
+    expect(setupOutput.text()).not.toMatch(/\x1b\[3J|\x1b\[2J|\x1b\[H|\x1b\[\d+;\d+H/u);
+  });
+
+  it("does not persist typed setup-console secret text when secret entry is cancelled", async () => {
+    await writeUserConfig(tempDir, localReadyConfig());
+    await trustWorkspace(tempDir, workspaceRoot);
+    const output: string[] = [];
+    const input = createTtyInput();
+    const setupOutput = createTtyOutput();
+    const cancelledSecret = "sk-cancelled-console-secret";
+    const prompt = Object.assign(
+      async (_question: string, promptOptions?: { secret?: boolean }) => {
+        if (promptOptions?.secret === true) {
+          throw new Error("base secret prompt should not run for setup console credential flow");
+        }
+        return "";
+      },
+      {
+        uiContext: { locale: "en" as const, direction: "ltr" as const },
+        select: vi.fn(async () => {
+          throw new Error("base prompt select should not run for setup console credential flow");
+        }),
+      }
+    ) as Prompt;
+
+    const pending = runConfigEditor({
+      homeDir: tempDir,
+      workspaceRoot,
+      prompt,
+      setupConsole: { input, output: setupOutput },
+      defaultActionId: "edit-primary-model-route",
+      flowEngine: flowEngine({ credentialAction: "collect", envVarName: "PR8_CANCELLED_CONSOLE_KEY" }),
+      applyExecutor: createReviewedSetupApplyExecutor({
+        homeDir: tempDir,
+        workspaceRoot,
+        collectVerification: () => readyVerification(profileConfigPath(tempDir)),
+      }),
+      output: { write: (value) => output.push(value) },
+    });
+
+    await vi.waitFor(() => {
+      expect(stripAnsi(setupOutput.text())).toContain("Primary Provider");
+    });
+    input.write("\r");
+    await vi.waitFor(() => {
+      expect(stripAnsi(setupOutput.text())).toContain("OpenAI Setup");
+    });
+    input.write("\r");
+    await vi.waitFor(() => {
+      expect(stripAnsi(setupOutput.text())).toContain("Primary Model");
+    });
+    input.write("\r");
+    await vi.waitFor(() => {
+      expect(stripAnsi(setupOutput.text())).toContain("API Key");
+    });
+    input.write(`${cancelledSecret}\x1b`);
+    await vi.waitFor(() => {
+      expect(stripAnsi(setupOutput.text())).toContain("Finalize Configuration");
+    });
+    input.write("\r");
+
+    const result = await pending;
+    const liveText = stripAnsi(setupOutput.text());
+    const envFile = await readFile(profileEnvPath(tempDir), "utf8").catch(() => "");
+
+    expect(result.completed).toBe(true);
+    expect(result.selectedActionId).toBe("edit-primary-model-route");
+    expect(envFile).not.toContain(cancelledSecret);
+    expect(envFile).not.toContain("PR8_CANCELLED_CONSOLE_KEY");
+    expect(liveText).not.toContain(cancelledSecret);
+    expect(output.join("")).not.toContain(cancelledSecret);
+    expect(JSON.stringify(result)).not.toContain(cancelledSecret);
   });
 
   it("opts comparative setup editor selectors into columns without changing selected values", async () => {
@@ -478,6 +842,9 @@ describe("runConfigEditor", () => {
     expect(trustInput?.options.find((option) => option.id === "cancel")?.group).toBe("navigation");
     expect(reviewInput?.options.find((option) => option.id === "approve")?.group).toBeUndefined();
     expect(reviewInput?.options.find((option) => option.id === "cancel")?.group).toBe("navigation");
+    expect(reviewInput?.statusLines).toEqual([
+      { text: "Pending changes: Security", tone: "warning", direction: "ltr" },
+    ]);
     expect(postApplyInput?.options.find((option) => option.id === "exit")?.group).toBe("navigation");
     expect(autoLaunchInput?.options.find((option) => option.id === "browser-auto-launch-no")?.group).toBeUndefined();
     expect(gatewayInput?.options.find((option) => option.id === "gateway-no")?.group).toBeUndefined();
@@ -4822,6 +5189,51 @@ function trackingPrompt(options: { readonly values?: readonly unknown[]; readonl
     value: () => secretPromptCount,
   });
   return prompt;
+}
+
+function createTtyInput(): PassThrough & {
+  isTTY: boolean;
+  isRaw: boolean;
+  setRawMode(mode: boolean): void;
+} {
+  const input = new PassThrough() as PassThrough & {
+    isTTY: boolean;
+    isRaw: boolean;
+    setRawMode(mode: boolean): void;
+  };
+  input.isTTY = true;
+  input.isRaw = false;
+  input.setRawMode = (mode: boolean) => {
+    input.isRaw = mode;
+  };
+  return input;
+}
+
+function createTtyOutput(): Writable & {
+  readonly columns: number;
+  readonly rows: number;
+  readonly isTTY: boolean;
+  text(): string;
+} {
+  const writes: string[] = [];
+  return new class extends Writable {
+    readonly columns = 88;
+    readonly rows = 24;
+    readonly isTTY = true;
+
+    _write(chunk: Buffer | string, _encoding: BufferEncoding, callback: (error?: Error | null) => void): void {
+      writes.push(typeof chunk === "string" ? chunk : chunk.toString("utf8"));
+      callback();
+    }
+
+    text(): string {
+      return writes.join("");
+    }
+  }();
+}
+
+function stripAnsi(value: string): string {
+  return value.replace(/\x1b\[[0-9;?]*[ -/]*[@-~]/gu, "");
 }
 
 function gatewayServiceActions(input: {

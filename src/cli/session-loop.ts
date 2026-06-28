@@ -1,5 +1,6 @@
 import { stdin as defaultInput, stdout as defaultOutput } from "node:process";
 import { join } from "node:path";
+import type { Readable } from "node:stream";
 import type { Runtime } from "../runtime/create-runtime.js";
 import type { RuntimeEvent } from "../contracts/runtime-event.js";
 import type { SessionEvent } from "../contracts/session.js";
@@ -23,6 +24,7 @@ import { WorkspaceTrustStore } from "../security/workspace-trust-store.js";
 import { storeCapabilitySecret, type SetupNeededMetadata } from "../capabilities/capability-setup.js";
 import { defaultImageModel } from "../contracts/image-generation.js";
 import type { Prompt, PromptOptions } from "./prompt-contract.js";
+import type { SelectPromptInput } from "./interactive-select.js";
 import { createInteractivePrompt } from "./create-interactive-prompt.js";
 import type { ToolExecutionRecord } from "../tools/tool-executor.js";
 import { buildToolsMenuViewModel, buildSkillsMenuViewModel } from "./slash-menu.js";
@@ -62,7 +64,9 @@ import {
   type SteerState,
   type TurnActivityState,
 } from "../ui/papyrus/operator-console/index.js";
-import { parseKeypress, type ParsedKeypress } from "../ui/input/parseKeypress.js";
+import type { ParsedKeypress } from "../ui/input/parseKeypress.js";
+import { createKeypressStreamDispatcher } from "../ui/input/keyPressStreamDispatcher.js";
+import { createTerminalLifecycle } from "../ui/input/terminalLifecycle.js";
 import { centerVisibleBlock, measureVisibleWidth, truncateVisible } from "../ui/renderers/layout.js";
 import { chromeCopy } from "../ui/cli-ui-copy.js";
 import { resolveShellHistoryMode } from "./shell-history-mode.js";
@@ -99,6 +103,11 @@ import {
   type ProviderRouteServingState,
   type StatusRailTiming,
 } from "./session-status-rail.js";
+import {
+  isSetupConsoleExit,
+  withSetupConsolePrompt,
+  type SetupConsolePromptAdapterOptions,
+} from "../setup/config-editor/setupConsolePromptAdapter.js";
 
 export type SessionLoopOptions = {
   runtime: Runtime;
@@ -462,21 +471,36 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
       }
 
       if (text.startsWith("/")) {
-        const shouldExit = await handleSlashCommand({
-          text,
-          runtime,
-          output,
-          renderer,
-          refreshRuntime: options.refreshRuntime,
-          switchRuntime: options.switchRuntime,
-          modelSwitchContext: options.modelSwitchContext,
-          prompt,
-          env: options.env,
-          workspaceRoot: options.workspaceRoot,
-          homeDir: options.homeDir,
-          cronRuntimeFactory: options.cronRuntimeFactory,
-          onSessionCompacted: ({ postTokens }) => applyCompactionRailReset(postTokens)
-        });
+        const slashPrompt = operatorConsoleEnabled
+          ? withSetupConsolePrompt(prompt, {
+              input: cliInput as unknown as Readable,
+              output: output as unknown as SetupConsolePromptAdapterOptions["output"],
+              style: operatorConsoleStyle,
+            })
+          : prompt;
+        let shouldExit: Awaited<ReturnType<typeof handleSlashCommand>>;
+        try {
+          shouldExit = await handleSlashCommand({
+            text,
+            runtime,
+            output,
+            renderer,
+            refreshRuntime: options.refreshRuntime,
+            switchRuntime: options.switchRuntime,
+            modelSwitchContext: options.modelSwitchContext,
+            prompt: slashPrompt,
+            env: options.env,
+            workspaceRoot: options.workspaceRoot,
+            homeDir: options.homeDir,
+            cronRuntimeFactory: options.cronRuntimeFactory,
+            onSessionCompacted: ({ postTokens }) => applyCompactionRailReset(postTokens)
+          });
+        } catch (error) {
+          if (isSetupConsoleExit(error)) {
+            continue;
+          }
+          throw error;
+        }
 
         if (typeof shouldExit !== "boolean") {
           await runtime.dispose();
@@ -699,21 +723,29 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
             return undefined;
           }
 
-          const wasRaw = cliInput.isRaw === true;
+          const lifecycle = createTerminalLifecycle({
+            stdin: cliInput,
+            stdout: output as NodeJS.WriteStream,
+            hideCursor: false,
+          });
+          const keypressDispatcher = createKeypressStreamDispatcher({
+            onEvents: (events: readonly ParsedKeypress[]) => {
+              for (const event of events) {
+                handleOperatorConsoleSteerKey(event);
+              }
+            },
+          });
+
           const onData = (chunk: string | Buffer | Uint8Array) => {
-            const textChunk = typeof chunk === "string" ? chunk : Buffer.from(chunk).toString("utf8");
-            for (const event of parseKeypress(textChunk)) {
-              handleOperatorConsoleSteerKey(event);
-            }
+            keypressDispatcher.handle(chunk);
           };
+          lifecycle.start();
           cliInput.on("data", onData);
-          cliInput.setRawMode?.(true);
           cliInput.resume();
           return () => {
+            keypressDispatcher.dispose();
             cliInput.off("data", onData);
-            if (!wasRaw) {
-              cliInput.setRawMode?.(false);
-            }
+            lifecycle.stop();
           };
         }
 
@@ -1594,20 +1626,40 @@ async function handleSessionModelPicker(
   }
 
   const cancel = "__cancel__";
+  const currentRoute = runtimeModelRoute(input.runtime);
   const provider = await input.prompt.select<string>({
     title: "Select provider",
     body: "Select the provider to use for this session only.",
+    columns: sessionModelPickerColumns(),
     options: [
       ...providers.map((candidate) => ({
+        id: candidate.id,
         value: candidate.id,
         label: candidate.displayName,
-        description: candidate.baseUrl ?? candidate.id
+        description: candidate.baseUrl ?? candidate.id,
+        cells: {
+          name: candidate.displayName,
+          details: candidate.baseUrl ?? candidate.id,
+        },
+        current: candidate.id === currentRoute?.provider,
       })),
-      { value: cancel, label: "Cancel", description: "Keep the current session model" }
+      {
+        id: "cancel",
+        value: cancel,
+        label: "Cancel",
+        description: "Keep the current session model",
+        cells: {
+          name: "Cancel",
+          details: "Keep the current session model",
+        },
+        group: "navigation",
+      }
     ],
     fallbackPrompt: "Provider number > ",
     selectedLabel: "Provider",
-    surface: "promptCard"
+    surface: "promptCard",
+    hint: "↑↓ navigate   ENTER select   CTRL+C exit",
+    showColumnHeaders: false,
   });
   if (provider === cancel) {
     input.output.write("No changes were made.\n\n");
@@ -1623,21 +1675,44 @@ async function handleSessionModelPicker(
   const model = await input.prompt.select<string>({
     title: "Select model",
     body: "Select the model to use for this session only.",
+    columns: sessionModelPickerColumns(),
     options: [
       ...models.map((candidate) => ({
+        id: candidate.id,
         value: candidate.id,
         label: candidate.id,
         description: [
           candidate.profile.supportsTools ? "tools" : undefined,
           candidate.profile.supportsVision ? "vision" : undefined,
           `${candidate.profile.contextWindowTokens} tokens`
-        ].filter((part) => part !== undefined).join(" · ")
+        ].filter((part) => part !== undefined).join(" · "),
+        cells: {
+          name: candidate.id,
+          details: [
+            candidate.profile.supportsTools ? "tools" : undefined,
+            candidate.profile.supportsVision ? "vision" : undefined,
+            `${candidate.profile.contextWindowTokens} tokens`
+          ].filter((part) => part !== undefined).join(" · "),
+        },
+        current: provider === currentRoute?.provider && candidate.id === currentRoute?.model,
       })),
-      { value: cancel, label: "Cancel", description: "Keep the current session model" }
+      {
+        id: "cancel",
+        value: cancel,
+        label: "Cancel",
+        description: "Keep the current session model",
+        cells: {
+          name: "Cancel",
+          details: "Keep the current session model",
+        },
+        group: "navigation",
+      }
     ],
     fallbackPrompt: "Model number > ",
     selectedLabel: "Model",
-    surface: "promptCard"
+    surface: "promptCard",
+    hint: "↑↓ navigate   ENTER select   CTRL+C exit",
+    showColumnHeaders: false,
   });
   if (model === cancel) {
     input.output.write("No changes were made.\n\n");
@@ -1645,6 +1720,22 @@ async function handleSessionModelPicker(
   }
 
   return handleSessionModelSet(input, `${provider}/${model}`);
+}
+
+function sessionModelPickerColumns(): NonNullable<SelectPromptInput<string>["columns"]> {
+  return [
+    { key: "name", header: "Name" },
+    { key: "details", header: "Details" },
+  ];
+}
+
+function runtimeModelRoute(runtime: Runtime): { readonly provider: string; readonly model: string } | undefined {
+  const entries = runtime.getModelInfo().entries;
+  const provider = entries.find((entry) => entry.key === "provider")?.value;
+  const model = entries.find((entry) => entry.key === "model")?.value;
+  return provider === undefined || model === undefined
+    ? undefined
+    : { provider: String(provider), model: String(model) };
 }
 
 async function refreshCurrentRuntime(input: HandleSlashCommandInput): Promise<Runtime | undefined> {
