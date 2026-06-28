@@ -1,7 +1,8 @@
 import type { Writable } from "node:stream";
 import { promptUiContextForLocale, type PromptUiContext } from "../contracts/ui.js";
 import { commandRegistry } from "./command-registry.js";
-import { parseKeypress, type ParsedKeypress } from "../ui/input/parseKeypress.js";
+import type { ParsedKeypress } from "../ui/input/parseKeypress.js";
+import { createKeypressStreamDispatcher, type KeypressStreamDispatcher } from "../ui/input/keyPressStreamDispatcher.js";
 import { applyKeypress, createLineEditorState, type LineEditorState } from "../ui/input/lineEditor.js";
 import { createTerminalLifecycle, type TerminalLifecycle } from "../ui/input/terminalLifecycle.js";
 import { createSlashCommandSuggestionProvider, type SlashCommandSuggestionMetadata } from "../ui/papyrus/input/providers/slashCommandProvider.js";
@@ -293,7 +294,10 @@ export class RawPromptController {
         return false;
       };
 
+      let keypressDispatcher: KeypressStreamDispatcher | undefined;
+
       const cleanup = () => {
+        keypressDispatcher?.dispose();
         stopStatusTicker();
         detachDataListener(this.#input, onData);
         dismissCurrentTypeahead();
@@ -387,10 +391,9 @@ export class RawPromptController {
         };
       };
 
-      const onData = (chunk: string | Buffer | Uint8Array) => {
+      const dispatchParsedEvents = (events: readonly ParsedKeypress[]) => {
         if (settled) return;
-        const text = typeof chunk === "string" ? chunk : Buffer.from(chunk).toString("utf8");
-        for (const event of parseKeypress(text)) {
+        for (const event of events) {
           if (this.#operatorConsole?.enabled === true && event.type === "paste") {
             addPasteAttachment(event.text);
             continue;
@@ -424,6 +427,13 @@ export class RawPromptController {
           }
           updateState(result.state);
         }
+      };
+
+      keypressDispatcher = createKeypressStreamDispatcher({ onEvents: dispatchParsedEvents });
+
+      const onData = (chunk: string | Buffer | Uint8Array) => {
+        if (settled) return;
+        keypressDispatcher?.handle(chunk);
       };
 
       this.#input.on("data", onData);

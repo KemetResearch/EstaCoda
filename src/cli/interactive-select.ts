@@ -15,7 +15,8 @@ import {
   type SelectKeyEvent,
 } from "../ui/papyrus/widgets/selectKeymap.js";
 import type { PapyrusOption } from "../ui/papyrus/widgets/optionMap.js";
-import { parseKeypress, type ParsedKeypress } from "../ui/input/parseKeypress.js";
+import type { ParsedKeypress } from "../ui/input/parseKeypress.js";
+import { createKeypressStreamDispatcher } from "../ui/input/keyPressStreamDispatcher.js";
 import {
   createOperatorConsoleStyle,
   mapSetupSelectToSetupPanelState,
@@ -118,6 +119,7 @@ async function ttySelect<T>(input: Readable, output: Writable, selection: Select
         return;
       }
       restored = true;
+      keypressDispatcher.dispose();
       ttyInput.off("data", onData);
       if (!wasRaw) {
         ttyInput.setRawMode(false);
@@ -138,30 +140,35 @@ async function ttySelect<T>(input: Readable, output: Writable, selection: Select
       resolve(value);
     };
 
+    const keypressDispatcher = createKeypressStreamDispatcher({
+      onEvents: (events) => {
+        for (const keypress of events) {
+          if (keypress.type === "key" && keypress.ctrl === true && keypress.key === "c") {
+            restoreTerminal();
+            output.write("\n");
+            process.emit("SIGINT");
+            return;
+          }
+          const event = selectKeyEventFromParsedKeypress(keypress);
+          if (event === undefined) {
+            continue;
+          }
+          const result = applySelectKey(selectState, event);
+          selectState = result.state;
+          if (result.intent?.type === "selected") {
+            const selectedIndex = focusedSelectionIndex(selectState);
+            finish(selection.options[selectedIndex]?.value ?? selection.options[0]!.value, selectedIndex);
+            return;
+          }
+          if (result.intent?.type === "focus-changed" || result.intent === undefined) {
+            renderSafely();
+          }
+        }
+      },
+    });
+
     const onData = (chunk: string | Buffer | Uint8Array) => {
-      const text = typeof chunk === "string" ? chunk : Buffer.from(chunk).toString("utf8");
-      for (const keypress of parseKeypress(text)) {
-        if (keypress.type === "key" && keypress.ctrl === true && keypress.key === "c") {
-          restoreTerminal();
-          output.write("\n");
-          process.emit("SIGINT");
-          return;
-        }
-        const event = selectKeyEventFromParsedKeypress(keypress);
-        if (event === undefined) {
-          continue;
-        }
-        const result = applySelectKey(selectState, event);
-        selectState = result.state;
-        if (result.intent?.type === "selected") {
-          const selectedIndex = focusedSelectionIndex(selectState);
-          finish(selection.options[selectedIndex]?.value ?? selection.options[0]!.value, selectedIndex);
-          return;
-        }
-        if (result.intent?.type === "focus-changed" || result.intent === undefined) {
-          renderSafely();
-        }
-      }
+      keypressDispatcher.handle(chunk);
     };
 
     ttyInput.on("data", onData);

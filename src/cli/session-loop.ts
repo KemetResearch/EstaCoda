@@ -62,7 +62,9 @@ import {
   type SteerState,
   type TurnActivityState,
 } from "../ui/papyrus/operator-console/index.js";
-import { parseKeypress, type ParsedKeypress } from "../ui/input/parseKeypress.js";
+import type { ParsedKeypress } from "../ui/input/parseKeypress.js";
+import { createKeypressStreamDispatcher } from "../ui/input/keyPressStreamDispatcher.js";
+import { createTerminalLifecycle } from "../ui/input/terminalLifecycle.js";
 import { centerVisibleBlock, measureVisibleWidth, truncateVisible } from "../ui/renderers/layout.js";
 import { chromeCopy } from "../ui/cli-ui-copy.js";
 import { resolveShellHistoryMode } from "./shell-history-mode.js";
@@ -699,21 +701,29 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
             return undefined;
           }
 
-          const wasRaw = cliInput.isRaw === true;
+          const lifecycle = createTerminalLifecycle({
+            stdin: cliInput,
+            stdout: output as NodeJS.WriteStream,
+            hideCursor: false,
+          });
+          const keypressDispatcher = createKeypressStreamDispatcher({
+            onEvents: (events: readonly ParsedKeypress[]) => {
+              for (const event of events) {
+                handleOperatorConsoleSteerKey(event);
+              }
+            },
+          });
+
           const onData = (chunk: string | Buffer | Uint8Array) => {
-            const textChunk = typeof chunk === "string" ? chunk : Buffer.from(chunk).toString("utf8");
-            for (const event of parseKeypress(textChunk)) {
-              handleOperatorConsoleSteerKey(event);
-            }
+            keypressDispatcher.handle(chunk);
           };
+          lifecycle.start();
           cliInput.on("data", onData);
-          cliInput.setRawMode?.(true);
           cliInput.resume();
           return () => {
+            keypressDispatcher.dispose();
             cliInput.off("data", onData);
-            if (!wasRaw) {
-              cliInput.setRawMode?.(false);
-            }
+            lifecycle.stop();
           };
         }
 

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { parseKeypress } from "./parseKeypress.js";
+import { createInitialKeypressParseState, parseKeypress, parseKeypressStream } from "./parseKeypress.js";
 
 describe("parseKeypress", () => {
   it("parses printable ASCII text", () => {
@@ -110,5 +110,92 @@ describe("parseKeypress", () => {
 
   it("preserves unknown CSI sequences safely", () => {
     expect(parseKeypress("\x1b[999~")).toEqual([{ type: "unknown", sequence: "\x1b[999~" }]);
+  });
+});
+
+describe("parseKeypressStream", () => {
+  it("preserves multiline bracketed paste across data chunks", () => {
+    let state = createInitialKeypressParseState();
+
+    let parsed = parseKeypressStream(state, "\x1b[200~line one\n");
+    expect(parsed.events).toEqual([]);
+    state = parsed.state;
+
+    parsed = parseKeypressStream(state, "line two\r\nline three\x1b[201~");
+    expect(parsed.events).toEqual([
+      { type: "paste", text: "line one\nline two\r\nline three" },
+    ]);
+    expect(parsed.state).toEqual(createInitialKeypressParseState());
+  });
+
+  it("preserves split bracketed paste start markers", () => {
+    let state = createInitialKeypressParseState();
+
+    let parsed = parseKeypressStream(state, "\x1b[20");
+    expect(parsed.events).toEqual([]);
+    state = parsed.state;
+
+    parsed = parseKeypressStream(state, "0~hello\x1b[201~");
+    expect(parsed.events).toEqual([{ type: "paste", text: "hello" }]);
+    expect(parsed.state).toEqual(createInitialKeypressParseState());
+  });
+
+  it("preserves bracketed paste start markers split after escape", () => {
+    let state = createInitialKeypressParseState();
+
+    let parsed = parseKeypressStream(state, "\x1b");
+    expect(parsed.events).toEqual([]);
+    state = parsed.state;
+
+    parsed = parseKeypressStream(state, "[200~hello\x1b[201~");
+    expect(parsed.events).toEqual([{ type: "paste", text: "hello" }]);
+    expect(parsed.state).toEqual(createInitialKeypressParseState());
+  });
+
+  it("preserves split bracketed paste end markers", () => {
+    let state = createInitialKeypressParseState();
+
+    let parsed = parseKeypressStream(state, "\x1b[200~hello\x1b[20");
+    expect(parsed.events).toEqual([]);
+    state = parsed.state;
+
+    parsed = parseKeypressStream(state, "1~");
+    expect(parsed.events).toEqual([{ type: "paste", text: "hello" }]);
+    expect(parsed.state).toEqual(createInitialKeypressParseState());
+  });
+
+  it("flushes a standalone escape key", () => {
+    let state = createInitialKeypressParseState();
+
+    const parsed = parseKeypressStream(state, "\x1b");
+    expect(parsed.events).toEqual([]);
+    state = parsed.state;
+
+    expect(parseKeypressStream(state, null).events).toEqual([{ type: "key", key: "escape" }]);
+  });
+
+  it("treats buffered escape as standalone before ordinary text", () => {
+    let state = createInitialKeypressParseState();
+
+    const parsed = parseKeypressStream(state, "\x1b");
+    expect(parsed.events).toEqual([]);
+    state = parsed.state;
+
+    expect(parseKeypressStream(state, "0i").events).toEqual([
+      { type: "key", key: "escape" },
+      { type: "text", text: "0i" },
+    ]);
+  });
+
+  it("flushes incomplete paste as one paste event", () => {
+    let state = createInitialKeypressParseState();
+
+    const parsed = parseKeypressStream(state, "\x1b[200~partial\npaste");
+    expect(parsed.events).toEqual([]);
+    state = parsed.state;
+
+    expect(parseKeypressStream(state, null).events).toEqual([
+      { type: "paste", text: "partial\npaste" },
+    ]);
   });
 });
