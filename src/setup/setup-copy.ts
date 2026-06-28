@@ -521,6 +521,8 @@ export const SETUP_COPY_ENTRIES = [
   copy("setupEditor.status.workspace.notTrusted", "not trusted", "غير موثوقة", [], "workspace-trust"),
   copy("setupEditor.status.profile", "Profile", "الملف", [], "config-summary"),
   copy("setupEditor.status.current", "Current", "الحالي", [], "provider-selection"),
+  copy("setupEditor.readOnlyPanel.description", "Review setup output without applying changes.", "راجع مخرجات الإعداد دون تطبيق تغييرات.", [], "setup-verification"),
+  copy("setupEditor.readOnlyPanel.footer", "Read-only output", "مخرجات للقراءة فقط", [], "setup-verification"),
   copy("setupEditor.prompt.postApply.title", "Setup next action", "الإجراء التالي للإعداد", [], "agent-launch"),
   copy("setupEditor.prompt.postApply.body", "Choose what happens next. Launch only after setup is verified ready; continue in limited mode only after reviewing warnings.", "اختر ما يحدث بعد ذلك. لا يتم التشغيل إلا بعد التحقق من الجاهزية؛ ولا تتابع في الوضع المحدود إلا بعد مراجعة التحذيرات.", [], "agent-launch"),
   copy("setupEditor.prompt.postApply.launch", "Launch EstaCoda", "شغّل EstaCoda", [], "agent-launch"),

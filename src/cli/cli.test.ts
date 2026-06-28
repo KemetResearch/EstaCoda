@@ -361,6 +361,40 @@ describe("runCliCommand setup prompt factory dispatch", () => {
     expect(interactivePromptMock.close).toHaveBeenCalledOnce();
   });
 
+  it("does not duplicate setup-console final output as plain command output", async () => {
+    Object.defineProperty(process.stdin, "isTTY", {
+      configurable: true,
+      value: true,
+    });
+    setupFlowMock.collectSetupRoute.mockResolvedValue({ kind: "configured-menu" });
+    setupFlowMock.runConfigEditorSetup.mockResolvedValue({
+      completed: true,
+      exitCode: 0,
+      output: "Setup diagnostics\nState: configured-ready",
+      initialDecision: { kind: "configured-menu" },
+      setupConsoleRenderedOutput: true,
+    });
+
+    const result = await runCliCommand({
+      argv: ["setup"],
+      workspaceRoot: tempDir,
+      homeDir: tempDir,
+    });
+
+    expect(result).toMatchObject({
+      handled: true,
+      exitCode: 0,
+      output: "",
+    });
+    expect(setupFlowMock.runConfigEditorSetup).toHaveBeenCalledWith(expect.objectContaining({
+      setupConsole: expect.objectContaining({
+        input: process.stdin,
+        output: process.stdout,
+      }),
+    }));
+    expect(interactivePromptMock.close).toHaveBeenCalledOnce();
+  });
+
   it("keeps injected setup prompts on the existing explicit prompt path", async () => {
     const prompt = Object.assign(vi.fn(async () => ""), { close: vi.fn() });
 

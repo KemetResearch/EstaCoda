@@ -2,7 +2,11 @@ import { PassThrough, Writable } from "node:stream";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { SelectPromptInput } from "../../cli/interactive-select.js";
 import type { Prompt } from "../../cli/prompt-contract.js";
-import { withSetupConsolePrompt } from "./setupConsolePromptAdapter.js";
+import {
+  preserveSetupConsoleOnPromptClose,
+  setupConsoleControllerForPrompt,
+  withSetupConsolePrompt,
+} from "./setupConsolePromptAdapter.js";
 import { createSetupOperatorConsoleController } from "./setupOperatorConsoleController.js";
 
 const forbiddenManagedRegionOutput = /\x1b\[3J|\x1b\[2J|\x1b\[H|\x1b\[\d+;\d+H/u;
@@ -146,6 +150,41 @@ describe("withSetupConsolePrompt", () => {
     expect(onboardingCard).toHaveBeenCalledWith(onboardingInput);
     expect(clear).toHaveBeenCalled();
     expect(close).toHaveBeenCalledOnce();
+  });
+
+  it("preserves a final setup console panel on close when marked as terminal output", () => {
+    const input = createInput();
+    const output = createOutput();
+    const controller = createSetupOperatorConsoleController({ output });
+    const clear = vi.spyOn(controller, "clear");
+    const close = vi.fn();
+    const prompt = createPrompt({ select: createSelect("base").select, close });
+    const wrapped = withSetupConsolePrompt(prompt, { input, output, controller });
+    const exposedController = setupConsoleControllerForPrompt(wrapped);
+
+    exposedController?.render({
+      kind: "table",
+      layout: "choiceMenu",
+      title: "Setup diagnostics",
+      description: "Review setup output without applying changes.",
+      rows: [
+        {
+          id: "state",
+          provider: "State",
+          model: "",
+          status: "configured-ready",
+          notes: "",
+        },
+      ],
+      footer: "Read-only output",
+    });
+    preserveSetupConsoleOnPromptClose(wrapped);
+    wrapped.close?.();
+
+    expect(exposedController).toBe(controller);
+    expect(clear).not.toHaveBeenCalled();
+    expect(close).toHaveBeenCalledOnce();
+    expect(stripAnsi(output.text())).toContain("Setup Diagnostics");
   });
 });
 

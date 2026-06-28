@@ -403,6 +403,79 @@ describe("runConfigEditor", () => {
     expect(config.security?.approvalMode).toBe("strict");
   });
 
+  it("renders read-only verification output through setup console without changing command output", async () => {
+    await writeUserConfig(tempDir, localReadyConfig());
+    await trustWorkspace(tempDir, workspaceRoot);
+    const output: string[] = [];
+    const input = createTtyInput();
+    const setupOutput = createTtyOutput();
+
+    const result = await runConfigEditor({
+      homeDir: tempDir,
+      workspaceRoot,
+      prompt: fakePrompt(),
+      setupConsole: { input, output: setupOutput },
+      defaultActionId: "run-readonly-verification",
+      renderInitialOverview: false,
+      output: { write: (value) => output.push(value) },
+    });
+    const liveText = stripAnsi(setupOutput.text());
+
+    expect(result.completed).toBe(true);
+    expect(result.selectedActionId).toBe("verify-setup");
+    expect(result.finalDecision?.kind).toBe("verify-readonly");
+    expect(result.setupConsoleRenderedOutput).toBe(true);
+    expect(result.output).toContain("Setup verification prepared");
+    expect(output.join("")).toBe("Setup verification prepared.\n");
+    expect(liveText).toContain("EstaCoda Verify");
+    expect(liveText).toContain("Review setup output without applying changes.");
+    expect(liveText).toContain("Read-only diagnostics");
+    expect(liveText).toContain("State");
+    expect(liveText).toContain("configured-ready");
+    expect(liveText).toContain("Setup path");
+    expect(liveText).toContain("verify-readonly");
+    expect(liveText).toContain("Read-only output");
+    expect(liveText).not.toContain("Selected:");
+    expect(setupOutput.text()).not.toMatch(/\x1b\[3J|\x1b\[2J|\x1b\[H|\x1b\[\d+;\d+H/u);
+  });
+
+  it("renders diagnostics output through setup console without changing diagnostic text", async () => {
+    await writeUserConfig(tempDir, localReadyConfig());
+    await trustWorkspace(tempDir, workspaceRoot);
+    const output: string[] = [];
+    const input = createTtyInput();
+    const setupOutput = createTtyOutput();
+
+    const result = await runConfigEditor({
+      homeDir: tempDir,
+      workspaceRoot,
+      prompt: fakePrompt(),
+      setupConsole: { input, output: setupOutput },
+      defaultActionId: "show-diagnostics",
+      renderInitialOverview: false,
+      output: { write: (value) => output.push(value) },
+    });
+    const liveText = stripAnsi(setupOutput.text());
+
+    expect(result.completed).toBe(true);
+    expect(result.selectedActionId).toBe("show-diagnostics");
+    expect(result.setupConsoleRenderedOutput).toBe(true);
+    expect(result.output).toContain("Setup diagnostics");
+    expect(result.output).toContain("State: configured-ready");
+    expect(output.join("")).toContain("Setup diagnostics");
+    expect(output.join("")).toContain("State: configured-ready");
+    expect(liveText).toContain("Setup Diagnostics");
+    expect(liveText).toContain("Review setup output without applying changes.");
+    expect(liveText).toContain("Read-only diagnostics");
+    expect(liveText).toContain("State");
+    expect(liveText).toContain("configured-ready");
+    expect(liveText).toContain("Setup path");
+    expect(liveText).toContain("configured-menu");
+    expect(liveText).toContain("Read-only output");
+    expect(liveText).not.toContain("Selected:");
+    expect(setupOutput.text()).not.toMatch(/\x1b\[3J|\x1b\[2J|\x1b\[H|\x1b\[\d+;\d+H/u);
+  });
+
   it("opts comparative setup editor selectors into columns without changing selected values", async () => {
     const prompt = fakePrompt({
       values: [

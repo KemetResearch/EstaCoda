@@ -472,11 +472,16 @@ async function interactiveSetup(options: CliOptions, input: { readonly advanced:
           write: (value) => chunks.push(value),
         },
       });
+      const output = setupConsole !== undefined && result.setupConsoleRenderedOutput === true
+        ? ""
+        : chunks.length > 0
+        ? chunks.join("")
+        : result.output;
 
       return {
         handled: true,
         exitCode: result.exitCode,
-        output: chunks.length > 0 ? chunks.join("") : result.output,
+        output,
       };
     }
 

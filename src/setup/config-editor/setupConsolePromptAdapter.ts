@@ -36,12 +36,20 @@ type TtyReadable = Readable & {
 
 const HIDE_CURSOR = "\x1b[?25l";
 const SHOW_CURSOR = "\x1b[?25h";
+const SETUP_CONSOLE_CONTROLLER = Symbol("setupConsoleController");
+const SETUP_CONSOLE_PRESERVE_ON_CLOSE = Symbol("setupConsolePreserveOnClose");
+
+type PromptWithSetupConsoleController = Prompt & {
+  readonly [SETUP_CONSOLE_CONTROLLER]?: () => SetupOperatorConsoleController | undefined;
+  readonly [SETUP_CONSOLE_PRESERVE_ON_CLOSE]?: () => void;
+};
 
 export function withSetupConsolePrompt(
   prompt: Prompt,
   options: SetupConsolePromptAdapterOptions
 ): Prompt {
   let ownedController: SetupOperatorConsoleController | undefined;
+  let preserveOnClose = false;
   const getController = () => {
     if (options.controller !== undefined) return options.controller;
     ownedController ??= options.createController?.({ output: options.output }) ??
@@ -70,12 +78,27 @@ export function withSetupConsolePrompt(
         ? undefined
         : prompt.onboardingCard,
       close: () => {
-        options.controller?.clear();
-        ownedController?.clear();
+        if (!preserveOnClose) {
+          options.controller?.clear();
+          ownedController?.clear();
+        }
         prompt.close?.();
+      },
+      [SETUP_CONSOLE_CONTROLLER]: () =>
+        hasLiveSetupConsole(options.input, options.output) ? getController() : undefined,
+      [SETUP_CONSOLE_PRESERVE_ON_CLOSE]: () => {
+        preserveOnClose = true;
       },
     }
   );
+}
+
+export function setupConsoleControllerForPrompt(prompt: Prompt): SetupOperatorConsoleController | undefined {
+  return (prompt as PromptWithSetupConsoleController)[SETUP_CONSOLE_CONTROLLER]?.();
+}
+
+export function preserveSetupConsoleOnPromptClose(prompt: Prompt): void {
+  (prompt as PromptWithSetupConsoleController)[SETUP_CONSOLE_PRESERVE_ON_CLOSE]?.();
 }
 
 async function selectWithSetupConsole<T>(
@@ -203,7 +226,14 @@ function shouldUseSetupConsole<T>(
 ): boolean {
   return selection.surface === "promptCard" &&
     selection.options.length > 0 &&
-    Boolean((input as TtyReadable).isTTY && output.isTTY);
+    hasLiveSetupConsole(input, output);
+}
+
+function hasLiveSetupConsole(
+  input: Readable,
+  output: SetupOperatorConsoleOutput
+): boolean {
+  return Boolean((input as TtyReadable).isTTY && output.isTTY);
 }
 
 function createSetupSelectState<T>(selection: SelectPromptInput<T>): SelectNavigationState<string, number> {

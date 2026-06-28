@@ -9,6 +9,7 @@ import type { Prompt } from "../../cli/prompt-contract.js";
 import { withPromptUiContext } from "../../cli/prompt-contract.js";
 import { promptUiContextForLocale } from "../../contracts/ui.js";
 import { promptForApiKeyInput } from "../../cli/secret-prompt.js";
+import type { SetupPanelState } from "../../ui/papyrus/operator-console/index.js";
 import {
   createProviderModelSelectionFlow,
   type FlowEngine,
@@ -73,6 +74,8 @@ import {
   type ConfigEditorPostApplyActionId,
 } from "./prompts.js";
 import {
+  preserveSetupConsoleOnPromptClose,
+  setupConsoleControllerForPrompt,
   withSetupConsolePrompt,
   type SetupConsolePromptAdapterOptions,
 } from "./setupConsolePromptAdapter.js";
@@ -141,6 +144,7 @@ export type ConfigEditorRunnerResult = {
   readonly applyPlanningResult?: SetupApplyPlanningResult;
   readonly applyEndState?: SetupApplyEndState;
   readonly gatewayServiceActivationResult?: GatewayServiceActivationResult;
+  readonly setupConsoleRenderedOutput?: boolean;
 };
 
 type LocalizedConfigEditorRunnerOptions = ConfigEditorRunnerOptions & {
@@ -472,6 +476,11 @@ async function handleAction(
     case "verify-setup": {
       const finalDecision = await collectSetupRoute({ ...options, selection: "verify" });
       const output = setupCopyText(options.locale, "setupEditor.result.verifyPrepared");
+      const setupConsoleRenderedOutput = renderSetupConsoleReadOnlyOutput(options, {
+        title: setupCopyText(options.locale, "setupVerification.title"),
+        decision: finalDecision,
+        output: renderConfigEditorDiagnosticsForLocale(finalDecision, options.locale),
+      });
       write(options, `${output}\n`);
       return {
         completed: true,
@@ -480,10 +489,16 @@ async function handleAction(
         initialDecision,
         finalDecision,
         selectedActionId: action.id,
+        setupConsoleRenderedOutput,
       };
     }
     case "show-diagnostics": {
       const output = renderConfigEditorDiagnosticsForLocale(initialDecision, options.locale);
+      const setupConsoleRenderedOutput = renderSetupConsoleReadOnlyOutput(options, {
+        title: setupCopyText(options.locale, "setupEditor.diagnostics.title"),
+        decision: initialDecision,
+        output,
+      });
       write(options, `${output}\n`);
       return {
         completed: true,
@@ -491,6 +506,7 @@ async function handleAction(
         output,
         initialDecision,
         selectedActionId: action.id,
+        setupConsoleRenderedOutput,
       };
     }
     case "exit": {
@@ -542,6 +558,88 @@ async function handleAction(
       };
     }
   }
+}
+
+function renderSetupConsoleReadOnlyOutput(
+  options: LocalizedConfigEditorRunnerOptions,
+  input: {
+    readonly title: string;
+    readonly decision: SetupRouteDecision;
+    readonly output: string;
+  }
+): boolean {
+  const controller = setupConsoleControllerForPrompt(options.prompt);
+  if (controller === undefined) return false;
+
+  const panel = readOnlyOutputPanel(options, input);
+  controller.render(panel);
+  preserveSetupConsoleOnPromptClose(options.prompt);
+  return true;
+}
+
+function readOnlyOutputPanel(
+  options: LocalizedConfigEditorRunnerOptions,
+  input: {
+    readonly title: string;
+    readonly decision: SetupRouteDecision;
+    readonly output: string;
+  }
+): SetupPanelState {
+  const outputLines = input.output
+    .split(/\r?\n/u)
+    .map((line) => line.trimEnd())
+    .filter((line) => line.trim().length > 0);
+  const contentLines = outputLines[0] === input.title ? outputLines.slice(1) : outputLines;
+  const rows = contentLines.map((line, index) => readOnlyOutputRow(line, index));
+  return {
+    kind: "table",
+    layout: "choiceMenu",
+    title: input.title,
+    description: setupCopyText(options.locale, "setupEditor.readOnlyPanel.description"),
+    statusLines: setupEditorReadOnlyStatusLines(options, input.decision),
+    locale: options.locale,
+    rows: rows.length > 0 ? rows : [readOnlyOutputRow(setupCopyText(options.locale, "setupEditor.status.readOnlyDiagnostics"), 0)],
+    footer: setupCopyText(options.locale, "setupEditor.readOnlyPanel.footer"),
+  };
+}
+
+function setupEditorReadOnlyStatusLines(
+  options: LocalizedConfigEditorRunnerOptions,
+  decision: SetupRouteDecision
+): readonly PromptCardStatusLine[] {
+  const direction = options.locale === "ar" ? "rtl" : "ltr";
+  return [
+    {
+      text: setupCopyText(options.locale, "setupEditor.status.readOnlyDiagnostics"),
+      tone: "muted",
+      direction,
+    },
+    ...setupEditorStatusLines(options, decision).slice(1),
+  ];
+}
+
+function readOnlyOutputRow(
+  line: string,
+  index: number
+): SetupPanelState["rows"][number] {
+  const labeled = /^([^:]{1,28}):\s*(.*)$/u.exec(line);
+  if (labeled !== null) {
+    return {
+      id: `line-${index}`,
+      provider: labeled[1]!.trim(),
+      model: "",
+      status: labeled[2]!.trim(),
+      notes: "",
+    };
+  }
+
+  return {
+    id: `line-${index}`,
+    provider: "",
+    model: "",
+    status: line,
+    notes: "",
+  };
 }
 
 async function handleWorkspaceTrustAction(
