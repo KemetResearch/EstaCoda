@@ -52,7 +52,7 @@ function renderSetupTablePanel(
   const footer = state.footer ?? copy.footer;
   const rows = [
     renderSetupPanelTopBorder(state.title, state.locale, width, style),
-    renderContentRow(description, contentWidth, width),
+    renderPanelDescriptionRow(description, state.locale, contentWidth, width),
     ...renderStatusLines(state.statusLines, contentWidth, width, style),
     renderContentRow("", contentWidth, width),
     ...(state.locale === "ar"
@@ -95,9 +95,8 @@ function renderArabicStackedRows(
     ));
 
     for (const detailLine of wrapVisibleCells(arabicRowDetail(row, state.layout), contentWidth)) {
-      rows.push(renderSelectedRightContentRow(
+      rows.push(renderSecondaryRightContentRow(
         localizeChoiceCell(detailLine),
-        selected,
         style,
         contentWidth,
         width
@@ -189,6 +188,16 @@ function renderSelectedRightContentRow(
 ): string {
   const content = padVisibleStart(truncateVisibleCells(row, contentWidth), contentWidth);
   return renderContentRow(styleSelectedChoiceRow(content, selected, style), contentWidth, width);
+}
+
+function renderSecondaryRightContentRow(
+  row: string,
+  style: OperatorConsoleStyle | undefined,
+  contentWidth: number,
+  width: number
+): string {
+  const content = padVisibleStart(truncateVisibleCells(row, contentWidth), contentWidth);
+  return renderContentRow(styleSecondary(content, style), contentWidth, width);
 }
 
 function physicalChoiceCell(
@@ -394,6 +403,17 @@ function renderContentRow(row: string, contentWidth: number, width: number): str
   return truncateVisibleCells(`  ${content}`, width);
 }
 
+function renderPanelDescriptionRow(
+  description: string,
+  locale: SetupPanelState["locale"],
+  contentWidth: number,
+  width: number
+): string {
+  if (locale !== "ar") return renderContentRow(description, contentWidth, width);
+  const content = padVisibleStart(truncateVisibleCells(localizeChoiceCell(description), contentWidth), contentWidth);
+  return renderContentRow(content, contentWidth, width);
+}
+
 function renderStatusLines(
   statusLines: readonly SetupPanelStatusLine[] | undefined,
   contentWidth: number,
@@ -425,6 +445,11 @@ function styleBrand(text: string, style: OperatorConsoleStyle | undefined): stri
 }
 
 function styleFooter(text: string, style: OperatorConsoleStyle | undefined): string {
+  const secondary = style?.tokens.contract.text.secondary;
+  return secondary === undefined ? text : styleColor(style, text, secondary);
+}
+
+function styleSecondary(text: string, style: OperatorConsoleStyle | undefined): string {
   const secondary = style?.tokens.contract.text.secondary;
   return secondary === undefined ? text : styleColor(style, text, secondary);
 }

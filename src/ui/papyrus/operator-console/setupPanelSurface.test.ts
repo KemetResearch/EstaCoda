@@ -130,6 +130,7 @@ describe("Papyrus operator console setup panel surface", () => {
     const text = output.join("\n");
     const fallbackLabelLine = output.find((line) => line.includes("النماذج الاحتياطية") && line.includes("◂")) ?? "";
     const fallbackDetailLine = output.find((line) => line.includes("نماذج احتياطية")) ?? "";
+    const descriptionLine = output.find((line) => line.includes("اختار اللي تحب تضبطه")) ?? "";
 
     expect(output[0]).toContain("𓂀  محرّر الإعدادات");
     expect(text).toContain("محرّر الإعدادات");
@@ -139,6 +140,8 @@ describe("Papyrus operator console setup panel surface", () => {
     expect(fallbackLabelLine).toContain("◂");
     expect(fallbackDetailLine).toContain("نماذج احتياطية");
     expect(visibleColumn(output[0]!, "𓂀  محرّر الإعدادات")).toBeGreaterThan(70);
+    expect(descriptionLine).toContain(`${RLI}اختار اللي تحب تضبطه:`);
+    expect(visibleColumn(descriptionLine, "اختار اللي تحب تضبطه")).toBeGreaterThan(70);
     expect(visibleColumn(fallbackLabelLine, "النماذج الاحتياطية")).toBeGreaterThan(80);
     expect(output.every((line) => stringWidth(line) <= 120)).toBe(true);
   });
@@ -153,10 +156,14 @@ describe("Papyrus operator console setup panel surface", () => {
       }),
     });
     const selectedLine = output.find((line) => line.includes("النماذج الاحتياطية") && line.includes("◂")) ?? "";
+    const selectedDetailLine = output.find((line) => line.includes("نماذج احتياطية")) ?? "";
 
     expect(selectedLine).toContain(ansiFg(tokens.contract.palette.action));
     expect(selectedLine).toContain(`${RLI}النماذج الاحتياطية`);
     expect(selectedLine).toMatch(/النماذج الاحتياطية.*◂.*\x1b\[0m/u);
+    expect(selectedDetailLine).toContain(ansiFg(tokens.contract.text.secondary));
+    expect(selectedDetailLine).not.toContain(ansiFg(tokens.contract.palette.action));
+    expect(selectedDetailLine).toContain(`${RLI}نماذج احتياطية`);
   });
 
   it("colors the selected setup route row when styled", () => {
