@@ -54,6 +54,24 @@ describe("Papyrus operator console layout", () => {
     expect(regionKinds(layout)).toContain("setupPanel");
   });
 
+  it("allocates only setup-owned surfaces in setup mode", () => {
+    const layout = createOperatorConsoleLayout(createFullState({
+      mode: "setup",
+    }), { width: 80, height: 24, isTty: true });
+
+    expect(regionKinds(layout)).toEqual(["setupPanel"]);
+    expect(visibleRegionKinds(layout)).toEqual(["setupPanel"]);
+    expect(region(layout, "setupPanel")).toMatchObject({ visible: true });
+  });
+
+  it("allocates no session fallback surfaces in empty setup mode", () => {
+    const layout = createOperatorConsoleLayout(createState({
+      mode: "setup",
+    }), { width: 80, height: 24, isTty: true });
+
+    expect(regionKinds(layout)).toEqual([]);
+  });
+
   it("includes active work only when active work state is non-empty", () => {
     expect(regionKinds(createOperatorConsoleLayout(createState()))).not.toContain("activeWork");
 
@@ -265,7 +283,7 @@ function createState(input: Partial<OperatorConsoleState> = {}): OperatorConsole
   });
 }
 
-function createFullState(): OperatorConsoleState {
+function createFullState(input: Partial<OperatorConsoleState> = {}): OperatorConsoleState {
   return createState({
     startup: startupDashboard(),
     setupPanel: setupPanel(),
@@ -292,6 +310,7 @@ function createFullState(): OperatorConsoleState {
       query: "/mo",
       items: [{ id: "model", label: "/model" }],
     },
+    ...input,
   });
 }
 
