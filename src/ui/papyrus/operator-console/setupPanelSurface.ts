@@ -17,13 +17,13 @@ export type SetupPanelRenderOptions = {
 const WIDE_TABLE_MIN_WIDTH = 72;
 
 export function getSetupPanelSurfaceDesiredHeight(state: SetupSurfaceState, width: number): number {
-  if (state.kind === "secret") return state.optional === true ? 9 : 11;
+  if (state.kind === "secret") return state.optional === true ? 8 : 10;
   const statusLineCount = state.statusLines?.length ?? 0;
   const navigationSeparatorCount = state.rows.some((row) => row.group === "navigation") ? 1 : 0;
-  const baseRows = state.rows.length + navigationSeparatorCount + 8 + statusLineCount;
+  const baseRows = state.rows.length + navigationSeparatorCount + 7 + statusLineCount;
   return normalizeDimension(width) >= WIDE_TABLE_MIN_WIDTH
     ? Math.max(8, baseRows)
-    : Math.max(8, state.rows.length * 4 + 5 + statusLineCount);
+    : Math.max(8, state.rows.length * 4 + 4 + statusLineCount);
 }
 
 export function renderSetupPanelSurface(
@@ -48,8 +48,7 @@ function renderSetupTablePanel(
   const description = state.description ?? copy.modelDescription;
   const footer = state.footer ?? copy.footer;
   const rows = [
-    renderSetupEditorTopBorder(width, style),
-    renderContentRow(state.title, contentWidth, width),
+    renderSetupPanelTopBorder(state.title, state.locale, width, style),
     renderContentRow(description, contentWidth, width),
     ...renderStatusLines(state.statusLines, contentWidth, width, style),
     renderContentRow("", contentWidth, width),
@@ -134,7 +133,7 @@ function renderSelectedContentRow(
     return renderContentRow(row, contentWidth, width);
   }
   const content = padVisibleEnd(truncateVisibleCells(row, contentWidth), contentWidth);
-  return `│ ${styleSelectedChoiceRow(content, selected, style)} │`;
+  return renderContentRow(styleSelectedChoiceRow(content, selected, style), contentWidth, width);
 }
 
 function physicalChoiceCell(
@@ -238,8 +237,7 @@ function renderSecretEntryPanel(
     ? state.emptyLabel ?? "[leave empty]"
     : maskSecretValue(state);
   const rows = [
-    renderSetupEditorTopBorder(width, style),
-    renderContentRow(state.title, contentWidth, width),
+    renderSetupPanelTopBorder(state.title, undefined, width, style),
     renderContentRow(state.description, contentWidth, width),
     renderContentRow("", contentWidth, width),
     renderContentRow(value, contentWidth, width),
@@ -292,8 +290,13 @@ function resolveSetupCopy(locale: SetupPanelState["locale"]): SetupCopy {
   };
 }
 
-function renderSetupEditorTopBorder(width: number, style: OperatorConsoleStyle | undefined): string {
-  return renderTopBorder(styleBrand("𓂀  Setup Editor", style), width);
+function renderSetupPanelTopBorder(
+  title: string,
+  locale: SetupPanelState["locale"],
+  width: number,
+  style: OperatorConsoleStyle | undefined
+): string {
+  return renderTopBorder(styleBrand(`𓂀  ${formatFrameTitle(title, locale)}`, style), width);
 }
 
 function renderTopBorder(title: string, width: number): string {
@@ -309,9 +312,9 @@ function renderBottomBorder(width: number): string {
 }
 
 function renderContentRow(row: string, contentWidth: number, width: number): string {
-  if (width <= 1) return "│".slice(0, width);
+  if (width <= 0) return "";
   const content = padVisibleEnd(truncateVisibleCells(row, contentWidth), contentWidth);
-  return truncateVisibleCells(`│ ${content} │`, width);
+  return truncateVisibleCells(`  ${content}`, width);
 }
 
 function renderStatusLines(
@@ -347,6 +350,15 @@ function styleBrand(text: string, style: OperatorConsoleStyle | undefined): stri
 function styleFooter(text: string, style: OperatorConsoleStyle | undefined): string {
   const secondary = style?.tokens.contract.text.secondary;
   return secondary === undefined ? text : styleColor(style, text, secondary);
+}
+
+function formatFrameTitle(title: string, locale: SetupPanelState["locale"]): string {
+  if (locale === "ar" || containsArabicScript(title)) return title;
+  return title.split(/(\s+)/u).map((part) => {
+    if (/^\s+$/u.test(part) || part.length === 0) return part;
+    if (/[A-Z]/u.test(part.slice(1))) return part;
+    return `${part[0]?.toLocaleUpperCase("en-US") ?? ""}${part.slice(1)}`;
+  }).join("");
 }
 
 function padVisibleEnd(value: string, width: number): string {

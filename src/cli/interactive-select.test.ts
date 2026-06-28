@@ -150,8 +150,8 @@ describe("interactive-select prompt card surface", () => {
     await expect(pending).resolves.toBe("local");
     const rendered = stripAnsi(output.getText());
     const latestFrame = stripAnsi(latestRenderedFrame(output.getText()));
-    expect(rendered).toContain("╭──── 𓂀  Setup Editor");
-    expect(rendered).toContain("Model route");
+    expect(rendered).toContain("╭──── 𓂀  Model Route");
+    expect(rendered).not.toContain("│ Model route");
     expect(rendered).toContain("Choose the active provider and model route.");
     expect(rendered).toContain("Provider");
     expect(rendered).toContain("Model");
@@ -254,7 +254,7 @@ describe("interactive-select prompt card surface", () => {
 
     await expect(pending).resolves.toBe("fallback");
     const latestFrame = stripAnsi(latestRenderedFrame(output.getText()));
-    expect(latestFrame).toContain("╭──── 𓂀  Setup Editor");
+    expect(latestFrame).toContain("╭──── 𓂀  محرّر الإعدادات");
     expect(latestFrame).toContain("محرّر الإعدادات");
     expect(latestFrame).toContain("اختار اللي تحب تضبطه:");
     expect(latestFrame).toContain("النموذج الافتراضي الذي يستخدمه الوكيل.");

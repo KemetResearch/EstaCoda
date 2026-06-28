@@ -14,8 +14,8 @@ describe("Papyrus operator console setup panel surface", () => {
     const output = renderSetupPanelSurface(modelRoutePanel(), { width: 72 });
     const text = output.join("\n");
 
-    expect(output[0]).toContain("𓂀  Setup Editor");
-    expect(text).toContain("Model route");
+    expect(output[0]).toContain("𓂀  Model Route");
+    expect(text).not.toContain("│ Model route");
     expect(text).toContain("Choose the active provider and model route.");
     expect(text).toContain("Provider");
     expect(text).toContain("Model");
@@ -27,6 +27,7 @@ describe("Papyrus operator console setup panel surface", () => {
     expect(text).toContain("ready");
     expect(text).toContain("API key set");
     expect(text).toContain("↑↓ navigate · Enter select · / filter · Esc back");
+    expect(output.slice(1, -1).every((line) => !line.trimStart().startsWith("│"))).toBe(true);
     expect(output.every((line) => stringWidth(line) <= 72)).toBe(true);
   });
 
@@ -131,7 +132,7 @@ describe("Papyrus operator console setup panel surface", () => {
     const fallbackLine = output.find((line) => line.includes("نماذج احتياطية")) ?? "";
     const searchLine = output.find((line) => line.includes("EstaCoda")) ?? "";
 
-    expect(output[0]).toContain("𓂀  Setup Editor");
+    expect(output[0]).toContain("𓂀  محرّر الإعدادات");
     expect(text).toContain("محرّر الإعدادات");
     expect(text).toContain("◂");
     expect(text).not.toContain("المزود");
@@ -190,7 +191,7 @@ describe("Papyrus operator console setup panel surface", () => {
       }),
     }).join("\n");
 
-    expect(output).toContain(`${ansiFg(tokens.contract.palette.brand)}𓂀  Setup Editor\x1b[0m`);
+    expect(output).toContain(`${ansiFg(tokens.contract.palette.brand)}𓂀  Model Route\x1b[0m`);
     expect(output).toContain(`${ansiFg(tokens.contract.severity.ok)}Current: OpenAI\x1b[0m`);
     expect(output).toContain(`${ansiFg(tokens.contract.text.secondary)}↑↓ navigate   ENTER select   CTRL+C exit\x1b[0m`);
   });
@@ -199,7 +200,8 @@ describe("Papyrus operator console setup panel surface", () => {
     const output = renderSetupPanelSurface(requiredSecretPanel(), { width: 72 });
     const text = output.join("\n");
 
-    expect(text).toContain("API key · OpenAI");
+    expect(output[0]).toContain("API Key · OpenAI");
+    expect(text).not.toContain("│ API key · OpenAI");
     expect(text).toContain("Enter API key for OpenAI.");
     expect(text).toContain("sk-••••••••••••••••");
     expect(text).toContain("Stored as: OPENAI_API_KEY");
