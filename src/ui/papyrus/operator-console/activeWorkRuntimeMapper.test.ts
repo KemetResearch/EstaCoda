@@ -24,7 +24,7 @@ describe("active work runtime mapper", () => {
 
     const lines = renderActiveWorkSurface(state, { width: 80, height: 8 });
     expect(lines).toHaveLength(8);
-    expect(lines.join("\n")).toContain("Active work");
+    expect(lines.join("\n")).toContain("Running tools");
     expect(lines.join("\n")).toContain("... 7 more completed this turn");
     expect(lines.every((line) => stringWidth(line) <= 80)).toBe(true);
   });
@@ -60,7 +60,7 @@ describe("active work runtime mapper", () => {
       }),
     ]);
     expect(formatActiveWorkSummary(state)).toBe(
-      "Completed tool work: 0 running steps resolved, 1 total tool events, 1 file change inspected."
+      "1 completed · 0 active · 0 failed · Worked for 00:01"
     );
   });
 
@@ -87,7 +87,7 @@ describe("active work runtime mapper", () => {
 
     expect(state.items).toHaveLength(42);
     expect(formatActiveWorkSummary(state)).toBe(
-      "Completed tool work: 3 running steps resolved, 42 total tool events, 1 file change inspected."
+      "39 completed · 3 active · 0 failed · Worked for 00:00"
     );
     expect(renderActiveWorkSurface(state, { width: 80, height: 8 }).join("\n")).toContain(
       "more completed this turn"
@@ -129,7 +129,7 @@ describe("active work runtime mapper", () => {
     });
 
     const rendered = renderActiveWorkSurface(state, { width: 80, height: 5, locale: "ar" }).join("\n");
-    expect(rendered).toContain("العمل النشط");
+    expect(rendered).toContain("تنفيذ الأدوات");
     expect(rendered).toContain("read_file");
     expect(rendered).toContain("src/ui/papyrus/screen/output.ts");
     expect(rendered).toContain("00:03");

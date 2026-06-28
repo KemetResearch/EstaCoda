@@ -108,7 +108,7 @@ describe("OperatorConsoleRuntimeHost", () => {
     expect(text).toContain("EstaCoda");
     expect(text).toContain("Model Route");
     expect(text).toContain("Attachments");
-    expect(text).toContain("Active work");
+    expect(text).toContain("Running tools");
     expect(text).toContain("Approval required");
   });
 
@@ -170,7 +170,7 @@ describe("OperatorConsoleRuntimeHost", () => {
     host.setAttachments([attachment()]);
 
     const lines = host.render().lines;
-    const activeWorkIndex = findLine(lines, "Active work");
+    const activeWorkIndex = findLine(lines, "Running tools");
     const queuedSteerIndex = findLine(lines, "Queued steer");
     const attachmentsIndex = findLine(lines, "Attachments");
     const steerInputIndex = findLine(lines, "Steer current turn");
@@ -226,14 +226,14 @@ describe("OperatorConsoleRuntimeHost", () => {
 
     const lines = host.render().lines;
 
-    expect(findLine(lines, "Approval required")).toBeLessThan(findLine(lines, "Active work"));
+    expect(findLine(lines, "Approval required")).toBeLessThan(findLine(lines, "Running tools"));
   });
 
   it("does not reserve rows for absent optional surfaces", () => {
     const host = createHost();
     const text = host.render().lines.join("\n");
 
-    expect(text).not.toContain("Active work");
+    expect(text).not.toContain("Running tools");
     expect(text).not.toContain("Approval required");
     expect(text).not.toContain("Attachments");
     expect(text).not.toContain("Queued steer");

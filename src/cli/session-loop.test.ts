@@ -2427,18 +2427,18 @@ describe("runSessionLoop — active turn spinner", () => {
       "awaitingApproval",
     ]);
     expect(formatActiveWorkSummary(maxActiveWorkState)).toBe(
-      "Completed tool work: 3 running steps resolved, 13 total tool events, 1 file change inspected."
+      "9 completed · 3 active · 1 failed · Worked for 00:00"
     );
 
     const strippedChunks = outputChunks.map((chunk) => stripAnsi(chunk));
-    const activeWorkTitleIndex = strippedChunks.findIndex((chunk) => chunk.includes("Active work"));
+    const activeWorkTitleIndex = strippedChunks.findIndex((chunk) => chunk.includes("Running tools"));
     expect(activeWorkTitleIndex).toBeGreaterThan(-1);
     expect(outputChunks[activeWorkTitleIndex - 1]).toBe("\x1b[0K");
     expect(strippedChunks.some((chunk) => chunk.includes("src/running-0.ts"))).toBe(true);
     expect(strippedChunks.some((chunk) => chunk.includes("approval required"))).toBe(true);
     expect(strippedChunks.some((chunk) => chunk.includes("src/completed-0.ts"))).toBe(true);
     expect(strippedChunks.some((chunk) => chunk.includes("more completed this turn"))).toBe(true);
-    expect(strippedChunks.some((chunk) => chunk.includes("Active work") && chunk.includes("src/running-0.ts"))).toBe(false);
+    expect(strippedChunks.some((chunk) => chunk.includes("Running tools") && chunk.includes("src/running-0.ts"))).toBe(false);
 
     const durableResponseChunk = strippedChunks.find((chunk) => chunk.includes("Mock response"));
     expect(durableResponseChunk).toBeDefined();
@@ -2446,15 +2446,15 @@ describe("runSessionLoop — active turn spinner", () => {
     expect(durableResponseChunk).not.toContain("src/completed-7.ts");
     expect(durableResponseChunk).not.toContain("approval required");
     const durableOutput = strippedChunks.join("");
-    expect(durableOutput).toContain("Completed tool work");
+    expect(durableOutput).toContain("Tools completed");
     expect(durableOutput).toContain("src/completed-0.ts");
     expect(durableOutput).toContain("src/completed-7.ts");
     expect(durableOutput).toContain("approval required");
     expect(durableOutput).toContain("failed");
     expect(durableOutput).toContain("Worked for");
-    const summaryChunks = strippedChunks.filter((chunk) => chunk.includes("Completed tool work:"));
+    const summaryChunks = strippedChunks.filter((chunk) => chunk.includes("completed ·"));
     expect(summaryChunks.join("")).toContain(
-      "Completed tool work: 3 running steps resolved, 13 total tool events, 1 file change inspected."
+      "9 completed · 3 active · 1 failed · Worked for 00:00"
     );
   });
 

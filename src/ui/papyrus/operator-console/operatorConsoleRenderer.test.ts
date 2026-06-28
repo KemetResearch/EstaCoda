@@ -145,9 +145,9 @@ describe("Papyrus operator console renderer", () => {
     const output = renderOperatorConsoleTextLines(state, layout);
 
     expect(output[0]).toBe("Transcript: 1 block");
-    expect(output).toContainEqual(expect.stringContaining("Active work"));
+    expect(output).toContainEqual(expect.stringContaining("Running tools"));
     expect(output).toContain("Attachments");
-    expect(output.findIndex((line) => line.includes("Active work"))).toBeLessThan(
+    expect(output.findIndex((line) => line.includes("Running tools"))).toBeLessThan(
       output.findIndex((line) => line === "Attachments")
     );
     expect(output.findIndex((line) => line === "Attachments")).toBeLessThan(
@@ -197,7 +197,7 @@ describe("Papyrus operator console renderer", () => {
       createOperatorConsoleLayout(state, { width: 120, height: 24, isTty: true })
     );
     const approvalIndex = output.findIndex((line) => line.includes("Approval required"));
-    const activeWorkIndex = output.findIndex((line) => line.includes("Active work"));
+    const activeWorkIndex = output.findIndex((line) => line.includes("Running tools"));
     const attachmentsIndex = output.findIndex((line) => line === "Attachments");
     const promptIndex = output.findIndex((line) => line.includes("›"));
     const statusIndex = output.findIndex((line) => line.includes("◷ 01:12"));
@@ -238,7 +238,7 @@ describe("Papyrus operator console renderer", () => {
     const state = createFullState();
     const layout = createOperatorConsoleLayout(state, { width: 120, height: 20, isTty: true });
     const output = renderOperatorConsoleTextLines(state, layout);
-    const activeWorkIndex = output.findIndex((line) => line.includes("Active work"));
+    const activeWorkIndex = output.findIndex((line) => line.includes("Running tools"));
     const queuedSteerIndex = output.findIndex((line) => line.includes("Queued steer"));
     const attachmentsIndex = output.findIndex((line) => line === "Attachments");
     const steerInputIndex = output.findIndex((line) => line.includes("Steer current turn"));
@@ -371,7 +371,7 @@ describe("Papyrus operator console renderer", () => {
     const layout = createOperatorConsoleLayout(state, { width: 80, height: 8, isTty: true });
     const output = renderOperatorConsoleTextLines(state, layout);
 
-    expect(output).not.toContainEqual(expect.stringContaining("Active work"));
+    expect(output).not.toContainEqual(expect.stringContaining("Running tools"));
     expect(output[0]).toMatch(/^─+$/u);
   });
 

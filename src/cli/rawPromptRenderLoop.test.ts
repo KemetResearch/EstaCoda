@@ -208,7 +208,7 @@ describe("raw prompt render loop", () => {
       mode: "drafting",
       draft: "focus approvals",
     }));
-    expect(text.indexOf("╭─ Active work")).toBeLessThan(text.indexOf("╭─ Steer current turn"));
+    expect(text.indexOf("╭─ Running tools")).toBeLessThan(text.indexOf("╭─ Steer current turn"));
     expect(text.indexOf("╭─ Steer current turn")).toBeLessThan(text.indexOf("◷ 00:13"));
     expect(text).toContain("› focus approvals");
     expect(text).not.toMatch(forbiddenManagedRegionOutput);

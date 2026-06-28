@@ -90,7 +90,7 @@ describe("Papyrus operator console active work surface", () => {
     expect(sortedIds.indexOf("approval")).toBeLessThan(sortedIds.indexOf("cancelled"));
   });
 
-  it("counts failed, cancelled, and succeeded items as completed in expanded headers", () => {
+  it("uses the running tools title for active turn headers", () => {
     const output = renderActiveWorkSurface(createState({
       expanded: true,
       items: [
@@ -101,7 +101,7 @@ describe("Papyrus operator console active work surface", () => {
       ],
     }), { width: 80, height: 8 });
 
-    expect(output[0]).toContain("Active work · 1 running · 3 completed");
+    expect(output[0]).toContain("Running tools");
   });
 
   it("renders completed items during an active turn", () => {
@@ -115,7 +115,7 @@ describe("Papyrus operator console active work surface", () => {
   it("renders collapsed active work as a viewport-limited box with completed overflow", () => {
     const output = renderActiveWorkSurface(createLiveState(), { width: 80, height: 8 });
 
-    expect(output[0]).toMatch(/^╭─ Active work ─+╮$/u);
+    expect(output[0]).toMatch(/^╭─ Running tools ─+╮$/u);
     expect(output).toContainEqual(expect.stringContaining("read_file"));
     expect(output).toContainEqual(expect.stringContaining("... 18 more completed this turn"));
     expect(output.at(-1)).toMatch(/^╰─+╯$/u);
@@ -141,7 +141,7 @@ describe("Papyrus operator console active work surface", () => {
     expect(output).toContainEqual(expect.stringContaining("... 4 more completed this turn"));
   });
 
-  it("renders expanded active work with counts, viewport scrolling, and footer controls", () => {
+  it("renders expanded active work with viewport scrolling and footer controls", () => {
     const state = createState({
       expanded: true,
       scrollOffset: 2,
@@ -154,7 +154,7 @@ describe("Papyrus operator console active work surface", () => {
     });
     const output = renderActiveWorkSurface(state, { width: 80, height: 10 });
 
-    expect(output[0]).toContain("Active work · 3 running · 42 completed");
+    expect(output[0]).toContain("Running tools");
     expect(output.join("\n")).not.toContain("terminal.exec");
     expect(output.join("\n")).toContain("rg");
     expect(output.at(-2)).toContain("↑↓ scroll · Enter inspect · Esc collapse");
@@ -206,8 +206,7 @@ describe("Papyrus operator console active work surface", () => {
       ],
     }), { width: 72, height: 4 });
 
-    expect(output[0]).toContain("Active work");
-    expect(output[0]).toContain("Working 00:01");
+    expect(output[0]).toContain("Running tools  ◷ 00:01");
     expect(output.every((line) => stringWidth(line) <= 72)).toBe(true);
   });
 
@@ -222,9 +221,24 @@ describe("Papyrus operator console active work surface", () => {
     }), { width: 72, height: 5 });
     const text = output.join("\n");
 
-    expect(output[0]).toContain("Working 01:01");
+    expect(output[0]).toContain("Running tools  ◷ 01:01");
     expect(text).toContain("! shell");
     expect(text).toContain("pnpm run build");
+    expect(output.every((line) => stringWidth(line) <= 72)).toBe(true);
+  });
+
+  it("isolates the Arabic live timer in the active work header", () => {
+    const output = renderActiveWorkSurface(createState({
+      startedAtMs: 1_000,
+      updatedAtMs: 13_000,
+      items: [
+        item("read", "running", { toolName: "read_file", target: "src/app.ts" }),
+      ],
+    }), { width: 72, height: 4, locale: "ar" });
+    const logicalHeader = output[0].replace(/[\u2068\u2069]/gu, "");
+
+    expect(output[0]).toContain("⁨00:12⁩");
+    expect(logicalHeader).toContain("تنفيذ الأدوات  ◷ 00:12");
     expect(output.every((line) => stringWidth(line) <= 72)).toBe(true);
   });
 
@@ -239,13 +253,12 @@ describe("Papyrus operator console active work surface", () => {
     }), { width: 96 });
     const text = output.join("\n");
 
-    expect(output[0]).toContain("Completed tool work");
+    expect(output[0]).toContain("Tools completed");
     expect(text).toContain("read_file");
     expect(text).toContain("src/app.ts");
     expect(text).toContain("test");
     expect(text).toContain("failed");
-    expect(text).toContain("Completed tool work: 0 running steps resolved, 2 total tool events.");
-    expect(text).toContain("Worked for 25m32s");
+    expect(text).toContain("1 completed · 0 active · 1 failed · Worked for 25:32");
     expect(output.every((line) => stringWidth(line) <= 96)).toBe(true);
   });
 
@@ -261,12 +274,10 @@ describe("Papyrus operator console active work surface", () => {
     const text = output.join("\n");
     const logicalText = text.replace(/[\u2068\u2069]/gu, "");
 
-    expect(output[0]).toContain("عمل الأدوات المكتمل");
-    expect(logicalText).toContain("عمل الأدوات المكتمل: 0 خطوات نشطة حُلّت، 2 إجمالي أحداث الأدوات.");
-    expect(logicalText).toContain("عمل لمدة 1m05s");
+    expect(output[0]).toContain("اكتمل تنفيذ الأدوات");
+    expect(logicalText).toContain("1 اكتملت · 0 نشطة · 1 فشلت · المدة 01:05");
     expect(logicalText).toContain("read_file");
     expect(logicalText).toContain("shell");
-    expect(output.some((line) => line.includes("عمل الأدوات المكتمل:") && line.includes("عمل لمدة"))).toBe(false);
     expect(output.every((line) => stringWidth(line) <= 72)).toBe(true);
   });
 
@@ -351,7 +362,7 @@ describe("Papyrus operator console active work surface", () => {
     });
 
     expect(formatActiveWorkSummary(state)).toBe(
-      "Completed tool work: 3 running steps resolved, 42 total tool events, 1 file change inspected."
+      "39 completed · 3 active · 0 failed · Worked for 00:38"
     );
   });
 
@@ -364,7 +375,7 @@ describe("Papyrus operator console active work surface", () => {
     });
 
     expect(renderActiveWorkSurface(state, { width: 80, height: 5 })).toHaveLength(5);
-    expect(formatActiveWorkSummary(state)).toContain("12 total tool events");
+    expect(formatActiveWorkSummary(state)).toContain("11 completed · 1 active · 0 failed");
   });
 
   it("formats Arabic turn-end tool summaries through active work copy", () => {
@@ -376,13 +387,15 @@ describe("Papyrus operator console active work surface", () => {
     });
 
     expect(formatActiveWorkSummary(state, { locale: "ar" })).toBe(
-      "عمل الأدوات المكتمل: 1 خطوات نشطة حُلّت، 2 إجمالي أحداث الأدوات، 1 تغيير ملف مفحوص."
+      "1 اكتملت · 1 نشطة · 0 فشلت · المدة ⁨00:00⁩"
     );
   });
 
   it("resolves English copy by default and Arabic copy when requested", () => {
-    expect(resolveActiveWorkCopy().activeWork).toBe("Active work");
-    expect(resolveActiveWorkCopy("ar").activeWork).toBe("العمل النشط");
+    expect(resolveActiveWorkCopy().runningTools).toBe("Running tools");
+    expect(resolveActiveWorkCopy().toolsCompleted).toBe("Tools completed");
+    expect(resolveActiveWorkCopy("ar").runningTools).toBe("تنفيذ الأدوات");
+    expect(resolveActiveWorkCopy("ar").toolsCompleted).toBe("اكتمل تنفيذ الأدوات");
     expect(resolveActiveWorkCopy("ar").awaitingApproval).toBe("بانتظار الموافقة");
   });
 
@@ -390,12 +403,14 @@ describe("Papyrus operator console active work surface", () => {
     const surfaceSource = readFileSync(join(thisDir, "activeWorkSurface.ts"), "utf8");
     const copySource = readFileSync(join(thisDir, "activeWorkCopy.ts"), "utf8");
 
-    expect(surfaceSource).not.toContain("Completed tool work");
+    expect(surfaceSource).not.toContain("Completed tool work:");
     expect(surfaceSource).not.toContain("running steps resolved");
     expect(surfaceSource).not.toContain("total tool events");
     expect(surfaceSource).not.toContain("file change inspected");
-    expect(copySource).toContain("Completed tool work");
-    expect(copySource).toContain("running steps resolved");
+    expect(copySource).not.toContain("Completed tool work");
+    expect(copySource).not.toContain("running steps resolved");
+    expect(copySource).toContain("Running tools");
+    expect(copySource).toContain("Tools completed");
   });
 
   it("does not depend on CLI or setup copy modules", () => {
@@ -425,7 +440,7 @@ describe("Papyrus operator console active work surface", () => {
     }), { width: 80, height: 7, locale: "ar" });
     const text = output.join("\n");
 
-    expect(text).toContain("العمل النشط");
+    expect(text).toContain("تنفيذ الأدوات");
     expect(text).toContain("read_file");
     expect(text).toContain("src/ui/papyrus/screen/output.ts");
     expect(text).toContain("00:03");
@@ -440,7 +455,7 @@ describe("Papyrus operator console active work surface", () => {
     const output = renderActiveWorkSurface(createLiveState(), { width: 80, height: 8, locale: "ar" });
     const text = output.join("\n");
 
-    expect(text).toContain("العمل النشط");
+    expect(text).toContain("تنفيذ الأدوات");
     expect(text).toContain("... 18 أخرى مكتملة في هذه الجولة");
     expect(output.every((line) => stringWidth(line) <= 80)).toBe(true);
   });

@@ -72,22 +72,17 @@ export function renderActiveWorkSurface(
   const height = normalizeDimension(options.height ?? getActiveWorkSurfaceDesiredHeight(state));
   if (height <= 0) return [];
   const copy = resolveActiveWorkCopy(options.locale);
-  if (height < 3) return [truncateVisibleCells(`${copy.activeWork}: ${state.items.length}`, width)];
+  if (height < 3) return [truncateVisibleCells(`${copy.runningTools}: ${state.items.length}`, width)];
 
   const contentWidth = Math.max(0, width - 4);
   const contentRows = Math.max(1, height - 2);
   const sorted = sortActiveWorkItems(state);
-  const activeCount = sorted.filter(isActiveStatusItem).length;
-  const completedCount = sorted.length - activeCount;
-  const title = state.expanded
-    ? `${copy.activeWork} · ${formatNumber(activeCount)} ${copy.running} · ${formatNumber(completedCount)} ${copy.completed}`
-    : copy.activeWork;
-  const titleStatus = sorted.some(isActiveStatusItem) && state.startedAtMs !== undefined
-    ? `${copy.working} ${formatClockDuration(resolveActiveWorkElapsedMs(state))}`
-    : undefined;
+  const title = sorted.some(isActiveStatusItem) && state.startedAtMs !== undefined
+    ? `${copy.runningTools}  ◷ ${isolateIfNeeded(formatClockDuration(resolveActiveWorkElapsedMs(state)), options.locale)}`
+    : copy.runningTools;
 
   return [
-    renderTopBorder(title, width, titleStatus),
+    renderTopBorder(title, width),
     ...renderActiveWorkContentRows(state, sorted, contentRows, contentWidth, options.locale, options.style)
       .map((row) => renderContentRow(row, contentWidth, width)),
     renderBottomBorder(width),
@@ -111,7 +106,7 @@ export function renderCompletedActiveWorkSurface(
   const visibleRows = renderCompletedActiveWorkContentRows(state, contentRows, contentWidth, options.locale, options.style);
 
   return [
-    renderTopBorder(copy.completedToolWork, width),
+    renderTopBorder(copy.toolsCompleted, width),
     ...visibleRows.map((row) => renderContentRow(row, contentWidth, width)),
     renderBottomBorder(width),
   ];
@@ -123,16 +118,20 @@ export function formatActiveWorkSummary(
 ): string {
   const copy = resolveActiveWorkCopy(options.locale);
   const activeCount = state.items.filter(isActiveStatusItem).length;
-  const inspectedFileChanges = state.items.filter((item) => item.fileChangeInspected === true).length;
-  const parts = [
-    copy.runningStepsResolved(activeCount),
-    `${formatNumber(state.items.length)} ${copy.totalToolEvents}`,
-  ];
-  if (inspectedFileChanges > 0) {
-    parts.push(`${formatNumber(inspectedFileChanges)} ${copy.fileChangeInspected}`);
-  }
-  const separator = options.locale === "ar" ? "، " : ", ";
-  return `${copy.completedToolWork}: ${parts.join(separator)}.`;
+  const failedCount = state.items.filter((item) => item.status === "failed").length;
+  const completedCount = state.items.filter((item) =>
+    item.status === "succeeded" || item.status === "cancelled"
+  ).length;
+  const durationValue = formatClockDuration(resolveActiveWorkElapsedMs(state));
+  const duration = options.locale === "ar"
+    ? `${copy.duration} ${isolateIfNeeded(durationValue, options.locale)}`
+    : `${copy.workedFor} ${durationValue}`;
+  return [
+    `${formatNumber(completedCount)} ${copy.completed}`,
+    `${formatNumber(activeCount)} ${copy.active}`,
+    `${formatNumber(failedCount)} ${copy.failed}`,
+    duration,
+  ].join(" · ");
 }
 
 function renderCompletedActiveWorkContentRows(
@@ -165,23 +164,8 @@ function formatCompletionFooterRows(
   contentWidth: number,
   locale: OperatorConsoleLocale | undefined
 ): readonly string[] {
-  const copy = resolveActiveWorkCopy(locale);
   const summary = formatActiveWorkSummary(state, { locale });
-  const durationValue = formatHumanDuration(resolveActiveWorkElapsedMs(state));
-  const duration = `${copy.workedFor} ${isolateIfNeeded(durationValue, locale)}`;
-  if (locale === "ar") {
-    return [
-      truncateVisibleCells(summary, contentWidth),
-      formatRowWithRight("", duration, contentWidth),
-    ];
-  }
-  if (stringWidth(summary) + 1 + stringWidth(duration) <= contentWidth) {
-    return [formatRowWithRight(summary, duration, contentWidth)];
-  }
-  return [
-    truncateVisibleCells(summary, contentWidth),
-    formatRowWithRight("", duration, contentWidth),
-  ];
+  return [truncateVisibleCells(summary, contentWidth)];
 }
 
 function renderActiveWorkContentRows(
@@ -350,16 +334,6 @@ function formatClockDuration(durationMs: number): string {
   return `${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
 }
 
-function formatHumanDuration(durationMs: number): string {
-  const totalSeconds = Math.max(0, Math.floor(durationMs / 1000));
-  const hours = Math.floor(totalSeconds / 3600);
-  const minutes = Math.floor((totalSeconds % 3600) / 60);
-  const seconds = totalSeconds % 60;
-  if (hours > 0) return `${hours}h${String(minutes).padStart(2, "0")}m${String(seconds).padStart(2, "0")}s`;
-  if (minutes > 0) return `${minutes}m${String(seconds).padStart(2, "0")}s`;
-  return `${seconds}s`;
-}
-
 function formatDuration(durationMs: number): string {
   return formatClockDuration(durationMs);
 }
@@ -391,20 +365,6 @@ function padRows(rows: readonly string[], count: number): readonly string[] {
 function padVisibleEnd(value: string, width: number): string {
   const padCells = Math.max(0, width - stringWidth(value));
   return `${value}${" ".repeat(padCells)}`;
-}
-
-function formatRowWithRight(left: string, right: string, width: number): string {
-  const normalizedWidth = normalizeDimension(width);
-  if (normalizedWidth <= 0) return "";
-  const leftWidth = stringWidth(left);
-  const rightWidth = stringWidth(right);
-  if (rightWidth >= normalizedWidth) return truncateVisibleCells(right, normalizedWidth);
-  if (leftWidth + 1 + rightWidth > normalizedWidth) {
-    const availableLeft = Math.max(0, normalizedWidth - rightWidth - 1);
-    const truncatedLeft = truncateVisibleCells(left, availableLeft);
-    return `${padVisibleEnd(truncatedLeft, availableLeft)} ${right}`;
-  }
-  return `${left}${" ".repeat(normalizedWidth - leftWidth - rightWidth)}${right}`;
 }
 
 function isolateIfNeeded(value: string, locale: OperatorConsoleLocale | undefined): string {
