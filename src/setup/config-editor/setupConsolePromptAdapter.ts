@@ -301,7 +301,7 @@ async function readSecretWithSetupConsole(
         return;
       }
       if (result.intent?.type === "cancel" || result.intent?.type === "eof") {
-        finish("/exit", resolveSecret);
+        finish("", resolveSecret);
         return;
       }
     }

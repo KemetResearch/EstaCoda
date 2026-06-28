@@ -124,7 +124,7 @@ describe("withSetupConsolePrompt", () => {
     expect(text).not.toContain("brave-arabic-secret");
   });
 
-  it("returns /exit for setup secret cancellation without rendering typed secret text", async () => {
+  it("returns empty setup secret cancellation without rendering typed secret text", async () => {
     const input = createInput();
     const output = createOutput();
     const prompt = createPrompt({ select: createSelect("base").select });
@@ -134,7 +134,7 @@ describe("withSetupConsolePrompt", () => {
     await Promise.resolve();
     input.write("cancel-secret\x1b");
 
-    await expect(pending).resolves.toBe("/exit");
+    await expect(pending).resolves.toBe("");
     expect(stripAnsi(output.text())).not.toContain("cancel-secret");
     expect(input.rawModes).toEqual([true, false]);
   });

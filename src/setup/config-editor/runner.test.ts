@@ -551,6 +551,77 @@ describe("runConfigEditor", () => {
     expect(setupOutput.text()).not.toMatch(/\x1b\[3J|\x1b\[2J|\x1b\[H|\x1b\[\d+;\d+H/u);
   });
 
+  it("does not persist typed setup-console secret text when secret entry is cancelled", async () => {
+    await writeUserConfig(tempDir, localReadyConfig());
+    await trustWorkspace(tempDir, workspaceRoot);
+    const output: string[] = [];
+    const input = createTtyInput();
+    const setupOutput = createTtyOutput();
+    const cancelledSecret = "sk-cancelled-console-secret";
+    const prompt = Object.assign(
+      async (_question: string, promptOptions?: { secret?: boolean }) => {
+        if (promptOptions?.secret === true) {
+          throw new Error("base secret prompt should not run for setup console credential flow");
+        }
+        return "";
+      },
+      {
+        uiContext: { locale: "en" as const, direction: "ltr" as const },
+        select: vi.fn(async () => {
+          throw new Error("base prompt select should not run for setup console credential flow");
+        }),
+      }
+    ) as Prompt;
+
+    const pending = runConfigEditor({
+      homeDir: tempDir,
+      workspaceRoot,
+      prompt,
+      setupConsole: { input, output: setupOutput },
+      defaultActionId: "edit-primary-model-route",
+      flowEngine: flowEngine({ credentialAction: "collect", envVarName: "PR8_CANCELLED_CONSOLE_KEY" }),
+      applyExecutor: createReviewedSetupApplyExecutor({
+        homeDir: tempDir,
+        workspaceRoot,
+        collectVerification: () => readyVerification(profileConfigPath(tempDir)),
+      }),
+      output: { write: (value) => output.push(value) },
+    });
+
+    await vi.waitFor(() => {
+      expect(stripAnsi(setupOutput.text())).toContain("Primary Provider");
+    });
+    input.write("\r");
+    await vi.waitFor(() => {
+      expect(stripAnsi(setupOutput.text())).toContain("OpenAI Setup");
+    });
+    input.write("\r");
+    await vi.waitFor(() => {
+      expect(stripAnsi(setupOutput.text())).toContain("Primary Model");
+    });
+    input.write("\r");
+    await vi.waitFor(() => {
+      expect(stripAnsi(setupOutput.text())).toContain("API Key");
+    });
+    input.write(`${cancelledSecret}\x1b`);
+    await vi.waitFor(() => {
+      expect(stripAnsi(setupOutput.text())).toContain("Finalize Configuration");
+    });
+    input.write("\r");
+
+    const result = await pending;
+    const liveText = stripAnsi(setupOutput.text());
+    const envFile = await readFile(profileEnvPath(tempDir), "utf8").catch(() => "");
+
+    expect(result.completed).toBe(true);
+    expect(result.selectedActionId).toBe("edit-primary-model-route");
+    expect(envFile).not.toContain(cancelledSecret);
+    expect(envFile).not.toContain("PR8_CANCELLED_CONSOLE_KEY");
+    expect(liveText).not.toContain(cancelledSecret);
+    expect(output.join("")).not.toContain(cancelledSecret);
+    expect(JSON.stringify(result)).not.toContain(cancelledSecret);
+  });
+
   it("opts comparative setup editor selectors into columns without changing selected values", async () => {
     const prompt = fakePrompt({
       values: [
