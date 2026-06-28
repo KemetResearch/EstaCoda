@@ -223,12 +223,7 @@ describe("runConfigEditor", () => {
     expect(prompts[0]?.tableMaxWidth).toBe(88);
     expect(prompts[0]?.tableAlign).toBe("right");
     expect(prompts[0]?.showColumnHeaders).toBe(false);
-    expect(prompts[0]?.statusLines).toEqual([
-      { text: "لا تغييرات مطبّقة", tone: "muted", direction: "rtl" },
-      { text: "مساحة العمل: موثوقة", tone: "active", direction: "rtl" },
-      { text: `الملف: ${isolateLtr("default")}`, tone: "muted", direction: "rtl" },
-      { text: `الحالي: ${isolateLtr("local/local-test-model")}`, tone: "active", direction: "rtl" },
-    ]);
+    expect(prompts[0]?.statusLines).toBeUndefined();
     expect(prompts[0]?.hint).toBe("↑↓ navigate   ENTER select   CTRL+C exit");
     expect(prompts[0]?.labels).toContain("النموذج الأساسي");
     expect(prompts[0]?.descriptions).toContain("النموذج الافتراضي الذي يستخدمه الوكيل.");
@@ -295,10 +290,10 @@ describe("runConfigEditor", () => {
     expect(result.selectedActionId).toBe("exit");
     expect(select).not.toHaveBeenCalled();
     expect(liveText).toContain("Setup Editor");
-    expect(liveText).toContain("No changes applied");
-    expect(liveText).toContain("Workspace: trusted");
-    expect(liveText).toContain("Profile: default");
-    expect(liveText).toContain("Current: local/local-test-model");
+    expect(liveText).not.toContain("No changes applied");
+    expect(liveText).not.toContain("Workspace: trusted");
+    expect(liveText).not.toContain("Profile: default");
+    expect(liveText).not.toContain("Current: local/local-test-model");
     expect(liveText).toContain("Exit without changes");
     expect(liveText).not.toContain("Selected:");
     expect(setupOutput.text()).not.toMatch(/\x1b\[3J|\x1b\[2J|\x1b\[H|\x1b\[\d+;\d+H/u);

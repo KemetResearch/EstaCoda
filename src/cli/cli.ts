@@ -39,7 +39,9 @@ import {
 } from "../config/runtime-config.js";
 import type { Prompt } from "./prompt-contract.js";
 import { canRunInteractive } from "../ui/terminal-capabilities.js";
+import { createOperatorConsoleStyle } from "../ui/papyrus/operator-console/index.js";
 import { createInteractivePrompt } from "./create-interactive-prompt.js";
+import { createSessionRenderer } from "./session-renderer.js";
 import { promptUiContextForLocale } from "../contracts/ui.js";
 import { runFirstRunSetup } from "../setup/onboarding-wizard/runner.js";
 import { runConfigEditorSetup } from "../setup/config-editor/runner.js";
@@ -454,9 +456,19 @@ async function interactiveSetup(options: CliOptions, input: { readonly advanced:
       decision.kind === "repair-first-menu"
     ) {
       const chunks: string[] = [];
-      const setupConsole = options.prompt === undefined && options.output === undefined && canRunInteractive()
-        ? { input: stdin, output: stdout }
+      const setupRenderer = options.prompt === undefined && options.output === undefined && canRunInteractive()
+        ? createSessionRenderer({ output: stdout })
         : undefined;
+      const setupConsole = setupRenderer === undefined
+        ? undefined
+        : {
+            input: stdin,
+            output: stdout,
+            style: createOperatorConsoleStyle({
+              tokens: setupRenderer.tokens,
+              capabilities: setupRenderer.capabilities,
+            }),
+          };
       const result = await runConfigEditorSetup({
         ...options,
         prompt,

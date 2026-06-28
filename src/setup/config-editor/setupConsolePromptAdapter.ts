@@ -4,6 +4,7 @@ import type { Prompt, PromptOptions, PromptSubmission } from "../../cli/prompt-c
 import { createKeypressStreamDispatcher } from "../../ui/input/keyPressStreamDispatcher.js";
 import type { ParsedKeypress } from "../../ui/input/parseKeypress.js";
 import { SecretPromptController } from "../../ui/papyrus/input/secretPromptController.js";
+import type { OperatorConsoleStyle } from "../../ui/papyrus/operator-console/index.js";
 import { mapSetupSelectToSetupPanelState } from "../../ui/papyrus/operator-console/setupSelectRuntimeMapper.js";
 import {
   applySelectKey,
@@ -24,6 +25,7 @@ export type SetupConsolePromptAdapterOptions = {
   readonly input: Readable;
   readonly output: SetupOperatorConsoleOutput & Writable;
   readonly controller?: SetupOperatorConsoleController;
+  readonly style?: OperatorConsoleStyle;
   readonly createController?: (options: {
     readonly output: SetupOperatorConsoleOutput;
   }) => SetupOperatorConsoleController;
@@ -55,7 +57,7 @@ export function withSetupConsolePrompt(
   const getController = () => {
     if (options.controller !== undefined) return options.controller;
     ownedController ??= options.createController?.({ output: options.output }) ??
-      createSetupOperatorConsoleController({ output: options.output });
+      createSetupOperatorConsoleController({ output: options.output, style: options.style });
     return ownedController;
   };
   const select = prompt.select === undefined
@@ -264,6 +266,7 @@ async function readSecretWithSetupConsole(
       envVar: secretPanelEnvVar(question),
       optional: true,
       emptyLabel: copy.emptyLabel,
+      locale: normalizedLocale,
       footer: copy.footer,
     });
   };

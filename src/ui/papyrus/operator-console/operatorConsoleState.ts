@@ -211,6 +211,7 @@ export type SecretEntryPanelState = {
   readonly kind: "secret";
   readonly title: string;
   readonly description: string;
+  readonly locale?: OperatorConsoleLocale;
   readonly maskedValue?: string;
   readonly rawValue?: string;
   readonly envVar?: string;

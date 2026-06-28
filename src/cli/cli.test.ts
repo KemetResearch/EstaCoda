@@ -356,6 +356,17 @@ describe("runCliCommand setup prompt factory dispatch", () => {
       setupConsole: expect.objectContaining({
         input: process.stdin,
         output: process.stdout,
+        style: expect.objectContaining({
+          supportsColor: expect.any(Boolean),
+          tokens: expect.objectContaining({
+            contract: expect.objectContaining({
+              palette: expect.objectContaining({
+                brand: expect.any(String),
+                action: expect.any(String),
+              }),
+            }),
+          }),
+        }),
       }),
     }));
     expect(interactivePromptMock.close).toHaveBeenCalledOnce();

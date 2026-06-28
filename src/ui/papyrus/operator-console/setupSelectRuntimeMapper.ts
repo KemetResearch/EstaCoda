@@ -42,7 +42,7 @@ export function mapSetupSelectToSetupPanelState(
     locale: input.locale,
     rows: input.options.map((option, index) => mapOptionToRow(option, index)),
     selectedRowId: optionId(input.options[selectedIndex], selectedIndex),
-    footer: input.hint ?? defaultFooter(input.locale),
+    footer: defaultFooter(),
   };
 }
 
@@ -96,10 +96,8 @@ function firstNonEmpty(...values: readonly (string | undefined)[]): string {
   return values.find((value) => value !== undefined && value.trim().length > 0) ?? "";
 }
 
-function defaultFooter(locale: OperatorConsoleLocale | undefined): string {
-  return locale === "ar"
-    ? "↑↓ تنقل · Enter اختيار · / بحث · Esc رجوع"
-    : "↑↓ navigate · Enter select · / filter · Esc back";
+function defaultFooter(): string {
+  return "↑↓ navigate   ENTER select   CTRL+C exit";
 }
 
 function clampIndex(index: number, optionCount: number): number {

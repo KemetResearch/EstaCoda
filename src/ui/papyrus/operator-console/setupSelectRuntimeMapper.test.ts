@@ -40,7 +40,7 @@ describe("Operator Console setup select runtime mapper", () => {
       statusLines: [{ text: "Current: OpenAI", tone: "active", direction: "ltr" }],
       locale: undefined,
       selectedRowId: "local",
-      footer: "↑↓ navigate · Enter select · / filter · Esc back",
+      footer: "↑↓ navigate   ENTER select   CTRL+C exit",
       rows: [
         { id: "openai", provider: "OpenAI", model: "gpt-5.5", status: "ready", notes: "API key set" },
         { id: "local", provider: "Local", model: "qwen3-coder", status: "offline", notes: "endpoint unset" },
@@ -174,7 +174,7 @@ describe("Operator Console setup select runtime mapper", () => {
         notes: "current",
       },
     ]);
-    expect(state?.footer).toBe("↑↓ navigate   ENTER select");
+    expect(state?.footer).toBe("↑↓ navigate   ENTER select   CTRL+C exit");
   });
 
   it("preserves Arabic copy and technical tokens", () => {
@@ -218,7 +218,7 @@ describe("Operator Console setup select runtime mapper", () => {
       model: "qwen3-coder",
       notes: "URL غير مضبوط",
     });
-    expect(state?.footer).toContain("Enter");
-    expect(state?.footer).toContain("Esc");
+    expect(state?.footer).toContain("ENTER");
+    expect(state?.footer).toContain("CTRL+C");
   });
 });

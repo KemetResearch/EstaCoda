@@ -26,7 +26,7 @@ describe("Papyrus operator console setup panel surface", () => {
     expect(text).toContain("gpt-5.5");
     expect(text).toContain("ready");
     expect(text).toContain("API key set");
-    expect(text).toContain("↑↓ navigate · Enter select · / filter · Esc back");
+    expect(text).toContain("↑↓ navigate   ENTER select   CTRL+C exit");
     expect(output.slice(1, -1).every((line) => !line.trimStart().startsWith("│"))).toBe(true);
     expect(output.every((line) => stringWidth(line) <= 72)).toBe(true);
   });
@@ -81,8 +81,8 @@ describe("Papyrus operator console setup panel surface", () => {
     expect(text).toContain("Local");
     expect(text).toContain("qwen3-coder");
     expect(text).toContain("URL");
-    expect(text).toContain("Enter");
-    expect(text).toContain("Esc");
+    expect(text).toContain("ENTER");
+    expect(text).toContain("CTRL+C");
     expect(visibleColumn(output[0]!, "𓂀  إعداد النموذج")).toBeGreaterThan(24);
     expect(output.every((line) => stringWidth(line) <= 72)).toBe(true);
   });
@@ -126,6 +126,7 @@ describe("Papyrus operator console setup panel surface", () => {
         },
       ],
       selectedRowId: "fallback",
+      footer: "↑↓ navigate   ENTER select   CTRL+C exit",
     }, { width: 120 });
     const text = output.join("\n");
     const fallbackLabelLine = output.find((line) => line.includes("النماذج الاحتياطية") && line.includes("◂")) ?? "";
@@ -203,6 +204,22 @@ describe("Papyrus operator console setup panel surface", () => {
     expect(output).toContain(`${ansiFg(tokens.contract.palette.brand)}\x1b[1m𓂀  Model Route\x1b[0m\x1b[0m`);
     expect(output).toContain(`${ansiFg(tokens.contract.severity.ok)}Current: OpenAI\x1b[0m`);
     expect(output).toContain(`${ansiFg(tokens.contract.text.secondary)}↑↓ navigate   ENTER select   CTRL+C exit\x1b[0m`);
+  });
+
+  it("right-aligns English setup footers and leaves Arabic setup footers on the left", () => {
+    const english = renderSetupPanelSurface({
+      ...modelRoutePanel(),
+      footer: "↑↓ navigate   ENTER select   CTRL+C exit",
+    }, { width: 72 });
+    const arabic = renderSetupPanelSurface({
+      ...arabicChoiceMenu(),
+      footer: "↑↓ navigate   ENTER select   CTRL+C exit",
+    }, { width: 72 });
+    const englishFooter = english.find((line) => line.includes("↑↓ navigate")) ?? "";
+    const arabicFooter = arabic.find((line) => line.includes("↑↓ navigate")) ?? "";
+
+    expect(visibleColumn(englishFooter, "↑↓ navigate")).toBeGreaterThan(24);
+    expect(visibleColumn(arabicFooter, "↑↓ navigate")).toBe(2);
   });
 
   it("renders required API key panel with masked value and env var only", () => {

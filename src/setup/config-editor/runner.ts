@@ -371,7 +371,7 @@ async function resolveConfigEditorLocale(options: ConfigEditorRunnerOptions): Pr
 
 async function selectAction(
   options: LocalizedConfigEditorRunnerOptions,
-  initialDecision: SetupRouteDecision,
+  _initialDecision: SetupRouteDecision,
   actions: readonly ConfigEditorRenderedAction[],
   defaultActionId: SetupEditorActionId | SetupRouteActionId | undefined
 ): Promise<ConfigEditorRenderedAction | { readonly id: string } | undefined> {
@@ -380,9 +380,7 @@ async function selectAction(
     return actions.find((action) => action.id === normalizedActionId) ?? { id: normalizedActionId };
   }
 
-  return promptConfigEditorAction(options.prompt, actions, undefined, options.locale, {
-    statusLines: setupEditorStatusLines(options, initialDecision),
-  });
+  return promptConfigEditorAction(options.prompt, actions, undefined, options.locale);
 }
 
 function setupEditorStatusLines(

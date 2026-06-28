@@ -64,7 +64,7 @@ function renderSetupTablePanel(
       : renderNarrowTableRows(state, contentWidth, width, style)
     ),
     renderContentRow("", contentWidth, width),
-    renderContentRow(styleFooter(footer, style), contentWidth, width),
+    renderFooterRow(footer, state.locale, contentWidth, width, style),
     renderBottomBorder(width),
   ];
   return rows;
@@ -316,7 +316,7 @@ function renderSecretEntryPanel(
     ? state.emptyLabel ?? "[leave empty]"
     : maskSecretValue(state);
   const rows = [
-    renderSetupPanelTopBorder(state.title, undefined, width, style),
+    renderSetupPanelTopBorder(state.title, state.locale, width, style),
     renderContentRow(state.description, contentWidth, width),
     renderContentRow("", contentWidth, width),
     renderContentRow(value, contentWidth, width),
@@ -328,7 +328,7 @@ function renderSecretEntryPanel(
     rows.push(renderContentRow("", contentWidth, width));
   }
 
-  rows.push(renderContentRow(styleFooter(state.footer, style), contentWidth, width));
+  rows.push(renderFooterRow(state.footer, state.locale, contentWidth, width, style));
   rows.push(renderBottomBorder(width));
   return rows;
 }
@@ -356,7 +356,7 @@ function resolveSetupCopy(locale: SetupPanelState["locale"]): SetupCopy {
       status: "الحالة",
       notes: "ملاحظات",
       modelDescription: "اختر مزود النموذج والمسار النشط.",
-      footer: "↑↓ تنقل · Enter اختيار · / بحث · Esc رجوع",
+      footer: "↑↓ navigate   ENTER select   CTRL+C exit",
     };
   }
   return {
@@ -365,7 +365,7 @@ function resolveSetupCopy(locale: SetupPanelState["locale"]): SetupCopy {
     status: "Status",
     notes: "Notes",
     modelDescription: "Choose the active provider and model route.",
-    footer: "↑↓ navigate · Enter select · / filter · Esc back",
+    footer: "↑↓ navigate   ENTER select   CTRL+C exit",
   };
 }
 
@@ -424,6 +424,20 @@ function renderStatusLines(
     const localized = line.direction === "rtl" ? isolateRtl(line.text) : line.text;
     return renderContentRow(styleStatusLine(localized, line, style), contentWidth, width);
   });
+}
+
+function renderFooterRow(
+  footer: string,
+  locale: SetupPanelState["locale"],
+  contentWidth: number,
+  width: number,
+  style: OperatorConsoleStyle | undefined
+): string {
+  const styledFooter = styleFooter(footer, style);
+  const content = locale === "ar"
+    ? styledFooter
+    : padVisibleStart(styledFooter, contentWidth);
+  return renderContentRow(content, contentWidth, width);
 }
 
 function styleStatusLine(
