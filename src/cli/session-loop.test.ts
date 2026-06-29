@@ -5027,6 +5027,192 @@ describe("runSessionLoop — active turn spinner", () => {
     }));
   });
 
+  it("streams provider deltas into Operator Console transcript and skips duplicate final assistant output", async () => {
+    const outputChunks: string[] = [];
+    const host = createOperatorConsoleRuntimeHost({
+      terminal: { width: 96, height: 16, isTty: true },
+    });
+    const runtime = {
+      ...createMockRuntime(),
+      handle: async ({ onDelta, onEvent }: Parameters<Runtime["handle"]>[0]): Promise<AgentLoopResponse> => {
+        onEvent?.({ kind: "agent-start", sessionId: "test-session", input: "hello" });
+        onEvent?.({ kind: "provider-token", provider: "mock", model: "mock-model", text: "Hello" });
+        onDelta?.("Hello");
+        onEvent?.({ kind: "provider-token", provider: "mock", model: "mock-model", text: " there" });
+        onDelta?.(" there");
+        onEvent?.({ kind: "agent-final", text: "Hello there" });
+        return mockResponse({ text: "Hello there" });
+      },
+    } as Runtime;
+
+    let promptIndex = 0;
+    await runSessionLoop({
+      runtime,
+      output: {
+        write(chunk: string | Uint8Array): boolean {
+          outputChunks.push(String(chunk));
+          return true;
+        },
+        isTTY: true,
+        columns: 96,
+      } as unknown as NodeJS.WritableStream,
+      capabilities: interactiveCaps({ terminalWidth: 96, supportsAnimation: false }),
+      operatorConsole: { enabled: true, runtimeHost: host },
+      prompt: Object.assign(
+        async () => {
+          const values = ["hello", "/exit"];
+          return values[promptIndex++] ?? "/exit";
+        },
+        { close: () => {} }
+      ),
+      close: () => {},
+    });
+
+    const rendered = stripAnsi(outputChunks.join(""));
+    expect(rendered).toContain("Assistant │ Hello there");
+    expect(rendered).not.toContain("  Hello there");
+    expect(host.getState().transcript.map((block) => block.text)).toEqual(["Hello there"]);
+  });
+
+  it("uses provider segment breaks as Operator Console streaming segment boundaries", async () => {
+    const outputChunks: string[] = [];
+    const host = createOperatorConsoleRuntimeHost({
+      terminal: { width: 96, height: 16, isTty: true },
+    });
+    const runtime = {
+      ...createMockRuntime(),
+      handle: async ({ onDelta, onEvent, onSegmentBreak }: Parameters<Runtime["handle"]>[0]): Promise<AgentLoopResponse> => {
+        onEvent?.({ kind: "agent-start", sessionId: "test-session", input: "hello" });
+        onDelta?.("First segment.");
+        await onSegmentBreak?.("provider-tool-call");
+        onDelta?.(" Second segment.");
+        onEvent?.({ kind: "agent-final", text: "First segment. Second segment." });
+        return mockResponse({ text: "First segment. Second segment." });
+      },
+    } as Runtime;
+
+    let promptIndex = 0;
+    await runSessionLoop({
+      runtime,
+      output: {
+        write(chunk: string | Uint8Array): boolean {
+          outputChunks.push(String(chunk));
+          return true;
+        },
+        isTTY: true,
+        columns: 96,
+      } as unknown as NodeJS.WritableStream,
+      capabilities: interactiveCaps({ terminalWidth: 96, supportsAnimation: false }),
+      operatorConsole: { enabled: true, runtimeHost: host },
+      prompt: Object.assign(
+        async () => {
+          const values = ["hello", "/exit"];
+          return values[promptIndex++] ?? "/exit";
+        },
+        { close: () => {} }
+      ),
+      close: () => {},
+    });
+
+    const rendered = stripAnsi(outputChunks.join(""));
+    expect(rendered).toContain("Assistant │ First segment.");
+    expect(rendered).toContain("Assistant │ Second segment.");
+    expect(rendered).not.toContain("  First segment. Second segment.");
+  });
+
+  it("resets Operator Console streaming output when a provider fallback is announced", async () => {
+    const outputChunks: string[] = [];
+    const host = createOperatorConsoleRuntimeHost({
+      terminal: { width: 96, height: 16, isTty: true },
+    });
+    const runtime = {
+      ...createMockRuntime(),
+      handle: async ({ onDelta, onEvent }: Parameters<Runtime["handle"]>[0]): Promise<AgentLoopResponse> => {
+        onEvent?.({ kind: "agent-start", sessionId: "test-session", input: "hello" });
+        onDelta?.("primary failed");
+        onEvent?.({
+          kind: "provider-result",
+          provider: "primary",
+          model: "primary-model",
+          ok: false,
+          fallback: false,
+          willFallback: true,
+        });
+        onDelta?.("fallback wins");
+        onEvent?.({ kind: "agent-final", text: "fallback wins" });
+        return mockResponse({ text: "fallback wins" });
+      },
+    } as Runtime;
+
+    let promptIndex = 0;
+    await runSessionLoop({
+      runtime,
+      output: {
+        write(chunk: string | Uint8Array): boolean {
+          outputChunks.push(String(chunk));
+          return true;
+        },
+        isTTY: true,
+        columns: 96,
+      } as unknown as NodeJS.WritableStream,
+      capabilities: interactiveCaps({ terminalWidth: 96, supportsAnimation: false }),
+      operatorConsole: { enabled: true, runtimeHost: host },
+      prompt: Object.assign(
+        async () => {
+          const values = ["hello", "/exit"];
+          return values[promptIndex++] ?? "/exit";
+        },
+        { close: () => {} }
+      ),
+      close: () => {},
+    });
+
+    const rendered = stripAnsi(outputChunks.join(""));
+    expect(rendered).toContain("Assistant │ fallback wins");
+    expect(rendered).not.toContain("primary failed");
+    expect(rendered).not.toContain("  fallback wins");
+  });
+
+  it("keeps plain CLI provider-token stdout behavior unchanged", async () => {
+    const outputChunks: string[] = [];
+    let sawDeltaCallback = false;
+    const runtime = {
+      ...createMockRuntime(),
+      handle: async ({ onDelta, onEvent }: Parameters<Runtime["handle"]>[0]): Promise<AgentLoopResponse> => {
+        sawDeltaCallback = onDelta !== undefined;
+        onEvent?.({ kind: "provider-token", provider: "mock", model: "mock-model", text: "plain streamed token" });
+        return mockResponse({ text: "Plain final response" });
+      },
+    } as Runtime;
+
+    let promptIndex = 0;
+    await runSessionLoop({
+      runtime,
+      output: {
+        write(chunk: string | Uint8Array): boolean {
+          outputChunks.push(String(chunk));
+          return true;
+        },
+        isTTY: false,
+        columns: 96,
+      } as unknown as NodeJS.WritableStream,
+      capabilities: interactiveCaps({ isTTY: false, terminalWidth: 96, supportsAnimation: false }),
+      prompt: Object.assign(
+        async () => {
+          const values = ["hello", "/exit"];
+          return values[promptIndex++] ?? "/exit";
+        },
+        { close: () => {} }
+      ),
+      close: () => {},
+    });
+
+    const rendered = stripAnsi(outputChunks.join(""));
+    expect(sawDeltaCallback).toBe(false);
+    expect(rendered).toContain("plain streamed token");
+    expect(rendered).toContain("Plain final response");
+  });
+
   it("keeps Operator Console inspect intent on the existing no-grant invalid-answer path", async () => {
     const host = createOperatorConsoleRuntimeHost({
       terminal: { width: 96, height: 16, isTty: true },

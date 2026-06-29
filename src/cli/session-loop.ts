@@ -768,6 +768,16 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
             text: retryText,
             channel: "cli",
             signal: activeTurn.signal,
+            onDelta: operatorConsoleLiveFrame === undefined
+              ? undefined
+              : (delta) => {
+                  operatorConsoleLiveFrame.appendStreamingText(delta);
+                },
+            onSegmentBreak: operatorConsoleLiveFrame === undefined
+              ? undefined
+              : (reason) => {
+                  operatorConsoleLiveFrame.flushStreamingSegment(reason);
+                },
 	            onEvent: (event) => {
 	              if (event.kind === "context-usage") {
                 const currentPriority = activeTurnContextUsageSource === undefined
@@ -792,6 +802,9 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
 	              }
 	              if (event.kind === "agent-cancelled") {
 	                turnWasCancelled = true;
+	              }
+	              if (operatorConsoleLiveFrame !== undefined && event.kind === "provider-result" && event.willFallback) {
+	                operatorConsoleLiveFrame.resetStreaming();
 	              }
 	              let newPhase: string | undefined;
 	              if (operatorConsoleLiveFrame !== undefined && isToolActivityRuntimeEvent(event)) {
@@ -854,6 +867,7 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
 	        }
 	        writeSessionStatusRail();
 	        if (pendingSteeringNote !== undefined && !steeringRetryUsed) {
+	          operatorConsoleLiveFrame?.resetStreaming();
 	          const steeringNote = pendingSteeringNote;
 	          pendingSteeringNote = undefined;
 	          steeringRetryUsed = true;
@@ -869,6 +883,7 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
 	        }
 	        writeSessionStatusRail();
 
+	        const hasVisibleStreamingOutput = operatorConsoleLiveFrame?.hasStreamingOutput() === true;
 	        const assistantVm = buildAssistantResponseViewModel({
 	          label: response.label,
           text: response.text,
@@ -878,7 +893,12 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
 	        if (providerServingAlert !== undefined) {
 	          output.write(`${providerServingAlert}\n`);
 	        }
-	        output.write(renderer.render(assistantVm));
+	        if (hasVisibleStreamingOutput) {
+	          operatorConsoleLiveFrame?.completeStreaming();
+	        }
+	        if (!hasVisibleStreamingOutput) {
+	          output.write(renderer.render(assistantVm));
+	        }
         if (turnVoiceMode === "tts") {
           const playback = await playCliResponseIfEnabled({
             runtime,
