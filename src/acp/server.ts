@@ -798,7 +798,9 @@ export class AcpServer {
         assessor: {
           ...config.security.assessor,
           providerExecutor: new ProviderExecutor({
-            registry: config.providerRegistry
+            registry: config.providerRegistry,
+            homeDir: config.homeDir,
+            profileId: config.profileId
           }),
           sessionId: options.sessionId
         }

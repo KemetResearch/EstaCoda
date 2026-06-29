@@ -378,7 +378,9 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
       providerModels
     });
   const providerExecutor = new ProviderExecutor({
-    registry: providerRegistry
+    registry: providerRegistry,
+    homeDir: globalPaths.homeDir,
+    profileId
   });
   const processManager = new ProcessManager({ workspaceRoot });
   const pythonStateRoot = globalPaths.stateRoot;
@@ -808,7 +810,8 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
     parentRoutes: agentLoopRoutes,
     providerRegistry,
     providerConfigs: options.providerConfigs,
-    homeDir: options.homeDir,
+    homeDir: globalPaths.homeDir,
+    profileId,
     sessionDb,
     trajectoryRecorderFactory: ({ profileId, sessionId }) => new TrajectoryRecorder({
       profileId,

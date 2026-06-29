@@ -60,6 +60,8 @@ function loadedConfig(input: {
       }
     },
     sources: [],
+    homeDir: "/tmp/estacoda-test-home",
+    profileId: "default",
     model: selectedModel,
     primaryModelRoute: input.primaryRoute ?? route(),
     modelFallbackRoutes: [],

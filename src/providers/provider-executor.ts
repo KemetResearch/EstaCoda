@@ -109,15 +109,18 @@ export type ProviderExecutionOptions = {
 export type ProviderExecutorOptions = {
   registry: ProviderRegistry;
   homeDir?: string;
+  profileId?: string;
 };
 
 export class ProviderExecutor {
   readonly #registry: ProviderRegistry;
   readonly #homeDir: string | undefined;
+  readonly #profileId: string | undefined;
 
   constructor(options: ProviderExecutorOptions) {
     this.#registry = options.registry;
     this.#homeDir = options.homeDir;
+    this.#profileId = options.profileId;
   }
 
   async complete(
@@ -253,6 +256,7 @@ export class ProviderExecutor {
         route: { apiKeyEnv: route.apiKeyEnv, authMethod: route.authMethod },
         metadata: getProviderMetadata(route.provider),
         homeDir: this.#homeDir,
+        profileId: this.#profileId
       });
 
       if (!resolution.diagnostic.ok) {
@@ -526,7 +530,7 @@ export class ProviderExecutor {
     | { kind: "success"; accessToken: string }
     | { kind: "error"; reason: string }
   > {
-    const oauthResult = await loadOAuthStore({ homeDir: this.#homeDir });
+    const oauthResult = await loadOAuthStore({ homeDir: this.#homeDir, profileId: this.#profileId });
     const record = oauthResult.store.providers[providerId];
     if (record === undefined) {
       return {
@@ -537,7 +541,8 @@ export class ProviderExecutor {
     const refreshResult = await refreshOAuthToken({
       providerId,
       record,
-      homeDir: this.#homeDir
+      homeDir: this.#homeDir,
+      profileId: this.#profileId
     });
     if (refreshResult.kind === "error") {
       return {

@@ -133,7 +133,11 @@ async function createProductionProfileContextGenerator(options: CliOptions): Pro
     const result = await executeAuxiliaryTask({
       route,
       mainRoute: loaded.primaryModelRoute,
-      providerExecutor: new ProviderExecutor({ registry: loaded.providerRegistry }),
+      providerExecutor: new ProviderExecutor({
+        registry: loaded.providerRegistry,
+        homeDir: loaded.homeDir,
+        profileId: loaded.profileId
+      }),
       scopeKey: input.profileId,
       request: {
         model: route.route.id,

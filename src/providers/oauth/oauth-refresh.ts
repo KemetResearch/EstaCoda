@@ -57,6 +57,7 @@ export async function refreshOAuthToken(options: {
   record: OAuthTokenRecord;
   fetchLike?: FetchLike;
   homeDir?: string;
+  profileId?: string;
 }): Promise<OAuthRefreshResult> {
   if (typeof options.record.refreshToken !== "string" || options.record.refreshToken.length === 0) {
     return {
@@ -116,7 +117,7 @@ export async function refreshOAuthToken(options: {
   const newRefreshToken = parsed.refreshToken ?? options.record.refreshToken;
 
   // Update auth.json atomically
-  const loadResult = await loadOAuthStore({ homeDir: options.homeDir });
+  const loadResult = await loadOAuthStore({ homeDir: options.homeDir, profileId: options.profileId });
   const updatedStore = {
     ...loadResult.store,
     providers: {
@@ -132,7 +133,7 @@ export async function refreshOAuthToken(options: {
     }
   };
 
-  await writeOAuthStore(updatedStore, { homeDir: options.homeDir });
+  await writeOAuthStore(updatedStore, { homeDir: options.homeDir, profileId: options.profileId });
 
   return {
     kind: "success",

@@ -1,4 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
+import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
+import { dirname, join } from "node:path";
+import { tmpdir } from "node:os";
 import { DEFAULT_DELEGATION_CONFIG } from "../config/delegation-defaults.js";
 import {
   MAX_DELEGATE_MODEL_OVERRIDE_ID_LENGTH,
@@ -8,6 +11,7 @@ import type { ModelProfile, ProviderId, ResolvedModelRoute } from "../contracts/
 import type { SessionRecord } from "../contracts/session.js";
 import type { ToolDefinition, ToolRiskClass, ToolsetName } from "../contracts/tool.js";
 import { ProviderRegistry } from "../providers/provider-registry.js";
+import { resolveProfileStateHome, writeActiveProfile } from "../config/profile-home.js";
 import { InMemorySessionDB } from "../session/in-memory-session-db.js";
 import { ToolRegistry } from "../tools/tool-registry.js";
 import { TrajectoryRecorder } from "../trajectory/trajectory-recorder.js";
@@ -533,6 +537,82 @@ describe("DefaultChildAgentLoopFactory", () => {
     });
     expect(builder.buildSession).not.toHaveBeenCalled();
     await expect(db.getSession("child-missing-provider-key")).resolves.toBeUndefined();
+  });
+
+  it("checks cross-provider OAuth credentials in the selected profile", async () => {
+    const homeDir = await mkdtemp(join(tmpdir(), "estacoda-child-oauth-profile-"));
+    try {
+      writeActiveProfile("default", { homeDir });
+      const authPath = resolveProfileStateHome({ homeDir, profileId: "research" }).authJsonPath;
+      await mkdir(dirname(authPath), { recursive: true });
+      await writeFile(authPath, JSON.stringify({
+        version: 1,
+        providers: {
+          codex: {
+            authMethod: "oauth_device_pkce",
+            accessToken: "research-codex-token",
+            expiresAt: new Date(Date.now() + 3600 * 1000).toISOString(),
+            source: "estacoda"
+          }
+        }
+      }, null, 2) + "\n", "utf8");
+
+      const db = new InMemorySessionDB();
+      const built = fakeBuiltSession();
+      const builder = fakeBuilder(built);
+      const registry = new ProviderRegistry();
+      registry.register({
+        id: "codex",
+        name: "Codex",
+        endpoint: {
+          baseUrl: "https://chatgpt.com/backend-api/codex",
+          apiKey: { kind: "none" }
+        },
+        health: () => ({ available: true }),
+        listModels: async () => [modelProfile("codex", "gpt-5.5")],
+        complete: async () => ({ ok: true, content: "", provider: "codex", model: "gpt-5.5" })
+      });
+      const factory = new DefaultChildAgentLoopFactory({
+        builder: builder as never,
+        parentRoutes: parentRoutes(),
+        providerRegistry: registry,
+        providerConfigs: {
+          codex: {
+            baseUrl: "https://chatgpt.com/backend-api/codex",
+            apiMode: "openai_responses",
+            authMethod: "oauth_device_pkce",
+            enableNetwork: true
+          }
+        },
+        homeDir,
+        profileId: "research",
+        sessionDb: db,
+        trajectoryRecorderFactory: ({ profileId, sessionId }) => new TrajectoryRecorder({ profileId, sessionId, modelId: "model" }),
+        responseLabel: "EstaCoda",
+        workspaceRoot: "/workspace",
+        id: () => "child-codex-profile"
+      });
+
+      const child = await factory.createChild({
+        parentSessionId: "parent-1",
+        profileId: "research",
+        task: "Use Codex child",
+        trustedWorkspace: true,
+        modelOverride: { provider: "codex", model: "gpt-5.5" },
+        parentVisibleTools: readOnlyParentTools()
+      });
+
+      expect(child.modelOverride).toEqual({
+        requested: true,
+        status: "applied",
+        provider: "codex",
+        model: "gpt-5.5",
+        fallbackBehavior: "disabled-for-override"
+      });
+      expect(builder.buildSession).toHaveBeenCalled();
+    } finally {
+      await rm(homeDir, { recursive: true, force: true });
+    }
   });
 
   it("allows cross-provider authMethod none without requiring credentials", async () => {

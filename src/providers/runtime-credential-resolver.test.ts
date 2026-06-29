@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { resolveRuntimeCredential } from "./runtime-credential-resolver.js";
 import type { ProviderMetadata } from "./provider-metadata.js";
-import { resolveProfileStateHome } from "../config/profile-home.js";
+import { resolveProfileStateHome, writeActiveProfile } from "../config/profile-home.js";
 
 function hostedMetadata(): ProviderMetadata {
   return {
@@ -76,9 +76,9 @@ async function makeTempDir(): Promise<string> {
   return mkdtemp(join(tmpdir(), "estacoda-credential-resolver-test-"));
 }
 
-async function writeAuthJson(homeDir: string, store: unknown): Promise<void> {
-  const path = resolveProfileStateHome({ homeDir, profileId: "default" }).authJsonPath;
-  await mkdir(join(homeDir, ".estacoda", "profiles", "default"), { recursive: true });
+async function writeAuthJson(homeDir: string, store: unknown, profileId = "default"): Promise<void> {
+  const path = resolveProfileStateHome({ homeDir, profileId }).authJsonPath;
+  await mkdir(join(homeDir, ".estacoda", "profiles", profileId), { recursive: true });
   await writeFile(path, JSON.stringify(store, null, 2) + "\n", "utf8");
 }
 
@@ -281,6 +281,36 @@ describe("resolveRuntimeCredential OAuth", () => {
 
     expect(result.diagnostic.ok).toBe(true);
     expect(result.credential?.id).toBe("codex:oauth");
+  });
+
+  it("resolves from explicit profile instead of active profile", async () => {
+    writeActiveProfile("default", { homeDir: tmpDir });
+    await writeAuthJson(tmpDir, {
+      version: 1,
+      providers: {
+        codex: {
+          authMethod: "oauth_device_pkce",
+          accessToken: "research-access",
+          expiresAt: new Date(Date.now() + 3600 * 1000).toISOString(),
+          source: "estacoda"
+        }
+      }
+    }, "research");
+
+    const result = await resolveRuntimeCredential({
+      providerId: "codex",
+      metadata: codexMetadata(),
+      homeDir: tmpDir,
+      profileId: "research"
+    });
+
+    expect(result.diagnostic.ok).toBe(true);
+    expect(result.credential).toEqual({
+      kind: "bearer",
+      id: "codex:oauth",
+      value: "research-access",
+      source: "oauth"
+    });
   });
 
   it("returns diagnostic with setup instruction when token is missing", async () => {

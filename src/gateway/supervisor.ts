@@ -156,6 +156,8 @@ export function buildGatewayCronRuntimeOptions(input: GatewayCronRuntimeBaseInpu
       ...latestConfig.security.assessor,
       providerExecutor: new ProviderExecutor({
         registry: latestConfig.providerRegistry,
+        homeDir: input.homeDir,
+        profileId: input.profileId
       }),
     },
     browser: latestConfig.browser,
@@ -208,6 +210,8 @@ export function buildGatewayCronRuntimeOptions(input: GatewayCronRuntimeBaseInpu
       ...latestConfig.security.assessor,
       providerExecutor: new ProviderExecutor({
         registry: latestConfig.providerRegistry,
+        homeDir: input.homeDir,
+        profileId: input.profileId
       }),
     },
     browser: latestConfig.browser,
@@ -245,6 +249,8 @@ async function buildGatewaySecurityAssessorConfig(
       mainRoute,
       providerExecutor: new ProviderExecutor({
         registry: config.providerRegistry,
+        homeDir: config.homeDir,
+        profileId: config.profileId
       }),
     };
   }
@@ -266,6 +272,8 @@ async function buildGatewaySecurityAssessorConfig(
     mainRoute,
     providerExecutor: new ProviderExecutor({
       registry: config.providerRegistry,
+      homeDir: config.homeDir,
+      profileId: config.profileId
     }),
   };
 }
@@ -895,7 +903,9 @@ export async function runGatewaySupervisor(options: GatewaySupervisorOptions): P
         route: compressionRoute,
         mainRoute,
         providerExecutor: new ProviderExecutor({
-          registry: config.providerRegistry
+          registry: config.providerRegistry,
+          homeDir: config.homeDir,
+          profileId: config.profileId
         })
       }),
       logWarning

@@ -43,7 +43,7 @@ import {
 } from "../contracts/image-generation.js";
 import type { ModelsDevRegistryOptions } from "../model-catalog/models-dev-registry.js";
 import { defaultProfileId, readActiveProfile, resolveProfileStateHome } from "./profile-home.js";
-import { resolveOsHomeDir } from "./home-dir.js";
+import { resolveHomeDir, resolveOsHomeDir } from "./home-dir.js";
 import { coerceFiniteNumber, coerceNonNegativeInteger, coercePositiveInteger } from "./numeric-coercion.js";
 import { redactObject } from "../utils/redaction.js";
 import type { WebsitePolicyConfig } from "../browser/website-policy.js";
@@ -544,6 +544,8 @@ export type WhatsAppChannelConfig = {
 export type LoadedRuntimeConfig = {
   config: EstaCodaConfig;
   sources: string[];
+  homeDir: string;
+  profileId: string;
   model: ModelProfile;
   primaryModelRoute: ResolvedModelRoute;
   modelFallbackRoutes: ResolvedModelRoute[];
@@ -826,13 +828,14 @@ export type LoadRuntimeConfigOptions = {
 };
 
 export async function loadRuntimeConfig(options: LoadRuntimeConfigOptions): Promise<LoadedRuntimeConfig> {
-  const profileId = options.profileId ?? readActiveProfile({ homeDir: options.homeDir })?.profileId ?? defaultProfileId();
-  await loadDotEnvSecrets({ homeDir: options.homeDir, profileId });
-  const profilePaths = resolveProfileStateHome({ homeDir: options.homeDir, profileId });
+  const homeDir = resolveHomeDir(options.homeDir);
+  const profileId = options.profileId ?? readActiveProfile({ homeDir })?.profileId ?? defaultProfileId();
+  await loadDotEnvSecrets({ homeDir, profileId });
+  const profilePaths = resolveProfileStateHome({ homeDir, profileId });
   const loadedConfig = await readConfig(profilePaths.configPath);
   const config = patchConfig(loadedConfig.config);
   const catalogProfiles = await resolveModelProfilesFromCatalog({
-    homeDir: options.homeDir,
+    homeDir,
     allowNetwork: false,
     ...options.modelsDevOptions
   });
@@ -840,7 +843,7 @@ export async function loadRuntimeConfig(options: LoadRuntimeConfigOptions): Prom
     provider: config.model?.provider ?? "unconfigured",
     model: config.model?.id ?? "unconfigured",
     contextWindowTokens: config.model?.contextWindowTokens,
-    homeDir: options.homeDir,
+    homeDir,
     allowNetwork: false,
     ...options.modelsDevOptions
   });
@@ -928,7 +931,7 @@ export async function loadRuntimeConfig(options: LoadRuntimeConfigOptions): Prom
       provider: fallback.provider,
       model: fallback.id,
       contextWindowTokens: fallback.contextWindowTokens,
-      homeDir: options.homeDir,
+      homeDir,
       allowNetwork: false,
       ...options.modelsDevOptions
     });
@@ -952,6 +955,8 @@ export async function loadRuntimeConfig(options: LoadRuntimeConfigOptions): Prom
   return {
     config,
     sources: loadedConfig.loaded ? [loadedConfig.path] : [],
+    homeDir,
+    profileId,
     model,
     primaryModelRoute,
     modelFallbackRoutes,
@@ -981,10 +986,10 @@ export async function loadRuntimeConfig(options: LoadRuntimeConfigOptions): Prom
     stt: normalizeSttConfig(config.stt),
     voice: normalizeVoiceConfig(config.voice),
     mcp: {
-      servers: normalizeMcpServers(config.mcpServers ?? config.mcp_servers, options.homeDir)
+      servers: normalizeMcpServers(config.mcpServers ?? config.mcp_servers, homeDir)
     },
     skills: {
-      externalDirs: expandConfiguredPaths(config.skills?.externalDirs ?? [], options.homeDir),
+      externalDirs: expandConfiguredPaths(config.skills?.externalDirs ?? [], homeDir),
       autonomy: config.skills?.autonomy ?? "suggest",
       config: normalizeSkillConfig(config.skills?.config)
     },
