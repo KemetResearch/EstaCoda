@@ -155,7 +155,7 @@ describe("Papyrus operator console renderer", () => {
     expect(text).not.toContain("›");
     expect(text).not.toContain("ctx");
     expect(text).not.toContain("◷");
-    expect(text).not.toContain("Transcript:");
+    expect(text).not.toContain("Assistant │ Ready.");
     expect(text).not.toContain("Running tools");
     expect(text).not.toContain("Attachments");
     expect(output.every((line) => stringWidth(line) <= 72)).toBe(true);
@@ -185,7 +185,7 @@ describe("Papyrus operator console renderer", () => {
     const layout = createOperatorConsoleLayout(state, { width: 120, height: 20, isTty: true });
     const output = renderOperatorConsoleTextLines(state, layout);
 
-    expect(output[0]).toBe("Transcript: 1 block");
+    expect(output[0]).toBe("Assistant │ Ready.");
     expect(output).toContainEqual(expect.stringContaining("Running tools"));
     expect(output).toContain("Attachments");
     expect(output.findIndex((line) => line.includes("Running tools"))).toBeLessThan(

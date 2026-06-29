@@ -14,8 +14,8 @@ const MAX_STREAMING_SURFACE_ROWS = 8;
 
 export function hasStreamingSurface(state: StreamingState | undefined): state is StreamingState {
   return state !== undefined && state.isStreaming && (
-    state.tail.length > 0 ||
-    state.segments.some((segment) => segment.text.length > 0)
+    state.tail.trim().length > 0 ||
+    state.segments.some((segment) => segment.text.trim().length > 0)
   );
 }
 
@@ -92,7 +92,7 @@ function padRows(rows: readonly string[], count: number): readonly string[] {
 }
 
 function streamingSummary(state: StreamingState): string {
-  const segmentCount = state.segments.filter((segment) => segment.text.length > 0).length;
+  const segmentCount = state.segments.filter((segment) => segment.text.trim().length > 0).length;
   return `Assistant stream: ${segmentCount} segment${segmentCount === 1 ? "" : "s"}`;
 }
 

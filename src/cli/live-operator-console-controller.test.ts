@@ -205,7 +205,8 @@ describe("LiveOperatorConsoleController", () => {
     expect(controller.hasStreamingOutput()).toBe(false);
     expect(runtimeHost.getState().streaming).toBeUndefined();
     expect(runtimeHost.getState().transcript.map((block) => block.text)).toEqual(["First chunk.", " Final chunk."]);
-    expect(stripAnsi(output.text())).toContain("Transcript: 2 blocks");
+    expect(stripAnsi(output.text())).toContain("Assistant │ First chunk.");
+    expect(stripAnsi(output.text())).toContain("Assistant │ Final chunk.");
     expect(countOccurrences(stripAnsi(output.text()), "Assistant stream")).toBe(0);
   });
 

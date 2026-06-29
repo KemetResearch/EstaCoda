@@ -21,4 +21,5 @@ export * from "./startupDashboardSurface.js";
 export * from "./startupRuntimeMapper.js";
 export * from "./statusRailSurface.js";
 export * from "./streamingSurface.js";
+export * from "./transcriptSurface.js";
 export * from "./turnActivitySurface.js";

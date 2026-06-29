@@ -24,6 +24,7 @@ import {
   hasQueuedSteer,
   isSteerInputActive,
 } from "./steerSurface.js";
+import { getTranscriptSurfaceDesiredHeight } from "./transcriptSurface.js";
 
 export type OperatorConsoleRegionKind = OperatorConsoleSurface;
 
@@ -125,7 +126,7 @@ function createRegionDescriptors(
       kind: "transcript",
       priority: TRANSCRIPT_PRIORITY,
       minHeight: 1,
-      desiredHeight: Math.min(6, Math.max(1, state.transcript.length)),
+      desiredHeight: getTranscriptSurfaceDesiredHeight(state.transcript, terminal.width),
     });
   }
 
