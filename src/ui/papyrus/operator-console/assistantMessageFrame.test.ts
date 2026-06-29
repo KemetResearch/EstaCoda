@@ -31,6 +31,36 @@ describe("Papyrus operator console assistant message frame", () => {
     expect(settled).not.toContain("▍");
   });
 
+  it("renders inline tool trail rows between assistant text blocks", () => {
+    const rows = renderAssistantMessageFrame({
+      lines: [],
+      blocks: [
+        { kind: "text", lines: ["I'll inspect the runtime path first."] },
+        {
+          kind: "toolTrail",
+          entries: [{
+            id: "read-1",
+            sequence: 1,
+            toolName: "read_file",
+            status: "running",
+            summary: "src/cli/session-loop.ts",
+            target: "src/cli/session-loop.ts",
+            durationMs: 3_000,
+          }],
+        },
+        { kind: "text", lines: ["The session loop wires deltas through the console."], cursor: true },
+      ],
+    }, { width: 84 });
+    const rendered = rows.join("\n");
+
+    expect(rendered).toContain("I'll inspect the runtime path first.");
+    expect(rendered).toContain("◷ read_file");
+    expect(rendered).toContain("src/cli/session-loop.ts");
+    expect(rendered).toContain("00:03");
+    expect(rendered).toContain("The session loop wires deltas through the console.▍");
+    expect(rows.every((line) => stringWidth(line) <= 84)).toBe(true);
+  });
+
   it("summarizes without implementation chrome when height is constrained below a frame", () => {
     const rows = renderAssistantMessageFrame({
       lines: ["Constrained assistant output"],

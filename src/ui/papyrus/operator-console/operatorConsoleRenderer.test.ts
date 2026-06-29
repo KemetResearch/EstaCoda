@@ -210,6 +210,16 @@ describe("Papyrus operator console renderer", () => {
         }],
         tail: "Now checking the layout",
         isStreaming: true,
+        toolTrail: [{
+          id: "read-1",
+          sequence: 1,
+          toolName: "read_file",
+          status: "running",
+          summary: "src/ui/papyrus/operator-console",
+          target: "src/ui/papyrus/operator-console",
+          durationMs: 3_000,
+          afterSegmentId: "segment-1",
+        }],
       },
       turnActivity: { phase: "provider" },
     });
@@ -227,6 +237,7 @@ describe("Papyrus operator console renderer", () => {
     expect(tailIndex).toBeGreaterThan(streamingIndex);
     expect(turnActivityIndex).toBeGreaterThan(streamingIndex);
     expect(output).toContainEqual(expect.stringContaining("I am reading the operator console path."));
+    expect(output).toContainEqual(expect.stringContaining("◷ read_file"));
     expect(output).toContainEqual(expect.stringContaining("Now checking the layout"));
     expect(output).toContainEqual(expect.stringContaining("Now checking the layout▍"));
     expect(output.join("\n")).not.toContain("Assistant stream");

@@ -55,6 +55,7 @@ function renderTranscriptBlockRows(block: TranscriptBlock, width: number, height
   if (block.role === "assistant") {
     return renderAssistantMessageFrame({
       lines: normalizeTranscriptText(block.text),
+      toolTrail: block.toolTrail,
     }, {
       width,
       height,

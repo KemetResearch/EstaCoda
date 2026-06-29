@@ -361,6 +361,9 @@ User:
 explain the setup editor flow
 ╭──────────────────────────── EstaCoda ────────────────────────────╮
 │ The setup editor is split into detection, review, apply, and      │
+│                                                                   │
+│   ◷ read_file   src/cli/setup-editor.ts                    00:04 │
+│                                                                   │
 │ verification.▍                                                    │
 ╰───────────────────────────────────────────────────────────────────╯
 ╭─ Active work ─────────────────────────────────────────────────────────╮
@@ -383,6 +386,10 @@ Streaming contract:
   EstaCoda assistant-message frame. User-visible debug chrome such as
   `Assistant stream` or `assistant:` must not appear in normal rendering. The
   live-only marker is the trailing cursor on incomplete text.
+- Inline tool trails render inside that shared assistant-message frame using
+  the Papyrus active-work visual grammar for status symbols. They are part of
+  the assistant answer surface, not a detached dashboard or separate transcript
+  role.
 - Local interactive Operator Console turns receive visible text through
   `runtime.handle({ onDelta })`. Plain CLI turns keep the append-only stdout
   `provider-token` path and must not be converted to managed-frame rendering.
@@ -391,8 +398,10 @@ Streaming contract:
   markdown, paragraph, or reasoning delimiter.
 - Streaming state may carry `toolTrail` metadata derived from active-work
   events. The metadata preserves tool identity, status, timing, and the
-  assistant segment it follows; rendering that trail inside the assistant frame
-  is a separate surface concern.
+  assistant segment it follows; the frame renderer displays that trail inline
+  between the segment it follows and later assistant text when possible.
+- Inline trail rendering is passive: it formats the current trail metadata and
+  does not add optional progress plumbing or independent live duration ticks.
 - If a provider attempt reports `provider-result.willFallback`, the Operator
   Console resets live streaming for that attempt before fallback output starts.
   Failed-attempt text must not survive into the visible fallback stream.

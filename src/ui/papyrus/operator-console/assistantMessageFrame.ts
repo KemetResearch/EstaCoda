@@ -3,12 +3,30 @@ import {
   wrapText,
 } from "../../renderers/layout.js";
 import { stringWidth } from "../screen/stringWidth.js";
+import { formatInlineToolTrailRow } from "./inlineToolTrailSurface.js";
+import type { InlineToolTrailEntry } from "./operatorConsoleState.js";
 
 export type AssistantMessageFrameInput = {
   readonly title?: string;
   readonly lines: readonly string[];
   readonly cursor?: boolean;
+  readonly blocks?: readonly AssistantMessageFrameBlock[];
+  readonly toolTrail?: readonly InlineToolTrailEntry[];
 };
+
+export type AssistantMessageFrameBlock =
+  | {
+    readonly kind: "text";
+    readonly lines: readonly string[];
+    readonly cursor?: boolean;
+  }
+  | {
+    readonly kind: "toolTrail";
+    readonly entries: readonly InlineToolTrailEntry[];
+  };
+
+export type AssistantMessageFrameTextBlock = Extract<AssistantMessageFrameBlock, { readonly kind: "text" }>;
+export type AssistantMessageFrameToolTrailBlock = Extract<AssistantMessageFrameBlock, { readonly kind: "toolTrail" }>;
 
 export type AssistantMessageFrameRenderOptions = {
   readonly width: number;
@@ -58,9 +76,44 @@ function renderWrappedContentRows(
   input: AssistantMessageFrameInput,
   width: number
 ): readonly string[] {
-  const lines = withOptionalCursor(normalizeFrameLines(input.lines), input.cursor);
-  const wrapped = lines.flatMap((line) => wrapText(line, Math.max(1, width)));
-  return wrapped.length === 0 ? [""] : wrapped;
+  const rows = contentBlocksForInput(input).flatMap((block, index, blocks) =>
+    renderContentBlockRows(block, index, blocks, width)
+  );
+  return rows.length === 0 ? [""] : rows;
+}
+
+function contentBlocksForInput(input: AssistantMessageFrameInput): readonly AssistantMessageFrameBlock[] {
+  if (input.blocks !== undefined) return input.blocks;
+  const blocks: AssistantMessageFrameBlock[] = [{
+    kind: "text",
+    lines: input.lines,
+    cursor: input.cursor,
+  }];
+  if (input.toolTrail !== undefined && input.toolTrail.length > 0) {
+    blocks.push({ kind: "toolTrail", entries: input.toolTrail });
+  }
+  return blocks;
+}
+
+function renderContentBlockRows(
+  block: AssistantMessageFrameBlock,
+  index: number,
+  blocks: readonly AssistantMessageFrameBlock[],
+  width: number
+): readonly string[] {
+  if (block.kind === "text") {
+    const lines = withOptionalCursor(normalizeFrameLines(block.lines), block.cursor);
+    return lines.flatMap((line) => wrapText(line, Math.max(1, width)));
+  }
+
+  const entries = [...block.entries].sort((left, right) => left.sequence - right.sequence);
+  if (entries.length === 0) return [];
+  const rows = entries.map((entry) => formatInlineToolTrailRow(entry, width));
+  return [
+    ...(shouldSeparateFromPreviousBlock(index, blocks) ? [""] : []),
+    ...rows,
+    ...(shouldSeparateFromNextBlock(index, blocks) ? [""] : []),
+  ];
 }
 
 function normalizeFrameLines(lines: readonly string[]): readonly string[] {
@@ -79,6 +132,39 @@ function withOptionalCursor(lines: readonly string[], cursor: boolean | undefine
   const next = [...lines];
   next[next.length - 1] = `${next[next.length - 1] ?? ""}${LIVE_CURSOR}`;
   return next;
+}
+
+function shouldSeparateFromPreviousBlock(
+  index: number,
+  blocks: readonly AssistantMessageFrameBlock[]
+): boolean {
+  return index > 0 && hasRenderableContentBefore(index, blocks);
+}
+
+function shouldSeparateFromNextBlock(
+  index: number,
+  blocks: readonly AssistantMessageFrameBlock[]
+): boolean {
+  return hasRenderableTextAfter(index, blocks);
+}
+
+function hasRenderableContentBefore(
+  index: number,
+  blocks: readonly AssistantMessageFrameBlock[]
+): boolean {
+  return blocks.slice(0, index).some(hasRenderableBlockContent);
+}
+
+function hasRenderableTextAfter(
+  index: number,
+  blocks: readonly AssistantMessageFrameBlock[]
+): boolean {
+  return blocks.slice(index + 1).some((block) => block.kind === "text" && hasRenderableBlockContent(block));
+}
+
+function hasRenderableBlockContent(block: AssistantMessageFrameBlock): boolean {
+  if (block.kind === "toolTrail") return block.entries.length > 0;
+  return block.lines.some((line) => line.trim().length > 0) || block.cursor === true;
 }
 
 function selectLatestRows(rows: readonly string[], count: number): readonly string[] {

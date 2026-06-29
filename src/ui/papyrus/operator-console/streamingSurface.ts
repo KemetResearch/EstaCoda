@@ -1,10 +1,9 @@
 import {
+  type AssistantMessageFrameBlock,
   getAssistantMessageFrameDesiredHeight,
   renderAssistantMessageFrame,
 } from "./assistantMessageFrame.js";
-import type {
-  StreamingState,
-} from "./operatorConsoleState.js";
+import type { StreamingState } from "./operatorConsoleState.js";
 
 export type StreamingSurfaceRenderOptions = {
   readonly width: number;
@@ -28,8 +27,8 @@ export function getStreamingSurfaceDesiredHeight(
   return Math.min(
     MAX_STREAMING_SURFACE_ROWS,
     getAssistantMessageFrameDesiredHeight({
-      lines: streamingTextLines(state),
-      cursor: true,
+      lines: [],
+      blocks: streamingContentBlocks(state),
     }, width)
   );
 }
@@ -45,22 +44,62 @@ export function renderStreamingSurface(
   if (height <= 0) return [];
 
   return renderAssistantMessageFrame({
-    lines: streamingTextLines(state),
-    cursor: true,
+    lines: [],
+    blocks: streamingContentBlocks(state),
   }, { width, height });
 }
 
-function streamingTextLines(state: StreamingState): readonly string[] {
-  return [
-    ...state.segments.flatMap((segment) => normalizeStreamingText(segment.text)),
-    ...normalizeStreamingText(state.tail),
-  ];
+function streamingContentBlocks(state: StreamingState): readonly AssistantMessageFrameBlock[] {
+  const blocks: AssistantMessageFrameBlock[] = [];
+  const toolTrail = state.toolTrail ?? [];
+  const emittedToolIds = new Set<string>();
+
+  for (const segment of state.segments) {
+    const textLines = normalizeStreamingText(segment.text);
+    if (textLines.length > 0) {
+      blocks.push({ kind: "text", lines: textLines });
+    }
+    const entries = toolTrail.filter((entry) => entry.afterSegmentId === segment.id);
+    if (entries.length > 0) {
+      blocks.push({ kind: "toolTrail", entries });
+      for (const entry of entries) emittedToolIds.add(entry.id);
+    }
+  }
+
+  const unanchoredEntries = toolTrail.filter((entry) => !emittedToolIds.has(entry.id));
+  if (unanchoredEntries.length > 0) {
+    blocks.push({ kind: "toolTrail", entries: unanchoredEntries });
+  }
+
+  const tailLines = normalizeStreamingText(state.tail);
+  if (tailLines.length > 0) {
+    blocks.push({ kind: "text", lines: tailLines, cursor: true });
+  } else if (!hasToolTrailBlocks(blocks)) {
+    const lastTextIndex = findLastTextBlockIndex(blocks);
+    if (lastTextIndex >= 0) {
+      const block = blocks[lastTextIndex] as Extract<AssistantMessageFrameBlock, { readonly kind: "text" }>;
+      blocks[lastTextIndex] = { ...block, cursor: true };
+    }
+  }
+
+  return blocks;
 }
 
 function normalizeStreamingText(text: string): readonly string[] {
   if (text.length === 0) return [];
   const lines = text.replace(/\r\n?/gu, "\n").split("\n");
   return lines.length === 0 ? [] : lines;
+}
+
+function hasToolTrailBlocks(blocks: readonly AssistantMessageFrameBlock[]): boolean {
+  return blocks.some((block) => block.kind === "toolTrail" && block.entries.length > 0);
+}
+
+function findLastTextBlockIndex(blocks: readonly AssistantMessageFrameBlock[]): number {
+  for (let index = blocks.length - 1; index >= 0; index -= 1) {
+    if (blocks[index]?.kind === "text") return index;
+  }
+  return -1;
 }
 
 function normalizeDimension(value: number): number {

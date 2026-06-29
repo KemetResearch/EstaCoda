@@ -20,6 +20,34 @@ describe("Papyrus operator console transcript surface", () => {
     expect(rows.every((line) => stringWidth(line) <= 72)).toBe(true);
   });
 
+  it("renders assistant transcript tool trails inside the EstaCoda frame", () => {
+    const rows = renderTranscriptSurface([
+      {
+        id: "assistant-1",
+        role: "assistant",
+        text: "I inspected the runtime path.",
+        toolTrail: [{
+          id: "read-1",
+          sequence: 1,
+          toolName: "read_file",
+          status: "succeeded",
+          summary: "src/cli/session-loop.ts",
+          target: "src/cli/session-loop.ts",
+          durationMs: 1_000,
+        }],
+      },
+    ], { width: 80 });
+    const rendered = rows.join("\n");
+
+    expect(rendered).toContain("EstaCoda");
+    expect(rendered).toContain("I inspected the runtime path.");
+    expect(rendered).toContain("✓ read_file");
+    expect(rendered).toContain("src/cli/session-loop.ts");
+    expect(rendered).toContain("00:01");
+    expect(rendered).not.toContain("Tool │");
+    expect(rows.every((line) => stringWidth(line) <= 80)).toBe(true);
+  });
+
   it("wraps and truncates to the visible height cap", () => {
     const transcript: TranscriptBlock[] = [
       {

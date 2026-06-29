@@ -36,6 +36,32 @@ describe("Papyrus operator console streaming surface", () => {
     expect(rendered).not.toContain("assistant:");
   });
 
+  it("renders anchored inline tool trails between streamed segments and tail", () => {
+    const state: StreamingState = {
+      segments: [{ id: "segment-1", role: "assistant", text: "I'll inspect the runtime path first." }],
+      tail: "The session loop wires deltas through the console.",
+      isStreaming: true,
+      toolTrail: [{
+        id: "read-1",
+        sequence: 1,
+        toolName: "read_file",
+        status: "running",
+        summary: "src/cli/session-loop.ts",
+        target: "src/cli/session-loop.ts",
+        durationMs: 3_000,
+        afterSegmentId: "segment-1",
+      }],
+    };
+    const rendered = renderStreamingSurface(state, { width: 84 }).join("\n");
+
+    expect(rendered).toContain("I'll inspect the runtime path first.");
+    expect(rendered).toContain("◷ read_file");
+    expect(rendered).toContain("src/cli/session-loop.ts");
+    expect(rendered).toContain("The session loop wires deltas through the console.▍");
+    expect(rendered.indexOf("I'll inspect the runtime path first.")).toBeLessThan(rendered.indexOf("◷ read_file"));
+    expect(rendered.indexOf("◷ read_file")).toBeLessThan(rendered.indexOf("The session loop wires"));
+  });
+
   it("settles into the same assistant frame without the live cursor", () => {
     const state: StreamingState = {
       segments: [{ id: "segment-1", role: "assistant", text: "Visible segment." }],
