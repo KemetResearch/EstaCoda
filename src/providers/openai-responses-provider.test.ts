@@ -1312,13 +1312,7 @@ describe("openai-responses-provider", () => {
               response: {
                 status: "completed",
                 error: null,
-                output: [
-                  {
-                    type: "message",
-                    role: "assistant",
-                    content: [{ type: "output_text", text: "Hello" }]
-                  }
-                ]
+                output: []
               }
             }),
             "data: [DONE]\n\n"

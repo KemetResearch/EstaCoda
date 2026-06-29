@@ -1011,7 +1011,8 @@ function* parseResponsesStreamPayload(
     const parsed = parseResponsesPayload({
       provider,
       model,
-      payload: responsePayload
+      payload: responsePayload,
+      isStreamingCompletion: true
     });
     yield {
       kind: parsed.ok ? "done" : "error",
@@ -1067,6 +1068,7 @@ export function parseResponsesPayload(input: {
   provider: ProviderId;
   model: string;
   payload: unknown;
+  isStreamingCompletion?: boolean;
 }): ProviderResponse {
   const payload = input.payload as {
     status?: string;
@@ -1197,7 +1199,14 @@ export function parseResponsesPayload(input: {
   );
   const hasReasoningOnlySignal = reasoning !== undefined || reasoningMetadata?.present === true;
 
-  if (content.length === 0 && functionCalls.length === 0 && payload.status !== "in_progress" && !hasReasoningOnlySignal) {
+  const allowEmptyStreamingCompletion = input.isStreamingCompletion === true && payload.status === "completed";
+  if (
+    content.length === 0 &&
+    functionCalls.length === 0 &&
+    payload.status !== "in_progress" &&
+    !hasReasoningOnlySignal &&
+    !allowEmptyStreamingCompletion
+  ) {
     return {
       ok: false,
       content: "Provider response did not include assistant content.",
