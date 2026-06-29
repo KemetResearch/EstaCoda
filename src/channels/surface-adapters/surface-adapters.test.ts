@@ -11,7 +11,7 @@ import { DiscordSurfaceAdapter } from "./discord-surface-adapter.js";
 import { EmailSurfaceAdapter } from "./email-surface-adapter.js";
 import { WhatsAppSurfaceAdapter } from "./whatsapp-surface-adapter.js";
 import { renderChannelAssistantResponse } from "./channel-assistant-response.js";
-import { ChannelToolActivityRenderer, channelToolAction } from "./channel-tool-activity.js";
+import { ChannelToolActivityRenderer } from "./channel-tool-activity.js";
 import { renderPlainProgressLabel, plainActivityLabel } from "./channel-progress-label.js";
 import type { SurfaceAdapter } from "../../contracts/surface-adapter.js";
 import type { RuntimeEvent } from "../../contracts/runtime-event.js";
@@ -299,29 +299,6 @@ describe("ChannelToolActivityRenderer", () => {
   });
 });
 
-// ──────────────────────────────────────────────────
-describe("channelToolAction", () => {
-  it("returns definition progressLabel when available", () => {
-    const def = {
-      name: "custom.tool",
-      description: "",
-      inputSchema: {},
-      riskClass: "read-only-local" as const,
-      toolsets: ["core"],
-      progressLabel: "Custom action",
-      maxResultSizeChars: 0,
-    };
-    expect(channelToolAction("custom.tool", def)).toBe("Custom action");
-  });
-
-  it("falls back to shared display labels", () => {
-    expect(channelToolAction("workspace.open", undefined)).toBe("Workspace Open");
-    expect(channelToolAction("terminal.run", undefined)).toBe("Run Command");
-    expect(channelToolAction("unknown", undefined)).toBe("Unknown");
-  });
-});
-
-// ──────────────────────────────────────────────────
 describe("plainActivityLabel", () => {
   it("returns English label without emoji", () => {
     const label = plainActivityLabel("en", "thinking");

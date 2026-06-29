@@ -1,9 +1,8 @@
 import type { RuntimeEvent } from "../contracts/runtime-event.js";
 import type { Runtime } from "../runtime/create-runtime.js";
-import { ToolActivityRenderer, toolIcon } from "./tool-activity-renderer.js";
 import { ToolActivityViewModelBuilder } from "./tool-activity-view-models.js";
 import { renderPlain } from "../ui/renderers/plain-renderer.js";
-import { toolDisplayLabel } from "../ui/tool-display.js";
+import { toolDisplayIcon, toolDisplayLabel } from "../ui/tool-display.js";
 
 export type OneShotPromptResult = {
   handled: boolean;
@@ -110,7 +109,7 @@ function renderOneShotEvent(
         ? `provider fallback: ${event.provider}/${event.model}`
         : `provider: ${event.provider}/${event.model}`);
     case "provider-tool-call":
-      return safeLine(`${toolIcon(event.name ?? "")} provider requested ${toolDisplayLabel(event.name ?? "provider-tool")}`);
+      return safeLine(`${toolDisplayIcon(event.name ?? "", "cli")} provider requested ${toolDisplayLabel(event.name ?? "provider-tool")}`);
     case "provider-result":
       return safeLine(event.ok
         ? `provider ready: ${event.provider}/${event.model}`

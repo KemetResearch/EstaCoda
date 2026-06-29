@@ -79,9 +79,10 @@ export function renderChannelProgressLabel(
     case "tool-start": {
       const summary = event.targetSummary?.trim();
       const label = toolDisplayLabel(event.tool, locale);
+      const icon = toolDisplayIcon(event.tool, "channel");
       return summary === undefined || summary.length === 0
-        ? `${toolEmoji(event.tool)} ${label}`
-        : `${toolEmoji(event.tool)} ${label}: "${summary}"`;
+        ? `${icon} ${label}`
+        : `${icon} ${label}: "${summary}"`;
     }
     case "provider-attempt":
       return "";
@@ -107,10 +108,6 @@ function providerServingTransitionLabel(
   return transition === "fallback-active"
     ? "✦ Using fallback"
     : "✦ Primary model available again";
-}
-
-export function toolEmoji(tool: string): string {
-  return toolDisplayIcon(tool, "channel");
 }
 
 export function activityKeyForTool(tool: string): ActivityLabelKey {

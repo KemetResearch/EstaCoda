@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { activityKeyForTool, renderChannelProgressLabel, toolEmoji } from "./activity-labels.js";
+import { activityKeyForTool, renderChannelProgressLabel } from "./activity-labels.js";
 
 describe("channel activity labels", () => {
   it("renders updated localized lifecycle labels", () => {
@@ -33,17 +33,9 @@ describe("channel activity labels", () => {
     expect(renderChannelProgressLabel({ kind: "tool-start", tool: "mcp.custom_tool", targetSummary: "payload" })).toBe("⚙️ Custom Tool: \"payload\"");
   });
 
-  it("uses mixed EstaCoda glyphs for selected tool families", () => {
-    expect(toolEmoji("skill.read")).toBe("☥");
-    expect(toolEmoji("skill.search")).toBe("🔎");
-    expect(toolEmoji("skill.view")).toBe("☥");
+  it("keeps category labels separate from exact display labels", () => {
     expect(activityKeyForTool("skill.read")).toBe("load_skill");
     expect(activityKeyForTool("skill.search")).toBe("load_skill");
     expect(activityKeyForTool("skill.view")).toBe("load_skill");
-    expect(toolEmoji("skill.create")).toBe("✦");
-    expect(toolEmoji("config.image.setup")).toBe("🎨");
-    expect(toolEmoji("image.generate")).toBe("🎨");
-    expect(toolEmoji("python.probe")).toBe("𓆙");
-    expect(toolEmoji("execute_code")).toBe("𓆙");
   });
 });

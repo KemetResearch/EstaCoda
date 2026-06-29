@@ -33,9 +33,9 @@ import {
   progressStep,
   toolActivityRailEvent,
 } from "../ui/view-models/builders.js";
-import { toolActivityLabelKey } from "../ui/tool-labels.js";
 import { buildToolDisplayPreview } from "../tools/tool-target-summary.js";
 import { toolDisplayLabel } from "../ui/tool-display.js";
+import { formatCount, formatDuration, humanRisk } from "../ui/tool-activity-format.js";
 
 // ─────────────────────────────────────────────────────────────
 // Tool glyph resolution (capability-gated, token-driven)
@@ -93,47 +93,6 @@ export function resolveToolLabel(tool: string, definitions?: Map<string, ToolDef
   }
 
   return toolDisplayLabel(tool);
-}
-
-// ─────────────────────────────────────────────────────────────
-// Risk class humanization
-// ─────────────────────────────────────────────────────────────
-
-export function humanRisk(riskClass: string | undefined): string {
-  switch (riskClass) {
-    case "destructive-local":
-      return "destructive local action";
-    case "credential-access":
-      return "credential or secret access";
-    case "external-side-effect":
-      return "external side effect";
-    case "spend-money":
-      return "may spend money";
-    case "sandbox-escape":
-      return "sandbox boundary";
-    case "workspace-write":
-      return "workspace write";
-    default:
-      return riskClass ?? "policy gate";
-  }
-}
-
-// ─────────────────────────────────────────────────────────────
-// Duration / count formatting
-// ─────────────────────────────────────────────────────────────
-
-export function formatDuration(ms: number): string {
-  if (ms < 1_000) {
-    return `${Math.max(0, ms)}ms`;
-  }
-  return `${(ms / 1_000).toFixed(ms >= 10_000 ? 0 : 1)}s`;
-}
-
-export function formatCount(value: number): string {
-  if (value >= 1_000) {
-    return `${(value / 1_000).toFixed(value >= 10_000 ? 0 : 1)}k`;
-  }
-  return String(value);
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -207,7 +166,7 @@ export class ToolActivityViewModelBuilder {
     if (event.kind === "provider-tool-call") {
       const tool = event.name ?? "provider-tool";
       return toolActivityRailEvent(tool, "running", {
-        label: toolActivityLabelKey(tool),
+        label: railLabelKeyForTool(tool),
       });
     }
 
@@ -229,7 +188,7 @@ export class ToolActivityViewModelBuilder {
     const status = event.ok === false ? "failed" : "done";
     return toolActivityRailEvent(event.tool, status, {
       elapsedMs: elapsed ?? undefined,
-      label: status === "failed" ? "failed" : toolActivityLabelKey(event.tool),
+      label: status === "failed" ? "failed" : railLabelKeyForTool(event.tool),
       target: event.displayPreview ?? event.targetSummary,
       activityId: event.activityId,
     });
@@ -451,4 +410,18 @@ export function buildTurnProgressRail(options: BuildTurnProgressRailOptions): Pr
     sessionElapsedMs: options.sessionElapsedMs,
     taskElapsedMs: options.taskElapsedMs,
   });
+}
+
+function railLabelKeyForTool(tool: string): string {
+  if (tool.includes("read") || tool.includes("workspace") || tool.includes("file")) return "read";
+  if (tool.includes("write") || tool.includes("artifact") || tool.includes("trajectory")) return "write";
+  if (tool.includes("terminal") || tool.includes("process") || tool.includes("execute") || tool.includes("python")) return "run";
+  if (tool.includes("web") || tool.includes("browser")) return "fetch";
+  if (tool.includes("review")) return "review";
+  if (tool.includes("memory")) return "memo";
+  if (tool.includes("delegate")) return "delegate";
+  if (tool.includes("config") || tool.includes("onboarding")) return "config";
+  if (tool.includes("media")) return "media";
+  if (tool.includes("skill") || tool.includes("workflow")) return "plan";
+  return "run";
 }

@@ -30,7 +30,7 @@ import type { ToolExecutionRecord } from "../tools/tool-executor.js";
 import { buildToolsMenuViewModel, buildSkillsMenuViewModel } from "./slash-menu.js";
 import { renderSessionHelp, buildSessionHelpViewModel } from "./session-help.js";
 import { commandRegistry } from "./command-registry.js";
-import { toolIcon } from "./tool-activity-renderer.js";
+import { toolDisplayIcon } from "../ui/tool-display.js";
 import {
   ToolActivityViewModelBuilder,
   buildSecurityAuditViewModel,
@@ -2214,14 +2214,14 @@ async function renderManualToolExecution(
     toolInput: Record<string, unknown>;
   }
 ): Promise<void> {
-  output.write(`${toolIcon(input.tool)} calling ${input.tool}\n`);
+  output.write(`${toolDisplayIcon(input.tool, "cli")} calling ${input.tool}\n`);
   const execution = await runtime.executeTool?.(input);
   if (execution === undefined) {
-    output.write(`${toolIcon(input.tool)} ${input.tool} unavailable\n`);
+    output.write(`${toolDisplayIcon(input.tool, "cli")} ${input.tool} unavailable\n`);
     return;
   }
 
-  output.write(`${toolIcon(input.tool)} ${input.tool} ${execution.result?.ok === true ? "done" : "failed"}\n`);
+  output.write(`${toolDisplayIcon(input.tool, "cli")} ${input.tool} ${execution.result?.ok === true ? "done" : "failed"}\n`);
   if (execution.result?.content !== undefined && execution.result.content.length > 0) {
     output.write(`${execution.result.content}\n`);
   }
