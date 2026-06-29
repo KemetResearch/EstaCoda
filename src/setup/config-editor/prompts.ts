@@ -199,13 +199,22 @@ export function createOpenAICompatibleEndpointFlowUi(
       title: text.title,
       message: [
         text.body,
-        currentRoute === undefined ? text.currentNone : text.current,
-        text.hasCurrentEndpoint ? text.endpoint : text.defaultEndpoint,
         "",
         text.process,
-        text.destination,
         "",
       ].join("\n"),
+      statusLines: [
+        {
+          text: currentRoute === undefined ? text.currentNone : text.current,
+          tone: "active",
+          direction: locale === "ar" ? "rtl" : "ltr",
+        },
+        {
+          text: text.hasCurrentEndpoint ? text.endpoint : text.defaultEndpoint,
+          tone: "active",
+          direction: locale === "ar" ? "rtl" : "ltr",
+        },
+      ],
       columns: setupChoiceColumns(locale),
       tableDirection: setupChoiceTableDirection(locale),
       tableWidth: setupChoiceTableWidth(locale),
@@ -326,7 +335,7 @@ export function createOpenAICompatibleEndpointFlowUi(
         {
           id: "change-endpoint",
           label: text.changeEndpoint,
-          description: setupCopyText(locale, "setupEditor.prompt.openaiCompatible.endpoint.baseUrl").replace("{baseUrl}", probe.baseUrl),
+          description: setupCopyText(locale, "setupEditor.prompt.openaiCompatible.endpoint.changeEndpoint.description"),
           value: { kind: "change-endpoint" as const },
         },
         setupNavigationChoice({

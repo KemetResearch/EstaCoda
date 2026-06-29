@@ -274,6 +274,7 @@ const SETUP_EDITOR_KEYS = [
   "setupEditor.prompt.openaiCompatible.endpoint.body",
   "setupEditor.prompt.openaiCompatible.endpoint.baseUrl",
   "setupEditor.prompt.openaiCompatible.endpoint.destination",
+  "setupEditor.prompt.openaiCompatible.endpoint.changeEndpoint.description",
   "setupEditor.prompt.openaiCompatible.endpoint.check",
   "setupEditor.prompt.openaiCompatible.endpoint.manual",
   "setupEditor.prompt.openaiCompatible.endpoint.auth",
@@ -1213,12 +1214,15 @@ describe("setup copy", () => {
     expect(rawSetupCopy("en", "setupEditor.prompt.openaiCompatible.intro.title")).toBe("Local / Custom Endpoint");
     expect(rawSetupCopy("en", "setupEditor.prompt.openaiCompatible.intro.current")).toBe("Current: {providerId}/{modelId}");
     expect(rawSetupCopy("en", "setupEditor.prompt.openaiCompatible.intro.defaultEndpoint")).toBe("Default endpoint: {baseUrl}");
-    expect(rawSetupCopy("en", "setupEditor.prompt.openaiCompatible.intro.process")).toContain("/models");
+    expect(rawSetupCopy("en", "setupEditor.prompt.openaiCompatible.intro.process")).toContain("1. Choose or confirm the endpoint URL");
+    expect(rawSetupCopy("en", "setupEditor.prompt.openaiCompatible.intro.process")).toContain("2. Try to discover models from /models");
+    expect(rawSetupCopy("en", "setupEditor.prompt.openaiCompatible.intro.continue.description")).toBe("Continue with this endpoint.");
     expect(rawSetupCopy("en", "setupEditor.prompt.openaiCompatible.intro.changeEndpoint.description")).toBe("Enter a different OpenAI-compatible base URL.");
     expect(rawSetupCopy("en", "setupEditor.prompt.openaiCompatible.endpoint.title")).toBe("Local / Custom Endpoint");
     expect(rawSetupCopy("en", "setupEditor.prompt.openaiCompatible.endpoint.body")).toBe("Connect EstaCoda to an OpenAI-compatible inference endpoint.");
-    expect(rawSetupCopy("en", "setupEditor.prompt.openaiCompatible.endpoint.baseUrl")).toBe("Endpoint URL [{baseUrl}] - press ENTER to use this default:");
+    expect(rawSetupCopy("en", "setupEditor.prompt.openaiCompatible.endpoint.baseUrl")).toBe("Endpoint URL [{baseUrl}] - press ENTER to keep it:");
     expect(rawSetupCopy("en", "setupEditor.prompt.openaiCompatible.endpoint.destination")).toBe("Requests will be sent to {baseUrl}.");
+    expect(rawSetupCopy("en", "setupEditor.prompt.openaiCompatible.endpoint.changeEndpoint.description")).toBe("Enter a different endpoint URL.");
     expect(rawSetupCopy("en", "setupEditor.prompt.openaiCompatible.checking")).toBe("Checking {baseUrl}/models ...");
     expect(rawSetupCopy("en", "setupEditor.prompt.openaiCompatible.models.discovered")).toBe("Models discovered: {count}");
     expect(rawSetupCopy("en", "setupEditor.prompt.openaiCompatible.models.possibleCauses")).toBe("The endpoint may be offline, require authentication, or not expose /models.");
@@ -1249,6 +1253,7 @@ describe("setup copy", () => {
     expect(resolveSetupCopy("ar", "setupEditor.prompt.openaiCompatible.endpoint.baseUrl")).toContain(isolateLtr("{baseUrl}"));
     expect(resolveSetupCopy("ar", "setupEditor.prompt.openaiCompatible.endpoint.baseUrl")).toContain(isolateLtr("ENTER"));
     expect(resolveSetupCopy("ar", "setupEditor.prompt.openaiCompatible.endpoint.destination")).toContain(isolateLtr("{baseUrl}"));
+    expect(resolveSetupCopy("ar", "setupEditor.prompt.openaiCompatible.endpoint.changeEndpoint.description")).toContain(isolateLtr("URL"));
     expect(resolveSetupCopy("ar", "setupEditor.prompt.openaiCompatible.checking")).toContain(isolateLtr("{baseUrl}"));
     expect(resolveSetupCopy("ar", "setupEditor.prompt.openaiCompatible.checking")).toContain(isolateLtr("/models"));
     expect(resolveSetupCopy("ar", "setupEditor.prompt.openaiCompatible.models.possibleCauses")).toContain(isolateLtr("/models"));

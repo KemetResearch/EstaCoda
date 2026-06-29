@@ -2207,6 +2207,7 @@ describe("runConfigEditor", () => {
     prompt.select = basePrompt.select;
     prompt.onboardingCard = basePrompt.onboardingCard;
     prompt.close = basePrompt.close;
+    const selectInputs = captureSelectInputs(prompt);
 
     const result = await runConfigEditor({
       homeDir: tempDir,
@@ -2231,6 +2232,18 @@ describe("runConfigEditor", () => {
     };
 
     expect(result.completed).toBe(true);
+    const introInput = selectInputs.find((input) => input.title === "Local / Custom Endpoint");
+    expect(introInput?.body).toContain("EstaCoda will:");
+    expect(introInput?.body).toContain("1. Choose or confirm the endpoint URL");
+    expect(introInput?.statusLines).toEqual([
+      { text: "Current: local/local-test-model", tone: "active", direction: "ltr" },
+      { text: "Endpoint: http://localhost:11434/v1", tone: "active", direction: "ltr" },
+    ]);
+    expect(introInput?.options.find((option) => option.label === "Continue")?.description).toBe("Continue with this endpoint.");
+    const changeEndpointModelOption = selectInputs
+      .flatMap((input) => input.options)
+      .find((option) => option.id === "change-endpoint");
+    expect(changeEndpointModelOption?.description).toBe("Enter a different endpoint URL.");
     expect(questions).toEqual([
       "Context window tokens [infer]: ",
     ]);
@@ -2297,7 +2310,7 @@ describe("runConfigEditor", () => {
     expect(result.selectedActionId).toBe("add-custom-provider-route");
     expect(questions).toEqual([
       "Provider ID: ",
-      "Endpoint URL [http://localhost:11434/v1] - press ENTER to use this default:",
+      "Endpoint URL [http://localhost:11434/v1] - press ENTER to keep it:",
       "Model ID: ",
       "Context window tokens [infer]: ",
       "Environment variable [OPENAI_COMPATIBLE_API_KEY]:",
@@ -2447,8 +2460,8 @@ describe("runConfigEditor", () => {
     };
 
     expect(result.completed).toBe(true);
-    expect(questions[0]).toBe("Endpoint URL [http://localhost:11434/v1] - press ENTER to use this default:");
-    expect(questions[1]).toBe("Endpoint URL [http://localhost:11434/v1] - press ENTER to use this default:");
+    expect(questions[0]).toBe("Endpoint URL [http://localhost:11434/v1] - press ENTER to keep it:");
+    expect(questions[1]).toBe("Endpoint URL [http://localhost:11434/v1] - press ENTER to keep it:");
     expect(cards.flat()).toContain("Invalid endpoint URL. Enter an absolute URL such as http://localhost:11434/v1.");
     expect(result.reviewManifest?.sections["provider-model-network"][0]?.review.values).toEqual(expect.objectContaining({
       model: "manual-local-model",
