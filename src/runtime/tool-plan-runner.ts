@@ -6,6 +6,7 @@ import type { ProviderExecutionResult } from "../providers/provider-executor.js"
 import type { ToolCallPlanner } from "../tools/tool-call-planner.js";
 import type { ToolExecutor, ToolExecutionRecord } from "../tools/tool-executor.js";
 import { summarizeSecurityTarget } from "../tools/tool-executor.js";
+import { buildToolDisplayPreview } from "../tools/tool-target-summary.js";
 import { packetizeToolExecution } from "../tools/tool-result-packet.js";
 import { DelegateCallBudget } from "../delegation/delegate-call-budget.js";
 import type { RunRecorder } from "./run-recorder.js";
@@ -153,6 +154,7 @@ export class ToolPlanRunner {
       kind: "tool-start",
       tool: plan.tool,
       targetSummary: summarizeSecurityTarget(plan.tool, plan.input),
+      displayPreview: buildToolDisplayPreview(plan.tool, plan.input),
       activityId: plan.id
     });
 
@@ -182,6 +184,7 @@ export class ToolPlanRunner {
         tool: plan.tool,
         ok: false,
         targetSummary: summarizeSecurityTarget(plan.tool, plan.input),
+        displayPreview: buildToolDisplayPreview(plan.tool, plan.input),
         activityId: plan.id
       });
       return undefined;
@@ -210,6 +213,7 @@ export class ToolPlanRunner {
       ok: execution.result?.ok,
       fileChangePreview: toolResultFileChangePreview(execution),
       targetSummary: execution.targetSummary,
+      displayPreview: buildToolDisplayPreview(plan.tool, plan.input),
       activityId: plan.id,
       ...toolResultStats(execution)
     });

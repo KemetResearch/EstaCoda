@@ -47,7 +47,7 @@ import {
 } from "../ui/view-models/builders.js";
 import { createSessionRenderer, type SessionRenderer } from "./session-renderer.js";
 import type { ResolvedTokens } from "../contracts/ui-tokens.js";
-import type { StartupDashboardViewModel, StatusViewModel, ToolActivityRailEvent, ViewModel } from "../contracts/view-model.js";
+import type { StartupDashboardViewModel, StatusViewModel, ViewModel } from "../contracts/view-model.js";
 import type { TerminalCapabilities } from "../contracts/ui.js";
 import {
   createSubmittedSteerTranscriptBlock,
@@ -57,13 +57,13 @@ import {
   renderCompletedActiveWorkSurface,
   renderOperatorConsoleLines,
   routeSteerKey,
-  type ActiveWorkRuntimeEvent,
   type OperatorConsoleStyle,
   type OperatorConsoleRuntimeHost,
   type QueuedSteerState,
   type SteerState,
   type TurnActivityState,
 } from "../ui/papyrus/operator-console/index.js";
+import { activeWorkEventFromToolRail } from "./operator-console-tool-display.js";
 import type { ParsedKeypress } from "../ui/input/parseKeypress.js";
 import { createKeypressStreamDispatcher } from "../ui/input/keyPressStreamDispatcher.js";
 import { createTerminalLifecycle } from "../ui/input/terminalLifecycle.js";
@@ -576,23 +576,6 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
           operatorConsoleLiveFrame?.setSteer(state);
         }
 
-        function activeWorkEventFromToolRail(
-          railEvent: ToolActivityRailEvent,
-          runtimeEvent: Extract<RuntimeEvent, { kind: "tool-start" | "tool-result" }>
-        ): ActiveWorkRuntimeEvent {
-          return {
-            id: railEvent.activityId,
-            toolName: railEvent.tool,
-            status: railEvent.status,
-            summary: railEvent.label,
-            target: railEvent.target,
-            durationMs: railEvent.elapsedMs,
-            detailsRef: railEvent.activityId,
-            riskClass: railEvent.riskClass,
-            fileChangeInspected: runtimeEvent.kind === "tool-result" && runtimeEvent.fileChangePreview !== undefined,
-          };
-        }
-
         function writeTurnBoundaryRows(rows: readonly string[], options: { readonly redrawLiveFrame?: boolean } = {}): void {
           if (rows.length === 0) return;
           const writeRows = () => {
@@ -813,7 +796,11 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
 	              let newPhase: string | undefined;
 	              if (operatorConsoleLiveFrame !== undefined && isToolActivityRuntimeEvent(event)) {
 	                const railEvent = activityBuilder.buildToolActivityRailEvent(event);
-	                operatorConsoleLiveFrame.applyActiveWorkEvent(activeWorkEventFromToolRail(railEvent, event));
+	                operatorConsoleLiveFrame.applyActiveWorkEvent(activeWorkEventFromToolRail({
+	                  railEvent,
+	                  runtimeEvent: event,
+	                  locale: renderer.locale === "ar" ? "ar" : "en",
+	                }));
 	                newPhase = "tool";
 	              } else if (operatorConsoleLiveFrame !== undefined) {
                   const operatorConsolePhase = operatorConsoleTransientPhaseForRuntimeEvent(event);

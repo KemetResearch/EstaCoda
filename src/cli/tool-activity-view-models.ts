@@ -211,7 +211,7 @@ export class ToolActivityViewModelBuilder {
       this.#pushStart(this.#eventKey(event));
       return toolActivityRailEvent(event.tool, "running", {
         label: "preparing",
-        target: event.targetSummary ?? event.tool,
+        target: event.displayPreview ?? event.targetSummary ?? event.tool,
         activityId: event.activityId,
       });
     }
@@ -233,7 +233,7 @@ export class ToolActivityViewModelBuilder {
         elapsedMs: elapsed ?? undefined,
         label: "gated",
         riskClass: event.riskClass,
-        target: event.targetSummary,
+        target: event.displayPreview ?? event.targetSummary,
         activityId: event.activityId,
       });
     }
@@ -242,7 +242,7 @@ export class ToolActivityViewModelBuilder {
     return toolActivityRailEvent(event.tool, status, {
       elapsedMs: elapsed ?? undefined,
       label: status === "failed" ? "failed" : toolActivityLabelKey(event.tool),
-      target: event.targetSummary,
+      target: event.displayPreview ?? event.targetSummary,
       activityId: event.activityId,
     });
   }

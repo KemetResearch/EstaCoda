@@ -30,6 +30,7 @@ export type RuntimeEvent =
       tool: string;
       stepId?: string;
       targetSummary?: string;
+      displayPreview?: string;
       activityId?: string;
     }
   | {
@@ -43,6 +44,7 @@ export type RuntimeEvent =
       truncated?: boolean;
       fileChangePreview?: FileChangePreviewViewModel;
       targetSummary?: string;
+      displayPreview?: string;
       activityId?: string;
     }
   | {
