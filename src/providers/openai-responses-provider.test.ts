@@ -1021,6 +1021,51 @@ describe("openai-responses-provider", () => {
       });
     });
 
+    it("maps streamed max_output_tokens incomplete responses to length finish", async () => {
+      const provider = createOpenAIResponsesProvider({
+        id: "codex",
+        endpoint: {
+          baseUrl: "https://api.openai.com/v1",
+          apiKey: { kind: "none" }
+        },
+        enableNetwork: true,
+        fetch: createSseFetch({
+          chunks: [
+            sse({ type: "response.output_text.delta", delta: "Partial" }),
+            sse({
+              type: "response.incomplete",
+              response: {
+                status: "incomplete",
+                incomplete_details: { reason: "max_output_tokens" },
+                output: [
+                  {
+                    type: "message",
+                    role: "assistant",
+                    content: [{ type: "output_text", text: "Partial" }]
+                  }
+                ]
+              }
+            })
+          ]
+        })
+      });
+
+      const events = [];
+      for await (const event of provider.stream!({
+        model: "codex-model",
+        messages: [{ role: "user", content: "Hello" }]
+      })) {
+        events.push(event);
+      }
+
+      expect(events.filter((event) => event.kind === "token").map((event) => event.text)).toEqual(["Partial"]);
+      const done = events.find((event) => event.kind === "done");
+      expect(done?.response.ok).toBe(true);
+      expect(done?.response.content).toBe("Partial");
+      expect(done?.response.finishReason).toBe("length");
+      expect(done?.response.incompleteReason).toBe("max_output_tokens");
+    });
+
     it("collects streamed completion for the ChatGPT Codex backend", async () => {
       const capturedBodies: unknown[] = [];
       const provider = createOpenAIResponsesProvider({
