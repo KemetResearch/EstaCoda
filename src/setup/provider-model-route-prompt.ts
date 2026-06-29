@@ -128,8 +128,7 @@ function shouldDeferModelSelectionToEndpointFlow(
   options: SelectProviderModelRouteOptions,
   provider: ProviderCandidate
 ): boolean {
-  return options.mode === "primary" &&
-    options.endpointFirstProviderIds?.some((providerId) => providerId === provider.id) === true;
+  return options.endpointFirstProviderIds?.some((providerId) => providerId === provider.id) === true;
 }
 
 function providerPromptCandidates(

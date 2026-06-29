@@ -2920,6 +2920,67 @@ describe("runConfigEditor", () => {
     expect(JSON.stringify(result)).not.toContain("sk-fallback-add-secret");
   });
 
+  it("runs endpoint-first setup when adding a local custom fallback route", async () => {
+    await writeUserConfig(tempDir, localReadyConfig());
+    await trustWorkspace(tempDir, workspaceRoot);
+    const prompt = fakePrompt({
+      values: [
+        "Local",
+        "",
+        "Check endpoint",
+        "fallback-local-model",
+        "",
+        "No API key",
+        "Skip test",
+        "Review changes",
+        true,
+      ],
+    });
+    const selectInputs = captureSelectInputs(prompt);
+
+    const result = await runConfigEditor({
+      homeDir: tempDir,
+      workspaceRoot,
+      prompt,
+      defaultActionId: "edit-fallback-model-route",
+      flowEngine: flowEngine({ credentialAction: "endpoint", envVarName: "OPENAI_COMPATIBLE_API_KEY", providers: ["local"] }),
+      providerFetch: async (url) => {
+        if (url.endsWith("/models")) {
+          return fetchResponse({ data: [{ id: "fallback-local-model" }] });
+        }
+        return fetchResponse({});
+      },
+      applyExecutor: createReviewedSetupApplyExecutor({
+        homeDir: tempDir,
+        workspaceRoot,
+      }),
+    });
+    const config = JSON.parse(await readFile(profileConfigPath(tempDir), "utf8")) as {
+      model?: { fallbacks?: Array<{ provider?: string; id?: string; baseUrl?: string }> };
+    };
+
+    expect(result.completed).toBe(true);
+    expect(selectInputs.map((input) => input.title)).toContain("Local / Custom Endpoint");
+    expect(selectInputs.map((input) => input.title)).not.toContain("Fallback model");
+    expect(result.reviewManifest?.sections["provider-model-network"][0]?.review.summaryKey).toBe("setupDrafts.fallbackModelRoute.add.summary");
+    expect(result.reviewManifest?.sections["provider-model-network"][0]?.review.values).toEqual(expect.objectContaining({
+      fallbackOperation: "add",
+      provider: "local",
+      model: "fallback-local-model",
+      baseUrl: "http://localhost:11434/v1",
+      modelSource: "discovered",
+      modelListStatus: "passed",
+      chatCompletionStatus: "skipped",
+    }));
+    expect(config.model?.fallbacks).toEqual([
+      expect.objectContaining({
+        provider: "local",
+        id: "fallback-local-model",
+        baseUrl: "http://localhost:11434/v1",
+      }),
+    ]);
+  });
+
   it("prompts to edit existing fallbacks or add another route", async () => {
     await writeUserConfig(tempDir, {
       ...localReadyConfig(),
@@ -3108,6 +3169,69 @@ describe("runConfigEditor", () => {
     expect(rawConfig).not.toContain("sk-auxiliary-compression-secret");
     expect(JSON.stringify(result)).not.toContain("sk-auxiliary-compression-secret");
     expect(JSON.stringify(result.reviewManifest)).not.toContain("sk-auxiliary-compression-secret");
+  });
+
+  it("runs endpoint-first setup when selecting a local custom auxiliary route", async () => {
+    await writeUserConfig(tempDir, localReadyConfig());
+    await trustWorkspace(tempDir, workspaceRoot);
+    const prompt = fakePrompt({
+      values: [
+        "compression",
+        "Local",
+        "",
+        "Check endpoint",
+        "aux-local-model",
+        "",
+        "No API key",
+        "Skip test",
+        "Review changes",
+        true,
+      ],
+    });
+    const selectInputs = captureSelectInputs(prompt);
+
+    const result = await runConfigEditor({
+      homeDir: tempDir,
+      workspaceRoot,
+      prompt,
+      defaultActionId: "edit-auxiliary-model-route",
+      flowEngine: flowEngine({ credentialAction: "endpoint", envVarName: "OPENAI_COMPATIBLE_API_KEY", providers: ["local"] }),
+      providerFetch: async (url) => {
+        if (url.endsWith("/models")) {
+          return fetchResponse({ data: [{ id: "aux-local-model" }] });
+        }
+        return fetchResponse({});
+      },
+      applyExecutor: createReviewedSetupApplyExecutor({
+        homeDir: tempDir,
+        workspaceRoot,
+      }),
+    });
+    const config = JSON.parse(await readFile(profileConfigPath(tempDir), "utf8")) as {
+      auxiliaryModels?: {
+        compression?: { provider?: string; id?: string; baseUrl?: string; enabled?: boolean };
+      };
+    };
+
+    expect(result.completed).toBe(true);
+    expect(selectInputs.map((input) => input.title)).toContain("Local / Custom Endpoint");
+    expect(selectInputs.map((input) => input.title)).not.toContain("Auxiliary model");
+    expect(result.reviewManifest?.sections["provider-model-network"][0]?.review.summaryKey).toBe("setupDrafts.auxiliaryModelRoute.summary");
+    expect(result.reviewManifest?.sections["provider-model-network"][0]?.review.values).toEqual(expect.objectContaining({
+      auxiliaryTask: "compression",
+      provider: "local",
+      model: "aux-local-model",
+      baseUrl: "http://localhost:11434/v1",
+      modelSource: "discovered",
+      modelListStatus: "passed",
+      chatCompletionStatus: "skipped",
+    }));
+    expect(config.auxiliaryModels?.compression).toEqual(expect.objectContaining({
+      provider: "local",
+      id: "aux-local-model",
+      baseUrl: "http://localhost:11434/v1",
+      enabled: true,
+    }));
   });
 
   it("does not change assessor route when auxiliary review is cancelled", async () => {

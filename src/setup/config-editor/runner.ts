@@ -1237,8 +1237,9 @@ async function reviewAndApplyOpenAICompatibleEndpointResult(
   flowResult: Extract<OpenAICompatibleEndpointFlowResult, { readonly kind: "ready" }>
 ): Promise<RunOnceResult> {
   const verificationAction = session.plan.actions.find((candidate) => candidate.id === "run-readonly-verification");
+  const routeAction = endpointRouteActionForEditorAction(editorAction, flowResult.routeAction);
   const draftActions = [
-    flowResult.routeAction,
+    routeAction,
     ...(flowResult.credentialAction === undefined ? [] : [flowResult.credentialAction]),
     ...(verificationAction === undefined ? [] : [verificationAction]),
   ];
@@ -1270,6 +1271,22 @@ async function reviewAndApplyOpenAICompatibleEndpointResult(
   });
 }
 
+function endpointRouteActionForEditorAction(
+  editorAction: SetupEditorActionDraft,
+  endpointRouteAction: SetupEditorActionDraft
+): SetupEditorActionDraft {
+  if (editorAction.id === "edit-fallback-model-route" || editorAction.id === "edit-auxiliary-model-route") {
+    return {
+      ...editorAction,
+      reviewValues: {
+        ...editorAction.reviewValues,
+        ...endpointRouteAction.reviewValues,
+      },
+    };
+  }
+  return endpointRouteAction;
+}
+
 async function handleFallbackRouteAction(
   options: LocalizedConfigEditorRunnerOptions,
   initialDecision: SetupRouteDecision,
@@ -1295,7 +1312,7 @@ async function handleFallbackRouteAction(
     return handleProviderRoutePromptExit(options, initialDecision, action.id, resolved);
   }
 
-  return reviewAndApplyResolvedRoute(options, initialDecision, session, {
+  const selectedAction: SetupEditorActionDraft = {
     ...editorAction,
     reviewValues: {
       ...editorAction.reviewValues,
@@ -1308,7 +1325,23 @@ async function handleFallbackRouteAction(
           }
         : {}),
     },
-  }, resolved.selection);
+  };
+  if (resolved.selection.credentialAction.kind === "endpoint") {
+    return collectAndApplyOpenAICompatibleEndpointFlow(options, initialDecision, session, selectedAction, {
+      providerId: resolved.selection.provider,
+      defaultBaseUrl: resolved.selection.credentialAction.baseUrl ?? resolved.selection.baseUrl ?? "http://localhost:11434/v1",
+      defaultApiKeyEnv: resolved.selection.credentialAction.apiKeyEnv,
+      currentRoute: currentFallback === undefined
+        ? undefined
+        : {
+            providerId: currentFallback.provider,
+            modelId: currentFallback.id,
+            baseUrl: currentFallback.baseUrl,
+          },
+    });
+  }
+
+  return reviewAndApplyResolvedRoute(options, initialDecision, session, selectedAction, resolved.selection);
 }
 
 async function handleAuxiliaryRouteAction(
@@ -1333,18 +1366,34 @@ async function handleAuxiliaryRouteAction(
     return handleProviderRoutePromptExit(options, initialDecision, action.id, resolved);
   }
 
-  return reviewAndApplyResolvedRoute(options, initialDecision, session, {
+  const selectedAction: SetupEditorActionDraft = {
     ...editorAction,
     reviewValues: {
       ...editorAction.reviewValues,
       auxiliaryTask,
     },
-  }, resolved.selection);
+  };
+  if (resolved.selection.credentialAction.kind === "endpoint") {
+    return collectAndApplyOpenAICompatibleEndpointFlow(options, initialDecision, session, selectedAction, {
+      providerId: resolved.selection.provider,
+      defaultBaseUrl: resolved.selection.credentialAction.baseUrl ?? resolved.selection.baseUrl ?? "http://localhost:11434/v1",
+      defaultApiKeyEnv: resolved.selection.credentialAction.apiKeyEnv,
+      currentRoute: currentAuxiliaryRoute === undefined
+        ? undefined
+        : {
+            providerId: currentAuxiliaryRoute.provider,
+            modelId: currentAuxiliaryRoute.id,
+            baseUrl: currentAuxiliaryRoute.baseUrl,
+          },
+    });
+  }
+
+  return reviewAndApplyResolvedRoute(options, initialDecision, session, selectedAction, resolved.selection);
 }
 
 function auxiliaryRouteFromSlot(
   slot: AuxiliaryModelSlotInput | undefined
-): { readonly provider: string; readonly id: string } | undefined {
+): { readonly provider: string; readonly id: string; readonly baseUrl?: string } | undefined {
   if (slot === undefined) {
     return undefined;
   }
@@ -1364,6 +1413,7 @@ function auxiliaryRouteFromSlot(
   return {
     provider: slot.provider,
     id: slot.id,
+    baseUrl: slot.baseUrl,
   };
 }
 
@@ -1803,7 +1853,9 @@ async function selectResolvedProviderRoute(
     locale: options.locale,
     currentProviderId: currentRoute.currentProviderId,
     currentModelId: currentRoute.currentModelId,
-    endpointFirstProviderIds: mode === "primary" ? ["local", "openai-compatible"] : [],
+    endpointFirstProviderIds: mode === "primary" || mode === "fallback" || mode === "auxiliary"
+      ? ["local", "openai-compatible"]
+      : [],
     allowBack: true,
     allowCancel: true,
     mode,
