@@ -802,6 +802,7 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
 	              }
 	              if (event.kind === "agent-cancelled") {
 	                turnWasCancelled = true;
+	                operatorConsoleLiveFrame?.resetStreaming();
 	              }
 	              if (operatorConsoleLiveFrame !== undefined && event.kind === "provider-result" && event.willFallback) {
 	                operatorConsoleLiveFrame.resetStreaming();

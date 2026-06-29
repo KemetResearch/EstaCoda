@@ -2811,6 +2811,91 @@ describe("runSessionLoop — active turn spinner", () => {
     expect(rendered).not.toContain("Cancelled steer");
   });
 
+  it("does not leak prior streaming output across an Operator Console steering retry", async () => {
+    const input = makeTtyInput();
+    const outputChunks: string[] = [];
+    const handleInputs: string[] = [];
+    const host = createOperatorConsoleRuntimeHost({
+      terminal: { width: 96, height: 16, isTty: true },
+    });
+    let abortReason: unknown;
+    let firstHandleStarted: (() => void) | undefined;
+    let secondHandleStarted: (() => void) | undefined;
+    const firstHandleStartedPromise = new Promise<void>((resolve) => {
+      firstHandleStarted = resolve;
+    });
+    const secondHandleStartedPromise = new Promise<void>((resolve) => {
+      secondHandleStarted = resolve;
+    });
+    const runtime = createMockRuntime({
+      handle: async ({ text, signal, onDelta, onEvent }: Parameters<Runtime["handle"]>[0]) => {
+        handleInputs.push(text);
+        if (handleInputs.length === 1) {
+          onEvent?.({ kind: "agent-start", sessionId: "test-session", input: text });
+          onDelta?.("first partial should clear");
+          firstHandleStarted?.();
+          await new Promise<void>((resolve) => {
+            signal?.addEventListener("abort", () => {
+              abortReason = signal.reason;
+              resolve();
+            }, { once: true });
+          });
+          onEvent?.({ kind: "agent-cancelled", reason: String(abortReason) });
+          return mockResponse({ text: "Interrupted response" });
+        }
+        onEvent?.({ kind: "agent-start", sessionId: "test-session", input: text });
+        onDelta?.("retry final");
+        onEvent?.({ kind: "agent-final", text: "retry final" });
+        secondHandleStarted?.();
+        return mockResponse({ text: "retry final" });
+      },
+    });
+    let promptIndex = 0;
+    const loop = runSessionLoop({
+      runtime,
+      input,
+      output: {
+        write(chunk: string | Uint8Array): boolean {
+          outputChunks.push(String(chunk));
+          return true;
+        },
+        isTTY: true,
+        columns: 96,
+      } as unknown as NodeJS.WritableStream,
+      capabilities: interactiveCaps({ terminalWidth: 96, supportsAnimation: false }),
+      operatorConsole: { enabled: true, runtimeHost: host },
+      prompt: Object.assign(
+        async () => {
+          const values = ["build feature", "/exit"];
+          return values[promptIndex++] ?? "/exit";
+        },
+        { close: () => {} }
+      ),
+      close: () => {},
+    });
+
+    await firstHandleStartedPromise;
+    for (const char of "focus on the retry") {
+      input.press(char, { name: char, sequence: char });
+    }
+    input.press("\r", { name: "return" });
+    await secondHandleStartedPromise;
+    await loop;
+
+    const rendered = stripAnsi(outputChunks.join(""));
+    expect(abortReason).toBe("CLI steer");
+    expect(handleInputs).toEqual([
+      "build feature",
+      "build feature\n\n[Steering note while previous turn was interrupted]\nfocus on the retry",
+    ]);
+    expect(rendered).toContain("Assistant │ retry final");
+    const cancelledIndex = rendered.indexOf("cancelled: CLI steer");
+    expect(cancelledIndex).toBeGreaterThan(-1);
+    expect(rendered.slice(cancelledIndex)).not.toContain("first partial should clear");
+    expect(rendered).not.toContain("  retry final");
+    expect(host.getState().transcript.map((block) => block.text)).toEqual(["retry final"]);
+  });
+
   it("does not submit whitespace-only Operator Console steer drafts", async () => {
     const input = makeTtyInput();
     const outputChunks: string[] = [];
@@ -5074,6 +5159,50 @@ describe("runSessionLoop — active turn spinner", () => {
     expect(host.getState().transcript.map((block) => block.text)).toEqual(["Hello there"]);
   });
 
+  it("renders final assistant output when Operator Console streaming is whitespace-only", async () => {
+    const outputChunks: string[] = [];
+    const host = createOperatorConsoleRuntimeHost({
+      terminal: { width: 96, height: 16, isTty: true },
+    });
+    const runtime = {
+      ...createMockRuntime(),
+      handle: async ({ onDelta, onEvent }: Parameters<Runtime["handle"]>[0]): Promise<AgentLoopResponse> => {
+        onEvent?.({ kind: "agent-start", sessionId: "test-session", input: "hello" });
+        onDelta?.("   \n\t");
+        onEvent?.({ kind: "agent-final", text: "Visible final" });
+        return mockResponse({ text: "Visible final" });
+      },
+    } as Runtime;
+
+    let promptIndex = 0;
+    await runSessionLoop({
+      runtime,
+      output: {
+        write(chunk: string | Uint8Array): boolean {
+          outputChunks.push(String(chunk));
+          return true;
+        },
+        isTTY: true,
+        columns: 96,
+      } as unknown as NodeJS.WritableStream,
+      capabilities: interactiveCaps({ terminalWidth: 96, supportsAnimation: false }),
+      operatorConsole: { enabled: true, runtimeHost: host },
+      prompt: Object.assign(
+        async () => {
+          const values = ["hello", "/exit"];
+          return values[promptIndex++] ?? "/exit";
+        },
+        { close: () => {} }
+      ),
+      close: () => {},
+    });
+
+    const rendered = stripAnsi(outputChunks.join(""));
+    expect(rendered).toContain("  Visible final");
+    expect(rendered).not.toContain("Assistant │");
+    expect(host.getState().transcript).toEqual([]);
+  });
+
   it("uses provider segment breaks as Operator Console streaming segment boundaries", async () => {
     const outputChunks: string[] = [];
     const host = createOperatorConsoleRuntimeHost({
@@ -5173,6 +5302,52 @@ describe("runSessionLoop — active turn spinner", () => {
     expect(rendered).not.toContain("  fallback wins");
   });
 
+  it("clears Operator Console streaming output when the active turn is cancelled", async () => {
+    const outputChunks: string[] = [];
+    const host = createOperatorConsoleRuntimeHost({
+      terminal: { width: 96, height: 16, isTty: true },
+    });
+    const runtime = {
+      ...createMockRuntime(),
+      handle: async ({ onDelta, onEvent }: Parameters<Runtime["handle"]>[0]): Promise<AgentLoopResponse> => {
+        onEvent?.({ kind: "agent-start", sessionId: "test-session", input: "hello" });
+        onDelta?.("cancelled partial");
+        onEvent?.({ kind: "agent-cancelled", reason: "SIGINT" });
+        return mockResponse({ text: "Cancelled final" });
+      },
+    } as Runtime;
+
+    let promptIndex = 0;
+    await runSessionLoop({
+      runtime,
+      output: {
+        write(chunk: string | Uint8Array): boolean {
+          outputChunks.push(String(chunk));
+          return true;
+        },
+        isTTY: true,
+        columns: 96,
+      } as unknown as NodeJS.WritableStream,
+      capabilities: interactiveCaps({ terminalWidth: 96, supportsAnimation: false }),
+      operatorConsole: { enabled: true, runtimeHost: host },
+      prompt: Object.assign(
+        async () => {
+          const values = ["hello", "/exit"];
+          return values[promptIndex++] ?? "/exit";
+        },
+        { close: () => {} }
+      ),
+      close: () => {},
+    });
+
+    const rendered = stripAnsi(outputChunks.join(""));
+    expect(rendered).toContain("cancelled: SIGINT");
+    expect(rendered).toContain("  Cancelled final");
+    expect(rendered).not.toContain("cancelled partial");
+    expect(host.getState().streaming).toBeUndefined();
+    expect(host.getState().transcript).toEqual([]);
+  });
+
   it("keeps plain CLI provider-token stdout behavior unchanged", async () => {
     const outputChunks: string[] = [];
     let sawDeltaCallback = false;
@@ -5211,6 +5386,64 @@ describe("runSessionLoop — active turn spinner", () => {
     expect(sawDeltaCallback).toBe(false);
     expect(rendered).toContain("plain streamed token");
     expect(rendered).toContain("Plain final response");
+  });
+
+  it("does not use raw provider-token text as hidden reasoning in Operator Console streaming", async () => {
+    const outputChunks: string[] = [];
+    const host = createOperatorConsoleRuntimeHost({
+      terminal: { width: 96, height: 16, isTty: true },
+    });
+    const runtime = {
+      ...createMockRuntime(),
+      handle: async ({ onDelta, onEvent }: Parameters<Runtime["handle"]>[0]): Promise<AgentLoopResponse> => {
+        onEvent?.({ kind: "agent-start", sessionId: "test-session", input: "hello" });
+        onEvent?.({
+          kind: "provider-token",
+          provider: "mock",
+          model: "mock-model",
+          text: "Visible <reasoning>hidden forever",
+        });
+        onDelta?.("Visible ");
+        onEvent?.({
+          kind: "provider-token",
+          provider: "mock",
+          model: "mock-model",
+          text: "still hidden</reasoning>",
+        });
+        onEvent?.({ kind: "agent-final", text: "Visible" });
+        return mockResponse({ text: "Visible" });
+      },
+    } as Runtime;
+
+    let promptIndex = 0;
+    await runSessionLoop({
+      runtime,
+      output: {
+        write(chunk: string | Uint8Array): boolean {
+          outputChunks.push(String(chunk));
+          return true;
+        },
+        isTTY: true,
+        columns: 96,
+      } as unknown as NodeJS.WritableStream,
+      capabilities: interactiveCaps({ terminalWidth: 96, supportsAnimation: false }),
+      operatorConsole: { enabled: true, runtimeHost: host },
+      prompt: Object.assign(
+        async () => {
+          const values = ["hello", "/exit"];
+          return values[promptIndex++] ?? "/exit";
+        },
+        { close: () => {} }
+      ),
+      close: () => {},
+    });
+
+    const rendered = stripAnsi(outputChunks.join(""));
+    expect(rendered).toContain("Assistant │ Visible");
+    expect(rendered).not.toContain("hidden forever");
+    expect(rendered).not.toContain("still hidden");
+    expect(rendered).not.toContain("<reasoning>");
+    expect(host.getState().transcript.map((block) => block.text)).toEqual(["Visible "]);
   });
 
   it("keeps Operator Console inspect intent on the existing no-grant invalid-answer path", async () => {
