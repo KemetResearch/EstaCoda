@@ -364,6 +364,7 @@ export type ProviderAttemptSummary = {
   credentialId?: string;
   routeRole?: "primary" | "fallback";
   attemptedRouteIndex?: number;
+  streamDiagnostics?: ProviderStreamDiagnostics;
 };
 
 export type ProviderExecutionSummary = {

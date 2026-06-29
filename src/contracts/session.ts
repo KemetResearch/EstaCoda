@@ -25,6 +25,7 @@ import type {
   ProviderId,
   ProviderLoopRuntimeMetadata,
   ProviderReasoningMetadata,
+  ProviderStreamDiagnostics,
   ProviderUsage
 } from "./provider.js";
 
@@ -354,6 +355,7 @@ export type SessionEvent =
         incompleteReason?: string;
         usage?: ProviderUsage;
         reasoningMetadata?: ProviderReasoningMetadata;
+        streamDiagnostics?: ProviderStreamDiagnostics;
       }>;
       fallbackUsed: boolean;
       usage?: ProviderUsage;
@@ -375,6 +377,7 @@ export type SessionEvent =
         incompleteReason?: string;
         usage?: ProviderUsage;
         reasoningMetadata?: ProviderReasoningMetadata;
+        streamDiagnostics?: ProviderStreamDiagnostics;
       }>;
       toolPlans: Array<{
         id: string;
