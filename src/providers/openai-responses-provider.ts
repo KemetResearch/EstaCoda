@@ -90,7 +90,7 @@ export function createOpenAIResponsesProvider(options: OpenAIResponsesProviderOp
         };
       }
 
-      if (shouldCompleteViaStreaming(effectiveEndpoint, options.id)) {
+      if (isCodexResponsesBackend(effectiveEndpoint, options.id)) {
         const stream = this.stream?.({ ...request, stream: true }, completionOptions);
         if (stream === undefined) {
           return {
@@ -273,14 +273,18 @@ async function collectResponsesStream(input: {
   };
 }
 
-function shouldCompleteViaStreaming(endpoint: ProviderEndpoint, provider: ProviderId): boolean {
+function isCodexResponsesBackend(endpoint: ProviderEndpoint, provider: ProviderId): boolean {
   if (provider !== "codex") {
     return false;
   }
 
   try {
     const url = new URL(endpoint.baseUrl);
-    return url.hostname === "chatgpt.com" && url.pathname.replace(/\/$/, "") === "/backend-api/codex";
+    return url.protocol === "https:" &&
+      url.hostname === "chatgpt.com" &&
+      url.pathname.replace(/\/$/, "") === "/backend-api/codex" &&
+      url.search.length === 0 &&
+      url.hash.length === 0;
   } catch {
     return endpoint.baseUrl.replace(/\/$/, "") === "https://chatgpt.com/backend-api/codex";
   }
@@ -303,7 +307,10 @@ export function buildResponsesRequest(
         ? process.env[endpoint.apiKey.name]
         : undefined);
 
-  const { instructions, input } = extractInstructionsAndInput(request.messages);
+  const isCodexBackend = isCodexResponsesBackend(endpoint, provider);
+  const { instructions, input } = extractInstructionsAndInput(request.messages, {
+    codexBackend: isCodexBackend
+  });
   const hasTools = Array.isArray(request.tools) && request.tools.length > 0;
 
   const body: Record<string, unknown> = {
@@ -318,12 +325,14 @@ export function buildResponsesRequest(
   }
 
   const maxTokens = normalizeProviderMaxTokens(request.maxTokens);
-  if (maxTokens !== undefined) {
+  if (maxTokens !== undefined && !isCodexBackend) {
     body.max_output_tokens = maxTokens;
   }
 
   if (hasTools) {
-    body.tools = request.tools;
+    body.tools = isCodexBackend
+      ? convertCodexResponsesTools(request.tools)
+      : request.tools;
     body.tool_choice = "auto";
     body.parallel_tool_calls = false;
   }
@@ -332,6 +341,7 @@ export function buildResponsesRequest(
     url: `${endpoint.baseUrl.replace(/\/$/, "")}/responses`,
     headers: {
       "content-type": "application/json",
+      ...(isCodexBackend ? buildCodexResponsesHeaders(apiKey) : {}),
       ...(apiKey === undefined ? {} : { authorization: `Bearer ${apiKey}` }),
       ...(endpoint.headers ?? {})
     },
@@ -345,11 +355,74 @@ function normalizeProviderMaxTokens(value: unknown): number | undefined {
     : undefined;
 }
 
-function extractInstructionsAndInput(messages: ProviderRequest["messages"]): {
+function buildCodexResponsesHeaders(accessToken: string | undefined): Record<string, string> {
+  const accountId = codexAccountIdFromJwt(accessToken);
+  return {
+    "User-Agent": "codex_cli_rs/0.0.0 (EstaCoda)",
+    originator: "codex_cli_rs",
+    ...(accountId === undefined ? {} : { "ChatGPT-Account-ID": accountId })
+  };
+}
+
+function codexAccountIdFromJwt(accessToken: string | undefined): string | undefined {
+  if (accessToken === undefined) {
+    return undefined;
+  }
+
+  const [, payloadSegment] = accessToken.split(".");
+  if (payloadSegment === undefined || payloadSegment.length === 0) {
+    return undefined;
+  }
+
+  try {
+    const payload = JSON.parse(Buffer.from(payloadSegment, "base64url").toString("utf8")) as {
+      "https://api.openai.com/auth"?: {
+        chatgpt_account_id?: unknown;
+      };
+    };
+    const accountId = payload["https://api.openai.com/auth"]?.chatgpt_account_id;
+    return typeof accountId === "string" && accountId.length > 0
+      ? accountId
+      : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function convertCodexResponsesTools(tools: unknown[] | undefined): unknown[] | undefined {
+  if (tools === undefined) {
+    return undefined;
+  }
+
+  return tools.map((tool) => {
+    if (tool === null || typeof tool !== "object" || Array.isArray(tool)) {
+      return tool;
+    }
+
+    const record = tool as Record<string, unknown>;
+    const fn = record.function;
+    if (record.type !== "function" || fn === null || typeof fn !== "object" || Array.isArray(fn)) {
+      return tool;
+    }
+
+    const converted: Record<string, unknown> = {
+      ...record,
+      ...(fn as Record<string, unknown>),
+      type: "function"
+    };
+    delete converted.function;
+    return converted;
+  });
+}
+
+function extractInstructionsAndInput(
+  messages: ProviderRequest["messages"],
+  options: { codexBackend?: boolean } = {}
+): {
   instructions?: string;
   input: unknown;
 } {
-  const nonSystemMessages: Array<{ role: string; content: unknown }> = [];
+  const nonSystemMessages: unknown[] = [];
   let instructions: string | undefined;
 
   for (const message of messages) {
@@ -362,10 +435,47 @@ function extractInstructionsAndInput(messages: ProviderRequest["messages"]): {
       continue;
     }
 
+    if (options.codexBackend === true && message.role === "assistant" && Array.isArray(message.toolCalls) && message.toolCalls.length > 0) {
+      const content = stringifyResponsesContent(message.content);
+      if (content.trim().length > 0) {
+        nonSystemMessages.push({
+          role: "assistant",
+          content: message.content
+        });
+      }
+
+      for (const toolCall of message.toolCalls) {
+        if (
+          typeof toolCall.id === "string" &&
+          toolCall.id.length > 0 &&
+          typeof toolCall.name === "string" &&
+          toolCall.name.length > 0 &&
+          typeof toolCall.argumentsText === "string"
+        ) {
+          nonSystemMessages.push({
+            type: "function_call",
+            call_id: toolCall.id,
+            name: toolCall.name,
+            arguments: toolCall.argumentsText
+          });
+        }
+      }
+      continue;
+    }
+
     if (message.role === "tool") {
+      if (options.codexBackend === true && typeof message.toolCallId === "string" && message.toolCallId.length > 0) {
+        nonSystemMessages.push({
+          type: "function_call_output",
+          call_id: message.toolCallId,
+          output: stringifyResponsesContent(message.content)
+        });
+        continue;
+      }
+
       nonSystemMessages.push({
         role: "user",
-        content: typeof message.content === "string" ? message.content : JSON.stringify(message.content)
+        content: stringifyResponsesContent(message.content)
       });
       continue;
     }
@@ -380,6 +490,10 @@ function extractInstructionsAndInput(messages: ProviderRequest["messages"]): {
     instructions,
     input: nonSystemMessages
   };
+}
+
+function stringifyResponsesContent(content: unknown): string {
+  return typeof content === "string" ? content : (JSON.stringify(content) ?? "");
 }
 
 export async function executeResponsesRequest(input: {
