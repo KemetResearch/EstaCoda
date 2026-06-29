@@ -1,6 +1,7 @@
 export * from "./activeWorkCopy.js";
 export * from "./activeWorkRuntimeMapper.js";
 export * from "./activeWorkSurface.js";
+export * from "./assistantMessageFrame.js";
 export * from "./approvalRuntimeMapper.js";
 export * from "./approvalSurface.js";
 export * from "./attachmentSurface.js";

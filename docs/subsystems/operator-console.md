@@ -359,8 +359,10 @@ while a local interactive CLI turn is in flight:
 ```text
 User:
 explain the setup editor flow
-Assistant:
-The setup editor is split into detection, review, apply, and verification.
+╭──────────────────────────── EstaCoda ────────────────────────────╮
+│ The setup editor is split into detection, review, apply, and      │
+│ verification.▍                                                    │
+╰───────────────────────────────────────────────────────────────────╯
 ╭─ Active work ─────────────────────────────────────────────────────────╮
 │ ◷ reading setup editor files                                   00:04  │
 ╰───────────────────────────────────────────────────────────────────────╯
@@ -377,6 +379,10 @@ Streaming contract:
   any delta reaches the Operator Console.
 - Papyrus consumes visible deltas only. The streaming surface must not parse,
   infer, recover, or render hidden reasoning from provider events.
+- Live streaming and settled assistant transcript blocks share the same
+  EstaCoda assistant-message frame. User-visible debug chrome such as
+  `Assistant stream` or `assistant:` must not appear in normal rendering. The
+  live-only marker is the trailing cursor on incomplete text.
 - Local interactive Operator Console turns receive visible text through
   `runtime.handle({ onDelta })`. Plain CLI turns keep the append-only stdout
   `provider-token` path and must not be converted to managed-frame rendering.
@@ -580,7 +586,8 @@ kimi-k2.7-code ● │ ctx [▰▱▱▱▱▱▱▱▱▱] 18.4k/262k 7% │ se
 | Runtime host and state | `src/ui/papyrus/operator-console/operatorConsoleRuntimeHost.ts`, `src/ui/papyrus/operator-console/operatorConsoleState.ts` |
 | Layout and deterministic text render | `src/ui/papyrus/operator-console/operatorConsoleLayout.ts`, `src/ui/papyrus/operator-console/operatorConsoleRenderer.ts` |
 | Prompt/status surfaces | `src/ui/papyrus/operator-console/promptSurface.ts`, `src/ui/papyrus/operator-console/statusRailSurface.ts` |
-| Live assistant streaming | `src/ui/papyrus/operator-console/streamingSurface.ts`, `src/cli/live-operator-console-controller.ts`, `src/cli/session-loop.ts` |
+| Live assistant streaming | `src/ui/papyrus/operator-console/assistantMessageFrame.ts`, `src/ui/papyrus/operator-console/streamingSurface.ts`, `src/cli/live-operator-console-controller.ts`, `src/cli/session-loop.ts` |
+| Settled assistant transcript frame | `src/ui/papyrus/operator-console/assistantMessageFrame.ts`, `src/ui/papyrus/operator-console/transcriptSurface.ts` |
 | Active work | `src/ui/papyrus/operator-console/activeWorkSurface.ts`, `src/ui/papyrus/operator-console/activeWorkRuntimeMapper.ts` |
 | Approvals | `src/ui/papyrus/operator-console/approvalSurface.ts`, `src/ui/papyrus/operator-console/approvalRuntimeMapper.ts` |
 | Steering | `src/ui/papyrus/operator-console/steerSurface.ts` |

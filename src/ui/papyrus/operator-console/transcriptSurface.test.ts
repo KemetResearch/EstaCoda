@@ -7,16 +7,16 @@ import {
 } from "./index.js";
 
 describe("Papyrus operator console transcript surface", () => {
-  it("renders transcript blocks with role prefixes", () => {
+  it("renders assistant transcript blocks in the EstaCoda frame", () => {
     const rows = renderTranscriptSurface([
       { id: "user-1", role: "user", text: "Please inspect the stream path." },
       { id: "assistant-1", role: "assistant", text: "I found the controller and renderer." },
     ], { width: 72 });
 
-    expect(rows).toEqual([
-      "User │ Please inspect the stream path.",
-      "Assistant │ I found the controller and renderer.",
-    ]);
+    expect(rows[0]).toBe("User │ Please inspect the stream path.");
+    expect(rows).toContainEqual(expect.stringContaining("EstaCoda"));
+    expect(rows).toContainEqual(expect.stringContaining("I found the controller and renderer."));
+    expect(rows.join("\n")).not.toContain("Assistant │");
     expect(rows.every((line) => stringWidth(line) <= 72)).toBe(true);
   });
 
@@ -33,10 +33,10 @@ describe("Papyrus operator console transcript surface", () => {
 
     const rows = renderTranscriptSurface(transcript, { width: 44, height: 3 });
 
-    expect(rows).toEqual([
-      "Tool │ read_file completed",
-      "Assistant │ Final visible row.",
-    ]);
+    expect(rows).toHaveLength(3);
+    expect(rows[0]).toContain("EstaCoda");
+    expect(rows).toContainEqual(expect.stringContaining("Final visible row."));
+    expect(rows.join("\n")).not.toContain("Tool │ read_file completed");
     expect(getTranscriptSurfaceDesiredHeight(transcript, 44)).toBeGreaterThanOrEqual(rows.length);
     expect(rows.every((line) => stringWidth(line) <= 44)).toBe(true);
   });

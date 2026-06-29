@@ -2888,7 +2888,9 @@ describe("runSessionLoop — active turn spinner", () => {
       "build feature",
       "build feature\n\n[Steering note while previous turn was interrupted]\nfocus on the retry",
     ]);
-    expect(rendered).toContain("Assistant │ retry final");
+    expect(rendered).toContain("EstaCoda");
+    expect(rendered).toContain("retry final");
+    expect(rendered).not.toContain("Assistant stream");
     const cancelledIndex = rendered.indexOf("cancelled: CLI steer");
     expect(cancelledIndex).toBeGreaterThan(-1);
     expect(rendered.slice(cancelledIndex)).not.toContain("first partial should clear");
@@ -5154,7 +5156,9 @@ describe("runSessionLoop — active turn spinner", () => {
     });
 
     const rendered = stripAnsi(outputChunks.join(""));
-    expect(rendered).toContain("Assistant │ Hello there");
+    expect(rendered).toContain("EstaCoda");
+    expect(rendered).toContain("Hello there");
+    expect(rendered).not.toContain("Assistant stream");
     expect(rendered).not.toContain("  Hello there");
     expect(host.getState().transcript.map((block) => block.text)).toEqual(["Hello there"]);
   });
@@ -5244,8 +5248,10 @@ describe("runSessionLoop — active turn spinner", () => {
     });
 
     const rendered = stripAnsi(outputChunks.join(""));
-    expect(rendered).toContain("Assistant │ First segment.");
-    expect(rendered).toContain("Assistant │ Second segment.");
+    expect(rendered).toContain("EstaCoda");
+    expect(rendered).toContain("First segment.");
+    expect(rendered).toContain("Second segment.");
+    expect(rendered).not.toContain("Assistant stream");
     expect(rendered).not.toContain("  First segment. Second segment.");
   });
 
@@ -5297,7 +5303,9 @@ describe("runSessionLoop — active turn spinner", () => {
     });
 
     const rendered = stripAnsi(outputChunks.join(""));
-    expect(rendered).toContain("Assistant │ fallback wins");
+    expect(rendered).toContain("EstaCoda");
+    expect(rendered).toContain("fallback wins");
+    expect(rendered).not.toContain("Assistant stream");
     expect(rendered).not.toContain("primary failed");
     expect(rendered).not.toContain("  fallback wins");
   });
@@ -5439,7 +5447,9 @@ describe("runSessionLoop — active turn spinner", () => {
     });
 
     const rendered = stripAnsi(outputChunks.join(""));
-    expect(rendered).toContain("Assistant │ Visible");
+    expect(rendered).toContain("EstaCoda");
+    expect(rendered).toContain("Visible");
+    expect(rendered).not.toContain("Assistant stream");
     expect(rendered).not.toContain("hidden forever");
     expect(rendered).not.toContain("still hidden");
     expect(rendered).not.toContain("<reasoning>");

@@ -116,8 +116,10 @@ describe("LiveOperatorConsoleController", () => {
     vi.advanceTimersByTime(75);
 
     const text = stripAnsi(output.text());
-    expect(text).toContain("Assistant stream");
+    expect(text).toContain("EstaCoda");
     expect(text).toContain("Hello, streaming world");
+    expect(text).toContain("Hello, streaming world▍");
+    expect(text).not.toContain("Assistant stream");
   });
 
   it("tracks visible streaming output with trimmed text", () => {
@@ -205,9 +207,11 @@ describe("LiveOperatorConsoleController", () => {
     expect(controller.hasStreamingOutput()).toBe(false);
     expect(runtimeHost.getState().streaming).toBeUndefined();
     expect(runtimeHost.getState().transcript.map((block) => block.text)).toEqual(["First chunk.", " Final chunk."]);
-    expect(stripAnsi(output.text())).toContain("Assistant │ First chunk.");
-    expect(stripAnsi(output.text())).toContain("Assistant │ Final chunk.");
+    expect(stripAnsi(output.text())).toContain("First chunk.");
+    expect(stripAnsi(output.text())).toContain("Final chunk.");
+    expect(stripAnsi(output.text())).toContain("EstaCoda");
     expect(countOccurrences(stripAnsi(output.text()), "Assistant stream")).toBe(0);
+    expect(stripAnsi(output.text())).not.toContain("▍");
   });
 
   it("coalesces streaming refresh and animation timer renders", () => {
@@ -225,8 +229,10 @@ describe("LiveOperatorConsoleController", () => {
     vi.advanceTimersByTime(90);
 
     const text = stripAnsi(output.text());
-    expect(countOccurrences(text, "Assistant stream")).toBe(1);
+    expect(countOccurrences(text, "The answer is arriving")).toBe(1);
     expect(text).toContain("The answer is arriving");
+    expect(text).toContain("The answer is arriving▍");
+    expect(text).not.toContain("Assistant stream");
   });
 });
 

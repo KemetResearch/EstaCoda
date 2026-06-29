@@ -155,7 +155,7 @@ describe("Papyrus operator console renderer", () => {
     expect(text).not.toContain("›");
     expect(text).not.toContain("ctx");
     expect(text).not.toContain("◷");
-    expect(text).not.toContain("Assistant │ Ready.");
+    expect(text).not.toContain("Ready.");
     expect(text).not.toContain("Running tools");
     expect(text).not.toContain("Attachments");
     expect(output.every((line) => stringWidth(line) <= 72)).toBe(true);
@@ -185,7 +185,8 @@ describe("Papyrus operator console renderer", () => {
     const layout = createOperatorConsoleLayout(state, { width: 120, height: 20, isTty: true });
     const output = renderOperatorConsoleTextLines(state, layout);
 
-    expect(output[0]).toBe("Assistant │ Ready.");
+    expect(output[0]).toContain("EstaCoda");
+    expect(output).toContainEqual(expect.stringContaining("Ready."));
     expect(output).toContainEqual(expect.stringContaining("Running tools"));
     expect(output).toContain("Attachments");
     expect(output.findIndex((line) => line.includes("Running tools"))).toBeLessThan(
@@ -225,8 +226,11 @@ describe("Papyrus operator console renderer", () => {
     expect(streamingIndex).toBeGreaterThan(transcriptIndex);
     expect(tailIndex).toBeGreaterThan(streamingIndex);
     expect(turnActivityIndex).toBeGreaterThan(streamingIndex);
-    expect(output).toContainEqual(expect.stringContaining("assistant: I am reading the operator console path."));
+    expect(output).toContainEqual(expect.stringContaining("I am reading the operator console path."));
     expect(output).toContainEqual(expect.stringContaining("Now checking the layout"));
+    expect(output).toContainEqual(expect.stringContaining("Now checking the layout▍"));
+    expect(output.join("\n")).not.toContain("Assistant stream");
+    expect(output.join("\n")).not.toContain("assistant:");
     expect(output.every((line) => stringWidth(line) <= 80)).toBe(true);
   });
 

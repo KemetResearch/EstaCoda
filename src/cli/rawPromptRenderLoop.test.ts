@@ -241,8 +241,10 @@ describe("raw prompt render loop", () => {
       tail: "Streaming through raw prompt frame",
     }));
     expect(host.getState().streaming?.tail).toBe("Streaming through raw prompt frame");
-    expect(text).toContain("Assistant stream");
+    expect(text).toContain("EstaCoda");
     expect(text).toContain("Streaming through raw prompt frame");
+    expect(text).toContain("Streaming through raw prompt frame▍");
+    expect(text).not.toContain("Assistant stream");
     expect(text).not.toMatch(forbiddenManagedRegionOutput);
   });
 

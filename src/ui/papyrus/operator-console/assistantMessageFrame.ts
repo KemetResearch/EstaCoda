@@ -1,0 +1,140 @@
+import {
+  truncateVisible,
+  wrapText,
+} from "../../renderers/layout.js";
+import { stringWidth } from "../screen/stringWidth.js";
+
+export type AssistantMessageFrameInput = {
+  readonly title?: string;
+  readonly lines: readonly string[];
+  readonly cursor?: boolean;
+};
+
+export type AssistantMessageFrameRenderOptions = {
+  readonly width: number;
+  readonly height?: number;
+};
+
+const DEFAULT_ASSISTANT_TITLE = "EstaCoda";
+const LIVE_CURSOR = "▍";
+
+export function getAssistantMessageFrameDesiredHeight(
+  input: AssistantMessageFrameInput,
+  width: number
+): number {
+  const normalizedWidth = normalizeDimension(width);
+  if (normalizedWidth <= 0) return 0;
+  const contentRows = renderWrappedContentRows(input, contentWidthFor(normalizedWidth));
+  return Math.max(3, contentRows.length + 2);
+}
+
+export function renderAssistantMessageFrame(
+  input: AssistantMessageFrameInput,
+  options: AssistantMessageFrameRenderOptions
+): readonly string[] {
+  const width = normalizeDimension(options.width);
+  if (width <= 0) return [];
+
+  const desiredHeight = getAssistantMessageFrameDesiredHeight(input, width);
+  const height = normalizeDimension(options.height ?? desiredHeight);
+  if (height <= 0) return [];
+
+  const title = normalizeTitle(input.title);
+  const contentRows = renderWrappedContentRows(input, contentWidthFor(width));
+  if (height < 3) return [truncateVisible(`${title}: ${summarizeContentRows(contentRows)}`, width)];
+
+  const visibleContentRows = Math.max(1, height - 2);
+  const selectedRows = selectLatestRows(contentRows, visibleContentRows);
+  const paddedRows = padRows(selectedRows, visibleContentRows);
+
+  return [
+    renderTopBorder(title, width),
+    ...paddedRows.map((row) => renderContentRow(row, contentWidthFor(width), width)),
+    renderBottomBorder(width),
+  ];
+}
+
+function renderWrappedContentRows(
+  input: AssistantMessageFrameInput,
+  width: number
+): readonly string[] {
+  const lines = withOptionalCursor(normalizeFrameLines(input.lines), input.cursor);
+  const wrapped = lines.flatMap((line) => wrapText(line, Math.max(1, width)));
+  return wrapped.length === 0 ? [""] : wrapped;
+}
+
+function normalizeFrameLines(lines: readonly string[]): readonly string[] {
+  if (lines.length === 0) return [""];
+  return lines.flatMap((line) => normalizeLineBreaks(line));
+}
+
+function normalizeLineBreaks(text: string): readonly string[] {
+  const lines = text.replace(/\r\n?/gu, "\n").split("\n");
+  return lines.length === 0 ? [""] : lines;
+}
+
+function withOptionalCursor(lines: readonly string[], cursor: boolean | undefined): readonly string[] {
+  if (!cursor) return lines;
+  if (lines.length === 0) return [LIVE_CURSOR];
+  const next = [...lines];
+  next[next.length - 1] = `${next[next.length - 1] ?? ""}${LIVE_CURSOR}`;
+  return next;
+}
+
+function selectLatestRows(rows: readonly string[], count: number): readonly string[] {
+  if (rows.length <= count) return rows;
+  return rows.slice(Math.max(0, rows.length - count));
+}
+
+function padRows(rows: readonly string[], count: number): readonly string[] {
+  if (rows.length >= count) return rows.slice(0, count);
+  return [...rows, ...Array.from({ length: count - rows.length }, () => "")];
+}
+
+function summarizeContentRows(rows: readonly string[]): string {
+  return rows.join(" ").trim();
+}
+
+function normalizeTitle(title: string | undefined): string {
+  const value = title?.trim();
+  return value && value.length > 0 ? value : DEFAULT_ASSISTANT_TITLE;
+}
+
+function renderTopBorder(title: string, width: number): string {
+  if (width <= 0) return "";
+  if (width === 1) return "╭";
+  if (width === 2) return "╭╮";
+
+  const innerWidth = Math.max(0, width - 2);
+  const framedTitle = ` ${title} `;
+  const visibleTitle = truncateVisible(framedTitle, innerWidth);
+  const titleWidth = stringWidth(visibleTitle);
+  const fillWidth = Math.max(0, innerWidth - titleWidth);
+  const leftFill = Math.floor(fillWidth / 2);
+  const rightFill = fillWidth - leftFill;
+
+  return `╭${"─".repeat(leftFill)}${visibleTitle}${"─".repeat(rightFill)}╮`;
+}
+
+function renderBottomBorder(width: number): string {
+  if (width <= 0) return "";
+  if (width === 1) return "╰";
+  if (width === 2) return "╰╯";
+  return `╰${"─".repeat(Math.max(0, width - 2))}╯`;
+}
+
+function renderContentRow(row: string, contentWidth: number, width: number): string {
+  if (width < 4) return truncateVisible(row, width);
+  const visible = truncateVisible(row, contentWidth);
+  const padding = " ".repeat(Math.max(0, contentWidth - stringWidth(visible)));
+  return `│ ${visible}${padding} │`;
+}
+
+function contentWidthFor(width: number): number {
+  return Math.max(0, width - 4);
+}
+
+function normalizeDimension(value: number): number {
+  if (!Number.isFinite(value)) return 0;
+  return Math.max(0, Math.floor(value));
+}

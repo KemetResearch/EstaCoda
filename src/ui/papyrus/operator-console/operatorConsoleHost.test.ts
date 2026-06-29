@@ -194,8 +194,10 @@ describe("Papyrus operator console raw prompt host", () => {
     const text = frame.rows.join("\n");
 
     expect(frame.state.streaming?.tail).toBe("Still composing the response");
-    expect(text).toContain("Assistant stream");
+    expect(text).toContain("EstaCoda");
     expect(text).toContain("Still composing the response");
+    expect(text).toContain("Still composing the response▍");
+    expect(text).not.toContain("Assistant stream");
     expect(frame.rows.every((line) => stringWidth(line) <= 80)).toBe(true);
   });
 

@@ -3,6 +3,7 @@ import {
   wrapText,
 } from "../../renderers/layout.js";
 import { stringWidth } from "../screen/stringWidth.js";
+import { renderAssistantMessageFrame } from "./assistantMessageFrame.js";
 import type { TranscriptBlock } from "./operatorConsoleState.js";
 
 export type TranscriptSurfaceRenderOptions = {
@@ -50,7 +51,16 @@ function renderTranscriptRows(
   return transcript.flatMap((block) => renderTranscriptBlockRows(block, width));
 }
 
-function renderTranscriptBlockRows(block: TranscriptBlock, width: number): readonly string[] {
+function renderTranscriptBlockRows(block: TranscriptBlock, width: number, height?: number): readonly string[] {
+  if (block.role === "assistant") {
+    return renderAssistantMessageFrame({
+      lines: normalizeTranscriptText(block.text),
+    }, {
+      width,
+      height,
+    });
+  }
+
   const label = `${ROLE_LABELS[block.role] ?? block.role}`;
   const prefix = `${label} │ `;
   const continuationPrefix = `${" ".repeat(stringWidth(label))} │ `;
@@ -69,7 +79,10 @@ function renderLatestTranscriptRows(
   let remaining = height;
 
   for (let index = transcript.length - 1; index >= 0; index -= 1) {
-    const rows = renderTranscriptBlockRows(transcript[index]!, width);
+    const fullRows = renderTranscriptBlockRows(transcript[index]!, width);
+    const rows = selected.length === 0 && fullRows.length > remaining
+      ? renderTranscriptBlockRows(transcript[index]!, width, remaining)
+      : fullRows;
     if (rows.length === 0) continue;
     if (rows.length > remaining) {
       if (selected.length === 0) {

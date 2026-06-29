@@ -132,7 +132,8 @@ describe("OperatorConsoleRuntimeHost", () => {
     expect(text).toContain("Model Route");
     expect(text).toContain("Attachments");
     expect(text).toContain("Running tools");
-    expect(text).toContain("Assistant stream");
+    expect(text).toContain("Live streaming tail▍");
+    expect(text).not.toContain("Assistant stream");
     expect(text).toContain("Approval required");
   });
 
@@ -148,8 +149,10 @@ describe("OperatorConsoleRuntimeHost", () => {
     const status = lines.at(-1) ?? "";
 
     expect(host.getState().streaming?.tail).toBe("Still drafting the answer");
-    expect(text).toContain("Assistant stream");
+    expect(text).toContain("EstaCoda");
     expect(text).toContain("Still drafting the answer");
+    expect(text).toContain("Still drafting the answer▍");
+    expect(text).not.toContain("Assistant stream");
     expect(status).not.toMatch(/\b(stream|drafting|answer)\b/iu);
 
     host.setStreaming(undefined);
