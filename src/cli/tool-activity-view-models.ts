@@ -34,6 +34,8 @@ import {
   toolActivityRailEvent,
 } from "../ui/view-models/builders.js";
 import { toolActivityLabelKey } from "../ui/tool-labels.js";
+import { buildToolDisplayPreview } from "../tools/tool-target-summary.js";
+import { toolDisplayLabel } from "../ui/tool-display.js";
 
 // ─────────────────────────────────────────────────────────────
 // Tool glyph resolution (capability-gated, token-driven)
@@ -90,21 +92,7 @@ export function resolveToolLabel(tool: string, definitions?: Map<string, ToolDef
     return definition.progressLabel;
   }
 
-  if (tool.includes("artifact")) return "recording artifact";
-  if (tool.includes("media.extract-frame")) return "extracting preview frame";
-  if (tool.includes("media.inspect")) return "inspecting media";
-  if (tool.includes("media.probe")) return "checking media tools";
-  if (tool.includes("web.extract")) return "extracting web content";
-  if (tool.includes("browser.navigate")) return "navigating browser";
-  if (tool.includes("workspace")) return "reading workspace";
-  if (tool.includes("memory")) return "writing memory";
-  if (tool.includes("trajectory")) return "recording trajectory";
-  if (tool.includes("playbook")) return "planning playbook";
-  if (tool.includes("workflow")) return "planning workflow";
-  if (tool.includes("terminal") || tool.includes("process")) return "running process";
-  if (tool.includes("execute") || tool.includes("python")) return "executing code";
-  if (tool.includes("config")) return "updating config";
-  return "running tool";
+  return toolDisplayLabel(tool);
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -395,9 +383,14 @@ export function buildApprovalPromptViewModel(
   actions.push({ id: "deny", label: "Deny", severity: "error" });
 
   return buildApprovalSecurityViewModel({
-    toolName: execution.tool.name,
+    toolName: toolDisplayLabel(execution.tool.name),
     riskClass: execution.riskClass,
-    targetSummary: execution.targetSummary ?? execution.targetKey ?? execution.tool.name,
+    targetSummary: execution.input === undefined
+      ? execution.targetSummary ?? execution.targetKey ?? execution.tool.name
+      : buildToolDisplayPreview(execution.tool.name, execution.input) ??
+        execution.targetSummary ??
+        execution.targetKey ??
+        execution.tool.name,
     severity: "warn",
     actions,
     details,

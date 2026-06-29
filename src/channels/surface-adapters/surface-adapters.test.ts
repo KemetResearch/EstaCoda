@@ -65,7 +65,7 @@ describe("PlainLogSurfaceAdapter", () => {
   it("renders channel-safe tool activity summary without emoji", () => {
     const event: RuntimeEvent = { kind: "tool-start", tool: "terminal.run" };
     const out = adapter.renderToolActivity(event);
-    expect(out).toContain("terminal.run");
+    expect(out).toContain("Run Command");
     expect(out).toContain("[>]");
     assertNoEmoji(out);
     assertNoAnsi(out);
@@ -162,7 +162,7 @@ describe("TelegramSurfaceAdapter", () => {
   it("renders tool activity with emoji", () => {
     const event: RuntimeEvent = { kind: "tool-start", tool: "terminal.run" };
     const out = adapter.renderToolActivity(event);
-    expect(out).toContain("terminal.run");
+    expect(out).toContain("Run Command");
     expect(hasEmoji(out)).toBe(true);
   });
 
@@ -263,7 +263,7 @@ describe("ChannelToolActivityRenderer", () => {
     const event: RuntimeEvent = { kind: "tool-start", tool: "file.write" };
     const out = renderer.render(event);
     expect(out).toContain("[>]");
-    expect(out).toContain("file.write");
+    expect(out).toContain("Write File");
     assertNoEmoji(out);
   });
 
@@ -314,10 +314,10 @@ describe("channelToolAction", () => {
     expect(channelToolAction("custom.tool", def)).toBe("Custom action");
   });
 
-  it("falls back to generic action names", () => {
-    expect(channelToolAction("workspace.open", undefined)).toBe("reading workspace");
-    expect(channelToolAction("terminal.run", undefined)).toBe("running process");
-    expect(channelToolAction("unknown", undefined)).toBe("running tool");
+  it("falls back to shared display labels", () => {
+    expect(channelToolAction("workspace.open", undefined)).toBe("Workspace Open");
+    expect(channelToolAction("terminal.run", undefined)).toBe("Run Command");
+    expect(channelToolAction("unknown", undefined)).toBe("Unknown");
   });
 });
 

@@ -3,6 +3,7 @@
 
 import type { RuntimeEvent } from "../../contracts/runtime-event.js";
 import type { ToolDefinition } from "../../contracts/tool.js";
+import { toolDisplayLabel } from "../../ui/tool-display.js";
 
 export type ChannelToolActivityRendererOptions = {
   tools: readonly ToolDefinition[];
@@ -29,13 +30,13 @@ export class ChannelToolActivityRenderer {
     const elapsed = this.#popElapsed(this.#eventKey(event));
     const target = event.targetSummary === undefined ? "" : ` · ${event.targetSummary}`;
     if (event.decision !== undefined && event.decision !== "allow") {
-      return `! ${event.tool}${target} gated · ${humanRisk(event.riskClass)}${elapsed}`;
+      return `! ${channelToolAction(event.tool, this.#tools.get(event.tool))}${target} gated · ${humanRisk(event.riskClass)}${elapsed}`;
     }
 
     const status = event.ok === false ? "failed" : "done";
     const icon = event.ok === false ? "[X]" : "[OK]";
 
-    return `${icon} ${event.tool}${target} ${status}${elapsed}${renderChannelToolSize(event)}`;
+    return `${icon} ${channelToolAction(event.tool, this.#tools.get(event.tool))}${target} ${status}${elapsed}${renderChannelToolSize(event)}`;
   }
 
   #pushStart(tool: string): void {
@@ -82,21 +83,7 @@ export function channelToolAction(
     return definition.progressLabel;
   }
 
-  if (tool.includes("artifact")) return "recording artifact";
-  if (tool.includes("media.extract-frame")) return "extracting preview frame";
-  if (tool.includes("media.inspect")) return "inspecting media";
-  if (tool.includes("media.probe")) return "checking media tools";
-  if (tool.includes("web.extract")) return "extracting web content";
-  if (tool.includes("browser.navigate")) return "navigating browser";
-  if (tool.includes("workspace")) return "reading workspace";
-  if (tool.includes("memory")) return "writing memory";
-  if (tool.includes("trajectory")) return "recording trajectory";
-  if (tool.includes("playbook")) return "planning playbook";
-  if (tool.includes("workflow")) return "planning workflow";
-  if (tool.includes("terminal") || tool.includes("process")) return "running process";
-  if (tool.includes("execute") || tool.includes("python")) return "executing code";
-  if (tool.includes("config")) return "updating config";
-  return "running tool";
+  return toolDisplayLabel(tool);
 }
 
 function humanRisk(riskClass: string | undefined): string {

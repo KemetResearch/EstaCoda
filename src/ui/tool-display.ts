@@ -294,7 +294,7 @@ function fallbackToolDisplayIcon(tool: string): string {
   if (tool.startsWith("terminal.")) return "🖥️";
   if (tool.startsWith("process.")) return "▶️";
   if (tool.startsWith("skill.")) return "☥";
-  if (tool.startsWith("memory.")) return "🜂";
+  if (tool.startsWith("memory.")) return "💠";
   if (tool.startsWith("knowledge.")) return "𓂀";
   if (tool.startsWith("config.")) return "⚙️";
   return "⚙️";

@@ -14,23 +14,23 @@ describe("channel activity labels", () => {
     expect(renderChannelProgressLabel({ kind: "provider-serving-transition", transition: "primary-recovered", provider: "openrouter", model: "k2" }, "ar")).toBe("✦ النموذج الأساسي متاح مجددًا · k2");
   });
 
-  it("renders tool starts with tool name and target summary", () => {
+  it("renders tool starts with display label and target summary", () => {
     expect(renderChannelProgressLabel({
       kind: "tool-start",
       tool: "file.search",
       targetSummary: "import.*python-env|from.*python-env"
-    })).toBe("🔎 file.search: \"import.*python-env|from.*python-env\"");
+    })).toBe("🔎 Search Files: \"import.*python-env|from.*python-env\"");
     expect(renderChannelProgressLabel({
       kind: "tool-start",
       tool: "terminal.run",
       targetSummary: "pnpm test"
-    })).toBe("🖥️ terminal.run: \"pnpm test\"");
+    })).toBe("🖥️ Run Command: \"pnpm test\"");
   });
 
   it("renders tool starts without summaries and falls back for unknown tools", () => {
-    expect(renderChannelProgressLabel({ kind: "tool-start", tool: "terminal.run" })).toBe("🖥️ terminal.run");
-    expect(renderChannelProgressLabel({ kind: "tool-start", tool: "web_search" })).toBe("🌐 web_search");
-    expect(renderChannelProgressLabel({ kind: "tool-start", tool: "mcp.custom_tool", targetSummary: "payload" })).toBe("⚙️ mcp.custom_tool: \"payload\"");
+    expect(renderChannelProgressLabel({ kind: "tool-start", tool: "terminal.run" })).toBe("🖥️ Run Command");
+    expect(renderChannelProgressLabel({ kind: "tool-start", tool: "web_search" })).toBe("🌐 Web Search");
+    expect(renderChannelProgressLabel({ kind: "tool-start", tool: "mcp.custom_tool", targetSummary: "payload" })).toBe("⚙️ Custom Tool: \"payload\"");
   });
 
   it("uses mixed EstaCoda glyphs for selected tool families", () => {
