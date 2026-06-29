@@ -1,4 +1,3 @@
-import { join } from "node:path";
 import {
   loadRuntimeConfig,
   setupProviderConfig,
@@ -7,99 +6,12 @@ import {
   type ProviderSetupInput
 } from "../config/runtime-config.js";
 import type { ProviderId } from "../contracts/provider.js";
-import type { FetchLike } from "../providers/openai-compatible-provider.js";
+import { probeOpenAIModels } from "../providers/openai-compatible-model-probe.js";
 import type { CliOptions, CliCommandResult } from "./cli.js";
 import { defaultProfileId, readActiveProfile, resolveProfileStateHome } from "../config/profile-home.js";
 
-export type OpenAIModelProbe = {
-  ok: boolean;
-  baseUrl: string;
-  models: string[];
-  message: string;
-};
-
-export async function probeOpenAIModels(baseUrl: string, fetchLike?: FetchLike): Promise<OpenAIModelProbe> {
-  const normalizedBaseUrl = baseUrl.replace(/\/$/, "");
-  const url = `${normalizedBaseUrl}/models`;
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 3_000);
-
-  try {
-    const response = fetchLike === undefined
-      ? await globalThis.fetch(url, {
-          method: "GET",
-          headers: {},
-          signal: controller.signal
-        })
-      : await fetchLike(url, {
-          method: "GET",
-          headers: {},
-          body: "",
-          signal: controller.signal
-        });
-    const json = await response.json();
-    const models = extractOpenAIModelIds(json);
-
-    if (!response.ok) {
-      return {
-        ok: false,
-        baseUrl: normalizedBaseUrl,
-        models,
-        message: response.statusText || `HTTP ${response.status}`
-      };
-    }
-
-    return {
-      ok: true,
-      baseUrl: normalizedBaseUrl,
-      models,
-      message: models.length === 0
-        ? "endpoint responded, but no models were listed"
-        : `endpoint ready; ${models.length} model(s) visible`
-    };
-  } catch (error) {
-    return {
-      ok: false,
-      baseUrl: normalizedBaseUrl,
-      models: [],
-      message: error instanceof Error ? error.message : "endpoint did not respond"
-    };
-  } finally {
-    clearTimeout(timeout);
-  }
-}
-
-function extractOpenAIModelIds(value: unknown): string[] {
-  if (typeof value !== "object" || value === null) {
-    return [];
-  }
-  const record = value as {
-    data?: Array<{ id?: unknown }>;
-    models?: Array<{ name?: unknown; model?: unknown; id?: unknown }>;
-  };
-
-  if (Array.isArray(record.data)) {
-    return uniqueStrings(record.data.map((entry) => typeof entry.id === "string" ? entry.id : ""));
-  }
-
-  if (Array.isArray(record.models)) {
-    return uniqueStrings(record.models.map((entry) => {
-      if (typeof entry.id === "string") return entry.id;
-      if (typeof entry.model === "string") return entry.model;
-      if (typeof entry.name === "string") return entry.name;
-      return "";
-    }));
-  }
-
-  return [];
-}
-
 function selectedProfileId(options: Pick<CliOptions, "homeDir" | "profileId">): string {
   return options.profileId ?? readActiveProfile({ homeDir: options.homeDir }).profileId ?? defaultProfileId();
-}
-
-function uniqueStrings(values: string[]): string[] {
-  return [...new Set(values.filter((v) => v.length > 0))];
 }
 
 export function shortHash(input: string): string {
@@ -209,7 +121,7 @@ export async function runModelSetupLocal(options: CliOptions, args: string[]): P
     };
   }
 
-  const probe = await probeOpenAIModels(baseUrl, options.providerFetch);
+  const probe = await probeOpenAIModels(baseUrl, { fetch: options.providerFetch });
   let selectedModel: string;
   let warnings: string[] = [];
 
@@ -347,7 +259,7 @@ export async function runModelSetupCustom(options: CliOptions, args: string[]): 
     };
   }
 
-  const probe = await probeOpenAIModels(baseUrl, options.providerFetch);
+  const probe = await probeOpenAIModels(baseUrl, { fetch: options.providerFetch });
   let selectedModel: string;
   let warnings: string[] = [];
 

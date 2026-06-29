@@ -186,10 +186,12 @@ import {
 import { produceModelStatusReport } from "../diagnostics/model-diagnostics.js";
 import {
   runModelSetupLocal,
-  runModelSetupCustom,
+  runModelSetupCustom
+} from "./model-setup.js";
+import {
   probeOpenAIModels,
   type OpenAIModelProbe
-} from "./model-setup.js";
+} from "../providers/openai-compatible-model-probe.js";
 import { runModelSetupCodex } from "./model-setup-codex.js";
 import { profileCommand } from "./profile-commands.js";
 import { runPythonEnvCommand } from "./python-env-commands.js";
@@ -2169,7 +2171,7 @@ async function local(options: CliOptions, args: string[]): Promise<CliCommandRes
   const baseUrl = providerConfig?.baseUrl ?? "http://localhost:11434/v1";
   const localModels = await config.providerRegistry.listModels();
   const selectedProfile = localModels.find((model) => model.provider === "local" && model.id === config.model.id);
-  const discovery = await probeOpenAIModels(baseUrl, options.providerFetch);
+  const discovery = await probeOpenAIModels(baseUrl, { fetch: options.providerFetch });
   const configuredForLocal = config.model.provider === "local";
 
   return {
