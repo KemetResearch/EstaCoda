@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { ProviderResponse } from "../contracts/provider.js";
+import type { ProviderResponse, ProviderStreamDiagnostics } from "../contracts/provider.js";
 import type { ProviderExecutionResult, ProviderAttempt } from "../providers/provider-executor.js";
 import {
   renderProviderExecutionSummary,
@@ -21,6 +21,7 @@ function attempt(input: {
   ok: boolean;
   errorClass?: string;
   credentialId?: string;
+  streamDiagnostics?: ProviderStreamDiagnostics;
 }): ProviderAttempt {
   return {
     provider: input.provider,
@@ -28,7 +29,8 @@ function attempt(input: {
     ok: input.ok,
     content: input.ok ? "ok" : "failed",
     ...(input.errorClass === undefined ? {} : { errorClass: input.errorClass }),
-    ...(input.credentialId === undefined ? {} : { credentialId: input.credentialId })
+    ...(input.credentialId === undefined ? {} : { credentialId: input.credentialId }),
+    ...(input.streamDiagnostics === undefined ? {} : { streamDiagnostics: input.streamDiagnostics })
   };
 }
 
@@ -251,5 +253,46 @@ describe("provider execution summary", () => {
     expect(JSON.stringify(summary)).not.toContain("DEEPSEEK_API_KEY");
     expect(rendered).not.toContain("KIMI_API_KEY");
     expect(rendered).not.toContain("DEEPSEEK_API_KEY");
+  });
+
+  it("preserves safe stream diagnostics in attempt summaries without raw reasoning", () => {
+    const hiddenReasoning = "hidden chain of thought";
+    const streamDiagnostics: ProviderStreamDiagnostics = {
+      stream: true,
+      startedAtMs: 1_000,
+      endedAtMs: 1_030,
+      durationMs: 30,
+      firstEventMs: 5,
+      firstTokenMs: 10,
+      eventCount: 4,
+      tokenChunks: 2,
+      visibleChars: "safe answer".length,
+      toolCallChunks: 1,
+      transportDone: true,
+      finish: "done",
+      finishReason: "stop",
+      reasoningMetadata: {
+        present: true,
+        chars: hiddenReasoning.length,
+        format: "reasoning"
+      }
+    };
+    const summary = summarizeProviderExecution({
+      execution: execution({
+        ok: true,
+        response: response("kimi", "kimi-k2.7-code", "safe answer"),
+        attempts: [
+          attempt({
+            provider: "kimi",
+            model: "kimi-k2.7-code",
+            ok: true,
+            streamDiagnostics
+          })
+        ]
+      })
+    });
+
+    expect(summary.attempts[0]?.streamDiagnostics).toEqual(streamDiagnostics);
+    expect(JSON.stringify(summary)).not.toContain(hiddenReasoning);
   });
 });

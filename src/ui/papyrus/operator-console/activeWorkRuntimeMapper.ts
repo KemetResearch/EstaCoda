@@ -41,7 +41,7 @@ export function applyActiveWorkRuntimeEvent(
   state: ToolActivityState,
   event: ActiveWorkRuntimeEvent
 ): ToolActivityState {
-  const id = normalizeEventId(event);
+  const id = normalizeActiveWorkRuntimeEventId(event);
   const existingIndex = state.items.findIndex((item) => item.id === id);
   const existing = existingIndex < 0 ? undefined : state.items[existingIndex];
   const item = createActiveWorkItem(event, id, existing);
@@ -88,7 +88,7 @@ function createActiveWorkItem(
   };
 }
 
-function normalizeEventId(event: ActiveWorkRuntimeEvent): string {
+export function normalizeActiveWorkRuntimeEventId(event: ActiveWorkRuntimeEvent): string {
   const explicit = event.id?.trim();
   if (explicit !== undefined && explicit.length > 0) return explicit;
   return `${normalizeText(event.toolName, "tool")}\0${event.target ?? ""}`;

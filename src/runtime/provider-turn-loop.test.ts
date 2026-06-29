@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { normalizeSessionCompressionConfig } from "../config/runtime-config.js";
-import type { ModelProfile, ResolvedModelRoute, ProviderRequest, ProviderResponse } from "../contracts/provider.js";
+import type { ModelProfile, ResolvedModelRoute, ProviderRequest, ProviderResponse, ProviderStreamDiagnostics } from "../contracts/provider.js";
 import type { RuntimeEvent } from "../contracts/runtime-event.js";
 import type { ReplacementSessionMessage, SessionDB, SessionEvent } from "../contracts/session.js";
 import type { ToolCallPlan } from "../contracts/tool-plan.js";
@@ -2037,6 +2037,64 @@ describe("ProviderTurnLoop post-tool empty response recovery", () => {
       runtimeMetadata: {
         reasoning: reasoningMetadata
       }
+    }));
+    expect(JSON.stringify(events)).not.toContain(hiddenReasoning);
+  });
+
+  it("persists safe stream diagnostics on provider completion attempts", async () => {
+    const hiddenReasoning = "hidden diagnostic reasoning";
+    const streamDiagnostics: ProviderStreamDiagnostics = {
+      stream: true,
+      startedAtMs: 3_000,
+      endedAtMs: 3_080,
+      durationMs: 80,
+      firstEventMs: 8,
+      firstTokenMs: 14,
+      eventCount: 6,
+      tokenChunks: 2,
+      visibleChars: "streamed answer".length,
+      toolCallChunks: 1,
+      transportDone: true,
+      finish: "done",
+      finishReason: "stop",
+      reasoningMetadata: {
+        present: true,
+        chars: hiddenReasoning.length,
+        format: "reasoning"
+      }
+    };
+    const harness = await createPostToolNudgeHarness({
+      responses: [
+        providerExecution("streamed answer", [], {
+          attempts: [
+            {
+              provider: "test-provider",
+              model: "test-model",
+              ok: true,
+              content: "streamed answer",
+              streamDiagnostics
+            }
+          ]
+        })
+      ],
+      toolSteps: []
+    });
+
+    await runBasicProviderTurn(harness.loop);
+
+    const events = await harness.sessionDb.listEvents(harness.sessionId);
+    const completionEvent = events.find((event) => event.kind === "provider-completion");
+
+    expect(completionEvent).toEqual(expect.objectContaining({
+      kind: "provider-completion",
+      attempts: [
+        expect.objectContaining({
+          provider: "test-provider",
+          model: "test-model",
+          ok: true,
+          streamDiagnostics
+        })
+      ]
     }));
     expect(JSON.stringify(events)).not.toContain(hiddenReasoning);
   });

@@ -18,6 +18,8 @@ import {
 import { renderSlashSurface } from "./slashSurface.js";
 import { renderStartupDashboardSurface } from "./startupDashboardSurface.js";
 import { renderStatusRailSurface } from "./statusRailSurface.js";
+import { renderStreamingSurface } from "./streamingSurface.js";
+import { renderTranscriptSurface } from "./transcriptSurface.js";
 import { renderTurnActivitySurface } from "./turnActivitySurface.js";
 
 export type OperatorConsoleRenderedLine = {
@@ -88,6 +90,20 @@ function renderRegionLines(
       style: state.style,
     }).map((text) => ({ region: region.kind, text }));
   }
+  if (region.kind === "streaming") {
+    return renderStreamingSurface(state.streaming, {
+      width: region.width,
+      height: region.height,
+      style: state.style,
+    }).map((text) => ({ region: region.kind, text }));
+  }
+  if (region.kind === "transcript") {
+    return renderTranscriptSurface(state.transcript, {
+      width: region.width,
+      height: region.height,
+      style: state.style,
+    }).map((text) => ({ region: region.kind, text }));
+  }
   if (region.kind === "turnActivity") {
     return renderTurnActivitySurface(state.turnActivity, {
       width: region.width,
@@ -139,7 +155,9 @@ function regionLabel(
     case "setupPanel":
       return `Setup: ${state.setupPanel?.title ?? ""}`;
     case "transcript":
-      return `Transcript: ${state.transcript.length} block${plural(state.transcript.length)}`;
+      return "";
+    case "streaming":
+      return `Streaming: ${state.streaming?.segments.length ?? 0} segment${plural(state.streaming?.segments.length ?? 0)}`;
     case "approvals":
       return `Approvals: ${state.approvals.length}`;
     case "turnActivity":

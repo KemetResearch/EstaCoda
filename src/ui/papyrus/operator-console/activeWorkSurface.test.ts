@@ -226,6 +226,22 @@ describe("Papyrus operator console active work surface", () => {
     expect(output).toContain("65m36s");
   });
 
+  it("keeps a readable gap between tool labels and targets", () => {
+    const output = renderCompletedActiveWorkSurface(createState({
+      items: [
+        item("inspect", "succeeded", {
+          toolName: "terminal.inspect",
+          displayLabel: "Inspect Terminal",
+          target: "inspecting terminal",
+          durationMs: 100,
+        }),
+      ],
+    }), { width: 96 }).join("\n");
+
+    expect(output).toMatch(/✓ Inspect Terminal {3,}inspecting terminal/u);
+    expect(output).toContain("0.1s");
+  });
+
   it("shows a live working timer in the active work header when turn timing is available", () => {
     const output = renderActiveWorkSurface(createState({
       startedAtMs: 1_000,
@@ -551,6 +567,7 @@ function item(
     toolName: input.toolName ?? id,
     status,
     summary: input.summary ?? input.target ?? id,
+    ...(input.displayLabel === undefined ? {} : { displayLabel: input.displayLabel }),
     ...(input.target === undefined ? {} : { target: input.target }),
     ...(input.startedAtMs === undefined ? {} : { startedAtMs: input.startedAtMs }),
     ...(input.endedAtMs === undefined ? {} : { endedAtMs: input.endedAtMs }),

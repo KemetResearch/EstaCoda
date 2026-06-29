@@ -40,6 +40,7 @@ describe("Papyrus operator console state model", () => {
       "startupDashboard",
       "setupPanel",
       "transcript",
+      "streaming",
       "approvals",
       "turnActivity",
       "activeWork",
@@ -193,6 +194,7 @@ describe("Papyrus operator console state model", () => {
       scrollOffset: 0,
       expanded: false,
     });
+    expect(state.streaming).toBeUndefined();
     expect(state.approvals).toEqual([]);
     expect(state.slash).toBeUndefined();
     expect(state.steer).toBeUndefined();
@@ -239,6 +241,83 @@ describe("Papyrus operator console state model", () => {
       title: "Model route",
       selectedRowId: "openai",
     });
+  });
+
+  it("constructs streaming state without runtime coupling", () => {
+    const state = createInitialOperatorConsoleState({
+      streaming: {
+        segments: [{
+          id: "segment-1",
+          role: "assistant",
+          text: "I will inspect the runtime path first.",
+          createdAtMs: 1_000,
+        }],
+        tail: "Then I will summarize",
+        isStreaming: true,
+        toolTrail: [{
+          id: "read-1",
+          sequence: 1,
+          toolName: "read_file",
+          status: "running",
+          summary: "src/cli/session-loop.ts",
+          target: "src/cli/session-loop.ts",
+          startedAtMs: 1_100,
+          afterSegmentId: "segment-1",
+        }],
+      },
+    });
+
+    expect(state.streaming).toEqual({
+      segments: [{
+        id: "segment-1",
+        role: "assistant",
+        text: "I will inspect the runtime path first.",
+        createdAtMs: 1_000,
+      }],
+      tail: "Then I will summarize",
+      isStreaming: true,
+      toolTrail: [{
+        id: "read-1",
+        sequence: 1,
+        toolName: "read_file",
+        status: "running",
+        summary: "src/cli/session-loop.ts",
+        target: "src/cli/session-loop.ts",
+        startedAtMs: 1_100,
+        afterSegmentId: "segment-1",
+      }],
+    });
+  });
+
+  it("constructs assistant transcript blocks with inline tool-trail metadata", () => {
+    const state = createInitialOperatorConsoleState({
+      transcript: [{
+        id: "assistant-1",
+        role: "assistant",
+        text: "I inspected the runtime path.",
+        toolTrail: [{
+          id: "read-1",
+          sequence: 1,
+          toolName: "read_file",
+          status: "succeeded",
+          summary: "src/cli/session-loop.ts",
+          target: "src/cli/session-loop.ts",
+          durationMs: 1_000,
+          afterSegmentId: "segment-1",
+        }],
+      }],
+    });
+
+    expect(state.transcript[0]?.toolTrail).toEqual([{
+      id: "read-1",
+      sequence: 1,
+      toolName: "read_file",
+      status: "succeeded",
+      summary: "src/cli/session-loop.ts",
+      target: "src/cli/session-loop.ts",
+      durationMs: 1_000,
+      afterSegmentId: "segment-1",
+    }]);
   });
 
   it("does not introduce rendering exports or ANSI strings in the model layer", () => {

@@ -3,10 +3,25 @@ import { stringWidth } from "../screen/stringWidth.js";
 import {
   applyActiveWorkRuntimeEvent,
   createActiveWorkRuntimeState,
+  normalizeActiveWorkRuntimeEventId,
 } from "./activeWorkRuntimeMapper.js";
 import { formatActiveWorkSummary, getActiveWorkSurfaceDesiredHeight, renderActiveWorkSurface } from "./activeWorkSurface.js";
 
 describe("active work runtime mapper", () => {
+  it("normalizes runtime event identity for active work and tool trails", () => {
+    expect(normalizeActiveWorkRuntimeEventId({
+      id: " read-1 ",
+      toolName: "read_file",
+      status: "running",
+      target: "src/app.ts",
+    })).toBe("read-1");
+    expect(normalizeActiveWorkRuntimeEventId({
+      toolName: " read_file ",
+      status: "running",
+      target: "src/app.ts",
+    })).toBe("read_file\0src/app.ts");
+  });
+
   it("keeps the active work model and default rendering uncapped", () => {
     let state = createActiveWorkRuntimeState();
     for (let index = 0; index < 12; index += 1) {

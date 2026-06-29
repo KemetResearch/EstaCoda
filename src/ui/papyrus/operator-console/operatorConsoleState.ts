@@ -14,6 +14,7 @@ export type TranscriptBlock = {
   readonly text: string;
   readonly createdAtMs?: number;
   readonly attachmentIds?: readonly string[];
+  readonly toolTrail?: readonly InlineToolTrailEntry[];
 };
 
 export type PromptSurfaceState = {
@@ -137,6 +138,38 @@ export type ToolActivityState = {
   readonly frameIndex?: number;
 };
 
+export type StreamingSegment = {
+  readonly id: string;
+  readonly role: "assistant" | "system";
+  readonly text: string;
+  readonly createdAtMs?: number;
+};
+
+export type InlineToolTrailEntry = {
+  readonly id: string;
+  readonly sequence: number;
+  readonly toolName: string;
+  readonly displayLabel?: string;
+  readonly status: ActiveWorkItemStatus;
+  readonly summary: string;
+  readonly target?: string;
+  readonly startedAtMs?: number;
+  readonly endedAtMs?: number;
+  readonly durationMs?: number;
+  readonly detailsRef?: string;
+  readonly riskLevel?: ActiveWorkItem["riskLevel"];
+  readonly approvalRef?: string;
+  readonly fileChangeInspected?: boolean;
+  readonly afterSegmentId?: string;
+};
+
+export type StreamingState = {
+  readonly segments: readonly StreamingSegment[];
+  readonly tail: string;
+  readonly isStreaming: boolean;
+  readonly toolTrail?: readonly InlineToolTrailEntry[];
+};
+
 export type ApprovalControl = ApprovalFocusControl;
 
 export type ApprovalCardState = {
@@ -238,6 +271,7 @@ export type OperatorConsoleState = {
   readonly turnActivity?: TurnActivityState;
   readonly attachments: readonly AttachmentCardState[];
   readonly activeWork: ToolActivityState;
+  readonly streaming?: StreamingState;
   readonly approvals: readonly ApprovalCardState[];
   readonly slash?: SlashMenuState;
   readonly steer?: SteerState;
@@ -250,6 +284,7 @@ export type OperatorConsoleSurface =
   | "startupDashboard"
   | "setupPanel"
   | "transcript"
+  | "streaming"
   | "approvals"
   | "turnActivity"
   | "activeWork"
@@ -263,6 +298,7 @@ export const OPERATOR_CONSOLE_SURFACE_ORDER: readonly OperatorConsoleSurface[] =
   "startupDashboard",
   "setupPanel",
   "transcript",
+  "streaming",
   "approvals",
   "turnActivity",
   "activeWork",
@@ -284,6 +320,7 @@ export type CreateInitialOperatorConsoleStateInput = {
   readonly turnActivity?: TurnActivityState;
   readonly attachments?: readonly AttachmentCardState[];
   readonly activeWork?: ToolActivityState;
+  readonly streaming?: StreamingState;
   readonly approvals?: readonly ApprovalCardState[];
   readonly slash?: SlashMenuState;
   readonly steer?: SteerState;
@@ -310,6 +347,7 @@ export function createInitialOperatorConsoleState(
     ...(input.turnActivity === undefined ? {} : { turnActivity: input.turnActivity }),
     attachments: input.attachments ?? [],
     activeWork: input.activeWork ?? createDefaultToolActivityState(),
+    ...(input.streaming === undefined ? {} : { streaming: input.streaming }),
     approvals: input.approvals ?? [],
     ...(input.slash === undefined ? {} : { slash: input.slash }),
     ...(input.steer === undefined ? {} : { steer: input.steer }),

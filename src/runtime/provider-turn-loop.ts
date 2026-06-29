@@ -1425,6 +1425,7 @@ function providerAttemptEventPayload(attempt: ProviderAttempt): {
   incompleteReason?: string;
   usage?: ProviderAttempt["usage"];
   reasoningMetadata?: ProviderAttempt["reasoningMetadata"];
+  streamDiagnostics?: ProviderAttempt["streamDiagnostics"];
 } {
   return {
     provider: attempt.provider,
@@ -1435,7 +1436,8 @@ function providerAttemptEventPayload(attempt: ProviderAttempt): {
     ...(attempt.finishReason === undefined ? {} : { finishReason: attempt.finishReason }),
     ...(attempt.incompleteReason === undefined ? {} : { incompleteReason: attempt.incompleteReason }),
     ...(attempt.usage === undefined ? {} : { usage: attempt.usage }),
-    ...(attempt.reasoningMetadata === undefined ? {} : { reasoningMetadata: attempt.reasoningMetadata })
+    ...(attempt.reasoningMetadata === undefined ? {} : { reasoningMetadata: attempt.reasoningMetadata }),
+    ...(attempt.streamDiagnostics === undefined ? {} : { streamDiagnostics: attempt.streamDiagnostics })
   };
 }
 

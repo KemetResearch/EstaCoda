@@ -5,7 +5,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ArtifactRecord } from "../contracts/artifact.js";
 import type { IntentRoute } from "../contracts/intent.js";
 import type { MemoryProvider } from "../contracts/memory.js";
-import type { ModelProfile } from "../contracts/provider.js";
+import type { ModelProfile, ProviderStreamDiagnostics } from "../contracts/provider.js";
 import type { SecurityPolicy } from "../contracts/security.js";
 import type { SkillDefinition } from "../contracts/skill.js";
 import type { ToolDefinition } from "../contracts/tool.js";
@@ -160,6 +160,21 @@ function successfulProviderExecution(content: string): ProviderExecutionResult {
       }
     ],
     toolCalls: []
+  };
+}
+
+function streamedProviderExecution(content: string, streamDiagnostics: ProviderStreamDiagnostics): ProviderExecutionResult {
+  return {
+    ...successfulProviderExecution(content),
+    attempts: [
+      {
+        provider: model.provider,
+        model: model.id,
+        ok: true,
+        content,
+        streamDiagnostics
+      }
+    ]
   };
 }
 
@@ -864,6 +879,55 @@ describe("AgentLoop provider availability gating", () => {
     expect(serialized).not.toContain("PRIMARY_API_KEY");
     expect(serialized).not.toContain("FALLBACK_API_KEY");
     expect(serialized).not.toContain("raw primary failure body");
+  });
+
+  it("persists safe provider stream diagnostics in final assistant metadata", async () => {
+    const hiddenReasoning = "raw hidden reasoning text";
+    const streamDiagnostics: ProviderStreamDiagnostics = {
+      stream: true,
+      startedAtMs: 2_000,
+      endedAtMs: 2_045,
+      durationMs: 45,
+      firstEventMs: 6,
+      firstTokenMs: 12,
+      eventCount: 5,
+      tokenChunks: 2,
+      visibleChars: "streamed answer".length,
+      toolCallChunks: 0,
+      transportDone: false,
+      finish: "done",
+      finishReason: "stop",
+      reasoningMetadata: {
+        present: true,
+        chars: hiddenReasoning.length,
+        format: "reasoning"
+      }
+    };
+    const { loop, sessionDb, sessionId } = await createAgentLoop({
+      canRunProvider: true,
+      runSkillPlaybook: vi.fn(async () => []),
+      providerExecution: streamedProviderExecution("streamed answer", streamDiagnostics)
+    });
+
+    await loop.handle({
+      text: "use the test skill",
+      channel: "cli",
+      trustedWorkspace: true
+    });
+
+    const agentMessages = (await sessionDb.listMessages(sessionId)).filter((message) => message.role === "agent");
+    const metadata = agentMessages[0]?.metadata;
+    expect(metadata?.providerExecution).toMatchObject({
+      attempts: [
+        {
+          provider: "test-provider",
+          model: "test-model",
+          ok: true,
+          streamDiagnostics
+        }
+      ]
+    });
+    expect(JSON.stringify(metadata?.providerExecution)).not.toContain(hiddenReasoning);
   });
 
   it("persists finalized continuation text once without synthetic continuation messages", async () => {

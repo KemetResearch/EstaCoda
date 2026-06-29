@@ -82,6 +82,31 @@ describe("operator console tool display", () => {
     });
   });
 
+  it("uses terminal inspect command previews for Papyrus active work targets", () => {
+    const event = activeWorkEventFromToolRail({
+      railEvent: {
+        tool: "terminal.inspect",
+        status: "done",
+        label: "inspecting terminal",
+        target: "inspecting terminal",
+      },
+      runtimeEvent: {
+        kind: "tool-result",
+        tool: "terminal.inspect",
+        ok: true,
+        targetSummary: "git status --short",
+        displayPreview: "git status --short",
+      },
+      locale: "en",
+    });
+
+    expect(event).toMatchObject({
+      toolName: "terminal.inspect",
+      displayLabel: "Inspect Terminal",
+      target: "git status --short",
+    });
+  });
+
   it("preserves result metadata needed by the Papyrus active work surface", () => {
     const event = activeWorkEventFromToolRail({
       railEvent: {

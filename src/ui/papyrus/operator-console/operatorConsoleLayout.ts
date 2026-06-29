@@ -13,6 +13,10 @@ import { getPromptSurfaceDesiredHeight } from "./promptSurface.js";
 import { getSetupPanelSurfaceDesiredHeight } from "./setupPanelSurface.js";
 import { getSlashSurfaceDesiredHeight } from "./slashSurface.js";
 import { getStartupDashboardSurfaceDesiredHeight } from "./startupDashboardSurface.js";
+import {
+  getStreamingSurfaceDesiredHeight,
+  hasStreamingSurface,
+} from "./streamingSurface.js";
 import { getTurnActivitySurfaceDesiredHeight } from "./turnActivitySurface.js";
 import {
   getQueuedSteerSurfaceDesiredHeight,
@@ -20,6 +24,7 @@ import {
   hasQueuedSteer,
   isSteerInputActive,
 } from "./steerSurface.js";
+import { getTranscriptSurfaceDesiredHeight } from "./transcriptSurface.js";
 
 export type OperatorConsoleRegionKind = OperatorConsoleSurface;
 
@@ -51,6 +56,7 @@ const INTERACTIVE_OPTIONAL_PRIORITY = 3;
 const APPROVAL_PRIORITY = 3;
 const TURN_ACTIVITY_PRIORITY = 3;
 const ACTIVE_WORK_PRIORITY = 4;
+const STREAMING_PRIORITY = 5;
 const ATTACHMENTS_PRIORITY = 5;
 const TRANSCRIPT_PRIORITY = 6;
 const STARTUP_PRIORITY = 7;
@@ -120,7 +126,18 @@ function createRegionDescriptors(
       kind: "transcript",
       priority: TRANSCRIPT_PRIORITY,
       minHeight: 1,
-      desiredHeight: Math.min(6, Math.max(1, state.transcript.length)),
+      desiredHeight: getTranscriptSurfaceDesiredHeight(state.transcript, terminal.width),
+    });
+  }
+
+  if (hasStreamingSurface(state.streaming)) {
+    descriptors.push({
+      kind: "streaming",
+      priority: STREAMING_PRIORITY,
+      minHeight: 1,
+      desiredHeight: getStreamingSurfaceDesiredHeight(state.streaming, terminal.width, {
+        terminalHeight: terminal.height,
+      }),
     });
   }
 
@@ -257,22 +274,24 @@ function surfaceOrderIndex(kind: OperatorConsoleRegionKind): number {
       return 1;
     case "transcript":
       return 2;
-    case "approvals":
+    case "streaming":
       return 3;
-    case "turnActivity":
+    case "approvals":
       return 4;
-    case "activeWork":
+    case "turnActivity":
       return 5;
-    case "queuedSteer":
+    case "activeWork":
       return 6;
-    case "attachments":
+    case "queuedSteer":
       return 7;
-    case "prompt":
+    case "attachments":
       return 8;
-    case "slashMenu":
+    case "prompt":
       return 9;
-    case "statusRail":
+    case "slashMenu":
       return 10;
+    case "statusRail":
+      return 11;
   }
 }
 

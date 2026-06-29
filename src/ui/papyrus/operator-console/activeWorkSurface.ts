@@ -33,6 +33,7 @@ export const ACTIVE_WORK_STATUS_SYMBOLS: Readonly<Record<ActiveWorkItemStatus, s
 
 const LTR_ISOLATE_START = "\u2068";
 const LTR_ISOLATE_END = "\u2069";
+const TOOL_DETAIL_GAP_CELLS = 3;
 
 export function hasActiveWork(state: ToolActivityState): boolean {
   return state.items.length > 0;
@@ -186,7 +187,7 @@ function formatActiveWorkRow(
   const renderedTool = item.displayLabel ?? item.toolName;
   const rawTool = renderedTool.trim().length === 0 ? "tool" : renderedTool.trim();
   const rawDetail = (item.target ?? item.summary).trim();
-  const duration = formatDuration(resolveDurationMs(item));
+  const duration = formatActiveWorkDuration(resolveDurationMs(item));
   if (width <= 8) return truncateVisibleCells(`${symbol} ${rawTool}`, width);
 
   const prefixCells = stringWidth(symbol) + 1;
@@ -195,11 +196,12 @@ function formatActiveWorkRow(
   if (availableMainCells <= 0) return truncateVisibleCells(`${symbol} ${rawTool}`, width);
 
   const toolCells = Math.min(16, Math.max(1, Math.min(availableMainCells, Math.floor(availableMainCells * 0.35))));
-  const detailGapCells = availableMainCells > toolCells ? 1 : 0;
+  const detailGapCells = availableMainCells > toolCells ? Math.min(TOOL_DETAIL_GAP_CELLS, availableMainCells - toolCells) : 0;
   const detailCells = Math.max(0, availableMainCells - toolCells - detailGapCells);
   const tool = isolateIfNeeded(truncateVisibleCells(rawTool, toolCells), locale);
   const detail = isolateIfNeeded(truncateVisibleCells(rawDetail, detailCells), locale);
-  const left = `${symbol} ${padVisibleEnd(tool, toolCells)}${detailGapCells > 0 ? ` ${padVisibleEnd(detail, detailCells)}` : ""}`;
+  const detailGap = " ".repeat(detailGapCells);
+  const left = `${symbol} ${padVisibleEnd(tool, toolCells)}${detailGapCells > 0 ? `${detailGap}${padVisibleEnd(detail, detailCells)}` : ""}`;
 
   if (durationPartCells === 0) return truncateVisibleCells(left, width);
   const row = `${left} ${isolateIfNeeded(duration, locale)}`;
@@ -278,7 +280,7 @@ function formatClockDuration(durationMs: number): string {
   return `${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
 }
 
-function formatDuration(durationMs: number): string {
+export function formatActiveWorkDuration(durationMs: number): string {
   const safeMs = Math.max(0, Number.isFinite(durationMs) ? durationMs : 0);
   if (safeMs < 60_000) {
     const roundedTenths = Math.round(safeMs / 100);

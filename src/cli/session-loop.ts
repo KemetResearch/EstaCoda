@@ -768,6 +768,16 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
             text: retryText,
             channel: "cli",
             signal: activeTurn.signal,
+            onDelta: operatorConsoleLiveFrame === undefined
+              ? undefined
+              : (delta) => {
+                  operatorConsoleLiveFrame.appendStreamingText(delta);
+                },
+            onSegmentBreak: operatorConsoleLiveFrame === undefined
+              ? undefined
+              : (reason) => {
+                  operatorConsoleLiveFrame.flushStreamingSegment(reason);
+                },
 	            onEvent: (event) => {
 	              if (event.kind === "context-usage") {
                 const currentPriority = activeTurnContextUsageSource === undefined
@@ -792,6 +802,10 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
 	              }
 	              if (event.kind === "agent-cancelled") {
 	                turnWasCancelled = true;
+	                operatorConsoleLiveFrame?.resetStreaming();
+	              }
+	              if (operatorConsoleLiveFrame !== undefined && event.kind === "provider-result" && event.willFallback) {
+	                operatorConsoleLiveFrame.resetStreaming();
 	              }
 	              let newPhase: string | undefined;
 	              if (operatorConsoleLiveFrame !== undefined && isToolActivityRuntimeEvent(event)) {
@@ -854,6 +868,7 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
 	        }
 	        writeSessionStatusRail();
 	        if (pendingSteeringNote !== undefined && !steeringRetryUsed) {
+	          operatorConsoleLiveFrame?.resetStreaming();
 	          const steeringNote = pendingSteeringNote;
 	          pendingSteeringNote = undefined;
 	          steeringRetryUsed = true;
@@ -869,12 +884,17 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
 	        }
 	        writeSessionStatusRail();
 
+	        const hasVisibleStreamingOutput = operatorConsoleLiveFrame?.hasStreamingOutput() === true;
 	        const assistantVm = buildAssistantResponseViewModel({
 	          label: response.label,
           text: response.text,
           matchedSkills: response.matchedSkills,
 	          progress: options.showResponseProgress === true ? response.progress : undefined,
 	        });
+	        if (hasVisibleStreamingOutput) {
+	          clearOperatorConsoleLiveFrame();
+	          operatorConsoleLiveFrame?.discardStreaming();
+	        }
 	        if (providerServingAlert !== undefined) {
 	          output.write(`${providerServingAlert}\n`);
 	        }

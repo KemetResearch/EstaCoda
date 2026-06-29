@@ -12,6 +12,7 @@ import {
   type ApprovalCardState,
   type AttachmentCardState,
   type CreateInitialOperatorConsoleStateInput,
+  type InlineToolTrailEntry,
   type OperatorConsoleMode,
   type OperatorConsoleState,
   type PromptSurfaceState,
@@ -20,6 +21,8 @@ import {
   type StartupDashboardState,
   type StatusRailState,
   type SteerState,
+  type StreamingSegment,
+  type StreamingState,
   type TerminalMetrics,
   type ToolActivityState,
   type TurnActivityState,
@@ -142,6 +145,14 @@ export class OperatorConsoleRuntimeHost {
     };
   }
 
+  setStreaming(streaming: StreamingState | undefined): void {
+    if (this.#disposed) return;
+    this.#state = {
+      ...this.#state,
+      ...(streaming === undefined ? { streaming: undefined } : { streaming: cloneStreamingState(streaming) }),
+    };
+  }
+
   setApprovals(approvals: readonly ApprovalCardState[]): void {
     if (this.#disposed) return;
     this.#state = {
@@ -225,6 +236,7 @@ function cloneOperatorConsoleState(state: OperatorConsoleState): OperatorConsole
     turnActivity: state.turnActivity === undefined ? undefined : cloneTurnActivityState(state.turnActivity),
     attachments: state.attachments.map(cloneAttachmentCardState),
     activeWork: cloneToolActivityState(state.activeWork),
+    streaming: state.streaming === undefined ? undefined : cloneStreamingState(state.streaming),
     approvals: state.approvals.map(cloneApprovalCardState),
     slash: state.slash === undefined ? undefined : cloneSlashMenuState(state.slash),
     steer: state.steer === undefined ? undefined : cloneSteerState(state.steer),
@@ -299,6 +311,7 @@ function cloneTranscriptBlock(block: TranscriptBlock): TranscriptBlock {
   return {
     ...block,
     ...(block.attachmentIds === undefined ? {} : { attachmentIds: [...block.attachmentIds] }),
+    ...(block.toolTrail === undefined ? {} : { toolTrail: block.toolTrail.map(cloneInlineToolTrailEntry) }),
   };
 }
 
@@ -319,6 +332,22 @@ function cloneToolActivityState(activeWork: ToolActivityState): ToolActivityStat
 
 function cloneActiveWorkItem(item: ActiveWorkItem): ActiveWorkItem {
   return { ...item };
+}
+
+function cloneStreamingState(streaming: StreamingState): StreamingState {
+  return {
+    ...streaming,
+    segments: streaming.segments.map(cloneStreamingSegment),
+    ...(streaming.toolTrail === undefined ? {} : { toolTrail: streaming.toolTrail.map(cloneInlineToolTrailEntry) }),
+  };
+}
+
+function cloneStreamingSegment(segment: StreamingSegment): StreamingSegment {
+  return { ...segment };
+}
+
+function cloneInlineToolTrailEntry(entry: InlineToolTrailEntry): InlineToolTrailEntry {
+  return { ...entry };
 }
 
 function cloneApprovalCardState(approval: ApprovalCardState): ApprovalCardState {

@@ -22,6 +22,12 @@ describe("buildToolSecurityTargetSummary", () => {
     expect(buildToolSecurityTargetSummary("terminal.run", { command: "pnpm test", path: "src/app.ts" })).toBe("pnpm test");
     expect(buildToolSecurityTargetSummary("file.read", { path: "src/app.ts", query: "ignored" })).toBe("src/app.ts");
   });
+
+  it("summarizes terminal inspect argv for progress targets", () => {
+    expect(buildToolSecurityTargetSummary("terminal.inspect", {
+      argv: ["git", "status", "--short"]
+    })).toBe("git status --short");
+  });
 });
 
 describe("buildToolDisplayPreview", () => {
@@ -46,6 +52,15 @@ describe("buildToolDisplayPreview", () => {
     expect(buildToolDisplayPreview("terminal.run", input)).toBe("pnpm test -- --runInBand");
   });
 
+  it("formats terminal inspect argv for display previews", () => {
+    expect(buildToolDisplayPreview("terminal.inspect", {
+      argv: ["git", "status", "--short"]
+    })).toBe("git status --short");
+    expect(buildToolDisplayPreview("terminal.inspect", {
+      argv: ["cat", "path with spaces/config.json"]
+    })).toBe("cat \"path with spaces/config.json\"");
+  });
+
   it("redacts secret-bearing display previews", () => {
     expect(buildToolDisplayPreview("web.extract", {
       url: "https://example.com/search?token=abc123&q=docs"
@@ -56,6 +71,9 @@ describe("buildToolDisplayPreview", () => {
     expect(redactToolDisplayPreview("Authorization: Bearer abc.def.ghi")).toBe("Authorization: Bearer [redacted]");
     expect(redactToolDisplayPreview("use sk-proj-secretvalue")).toBe("use [redacted]");
     expect(redactToolDisplayPreview("https://user:pass@example.com/private")).toBe("[redacted]");
+    expect(buildToolDisplayPreview("terminal.inspect", {
+      argv: ["git", "config", "http.extraHeader=Authorization: Bearer abc.def.ghi"]
+    })).toBe("git config \"http.extraHeader=Authorization: Bearer [redacted]\"");
   });
 
   it("summarizes delegate task batches", () => {
