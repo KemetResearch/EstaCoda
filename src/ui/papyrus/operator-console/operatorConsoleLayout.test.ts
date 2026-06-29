@@ -296,6 +296,18 @@ describe("Papyrus operator console layout", () => {
     expect(region(layout, "attachments")).toMatchObject({ height: 0, visible: false });
   });
 
+  it("allocates live streaming height responsively up to thirty-two rows", () => {
+    const state = createState({
+      streaming: streamingState({
+        segments: [],
+        tail: numberedLines(80),
+      }),
+    });
+
+    expect(region(createOperatorConsoleLayout(state, { width: 80, height: 24, isTty: true }), "streaming")?.height).toBe(12);
+    expect(region(createOperatorConsoleLayout(state, { width: 80, height: 80, isTty: true }), "streaming")?.height).toBe(32);
+  });
+
   it("keeps region bounds inside the terminal rectangle", () => {
     const layout = createOperatorConsoleLayout(createFullState(), { width: 32, height: 8, isTty: true });
 

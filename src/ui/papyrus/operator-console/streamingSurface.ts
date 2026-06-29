@@ -8,9 +8,12 @@ import type { StreamingState } from "./operatorConsoleState.js";
 export type StreamingSurfaceRenderOptions = {
   readonly width: number;
   readonly height?: number;
+  readonly terminalHeight?: number;
 };
 
-const MAX_STREAMING_SURFACE_ROWS = 8;
+const MIN_STREAMING_SURFACE_ROWS = 8;
+const MAX_STREAMING_SURFACE_ROWS = 32;
+const STREAMING_SURFACE_HEIGHT_RATIO = 0.5;
 
 export function hasStreamingSurface(state: StreamingState | undefined): state is StreamingState {
   return state !== undefined && state.isStreaming && (
@@ -21,11 +24,12 @@ export function hasStreamingSurface(state: StreamingState | undefined): state is
 
 export function getStreamingSurfaceDesiredHeight(
   state: StreamingState | undefined,
-  width: number
+  width: number,
+  options: { readonly terminalHeight?: number } = {}
 ): number {
   if (!hasStreamingSurface(state)) return 0;
   return Math.min(
-    MAX_STREAMING_SURFACE_ROWS,
+    getStreamingSurfaceRowLimit(options.terminalHeight),
     getAssistantMessageFrameDesiredHeight({
       lines: [],
       blocks: streamingContentBlocks(state),
@@ -40,7 +44,9 @@ export function renderStreamingSurface(
   const width = normalizeDimension(options.width);
   if (width <= 0 || !hasStreamingSurface(state)) return [];
 
-  const height = normalizeDimension(options.height ?? getStreamingSurfaceDesiredHeight(state, width));
+  const height = normalizeDimension(options.height ?? getStreamingSurfaceDesiredHeight(state, width, {
+    terminalHeight: options.terminalHeight,
+  }));
   if (height <= 0) return [];
 
   return renderAssistantMessageFrame({
@@ -100,6 +106,15 @@ function findLastTextBlockIndex(blocks: readonly AssistantMessageFrameBlock[]): 
     if (blocks[index]?.kind === "text") return index;
   }
   return -1;
+}
+
+function getStreamingSurfaceRowLimit(terminalHeight: number | undefined): number {
+  const normalizedHeight = terminalHeight === undefined ? 0 : normalizeDimension(terminalHeight);
+  if (normalizedHeight <= 0) return MAX_STREAMING_SURFACE_ROWS;
+  return Math.min(
+    MAX_STREAMING_SURFACE_ROWS,
+    Math.max(MIN_STREAMING_SURFACE_ROWS, Math.floor(normalizedHeight * STREAMING_SURFACE_HEIGHT_RATIO))
+  );
 }
 
 function normalizeDimension(value: number): number {

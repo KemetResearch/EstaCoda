@@ -11,7 +11,6 @@ export type TranscriptSurfaceRenderOptions = {
   readonly height?: number;
 };
 
-const MAX_TRANSCRIPT_SURFACE_ROWS = 8;
 const ROLE_LABELS: Record<TranscriptBlock["role"], string> = {
   startup: "Startup",
   user: "User",
@@ -27,7 +26,7 @@ export function getTranscriptSurfaceDesiredHeight(
   width: number
 ): number {
   if (transcript.length === 0) return 0;
-  return Math.min(MAX_TRANSCRIPT_SURFACE_ROWS, renderTranscriptRows(transcript, normalizeDimension(width)).length);
+  return renderTranscriptRows(transcript, normalizeDimension(width)).length;
 }
 
 export function renderTranscriptSurface(
@@ -38,7 +37,7 @@ export function renderTranscriptSurface(
   if (width <= 0 || transcript.length === 0) return [];
 
   const rows = renderTranscriptRows(transcript, width);
-  const height = normalizeDimension(options.height ?? Math.min(MAX_TRANSCRIPT_SURFACE_ROWS, rows.length));
+  const height = normalizeDimension(options.height ?? rows.length);
   if (height <= 0) return [];
   return renderLatestTranscriptRows(transcript, width, height);
 }

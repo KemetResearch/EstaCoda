@@ -36,6 +36,28 @@ describe("Papyrus operator console streaming surface", () => {
     expect(rendered).not.toContain("assistant:");
   });
 
+  it("caps live streaming height responsively up to thirty-two rows", () => {
+    const state: StreamingState = {
+      segments: [],
+      tail: numberedLines(80),
+      isStreaming: true,
+    };
+
+    expect(getStreamingSurfaceDesiredHeight(state, 80, { terminalHeight: 24 })).toBe(12);
+    expect(getStreamingSurfaceDesiredHeight(state, 80, { terminalHeight: 80 })).toBe(32);
+    expect(renderStreamingSurface(state, { width: 80, terminalHeight: 80 })).toHaveLength(32);
+  });
+
+  it("keeps at least the former eight-row live streaming budget on short terminals", () => {
+    const state: StreamingState = {
+      segments: [],
+      tail: numberedLines(80),
+      isStreaming: true,
+    };
+
+    expect(getStreamingSurfaceDesiredHeight(state, 80, { terminalHeight: 10 })).toBe(8);
+  });
+
   it("renders anchored inline tool trails between streamed segments and tail", () => {
     const state: StreamingState = {
       segments: [{ id: "segment-1", role: "assistant", text: "I'll inspect the runtime path first." }],
@@ -83,4 +105,8 @@ describe("Papyrus operator console streaming surface", () => {
 
 function extractFrameContent(line: string): string {
   return line.replace(/^│ /u, "").replace(/ │$/u, "").trim();
+}
+
+function numberedLines(count: number): string {
+  return Array.from({ length: count }, (_, index) => `line ${index + 1}`).join("\n");
 }

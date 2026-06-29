@@ -69,8 +69,28 @@ describe("Papyrus operator console transcript surface", () => {
     expect(rows.every((line) => stringWidth(line) <= 44)).toBe(true);
   });
 
+  it("does not cap settled transcript desired height to eight rows", () => {
+    const transcript: TranscriptBlock[] = [{
+      id: "assistant-1",
+      role: "assistant",
+      text: numberedLines(12),
+    }];
+
+    const desiredHeight = getTranscriptSurfaceDesiredHeight(transcript, 72);
+    const rows = renderTranscriptSurface(transcript, { width: 72 });
+
+    expect(desiredHeight).toBeGreaterThan(8);
+    expect(rows).toHaveLength(desiredHeight);
+    expect(rows.join("\n")).toContain("line 1");
+    expect(rows.join("\n")).toContain("line 12");
+  });
+
   it("returns no rows for empty transcript state", () => {
     expect(renderTranscriptSurface([], { width: 80 })).toEqual([]);
     expect(getTranscriptSurfaceDesiredHeight([], 80)).toBe(0);
   });
 });
+
+function numberedLines(count: number): string {
+  return Array.from({ length: count }, (_, index) => `line ${index + 1}`).join("\n");
+}

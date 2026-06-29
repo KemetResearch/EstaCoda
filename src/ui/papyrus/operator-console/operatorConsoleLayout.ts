@@ -135,7 +135,9 @@ function createRegionDescriptors(
       kind: "streaming",
       priority: STREAMING_PRIORITY,
       minHeight: 1,
-      desiredHeight: getStreamingSurfaceDesiredHeight(state.streaming, terminal.width),
+      desiredHeight: getStreamingSurfaceDesiredHeight(state.streaming, terminal.width, {
+        terminalHeight: terminal.height,
+      }),
     });
   }
 
