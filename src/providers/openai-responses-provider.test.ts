@@ -1296,6 +1296,55 @@ describe("openai-responses-provider", () => {
       expect(done?.response.incompleteReason).toBe("max_output_tokens");
     });
 
+    it("treats streamed completed responses with null error as successful", async () => {
+      const provider = createOpenAIResponsesProvider({
+        id: "codex",
+        endpoint: {
+          baseUrl: "https://chatgpt.com/backend-api/codex",
+          apiKey: { kind: "none" }
+        },
+        enableNetwork: true,
+        fetch: createSseFetch({
+          chunks: [
+            sse({ type: "response.output_text.delta", delta: "Hello" }),
+            sse({
+              type: "response.completed",
+              response: {
+                status: "completed",
+                error: null,
+                output: [
+                  {
+                    type: "message",
+                    role: "assistant",
+                    content: [{ type: "output_text", text: "Hello" }]
+                  }
+                ]
+              }
+            }),
+            "data: [DONE]\n\n"
+          ]
+        })
+      });
+
+      const events = [];
+      for await (const event of provider.stream!({
+        model: "codex-model",
+        messages: [{ role: "user", content: "Hello" }]
+      })) {
+        events.push(event);
+      }
+
+      expect(events.map((event) => event.kind)).toEqual([
+        "start",
+        "token",
+        "done"
+      ]);
+      const done = events.find((event) => event.kind === "done");
+      expect(done?.response.ok).toBe(true);
+      expect(done?.response.content).toBe("Hello");
+      expect(done?.response.errorClass).toBeUndefined();
+    });
+
     it("collects streamed completion for the ChatGPT Codex backend", async () => {
       const capturedBodies: unknown[] = [];
       const provider = createOpenAIResponsesProvider({

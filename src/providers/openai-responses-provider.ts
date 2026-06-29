@@ -1103,7 +1103,7 @@ export function parseResponsesPayload(input: {
     };
   };
 
-  if (payload.error !== undefined) {
+  if (payload.error != null) {
     return {
       ok: false,
       content: payload.error.message ?? "Provider returned an error.",
