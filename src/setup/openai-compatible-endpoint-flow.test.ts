@@ -167,6 +167,22 @@ describe("openai-compatible endpoint flow", () => {
     });
   });
 
+  it("treats Ctrl+C during endpoint URL entry as cancellation", async () => {
+    const ui = scriptedUi({
+      baseUrls: ["\u0003"],
+    });
+
+    const result = await collectOpenAICompatibleEndpointFlow({
+      providerId: "local",
+      defaultBaseUrl: "http://localhost:11434/v1",
+      locale: "en",
+      ui,
+      fetch: async () => response({ ok: true }),
+    });
+
+    expect(result.kind).toBe("cancelled");
+  });
+
   it("allows authentication before discovery without exposing the raw secret in drafts", async () => {
     const calls: Array<{ url: string; init: Parameters<FetchLike>[1] }> = [];
     const fetchLike: FetchLike = async (url, init) => {

@@ -106,7 +106,7 @@ export type OpenAICompatibleEndpointFlowUi = {
     readonly defaultBaseUrl: string;
     readonly text: OpenAICompatibleEndpointFlowText["endpoint"];
     readonly error?: string;
-  }) => Promise<string>;
+  }) => Promise<string | undefined>;
   readonly selectEndpointAction: (input: {
     readonly baseUrl: string;
     readonly authConfigured: boolean;
@@ -203,6 +203,7 @@ export async function collectOpenAICompatibleEndpointFlow(
 ): Promise<OpenAICompatibleEndpointFlowResult> {
   const defaultApiKeyEnv = options.defaultApiKeyEnv ?? DEFAULT_API_KEY_ENV;
   let baseUrl = await promptValidBaseUrl(options);
+  if (baseUrl === undefined) return { kind: "cancelled" };
   let authState: AuthState = { probeAuth: { kind: "none" } };
   let modelListCheck: OpenAICompatibleEndpointCheck = {
     status: "notTested",
@@ -257,7 +258,9 @@ export async function collectOpenAICompatibleEndpointFlow(
       });
       if (modelSelection.kind === "cancel") return { kind: "cancelled" };
       if (modelSelection.kind === "change-endpoint") {
-        baseUrl = await promptValidBaseUrl(options);
+        const nextBaseUrl = await promptValidBaseUrl(options);
+        if (nextBaseUrl === undefined) return { kind: "cancelled" };
+        baseUrl = nextBaseUrl;
         break;
       }
       if (modelSelection.kind === "configure-auth") {
@@ -301,14 +304,18 @@ export function isValidOpenAICompatibleEndpointBaseUrl(value: string): boolean {
   }
 }
 
-async function promptValidBaseUrl(options: OpenAICompatibleEndpointFlowOptions): Promise<string> {
+async function promptValidBaseUrl(options: OpenAICompatibleEndpointFlowOptions): Promise<string | undefined> {
   let error: string | undefined;
   for (;;) {
-    const raw = (await options.ui.promptBaseUrl({
+    const submitted = await options.ui.promptBaseUrl({
       defaultBaseUrl: options.defaultBaseUrl,
       text: endpointText(options.locale, options.defaultBaseUrl),
       error,
-    })).trim();
+    });
+    if (submitted === undefined || isPromptInterrupt(submitted)) {
+      return undefined;
+    }
+    const raw = submitted.trim();
     const candidate = raw.length > 0 ? raw : options.defaultBaseUrl;
     if (isValidOpenAICompatibleEndpointBaseUrl(candidate)) {
       return candidate.replace(/\/$/, "");
@@ -317,6 +324,10 @@ async function promptValidBaseUrl(options: OpenAICompatibleEndpointFlowOptions):
       baseUrl: options.defaultBaseUrl,
     });
   }
+}
+
+function isPromptInterrupt(value: string): boolean {
+  return value.includes("\u0003");
 }
 
 async function finalizeOpenAICompatibleEndpointFlow(input: {

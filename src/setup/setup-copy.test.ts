@@ -1200,7 +1200,7 @@ describe("setup copy", () => {
   it("contains OpenAI-compatible endpoint-first setup editor copy", () => {
     expect(rawSetupCopy("en", "setupEditor.prompt.openaiCompatible.endpoint.title")).toBe("Local / Private Endpoint");
     expect(rawSetupCopy("en", "setupEditor.prompt.openaiCompatible.endpoint.body")).toBe("Connect EstaCoda to an OpenAI-compatible inference endpoint.");
-    expect(rawSetupCopy("en", "setupEditor.prompt.openaiCompatible.endpoint.baseUrl")).toBe("Endpoint URL [{baseUrl}]:");
+    expect(rawSetupCopy("en", "setupEditor.prompt.openaiCompatible.endpoint.baseUrl")).toBe("Endpoint URL [{baseUrl}] - press ENTER to use this default:");
     expect(rawSetupCopy("en", "setupEditor.prompt.openaiCompatible.endpoint.destination")).toBe("Requests will be sent to {baseUrl}.");
     expect(rawSetupCopy("en", "setupEditor.prompt.openaiCompatible.checking")).toBe("Checking {baseUrl}/models ...");
     expect(rawSetupCopy("en", "setupEditor.prompt.openaiCompatible.models.discovered")).toBe("Models discovered: {count}");
@@ -1221,6 +1221,7 @@ describe("setup copy", () => {
     expect(resolveSetupCopy("ar", "setupEditor.prompt.openaiCompatible.endpoint.body")).toContain(isolateLtr("OpenAI"));
     expect(resolveSetupCopy("ar", "setupEditor.prompt.openaiCompatible.endpoint.baseUrl")).toContain(isolateLtr("URL"));
     expect(resolveSetupCopy("ar", "setupEditor.prompt.openaiCompatible.endpoint.baseUrl")).toContain(isolateLtr("{baseUrl}"));
+    expect(resolveSetupCopy("ar", "setupEditor.prompt.openaiCompatible.endpoint.baseUrl")).toContain(isolateLtr("ENTER"));
     expect(resolveSetupCopy("ar", "setupEditor.prompt.openaiCompatible.endpoint.destination")).toContain(isolateLtr("{baseUrl}"));
     expect(resolveSetupCopy("ar", "setupEditor.prompt.openaiCompatible.checking")).toContain(isolateLtr("{baseUrl}"));
     expect(resolveSetupCopy("ar", "setupEditor.prompt.openaiCompatible.checking")).toContain(isolateLtr("/models"));

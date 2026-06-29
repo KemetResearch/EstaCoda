@@ -233,11 +233,11 @@ describe("runConfigEditor", () => {
     expect(prompts[0]?.labels).toContain("التشخيصات");
     expect(prompts[0]?.labels).toContain("الخروج دون تغييرات");
     expect(prompts[0]?.descriptions).toContain("غادر الإعداد دون تعديل التكوين.");
+    expect(prompts[0]?.labels).not.toContain("مزوّد مخصص متوافق مع OpenAI");
     expect(prompts[0]?.values.map((value) =>
       typeof value === "object" && value !== null && "id" in value ? value.id : undefined
     )).toEqual([
       "edit-primary-model-route",
-      "add-custom-provider-route",
       "edit-fallback-model-route",
       "edit-auxiliary-model-route",
       "configure-channels",
@@ -2232,7 +2232,7 @@ describe("runConfigEditor", () => {
 
     expect(result.completed).toBe(true);
     expect(questions).toEqual([
-      "Endpoint URL [http://localhost:11434/v1]:",
+      "Endpoint URL [http://localhost:11434/v1] - press ENTER to use this default:",
       "Context window tokens [infer]: ",
     ]);
     expect(result.reviewManifest?.sections["provider-model-network"][0]?.review.values).toEqual(expect.objectContaining({
@@ -2297,7 +2297,7 @@ describe("runConfigEditor", () => {
     expect(result.selectedActionId).toBe("add-custom-provider-route");
     expect(questions).toEqual([
       "Provider ID: ",
-      "Endpoint URL [http://localhost:11434/v1]:",
+      "Endpoint URL [http://localhost:11434/v1] - press ENTER to use this default:",
       "Model ID: ",
       "Context window tokens [infer]: ",
       "Environment variable [OPENAI_COMPATIBLE_API_KEY]:",
@@ -2446,8 +2446,8 @@ describe("runConfigEditor", () => {
     };
 
     expect(result.completed).toBe(true);
-    expect(questions[0]).toBe("Endpoint URL [http://localhost:11434/v1]:");
-    expect(questions[1]).toBe("Endpoint URL [http://localhost:11434/v1]:");
+    expect(questions[0]).toBe("Endpoint URL [http://localhost:11434/v1] - press ENTER to use this default:");
+    expect(questions[1]).toBe("Endpoint URL [http://localhost:11434/v1] - press ENTER to use this default:");
     expect(cards.flat()).toContain("Invalid endpoint URL. Enter an absolute URL such as http://localhost:11434/v1.");
     expect(result.reviewManifest?.sections["provider-model-network"][0]?.review.values).toEqual(expect.objectContaining({
       model: "manual-local-model",

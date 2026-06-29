@@ -90,6 +90,7 @@ import {
 } from "./setupConsolePromptAdapter.js";
 import {
   configEditorActions,
+  configEditorHiddenDirectAction,
   isConfigEditorActionId,
   renderConfigEditor,
   renderConfigEditorDiagnosticsForLocale,
@@ -337,7 +338,13 @@ async function runConfigEditorOnce(
     };
   }
 
-  if (!isConfigEditorActionId(selectedAction.id, actions)) {
+  const allowedAction = actions.find((action) => action.id === selectedAction.id)
+    ?? (defaultActionId === undefined
+      ? undefined
+      : configEditorHiddenDirectAction(session, selectedAction.id, {
+        workspacePath: options.workspaceRoot,
+      }, locale));
+  if (allowedAction === undefined) {
     const output = formatSetupCopy(locale, "setupEditor.result.unavailableAction", {
       actionId: selectedAction.id,
     });
@@ -349,11 +356,6 @@ async function runConfigEditorOnce(
       initialDecision,
       selectedActionId: selectedAction.id,
     };
-  }
-
-  const allowedAction = actions.find((action) => action.id === selectedAction.id);
-  if (allowedAction === undefined) {
-    throw new Error(`Allowed setup editor action ${selectedAction.id} was not found.`);
   }
 
   return handleAction(localizedOptions, initialDecision, session, allowedAction);

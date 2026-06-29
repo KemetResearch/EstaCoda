@@ -17,7 +17,6 @@ const PR4_ACTION_ORDER: readonly SetupRouteActionId[] = ["verify-setup", "show-d
 const PR6_EDITOR_ACTION_ORDER: readonly SetupEditorActionId[] = [
   "repair-primary-provider",
   "edit-primary-model-route",
-  "add-custom-provider-route",
   "repair-missing-credential",
   "edit-fallback-model-route",
   "edit-auxiliary-model-route",
@@ -172,6 +171,19 @@ export function isConfigEditorActionId(
   actions: readonly ConfigEditorRenderedAction[]
 ): id is ConfigEditorRenderedAction["id"] {
   return actions.some((action) => action.id === id);
+}
+
+export function configEditorHiddenDirectAction(
+  session: SetupEditorPlanSession,
+  id: string,
+  copyValues: Record<string, SetupPromptValue> = {},
+  locale: SetupCopyLocale = "en"
+): ConfigEditorRenderedAction | undefined {
+  if (id !== "add-custom-provider-route") {
+    return undefined;
+  }
+  const action = session.plan.actions.find((candidate) => candidate.id === id);
+  return action === undefined ? undefined : renderEditorAction(action, copyValues, locale);
 }
 
 function renderRouteAction(
