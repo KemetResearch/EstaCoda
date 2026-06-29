@@ -94,12 +94,14 @@ function renderRegionLines(
     return renderStreamingSurface(state.streaming, {
       width: region.width,
       height: region.height,
+      style: state.style,
     }).map((text) => ({ region: region.kind, text }));
   }
   if (region.kind === "transcript") {
     return renderTranscriptSurface(state.transcript, {
       width: region.width,
       height: region.height,
+      style: state.style,
     }).map((text) => ({ region: region.kind, text }));
   }
   if (region.kind === "turnActivity") {

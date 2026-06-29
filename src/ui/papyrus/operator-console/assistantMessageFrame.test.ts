@@ -1,9 +1,11 @@
 import { describe, expect, it } from "vitest";
+import { resolveTokens } from "../../../theme/token-resolver.js";
 import { stringWidth } from "../screen/stringWidth.js";
 import {
   getAssistantMessageFrameDesiredHeight,
   renderAssistantMessageFrame,
 } from "./assistantMessageFrame.js";
+import { createOperatorConsoleStyle } from "./operatorConsoleStyle.js";
 
 describe("Papyrus operator console assistant message frame", () => {
   it("renders assistant text in the EstaCoda frame", () => {
@@ -11,10 +13,35 @@ describe("Papyrus operator console assistant message frame", () => {
       lines: ["The stream should look like the settled assistant response."],
     }, { width: 72 });
 
-    expect(rows[0]).toContain("EstaCoda");
+    expect(rows[0]).toContain("𓂀  EstaCoda");
     expect(rows).toContainEqual(expect.stringContaining("The stream should look like the settled assistant response."));
     expect(rows.at(-1)).toMatch(/^╰─+╯$/u);
     expect(rows.every((line) => stringWidth(line) <= 72)).toBe(true);
+  });
+
+  it("renders assistant content in the open response frame without side rails", () => {
+    const rows = renderAssistantMessageFrame({
+      lines: ["Open frame content"],
+    }, { width: 48 });
+
+    expect(rows[0]).toMatch(/^╭─+/u);
+    expect(rows[1]).toBe("  Open frame content");
+    expect(rows[1]).not.toContain("│");
+    expect(rows.at(-1)).toMatch(/^╰─+╯$/u);
+  });
+
+  it("uses the brand palette token for the assistant title when styled", () => {
+    const tokens = resolveTokens("standard", "dark", "kemetBlue");
+    const style = createOperatorConsoleStyle({
+      tokens,
+      capabilities: { supportsColor: true, supportsTrueColor: true },
+    });
+    const rows = renderAssistantMessageFrame({
+      lines: ["Branded frame."],
+    }, { width: 72, style });
+
+    expect(rows[0]).toContain(ansiFg(tokens.contract.palette.brand));
+    expect(rows[0]).toContain("\x1b[1m𓂀  EstaCoda\x1b[0m");
   });
 
   it("adds the live cursor only when requested", () => {
@@ -83,3 +110,11 @@ describe("Papyrus operator console assistant message frame", () => {
     }, 24)).toBeGreaterThan(3);
   });
 });
+
+function ansiFg(hex: string): string {
+  const clean = hex.replace("#", "");
+  const r = Number.parseInt(clean.slice(0, 2), 16);
+  const g = Number.parseInt(clean.slice(2, 4), 16);
+  const b = Number.parseInt(clean.slice(4, 6), 16);
+  return `\x1b[38;2;${r};${g};${b}m`;
+}

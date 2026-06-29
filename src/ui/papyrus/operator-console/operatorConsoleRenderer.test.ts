@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
+import { resolveTokens } from "../../../theme/token-resolver.js";
 import { stringWidth } from "../screen/stringWidth.js";
 import {
+  createOperatorConsoleStyle,
   createInitialOperatorConsoleState,
   createOperatorConsoleLayout,
   renderOperatorConsoleLines,
@@ -243,6 +245,38 @@ describe("Papyrus operator console renderer", () => {
     expect(output.join("\n")).not.toContain("Assistant stream");
     expect(output.join("\n")).not.toContain("assistant:");
     expect(output.every((line) => stringWidth(line) <= 80)).toBe(true);
+  });
+
+  it("threads style to assistant transcript and streaming frame titles", () => {
+    const tokens = resolveTokens("standard", "dark", "kemetBlue");
+    const style = createOperatorConsoleStyle({
+      tokens,
+      capabilities: { supportsColor: true, supportsTrueColor: true },
+    });
+    const state = createState({
+      style,
+      transcript: [{ id: "t1", role: "assistant", text: "Ready." }],
+      streaming: {
+        segments: [{
+          id: "segment-1",
+          role: "assistant",
+          text: "Reading the stream path.",
+        }],
+        tail: "Checking frame style",
+        isStreaming: true,
+      },
+    });
+    const rendered = renderOperatorConsoleLines(
+      state,
+      createOperatorConsoleLayout(state, { width: 80, height: 18, isTty: true })
+    );
+    const transcriptTitle = rendered.find((line) => line.region === "transcript" && line.text.includes("EstaCoda"))?.text ?? "";
+    const streamingTitle = rendered.find((line) => line.region === "streaming" && line.text.includes("EstaCoda"))?.text ?? "";
+
+    expect(transcriptTitle).toContain(ansiFg(tokens.contract.palette.brand));
+    expect(streamingTitle).toContain(ansiFg(tokens.contract.palette.brand));
+    expect(transcriptTitle).toContain("𓂀  EstaCoda");
+    expect(streamingTitle).toContain("𓂀  EstaCoda");
   });
 
   it("does not render inactive streaming state", () => {
@@ -643,6 +677,14 @@ function createFullState(input: Partial<OperatorConsoleState> = {}): OperatorCon
     },
     ...input,
   });
+}
+
+function ansiFg(hex: string): string {
+  const clean = hex.replace("#", "");
+  const r = Number.parseInt(clean.slice(0, 2), 16);
+  const g = Number.parseInt(clean.slice(2, 4), 16);
+  const b = Number.parseInt(clean.slice(4, 6), 16);
+  return `\x1b[38;2;${r};${g};${b}m`;
 }
 
 function startupDashboard() {

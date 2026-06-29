@@ -5,10 +5,12 @@ import {
 import { stringWidth } from "../screen/stringWidth.js";
 import { renderAssistantMessageFrame } from "./assistantMessageFrame.js";
 import type { TranscriptBlock } from "./operatorConsoleState.js";
+import type { OperatorConsoleStyle } from "./operatorConsoleStyle.js";
 
 export type TranscriptSurfaceRenderOptions = {
   readonly width: number;
   readonly height?: number;
+  readonly style?: OperatorConsoleStyle;
 };
 
 const ROLE_LABELS: Record<TranscriptBlock["role"], string> = {
@@ -36,21 +38,27 @@ export function renderTranscriptSurface(
   const width = normalizeDimension(options.width);
   if (width <= 0 || transcript.length === 0) return [];
 
-  const rows = renderTranscriptRows(transcript, width);
+  const rows = renderTranscriptRows(transcript, width, options.style);
   const height = normalizeDimension(options.height ?? rows.length);
   if (height <= 0) return [];
-  return renderLatestTranscriptRows(transcript, width, height);
+  return renderLatestTranscriptRows(transcript, width, height, options.style);
 }
 
 function renderTranscriptRows(
   transcript: readonly TranscriptBlock[],
-  width: number
+  width: number,
+  style?: OperatorConsoleStyle
 ): readonly string[] {
   if (width <= 0) return [];
-  return transcript.flatMap((block) => renderTranscriptBlockRows(block, width));
+  return transcript.flatMap((block) => renderTranscriptBlockRows(block, width, undefined, style));
 }
 
-function renderTranscriptBlockRows(block: TranscriptBlock, width: number, height?: number): readonly string[] {
+function renderTranscriptBlockRows(
+  block: TranscriptBlock,
+  width: number,
+  height?: number,
+  style?: OperatorConsoleStyle
+): readonly string[] {
   if (block.role === "assistant") {
     return renderAssistantMessageFrame({
       lines: normalizeTranscriptText(block.text),
@@ -58,6 +66,7 @@ function renderTranscriptBlockRows(block: TranscriptBlock, width: number, height
     }, {
       width,
       height,
+      style,
     });
   }
 
@@ -73,15 +82,16 @@ function renderTranscriptBlockRows(block: TranscriptBlock, width: number, height
 function renderLatestTranscriptRows(
   transcript: readonly TranscriptBlock[],
   width: number,
-  height: number
+  height: number,
+  style: OperatorConsoleStyle | undefined
 ): readonly string[] {
   const selected: string[][] = [];
   let remaining = height;
 
   for (let index = transcript.length - 1; index >= 0; index -= 1) {
-    const fullRows = renderTranscriptBlockRows(transcript[index]!, width);
+    const fullRows = renderTranscriptBlockRows(transcript[index]!, width, undefined, style);
     const rows = selected.length === 0 && fullRows.length > remaining
-      ? renderTranscriptBlockRows(transcript[index]!, width, remaining)
+      ? renderTranscriptBlockRows(transcript[index]!, width, remaining, style)
       : fullRows;
     if (rows.length === 0) continue;
     if (rows.length > remaining) {

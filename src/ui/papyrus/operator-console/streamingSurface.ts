@@ -4,11 +4,13 @@ import {
   renderAssistantMessageFrame,
 } from "./assistantMessageFrame.js";
 import type { StreamingState } from "./operatorConsoleState.js";
+import type { OperatorConsoleStyle } from "./operatorConsoleStyle.js";
 
 export type StreamingSurfaceRenderOptions = {
   readonly width: number;
   readonly height?: number;
   readonly terminalHeight?: number;
+  readonly style?: OperatorConsoleStyle;
 };
 
 const MIN_STREAMING_SURFACE_ROWS = 8;
@@ -52,7 +54,7 @@ export function renderStreamingSurface(
   return renderAssistantMessageFrame({
     lines: [],
     blocks: streamingContentBlocks(state),
-  }, { width, height });
+  }, { width, height, style: options.style });
 }
 
 function streamingContentBlocks(state: StreamingState): readonly AssistantMessageFrameBlock[] {

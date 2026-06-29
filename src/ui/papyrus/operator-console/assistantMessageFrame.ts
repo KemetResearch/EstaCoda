@@ -5,6 +5,11 @@ import {
 import { stringWidth } from "../screen/stringWidth.js";
 import { formatInlineToolTrailRow } from "./inlineToolTrailSurface.js";
 import type { InlineToolTrailEntry } from "./operatorConsoleState.js";
+import {
+  type OperatorConsoleStyle,
+  styleBold,
+  styleColor,
+} from "./operatorConsoleStyle.js";
 
 export type AssistantMessageFrameInput = {
   readonly title?: string;
@@ -31,9 +36,11 @@ export type AssistantMessageFrameToolTrailBlock = Extract<AssistantMessageFrameB
 export type AssistantMessageFrameRenderOptions = {
   readonly width: number;
   readonly height?: number;
+  readonly style?: OperatorConsoleStyle;
 };
 
-const DEFAULT_ASSISTANT_TITLE = "EstaCoda";
+const DEFAULT_ASSISTANT_NAME = "EstaCoda";
+const ASSISTANT_TITLE_GLYPH = "𓂀";
 const LIVE_CURSOR = "▍";
 
 export function getAssistantMessageFrameDesiredHeight(
@@ -57,7 +64,7 @@ export function renderAssistantMessageFrame(
   const height = normalizeDimension(options.height ?? desiredHeight);
   if (height <= 0) return [];
 
-  const title = normalizeTitle(input.title);
+  const title = normalizeTitle(input.title, options.style);
   const contentRows = renderWrappedContentRows(input, contentWidthFor(width));
   if (height < 3) return [truncateVisible(`${title}: ${summarizeContentRows(contentRows)}`, width)];
 
@@ -66,8 +73,8 @@ export function renderAssistantMessageFrame(
   const paddedRows = padRows(selectedRows, visibleContentRows);
 
   return [
-    renderTopBorder(title, width),
-    ...paddedRows.map((row) => renderContentRow(row, contentWidthFor(width), width)),
+    renderTopBorder(title, width, options.style),
+    ...paddedRows.map((row) => renderContentRow(row, width)),
     renderBottomBorder(width),
   ];
 }
@@ -181,18 +188,26 @@ function summarizeContentRows(rows: readonly string[]): string {
   return rows.join(" ").trim();
 }
 
-function normalizeTitle(title: string | undefined): string {
+function normalizeTitle(title: string | undefined, style: OperatorConsoleStyle | undefined): string {
   const value = title?.trim();
-  return value && value.length > 0 ? value : DEFAULT_ASSISTANT_TITLE;
+  if (value && value.length > 0) return value;
+  const name = style?.tokens.contract.branding.agentName.trim() || DEFAULT_ASSISTANT_NAME;
+  if (style?.tokens.mode === "plain") return name;
+  return `${ASSISTANT_TITLE_GLYPH}  ${name}`;
 }
 
-function renderTopBorder(title: string, width: number): string {
+function renderTopBorder(
+  title: string,
+  width: number,
+  style: OperatorConsoleStyle | undefined
+): string {
   if (width <= 0) return "";
   if (width === 1) return "╭";
   if (width === 2) return "╭╮";
 
   const innerWidth = Math.max(0, width - 2);
-  const framedTitle = ` ${title} `;
+  const styledTitle = styleTitle(title, style);
+  const framedTitle = ` ${styledTitle} `;
   const visibleTitle = truncateVisible(framedTitle, innerWidth);
   const titleWidth = stringWidth(visibleTitle);
   const fillWidth = Math.max(0, innerWidth - titleWidth);
@@ -209,15 +224,18 @@ function renderBottomBorder(width: number): string {
   return `╰${"─".repeat(Math.max(0, width - 2))}╯`;
 }
 
-function renderContentRow(row: string, contentWidth: number, width: number): string {
-  if (width < 4) return truncateVisible(row, width);
-  const visible = truncateVisible(row, contentWidth);
-  const padding = " ".repeat(Math.max(0, contentWidth - stringWidth(visible)));
-  return `│ ${visible}${padding} │`;
+function renderContentRow(row: string, width: number): string {
+  if (row.length === 0) return "";
+  if (width <= 2) return truncateVisible(row, width);
+  return `  ${truncateVisible(row, Math.max(0, width - 4))}`;
 }
 
 function contentWidthFor(width: number): number {
   return Math.max(0, width - 4);
+}
+
+function styleTitle(title: string, style: OperatorConsoleStyle | undefined): string {
+  return styleColor(style, styleBold(style, title), style?.tokens.contract.palette.brand ?? "");
 }
 
 function normalizeDimension(value: number): number {
