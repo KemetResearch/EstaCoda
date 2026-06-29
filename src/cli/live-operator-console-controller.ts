@@ -5,7 +5,10 @@ import {
   applyActiveWorkRuntimeEvent,
   createActiveWorkRuntimeState,
   getActiveWorkSurfaceDesiredHeight,
+  normalizeActiveWorkRuntimeEventId,
+  type ActiveWorkItem,
   type ActiveWorkRuntimeEvent,
+  type InlineToolTrailEntry,
   type OperatorConsoleRuntimeHost,
   type StatusRailState,
   type SteerState,
@@ -59,6 +62,8 @@ export class LiveOperatorConsoleController {
   #streamingCurrentSegmentText = "";
   #streamingTail = "";
   #streamingSegmentSequence = 0;
+  #streamingToolTrail: readonly InlineToolTrailEntry[] = [];
+  #streamingToolTrailSequence = 0;
   #animationTimer: ReturnType<typeof setInterval> | undefined;
   #streamingRefreshTimer: ReturnType<typeof setTimeout> | undefined;
   #lastTimerRefreshAtMs = Number.NEGATIVE_INFINITY;
@@ -93,9 +98,9 @@ export class LiveOperatorConsoleController {
   }
 
   applyActiveWorkEvent(event: ActiveWorkRuntimeEvent): ToolActivityState {
-    if (event.status === "running") {
-      this.#flushStreamingSegment();
-    }
+    const trailAnchor = event.status === "running"
+      ? this.#flushStreamingSegment()
+      : undefined;
     const timestamp = this.#now();
     const baseState: ToolActivityState = {
       items: this.#activeWork.items,
@@ -107,6 +112,7 @@ export class LiveOperatorConsoleController {
     };
     const next = applyActiveWorkRuntimeEvent(baseState, event);
     this.#activeWork = next;
+    this.#upsertStreamingToolTrail(event, next, trailAnchor, timestamp);
     this.refresh();
     return this.#activeWork;
   }
@@ -120,7 +126,7 @@ export class LiveOperatorConsoleController {
   }
 
   flushStreamingSegment(_reason?: string): void {
-    if (!this.#flushStreamingSegment()) return;
+    if (this.#flushStreamingSegment() === undefined) return;
     this.refresh();
   }
 
@@ -128,13 +134,18 @@ export class LiveOperatorConsoleController {
     this.#flushStreamingSegment();
     const blocks = this.#streamingSegments
       .filter((segment) => segment.text.trim().length > 0)
-      .map((segment) => streamingSegmentToTranscriptBlock(segment));
+      .map((segment, index) => streamingSegmentToTranscriptBlock(
+        segment,
+        this.#toolTrailForSegment(segment.id, { includeUnanchored: index === 0 })
+      ));
     if (blocks.length > 0) {
       this.#transcript = [...this.#transcript, ...blocks];
     }
     this.#streamingSegments = [];
     this.#streamingCurrentSegmentText = "";
     this.#streamingTail = "";
+    this.#streamingToolTrail = [];
+    this.#streamingToolTrailSequence = 0;
     this.#stopStreamingRefreshTimer();
     this.#runtimeHost.setStreaming(undefined);
     this.refresh();
@@ -145,6 +156,8 @@ export class LiveOperatorConsoleController {
     this.#streamingSegments = [];
     this.#streamingCurrentSegmentText = "";
     this.#streamingTail = "";
+    this.#streamingToolTrail = [];
+    this.#streamingToolTrailSequence = 0;
     this.#stopStreamingRefreshTimer();
     this.#runtimeHost.setStreaming(undefined);
     this.refresh();
@@ -332,11 +345,18 @@ export class LiveOperatorConsoleController {
   }
 
   #streamingSnapshotForRender(): StreamingState | undefined {
-    if (this.#streamingSegments.length === 0 && this.#streamingTail.length === 0) return undefined;
+    if (
+      this.#streamingSegments.length === 0 &&
+      this.#streamingTail.length === 0 &&
+      this.#streamingToolTrail.length === 0
+    ) {
+      return undefined;
+    }
     return {
       segments: this.#streamingSegments,
       tail: this.#streamingTail,
       isStreaming: true,
+      ...(this.#streamingToolTrail.length === 0 ? {} : { toolTrail: this.#streamingToolTrail }),
     };
   }
 
@@ -344,28 +364,109 @@ export class LiveOperatorConsoleController {
     this.#runtimeHost.setStreaming(this.#streamingSnapshotForRender());
   }
 
-  #flushStreamingSegment(): boolean {
+  #flushStreamingSegment(): StreamingSegment | undefined {
     this.#stopStreamingRefreshTimer();
     const text = this.#streamingCurrentSegmentText;
     this.#streamingCurrentSegmentText = "";
     this.#streamingTail = "";
     if (text.trim().length === 0) {
       this.#syncStreamingState();
-      return false;
+      return undefined;
     }
     this.#streamingSegmentSequence += 1;
+    const segment: StreamingSegment = {
+      id: `streaming-segment-${this.#streamingSegmentSequence}`,
+      role: "assistant",
+      text,
+      createdAtMs: this.#now(),
+    };
     this.#streamingSegments = [
       ...this.#streamingSegments,
-      {
-        id: `streaming-segment-${this.#streamingSegmentSequence}`,
-        role: "assistant",
-        text,
-        createdAtMs: this.#now(),
-      },
+      segment,
     ];
     this.#syncStreamingState();
-    return true;
+    return segment;
   }
+
+  #upsertStreamingToolTrail(
+    event: ActiveWorkRuntimeEvent,
+    state: ToolActivityState,
+    trailAnchor: StreamingSegment | undefined,
+    timestamp: number
+  ): void {
+    const id = normalizeActiveWorkRuntimeEventId(event);
+    const item = state.items.find((current) => current.id === id);
+    if (item === undefined) return;
+
+    const existing = this.#streamingToolTrail.find((entry) => entry.id === id);
+    const next = this.#toolTrailEntryFromActiveWorkItem(item, existing, trailAnchor, timestamp);
+    this.#streamingToolTrail = existing === undefined
+      ? [...this.#streamingToolTrail, next]
+      : this.#streamingToolTrail.map((entry) => entry.id === id ? next : entry);
+    this.#syncStreamingState();
+  }
+
+  #toolTrailEntryFromActiveWorkItem(
+    item: ActiveWorkItem,
+    existing: InlineToolTrailEntry | undefined,
+    trailAnchor: StreamingSegment | undefined,
+    timestamp: number
+  ): InlineToolTrailEntry {
+    const terminal = isTerminalActiveWorkStatus(item.status);
+    const startedAtMs = existing?.startedAtMs ?? (terminal ? undefined : timestamp);
+    const endedAtMs = terminal ? item.endedAtMs ?? timestamp : undefined;
+    const durationMs = resolveToolTrailDurationMs(item, existing, startedAtMs, endedAtMs);
+    const afterSegmentId = existing?.afterSegmentId ?? trailAnchor?.id ?? this.#streamingSegments.at(-1)?.id;
+    const sequence = existing?.sequence ?? this.#nextToolTrailSequence();
+
+    return {
+      id: item.id,
+      sequence,
+      toolName: item.toolName,
+      ...(item.displayLabel === undefined ? {} : { displayLabel: item.displayLabel }),
+      status: item.status,
+      summary: item.summary,
+      ...(item.target === undefined ? {} : { target: item.target }),
+      ...(startedAtMs === undefined ? {} : { startedAtMs }),
+      ...(endedAtMs === undefined ? {} : { endedAtMs }),
+      ...(durationMs === undefined ? {} : { durationMs }),
+      ...(item.detailsRef === undefined ? {} : { detailsRef: item.detailsRef }),
+      ...(item.riskLevel === undefined ? {} : { riskLevel: item.riskLevel }),
+      ...(item.approvalRef === undefined ? {} : { approvalRef: item.approvalRef }),
+      ...(item.fileChangeInspected === true ? { fileChangeInspected: true } : {}),
+      ...(afterSegmentId === undefined ? {} : { afterSegmentId }),
+    };
+  }
+
+  #nextToolTrailSequence(): number {
+    this.#streamingToolTrailSequence += 1;
+    return this.#streamingToolTrailSequence;
+  }
+
+  #toolTrailForSegment(
+    segmentId: string,
+    options: { readonly includeUnanchored: boolean }
+  ): readonly InlineToolTrailEntry[] {
+    return this.#streamingToolTrail.filter((entry) =>
+      entry.afterSegmentId === segmentId ||
+      (options.includeUnanchored && entry.afterSegmentId === undefined)
+    );
+  }
+}
+
+function isTerminalActiveWorkStatus(status: ActiveWorkItem["status"]): boolean {
+  return status === "succeeded" || status === "failed" || status === "cancelled";
+}
+
+function resolveToolTrailDurationMs(
+  item: ActiveWorkItem,
+  existing: InlineToolTrailEntry | undefined,
+  startedAtMs: number | undefined,
+  endedAtMs: number | undefined
+): number | undefined {
+  if (item.durationMs !== undefined) return item.durationMs;
+  if (startedAtMs !== undefined && endedAtMs !== undefined) return Math.max(0, endedAtMs - startedAtMs);
+  return existing?.durationMs;
 }
 
 function isSameTurnActivity(
@@ -392,11 +493,15 @@ function clampStreamingTail(text: string): string {
   return text.slice(text.length - MAX_STREAMING_TAIL_CHARS);
 }
 
-function streamingSegmentToTranscriptBlock(segment: StreamingSegment): TranscriptBlock {
+function streamingSegmentToTranscriptBlock(
+  segment: StreamingSegment,
+  toolTrail: readonly InlineToolTrailEntry[]
+): TranscriptBlock {
   return {
     id: `streaming-transcript-${segment.id}`,
     role: segment.role,
     text: segment.text,
     ...(segment.createdAtMs === undefined ? {} : { createdAtMs: segment.createdAtMs }),
+    ...(toolTrail.length === 0 ? {} : { toolTrail }),
   };
 }

@@ -254,6 +254,16 @@ describe("Papyrus operator console state model", () => {
         }],
         tail: "Then I will summarize",
         isStreaming: true,
+        toolTrail: [{
+          id: "read-1",
+          sequence: 1,
+          toolName: "read_file",
+          status: "running",
+          summary: "src/cli/session-loop.ts",
+          target: "src/cli/session-loop.ts",
+          startedAtMs: 1_100,
+          afterSegmentId: "segment-1",
+        }],
       },
     });
 
@@ -266,7 +276,48 @@ describe("Papyrus operator console state model", () => {
       }],
       tail: "Then I will summarize",
       isStreaming: true,
+      toolTrail: [{
+        id: "read-1",
+        sequence: 1,
+        toolName: "read_file",
+        status: "running",
+        summary: "src/cli/session-loop.ts",
+        target: "src/cli/session-loop.ts",
+        startedAtMs: 1_100,
+        afterSegmentId: "segment-1",
+      }],
     });
+  });
+
+  it("constructs assistant transcript blocks with inline tool-trail metadata", () => {
+    const state = createInitialOperatorConsoleState({
+      transcript: [{
+        id: "assistant-1",
+        role: "assistant",
+        text: "I inspected the runtime path.",
+        toolTrail: [{
+          id: "read-1",
+          sequence: 1,
+          toolName: "read_file",
+          status: "succeeded",
+          summary: "src/cli/session-loop.ts",
+          target: "src/cli/session-loop.ts",
+          durationMs: 1_000,
+          afterSegmentId: "segment-1",
+        }],
+      }],
+    });
+
+    expect(state.transcript[0]?.toolTrail).toEqual([{
+      id: "read-1",
+      sequence: 1,
+      toolName: "read_file",
+      status: "succeeded",
+      summary: "src/cli/session-loop.ts",
+      target: "src/cli/session-loop.ts",
+      durationMs: 1_000,
+      afterSegmentId: "segment-1",
+    }]);
   });
 
   it("does not introduce rendering exports or ANSI strings in the model layer", () => {

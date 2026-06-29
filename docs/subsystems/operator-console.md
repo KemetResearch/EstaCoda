@@ -389,6 +389,10 @@ Streaming contract:
 - `onSegmentBreak` is tool-boundary-only in this pass. It seals the current
   visible assistant segment before tool progress appears; it is not a general
   markdown, paragraph, or reasoning delimiter.
+- Streaming state may carry `toolTrail` metadata derived from active-work
+  events. The metadata preserves tool identity, status, timing, and the
+  assistant segment it follows; rendering that trail inside the assistant frame
+  is a separate surface concern.
 - If a provider attempt reports `provider-result.willFallback`, the Operator
   Console resets live streaming for that attempt before fallback output starts.
   Failed-attempt text must not survive into the visible fallback stream.
@@ -586,7 +590,7 @@ kimi-k2.7-code ● │ ctx [▰▱▱▱▱▱▱▱▱▱] 18.4k/262k 7% │ se
 | Runtime host and state | `src/ui/papyrus/operator-console/operatorConsoleRuntimeHost.ts`, `src/ui/papyrus/operator-console/operatorConsoleState.ts` |
 | Layout and deterministic text render | `src/ui/papyrus/operator-console/operatorConsoleLayout.ts`, `src/ui/papyrus/operator-console/operatorConsoleRenderer.ts` |
 | Prompt/status surfaces | `src/ui/papyrus/operator-console/promptSurface.ts`, `src/ui/papyrus/operator-console/statusRailSurface.ts` |
-| Live assistant streaming | `src/ui/papyrus/operator-console/assistantMessageFrame.ts`, `src/ui/papyrus/operator-console/streamingSurface.ts`, `src/cli/live-operator-console-controller.ts`, `src/cli/session-loop.ts` |
+| Live assistant streaming | `src/ui/papyrus/operator-console/assistantMessageFrame.ts`, `src/ui/papyrus/operator-console/streamingSurface.ts`, `src/ui/papyrus/operator-console/activeWorkRuntimeMapper.ts`, `src/cli/live-operator-console-controller.ts`, `src/cli/session-loop.ts` |
 | Settled assistant transcript frame | `src/ui/papyrus/operator-console/assistantMessageFrame.ts`, `src/ui/papyrus/operator-console/transcriptSurface.ts` |
 | Active work | `src/ui/papyrus/operator-console/activeWorkSurface.ts`, `src/ui/papyrus/operator-console/activeWorkRuntimeMapper.ts` |
 | Approvals | `src/ui/papyrus/operator-console/approvalSurface.ts`, `src/ui/papyrus/operator-console/approvalRuntimeMapper.ts` |

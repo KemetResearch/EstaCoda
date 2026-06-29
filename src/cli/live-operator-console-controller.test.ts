@@ -185,6 +185,104 @@ describe("LiveOperatorConsoleController", () => {
     expect(output.text()).toBe("");
   });
 
+  it("tracks inline tool trail metadata from active work events", () => {
+    const output = createOutput();
+    let nowMs = 10_000;
+    const { controller, runtimeHost } = createControllerFixture(output, {
+      now: () => nowMs,
+    });
+
+    controller.appendStreamingText("I will inspect the file first.");
+    nowMs = 10_100;
+    controller.applyActiveWorkEvent({
+      id: "read",
+      toolName: "read_file",
+      status: "running",
+      target: "src/app.ts",
+    });
+
+    expect(runtimeHost.getState().streaming?.toolTrail).toEqual([expect.objectContaining({
+      id: "read",
+      sequence: 1,
+      toolName: "read_file",
+      status: "running",
+      summary: "running",
+      target: "src/app.ts",
+      startedAtMs: 10_100,
+      afterSegmentId: "streaming-segment-1",
+    })]);
+
+    nowMs = 11_200;
+    controller.applyActiveWorkEvent({
+      id: "read",
+      toolName: "read_file",
+      status: "done",
+      summary: "src/app.ts",
+      target: "src/app.ts",
+      durationMs: 1_100,
+    });
+
+    expect(runtimeHost.getState().streaming?.toolTrail).toEqual([expect.objectContaining({
+      id: "read",
+      sequence: 1,
+      status: "succeeded",
+      summary: "src/app.ts",
+      durationMs: 1_100,
+      endedAtMs: 11_200,
+      afterSegmentId: "streaming-segment-1",
+    })]);
+
+    controller.completeStreaming();
+
+    expect(runtimeHost.getState().streaming).toBeUndefined();
+    expect(runtimeHost.getState().transcript[0]?.toolTrail).toEqual([expect.objectContaining({
+      id: "read",
+      sequence: 1,
+      status: "succeeded",
+      durationMs: 1_100,
+      afterSegmentId: "streaming-segment-1",
+    })]);
+  });
+
+  it("does not count tool-trail-only streaming as visible assistant output", () => {
+    const output = createOutput();
+    const { controller, runtimeHost } = createControllerFixture(output);
+
+    controller.applyActiveWorkEvent({
+      id: "read",
+      toolName: "read_file",
+      status: "running",
+      target: "src/app.ts",
+    });
+
+    expect(runtimeHost.getState().streaming?.toolTrail).toEqual([expect.objectContaining({
+      id: "read",
+      status: "running",
+    })]);
+    expect(controller.hasStreamingOutput()).toBe(false);
+  });
+
+  it("settles tool-first trail metadata into the first assistant transcript block", () => {
+    const output = createOutput();
+    const { controller, runtimeHost } = createControllerFixture(output);
+
+    controller.applyActiveWorkEvent({
+      id: "read",
+      toolName: "read_file",
+      status: "running",
+      target: "src/app.ts",
+    });
+    controller.appendStreamingText("The file shows the session loop path.");
+    controller.completeStreaming();
+
+    expect(runtimeHost.getState().transcript[0]?.text).toBe("The file shows the session loop path.");
+    expect(runtimeHost.getState().transcript[0]?.toolTrail).toEqual([expect.objectContaining({
+      id: "read",
+      status: "running",
+    })]);
+    expect(runtimeHost.getState().transcript[0]?.toolTrail?.[0]?.afterSegmentId).toBeUndefined();
+  });
+
   it("completes streaming atomically into transcript blocks", () => {
     const output = createOutput();
     let nowMs = 20_000;

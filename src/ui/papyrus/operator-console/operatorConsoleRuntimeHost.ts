@@ -12,6 +12,7 @@ import {
   type ApprovalCardState,
   type AttachmentCardState,
   type CreateInitialOperatorConsoleStateInput,
+  type InlineToolTrailEntry,
   type OperatorConsoleMode,
   type OperatorConsoleState,
   type PromptSurfaceState,
@@ -310,6 +311,7 @@ function cloneTranscriptBlock(block: TranscriptBlock): TranscriptBlock {
   return {
     ...block,
     ...(block.attachmentIds === undefined ? {} : { attachmentIds: [...block.attachmentIds] }),
+    ...(block.toolTrail === undefined ? {} : { toolTrail: block.toolTrail.map(cloneInlineToolTrailEntry) }),
   };
 }
 
@@ -336,11 +338,16 @@ function cloneStreamingState(streaming: StreamingState): StreamingState {
   return {
     ...streaming,
     segments: streaming.segments.map(cloneStreamingSegment),
+    ...(streaming.toolTrail === undefined ? {} : { toolTrail: streaming.toolTrail.map(cloneInlineToolTrailEntry) }),
   };
 }
 
 function cloneStreamingSegment(segment: StreamingSegment): StreamingSegment {
   return { ...segment };
+}
+
+function cloneInlineToolTrailEntry(entry: InlineToolTrailEntry): InlineToolTrailEntry {
+  return { ...entry };
 }
 
 function cloneApprovalCardState(approval: ApprovalCardState): ApprovalCardState {

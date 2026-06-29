@@ -14,6 +14,7 @@ export type TranscriptBlock = {
   readonly text: string;
   readonly createdAtMs?: number;
   readonly attachmentIds?: readonly string[];
+  readonly toolTrail?: readonly InlineToolTrailEntry[];
 };
 
 export type PromptSurfaceState = {
@@ -144,10 +145,29 @@ export type StreamingSegment = {
   readonly createdAtMs?: number;
 };
 
+export type InlineToolTrailEntry = {
+  readonly id: string;
+  readonly sequence: number;
+  readonly toolName: string;
+  readonly displayLabel?: string;
+  readonly status: ActiveWorkItemStatus;
+  readonly summary: string;
+  readonly target?: string;
+  readonly startedAtMs?: number;
+  readonly endedAtMs?: number;
+  readonly durationMs?: number;
+  readonly detailsRef?: string;
+  readonly riskLevel?: ActiveWorkItem["riskLevel"];
+  readonly approvalRef?: string;
+  readonly fileChangeInspected?: boolean;
+  readonly afterSegmentId?: string;
+};
+
 export type StreamingState = {
   readonly segments: readonly StreamingSegment[];
   readonly tail: string;
   readonly isStreaming: boolean;
+  readonly toolTrail?: readonly InlineToolTrailEntry[];
 };
 
 export type ApprovalControl = ApprovalFocusControl;

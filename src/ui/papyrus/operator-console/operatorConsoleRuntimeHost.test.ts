@@ -12,6 +12,7 @@ import type {
   ActiveWorkItem,
   ApprovalCardState,
   AttachmentCardState,
+  InlineToolTrailEntry,
   SetupSurfaceState,
   StartupDashboardState,
   StatusRailState,
@@ -304,14 +305,30 @@ describe("OperatorConsoleRuntimeHost", () => {
     const host = createHost();
     const attachments = [attachment({ preview: "original" })];
     const workItems = [workItem("read", "running")];
+    const toolTrail: InlineToolTrailEntry[] = [{
+      id: "read-1",
+      sequence: 1,
+      toolName: "read_file",
+      status: "running" as const,
+      summary: "original trail",
+      target: "src/app.ts",
+      afterSegmentId: "segment-1",
+    }];
     const streamingSegments = [{
       id: "segment-1",
       role: "assistant" as const,
       text: "Settled streaming text",
     }];
-    const streamingState = streaming({ segments: streamingSegments, tail: "original tail" });
+    const streamingState = streaming({ segments: streamingSegments, tail: "original tail", toolTrail });
+    const transcript = [{
+      id: "assistant-1",
+      role: "assistant" as const,
+      text: "settled",
+      toolTrail,
+    }];
     const approvals = [approval({ action: "original approval" })];
 
+    host.setTranscript(transcript);
     host.setAttachments(attachments);
     host.setActiveWork(activeWork(workItems));
     host.setStreaming(streamingState);
@@ -324,11 +341,27 @@ describe("OperatorConsoleRuntimeHost", () => {
       role: "assistant",
       text: "mutated text",
     };
+    toolTrail[0] = {
+      id: "read-mutated",
+      sequence: 2,
+      toolName: "read_file",
+      status: "failed",
+      summary: "mutated trail",
+    };
+    transcript[0] = {
+      id: "assistant-mutated",
+      role: "assistant",
+      text: "mutated",
+      toolTrail,
+    };
     approvals[0] = approval({ action: "mutated approval" });
 
+    expect(host.getState().transcript[0]?.text).toBe("settled");
+    expect(host.getState().transcript[0]?.toolTrail?.[0]?.summary).toBe("original trail");
     expect(host.getState().attachments[0]?.preview).toBe("original");
     expect(host.getState().activeWork.items[0]?.toolName).toBe("read");
     expect(host.getState().streaming?.segments[0]?.text).toBe("Settled streaming text");
+    expect(host.getState().streaming?.toolTrail?.[0]?.summary).toBe("original trail");
     expect(host.getState().approvals[0]?.action).toBe("original approval");
   });
 
@@ -416,6 +449,7 @@ function streaming(input: Partial<StreamingState> = {}): StreamingState {
     }],
     tail: input.tail ?? "Live streaming tail",
     isStreaming: input.isStreaming ?? true,
+    ...(input.toolTrail === undefined ? {} : { toolTrail: input.toolTrail }),
   };
 }
 
