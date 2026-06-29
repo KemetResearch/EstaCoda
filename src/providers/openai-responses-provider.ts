@@ -3,6 +3,7 @@ import type {
   ProviderAdapter,
   ProviderCompletionOptions,
   ProviderEndpoint,
+  ProviderErrorClass,
   ProviderId,
   ProviderRequest,
   ProviderResponse,
@@ -89,6 +90,25 @@ export function createOpenAIResponsesProvider(options: OpenAIResponsesProviderOp
         };
       }
 
+      if (shouldCompleteViaStreaming(effectiveEndpoint, options.id)) {
+        const stream = this.stream?.({ ...request, stream: true }, completionOptions);
+        if (stream === undefined) {
+          return {
+            ok: false,
+            content: "Streaming is not available for this provider.",
+            model: request.model,
+            provider: options.id,
+            errorClass: "unsupported",
+            raw: preparedRequest
+          };
+        }
+        return collectResponsesStream({
+          provider: options.id,
+          model: request.model,
+          stream
+        });
+      }
+
       if (options.enableNetwork === true) {
         return executeResponsesRequest({
           provider: options.id,
@@ -111,18 +131,58 @@ export function createOpenAIResponsesProvider(options: OpenAIResponsesProviderOp
       };
     },
     async *stream(request: ProviderRequest, completionOptions?: ProviderCompletionOptions): AsyncIterable<ProviderStreamEvent> {
-      yield {
-        kind: "error",
+      const effectiveEndpoint = completionOptions?.endpoint ?? options.endpoint;
+      const health = await this.health(completionOptions?.endpoint);
+      const preparedRequest = buildResponsesRequest(
+        effectiveEndpoint,
+        { ...request, stream: true },
+        completionOptions?.credential?.value,
+        options.id
+      );
+
+      if (!health.available && completionOptions?.credential?.value === undefined) {
+        yield {
+          kind: "error",
+          provider: options.id,
+          model: request.model,
+          response: {
+            ok: false,
+            content: health.reason ?? "Provider is not available.",
+            model: request.model,
+            provider: options.id,
+            errorClass: "auth",
+            raw: preparedRequest
+          }
+        };
+        return;
+      }
+
+      if (options.enableNetwork !== true) {
+        yield {
+          kind: "error",
+          provider: options.id,
+          model: request.model,
+          response: {
+            ok: false,
+            content: "Network inference is not enabled in this runtime yet. The Responses API streaming request was prepared.",
+            model: request.model,
+            provider: options.id,
+            errorClass: "unsupported",
+            raw: preparedRequest
+          }
+        };
+        return;
+      }
+
+      yield* streamResponsesRequest({
         provider: options.id,
         model: request.model,
-        response: {
-          ok: false,
-          content: "Streaming is not yet supported for the Responses API.",
-          model: request.model,
-          provider: options.id,
-          errorClass: "unsupported"
-        }
-      };
+        preparedRequest,
+        fetch: options.fetch ?? globalThis.fetch,
+        timeoutMs: completionOptions?.timeoutMs ?? options.timeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS,
+        staleTimeoutMs: completionOptions?.staleTimeoutMs ?? options.staleTimeoutMs ?? DEFAULT_STALE_TIMEOUT_MS,
+        signal: completionOptions?.signal
+      });
     }
   };
 }
@@ -136,6 +196,94 @@ function inferModelProfile(input: { provider: ProviderId; model: string }): Mode
     supportsVision: false,
     supportsStructuredOutput: false
   };
+}
+
+async function collectResponsesStream(input: {
+  provider: ProviderId;
+  model: string;
+  stream: AsyncIterable<ProviderStreamEvent>;
+}): Promise<ProviderResponse> {
+  let content = "";
+  let finalResponse: ProviderResponse | undefined;
+  let sawTransportDone = false;
+  const toolCallFragments = new Map<string, {
+    index?: number;
+    id?: string;
+    name?: string;
+    argumentsText?: string;
+    raw?: unknown;
+  }>();
+
+  for await (const event of input.stream) {
+    if (event.kind === "token") {
+      content += event.text;
+      continue;
+    }
+
+    if (event.kind === "tool-call") {
+      mergeResponsesToolCallFragment(toolCallFragments, event);
+      continue;
+    }
+
+    if (event.kind === "done") {
+      finalResponse = event.response;
+      continue;
+    }
+
+    if (event.kind === "error") {
+      return event.response;
+    }
+
+    if (event.kind === "transport-done") {
+      sawTransportDone = true;
+    }
+  }
+
+  if (finalResponse !== undefined) {
+    return withCollectedResponsesToolCalls(
+      finalResponse.content.length === 0 && content.length > 0
+        ? {
+            ...finalResponse,
+            content
+          }
+        : finalResponse,
+      toolCallFragments
+    );
+  }
+
+  if (sawTransportDone && content.length > 0) {
+    return withCollectedResponsesToolCalls({
+      ok: true,
+      content,
+      model: input.model,
+      provider: input.provider,
+      finishReason: "unknown"
+    }, toolCallFragments);
+  }
+
+  return {
+    ok: false,
+    content: content.length === 0
+      ? "Provider stream ended before a done or error event."
+      : `Provider stream ended before completion after partial output:\n${content}`,
+    ...(content.length === 0 ? {} : { partialContent: content }),
+    model: input.model,
+    provider: input.provider,
+    errorClass: "incomplete-stream"
+  };
+}
+
+function shouldCompleteViaStreaming(endpoint: ProviderEndpoint, provider: ProviderId): boolean {
+  if (provider !== "codex") {
+    return false;
+  }
+
+  try {
+    const url = new URL(endpoint.baseUrl);
+    return url.hostname === "chatgpt.com" && url.pathname.replace(/\/$/, "") === "/backend-api/codex";
+  } catch {
+    return endpoint.baseUrl.replace(/\/$/, "") === "https://chatgpt.com/backend-api/codex";
+  }
 }
 
 export function buildResponsesRequest(
@@ -164,6 +312,10 @@ export function buildResponsesRequest(
     input,
     store: false
   };
+
+  if (request.stream === true) {
+    body.stream = true;
+  }
 
   const maxTokens = normalizeProviderMaxTokens(request.maxTokens);
   if (maxTokens !== undefined) {
@@ -289,6 +441,514 @@ export async function executeResponsesRequest(input: {
   }
 }
 
+async function* streamResponsesRequest(input: {
+  provider: ProviderId;
+  model: string;
+  preparedRequest: ReturnType<typeof buildResponsesRequest>;
+  fetch: FetchLike;
+  timeoutMs: number;
+  staleTimeoutMs: number;
+  signal?: AbortSignal;
+}): AsyncIterable<ProviderStreamEvent> {
+  const timeout = createTimeoutSignal({
+    timeoutMs: input.timeoutMs,
+    staleTimeoutMs: input.staleTimeoutMs,
+    timeoutMessage: formatProviderTotalTimeout(input.timeoutMs),
+    staleTimeoutMessage: formatProviderStaleTimeout(input.staleTimeoutMs),
+    parentSignal: input.signal
+  });
+
+  yield {
+    kind: "start",
+    provider: input.provider,
+    model: input.model
+  };
+
+  try {
+    const response = await input.fetch(input.preparedRequest.url, {
+      method: "POST",
+      headers: input.preparedRequest.headers,
+      body: JSON.stringify(input.preparedRequest.body),
+      signal: timeout.signal
+    });
+    timeout.markProgress();
+
+    if (!response.ok) {
+      timeout.disableStale();
+      yield {
+        kind: "error",
+        provider: input.provider,
+        model: input.model,
+        response: {
+          ok: false,
+          content: await safeErrorText(response),
+          model: input.model,
+          provider: input.provider,
+          errorClass: classifyHttpError(response.status),
+          raw: {
+            status: response.status,
+            statusText: response.statusText
+          }
+        }
+      };
+      return;
+    }
+
+    if (response.body === undefined || response.body === null) {
+      timeout.disableStale();
+      const payload = await response.json();
+      const parsed = parseResponsesPayload({
+        provider: input.provider,
+        model: input.model,
+        payload
+      });
+
+      if (parsed.ok) {
+        for (const toolCall of extractResponsesToolCalls(payload)) {
+          yield {
+            kind: "tool-call",
+            provider: input.provider,
+            model: input.model,
+            index: toolCall.index,
+            id: toolCall.id,
+            name: toolCall.name,
+            argumentsText: toolCall.argumentsText,
+            raw: toolCall.raw
+          };
+        }
+        if (parsed.content.length > 0) {
+          yield {
+            kind: "token",
+            provider: input.provider,
+            model: input.model,
+            text: parsed.content
+          };
+        }
+        yield {
+          kind: "done",
+          provider: input.provider,
+          model: input.model,
+          response: parsed
+        };
+      } else {
+        yield {
+          kind: "error",
+          provider: input.provider,
+          model: input.model,
+          response: parsed
+        };
+      }
+
+      return;
+    }
+
+    let content = "";
+    let finalResponse: ProviderResponse | undefined;
+    let sawTransportDone = false;
+    let sawToolCall = false;
+    let usage: ProviderUsage | undefined;
+    const reasoningParts: string[] = [];
+    const argumentDeltaKeys = new Set<string>();
+
+    for await (const event of parseResponsesStream(response.body, input.provider, input.model, timeout.markProgress)) {
+      if (event.kind === "token") {
+        content += event.text;
+        yield event;
+        continue;
+      }
+
+      if (event.kind === "reasoning-delta") {
+        reasoningParts.push(event.text);
+        continue;
+      }
+
+      if (event.kind === "usage") {
+        usage = event.usage ?? usage;
+        continue;
+      }
+
+      if (event.kind === "tool-call") {
+        sawToolCall = true;
+        const key = responsesToolCallKey(event);
+        if (event.argumentsText !== undefined && event.argumentsText.length > 0) {
+          argumentDeltaKeys.add(key);
+        }
+        yield event;
+        continue;
+      }
+
+      if (event.kind === "tool-call-done") {
+        sawToolCall = true;
+        const key = responsesToolCallKey(event);
+        yield {
+          kind: "tool-call",
+          provider: event.provider,
+          model: event.model,
+          index: event.index,
+          id: event.id,
+          name: event.name,
+          ...(argumentDeltaKeys.has(key) ? {} : { argumentsText: event.argumentsText }),
+          raw: event.raw
+        };
+        continue;
+      }
+
+      if (event.kind === "done") {
+        usage = event.response.usage ?? usage;
+        finalResponse = finalResponse === undefined
+          ? event.response
+          : {
+              ...finalResponse,
+              ...event.response,
+              content: event.response.content.length > 0 ? event.response.content : finalResponse.content,
+              finishReason: event.response.finishReason ?? finalResponse.finishReason,
+              usage: event.response.usage ?? finalResponse.usage,
+              raw: event.response.raw ?? finalResponse.raw
+            };
+        continue;
+      }
+
+      if (event.kind === "error") {
+        yield event;
+        return;
+      }
+
+      if (event.kind === "transport-done") {
+        sawTransportDone = true;
+      }
+    }
+
+    const reasoning = mergeReasoningParts([
+      ...reasoningParts,
+      finalResponse?.reasoning
+    ]);
+    const reasoningMetadata = reasoning === undefined
+      ? finalResponse?.reasoningMetadata
+      : reasoningMetadataFromReasoning(reasoning, "responses_reasoning");
+
+    if (finalResponse !== undefined) {
+      yield {
+        kind: "done",
+        provider: input.provider,
+        model: input.model,
+        response: {
+          ...finalResponse,
+          content: finalResponse.content.length === 0 && content.length > 0
+            ? content
+            : finalResponse.content,
+          raw: sawToolCall
+            ? stripResponsesFunctionCallOutput(finalResponse.raw)
+            : finalResponse.raw,
+          ...(usage === undefined ? {} : { usage }),
+          ...(reasoning === undefined ? {} : { reasoning }),
+          ...(reasoningMetadata === undefined ? {} : { reasoningMetadata })
+        }
+      };
+      return;
+    }
+
+    if (sawTransportDone && (content.length > 0 || reasoning !== undefined || sawToolCall)) {
+      yield {
+        kind: "done",
+        provider: input.provider,
+        model: input.model,
+        response: {
+          ok: true,
+          content,
+          model: input.model,
+          provider: input.provider,
+          finishReason: "unknown",
+          ...(usage === undefined ? {} : { usage }),
+          ...(reasoning === undefined ? {} : { reasoning }),
+          ...(reasoningMetadata === undefined ? {} : { reasoningMetadata })
+        }
+      };
+      return;
+    }
+
+    yield {
+      kind: "error",
+      provider: input.provider,
+      model: input.model,
+      response: {
+        ok: false,
+        content: content.length === 0
+          ? "Provider stream ended before a done or error event."
+          : `Provider stream ended before completion after partial output:\n${content}`,
+        ...(content.length === 0 ? {} : { partialContent: content }),
+        model: input.model,
+        provider: input.provider,
+        errorClass: "incomplete-stream"
+      }
+    };
+  } catch (error) {
+    yield {
+      kind: "error",
+      provider: input.provider,
+      model: input.model,
+      response: {
+        ok: false,
+        content: error instanceof Error ? error.message : "Network request failed.",
+        model: input.model,
+        provider: input.provider,
+        errorClass: timeout.classify(error) ?? "network"
+      }
+    };
+  } finally {
+    timeout.cleanup();
+  }
+}
+
+type ResponsesParsedStreamEvent =
+  | ProviderStreamEvent
+  | {
+      kind: "reasoning-delta";
+      provider: ProviderId;
+      model: string;
+      text: string;
+    }
+  | {
+      kind: "usage";
+      provider: ProviderId;
+      model: string;
+      usage?: ProviderUsage;
+    }
+  | {
+      kind: "tool-call-done";
+      provider: ProviderId;
+      model: string;
+      index?: number;
+      id?: string;
+      name?: string;
+      argumentsText?: string;
+      raw?: unknown;
+    };
+
+async function* parseResponsesStream(
+  body: ReadableStream<Uint8Array>,
+  provider: ProviderId,
+  model: string,
+  markProgress: () => void
+): AsyncIterable<ResponsesParsedStreamEvent> {
+  const reader = body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) {
+        break;
+      }
+      markProgress();
+      buffer += decoder.decode(value, { stream: true });
+      const normalized = buffer.replace(/\r\n/g, "\n");
+      const events = normalized.split("\n\n");
+      buffer = events.pop() ?? "";
+      for (const block of events) {
+        yield* parseResponsesSseBlock(block, provider, model);
+      }
+    }
+
+    buffer += decoder.decode();
+    if (buffer.trim().length > 0) {
+      yield* parseResponsesSseBlock(buffer.replace(/\r\n/g, "\n"), provider, model);
+    }
+
+    yield {
+      kind: "transport-done",
+      provider,
+      model
+    };
+  } finally {
+    reader.releaseLock();
+  }
+}
+
+function* parseResponsesSseBlock(
+  block: string,
+  provider: ProviderId,
+  model: string
+): Iterable<ResponsesParsedStreamEvent> {
+  const dataLines = block
+    .split("\n")
+    .map((line) => line.trimEnd())
+    .filter((line) => line.startsWith("data:"))
+    .map((line) => line.slice("data:".length).trimStart());
+
+  if (dataLines.length === 0) {
+    return;
+  }
+
+  const data = dataLines.join("\n").trim();
+  if (data.length === 0) {
+    return;
+  }
+  if (data === "[DONE]") {
+    return;
+  }
+
+  let payload: unknown;
+  try {
+    payload = JSON.parse(data);
+  } catch {
+    return;
+  }
+
+  yield* parseResponsesStreamPayload(payload, provider, model);
+}
+
+function* parseResponsesStreamPayload(
+  payload: unknown,
+  provider: ProviderId,
+  model: string
+): Iterable<ResponsesParsedStreamEvent> {
+  const typed = payload as {
+    type?: string;
+    delta?: unknown;
+    text?: unknown;
+    output_text?: unknown;
+    response?: unknown;
+    item?: unknown;
+    output_index?: unknown;
+    item_id?: unknown;
+    output_item_id?: unknown;
+    call_id?: unknown;
+    id?: unknown;
+    name?: unknown;
+    arguments?: unknown;
+    usage?: unknown;
+    error?: {
+      message?: string;
+      type?: string;
+      code?: string;
+    };
+  };
+  const type = typeof typed.type === "string" ? typed.type : "";
+
+  if (type === "response.output_text.delta") {
+    const text = firstString(typed.delta, typed.text, typed.output_text);
+    if (text !== undefined && text.length > 0) {
+      yield {
+        kind: "token",
+        provider,
+        model,
+        text
+      };
+    }
+    return;
+  }
+
+  if (type.includes("reasoning") && type.endsWith(".delta")) {
+    const text = firstString(typed.delta, typed.text);
+    if (text !== undefined && text.length > 0) {
+      yield {
+        kind: "reasoning-delta",
+        provider,
+        model,
+        text
+      };
+    }
+    return;
+  }
+
+  if (type === "response.function_call_arguments.delta") {
+    const argumentsText = firstString(typed.delta, typed.arguments);
+    if (argumentsText !== undefined && argumentsText.length > 0) {
+      yield {
+        kind: "tool-call",
+        provider,
+        model,
+        index: firstNumber(typed.output_index),
+        id: firstString(typed.call_id, typed.id, typed.item_id, typed.output_item_id),
+        name: firstString(typed.name),
+        argumentsText,
+        raw: payload
+      };
+    }
+    return;
+  }
+
+  if (type === "response.output_item.done") {
+    const item = typed.item as {
+      type?: string;
+      call_id?: unknown;
+      id?: unknown;
+      name?: unknown;
+      arguments?: unknown;
+    } | undefined;
+    if (item?.type === "function_call") {
+      yield {
+        kind: "tool-call-done",
+        provider,
+        model,
+        index: firstNumber(typed.output_index),
+        id: firstString(item.call_id, item.id, typed.call_id, typed.id, typed.item_id, typed.output_item_id),
+        name: firstString(item.name, typed.name),
+        argumentsText: firstString(item.arguments, typed.arguments),
+        raw: item
+      };
+    }
+    return;
+  }
+
+  if (type === "response.completed" || type === "response.incomplete") {
+    const responsePayload = typed.response ?? payload;
+    const parsed = parseResponsesPayload({
+      provider,
+      model,
+      payload: responsePayload
+    });
+    yield {
+      kind: parsed.ok ? "done" : "error",
+      provider,
+      model,
+      response: parsed
+    };
+    return;
+  }
+
+  if (type === "response.failed" || type === "error") {
+    const responsePayload = typed.response ?? payload;
+    const parsed = parseResponsesPayload({
+      provider,
+      model,
+      payload: responsePayload
+    });
+    yield {
+      kind: "error",
+      provider,
+      model,
+      response: parsed.ok
+        ? {
+            ok: false,
+            content: "Provider stream failed.",
+            model,
+            provider,
+            errorClass: "server",
+            raw: responsePayload
+          }
+        : parsed
+    };
+    return;
+  }
+
+  if (typed.usage !== undefined) {
+    yield {
+      kind: "usage",
+      provider,
+      model,
+      usage: normalizeResponsesUsage(typed.usage as {
+        input_tokens?: number;
+        output_tokens?: number;
+        total_tokens?: number;
+        reasoning_tokens?: number;
+        output_tokens_details?: { reasoning_tokens?: number };
+      })
+    };
+  }
+}
+
 export function parseResponsesPayload(input: {
   provider: ProviderId;
   model: string;
@@ -335,7 +995,7 @@ export function parseResponsesPayload(input: {
       content: payload.error.message ?? "Provider returned an error.",
       model: input.model,
       provider: input.provider,
-      errorClass: classifyProviderError(payload.error.type ?? payload.error.code) as import("../contracts/provider.js").ProviderErrorClass,
+      errorClass: classifyProviderError(payload.error.type ?? payload.error.code),
       raw: input.payload
     };
   }
@@ -506,6 +1166,139 @@ function emptyResponsesReasoningMetadata(): ProviderReasoningMetadata {
   };
 }
 
+function responsesToolCallKey(input: {
+  index?: number;
+  id?: string;
+  name?: string;
+}): string {
+  if (input.index !== undefined) {
+    return `index:${input.index}`;
+  }
+  if (input.id !== undefined) {
+    return `id:${input.id}`;
+  }
+  if (input.name !== undefined) {
+    return `name:${input.name}`;
+  }
+  return "anonymous";
+}
+
+function mergeResponsesToolCallFragment(
+  fragments: Map<string, {
+    index?: number;
+    id?: string;
+    name?: string;
+    argumentsText?: string;
+    raw?: unknown;
+  }>,
+  event: Extract<ProviderStreamEvent, { kind: "tool-call" }>
+): void {
+  const key = responsesToolCallKey(event);
+  const current = fragments.get(key);
+  if (current === undefined) {
+    fragments.set(key, {
+      index: event.index,
+      id: event.id,
+      name: event.name,
+      argumentsText: event.argumentsText ?? "",
+      raw: event.raw
+    });
+    return;
+  }
+
+  fragments.set(key, {
+    index: current.index ?? event.index,
+    id: current.id ?? event.id,
+    name: current.name ?? event.name,
+    argumentsText: `${current.argumentsText ?? ""}${event.argumentsText ?? ""}`,
+    raw: event.raw ?? current.raw
+  });
+}
+
+function withCollectedResponsesToolCalls(
+  response: ProviderResponse,
+  toolCallFragments: Map<string, {
+    index?: number;
+    id?: string;
+    name?: string;
+    argumentsText?: string;
+    raw?: unknown;
+  }>
+): ProviderResponse {
+  if (toolCallFragments.size === 0) {
+    return response;
+  }
+
+  const output = [...toolCallFragments.values()].map((toolCall) => ({
+    type: "function_call",
+    call_id: toolCall.id,
+    name: toolCall.name,
+    arguments: toolCall.argumentsText ?? ""
+  }));
+  const raw = response.raw;
+
+  if (raw !== undefined && raw !== null && typeof raw === "object" && !Array.isArray(raw)) {
+    const typed = raw as { output?: unknown[] };
+    const preservedOutput = (typed.output ?? [])
+      .filter((item) => !isResponsesFunctionCallOutputItem(item));
+    return {
+      ...response,
+      raw: {
+        ...typed,
+        output: [
+          ...preservedOutput,
+          ...output
+        ]
+      }
+    };
+  }
+
+  return {
+    ...response,
+    raw: { output }
+  };
+}
+
+function stripResponsesFunctionCallOutput(raw: unknown): unknown {
+  if (raw === undefined || raw === null || typeof raw !== "object" || Array.isArray(raw)) {
+    return raw;
+  }
+
+  const typed = raw as { output?: unknown[] };
+  if (typed.output === undefined) {
+    return raw;
+  }
+
+  return {
+    ...typed,
+    output: typed.output.filter((item) => !isResponsesFunctionCallOutputItem(item))
+  };
+}
+
+function isResponsesFunctionCallOutputItem(item: unknown): boolean {
+  return item !== null &&
+    typeof item === "object" &&
+    (item as { type?: unknown }).type === "function_call";
+}
+
+function firstString(...values: unknown[]): string | undefined {
+  for (const value of values) {
+    if (typeof value === "string") {
+      return value;
+    }
+  }
+  return undefined;
+}
+
+function firstNumber(...values: unknown[]): number | undefined {
+  for (const value of values) {
+    if (typeof value === "number" && Number.isFinite(value)) {
+      return value;
+    }
+  }
+  return undefined;
+}
+
 export function extractResponsesToolCalls(payload: unknown): Array<{
   index?: number;
   id?: string;
@@ -533,7 +1326,7 @@ export function extractResponsesToolCalls(payload: unknown): Array<{
     }));
 }
 
-function classifyProviderError(code: string | undefined): string {
+function classifyProviderError(code: string | undefined): ProviderErrorClass {
   if (code === undefined) return "unknown";
   if (/auth|key|permission|forbidden|unauthorized/i.test(code)) return "auth";
   if (/rate/i.test(code)) return "rate-limit";
