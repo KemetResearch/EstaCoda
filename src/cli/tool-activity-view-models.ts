@@ -119,7 +119,7 @@ export class ToolActivityViewModelBuilder {
   ): TimelineEvent {
     if (event.kind === "tool-start") {
       this.#pushStart(this.#eventKey(event));
-      return timelineEvent(event.tool, "running");
+      return timelineEvent(resolveToolLabel(event.tool, this.#tools), "running");
     }
 
     const elapsed = this.#popElapsed(this.#eventKey(event));
@@ -128,7 +128,7 @@ export class ToolActivityViewModelBuilder {
       : undefined;
 
     if (decision !== undefined) {
-      return timelineEvent(event.tool, "gated", {
+      return timelineEvent(resolveToolLabel(event.tool, this.#tools), "gated", {
         elapsedMs: elapsed ?? undefined,
         decision,
         riskClass: event.riskClass,
@@ -136,7 +136,7 @@ export class ToolActivityViewModelBuilder {
     }
 
     const status = event.ok === false ? "failed" : "done";
-    return timelineEvent(event.tool, status, {
+    return timelineEvent(resolveToolLabel(event.tool, this.#tools), status, {
       elapsedMs: elapsed ?? undefined,
       chars: event.chars,
       sentChars: event.sentChars,
@@ -158,7 +158,7 @@ export class ToolActivityViewModelBuilder {
       this.#pushStart(this.#eventKey(event));
       return toolActivityRailEvent(event.tool, "running", {
         label: "preparing",
-        target: event.displayPreview ?? event.targetSummary ?? event.tool,
+        target: event.displayPreview ?? event.targetSummary ?? resolveToolLabel(event.tool, this.#tools),
         activityId: event.activityId,
       });
     }
@@ -180,7 +180,7 @@ export class ToolActivityViewModelBuilder {
         elapsedMs: elapsed ?? undefined,
         label: "gated",
         riskClass: event.riskClass,
-        target: event.displayPreview ?? event.targetSummary,
+        target: event.displayPreview ?? event.targetSummary ?? resolveToolLabel(event.tool, this.#tools),
         activityId: event.activityId,
       });
     }
@@ -189,7 +189,7 @@ export class ToolActivityViewModelBuilder {
     return toolActivityRailEvent(event.tool, status, {
       elapsedMs: elapsed ?? undefined,
       label: status === "failed" ? "failed" : railLabelKeyForTool(event.tool),
-      target: event.displayPreview ?? event.targetSummary,
+      target: event.displayPreview ?? event.targetSummary ?? resolveToolLabel(event.tool, this.#tools),
       activityId: event.activityId,
     });
   }

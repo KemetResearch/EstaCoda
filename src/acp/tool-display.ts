@@ -7,6 +7,13 @@ export type AcpToolDisplayExecution = {
   readonly targetSummary?: string;
 };
 
+export type AcpRuntimeToolDisplayEvent = {
+  readonly [key: string]: unknown;
+  readonly tool?: unknown;
+  readonly targetSummary?: unknown;
+  readonly displayPreview?: unknown;
+};
+
 export function acpToolExecutionTitle(execution: AcpToolDisplayExecution): string {
   const preview = execution.input === undefined
     ? execution.targetSummary
@@ -14,5 +21,20 @@ export function acpToolExecutionTitle(execution: AcpToolDisplayExecution): strin
   return formatToolDisplayCall({
     tool: execution.tool.name,
     preview,
+  });
+}
+
+export function acpRuntimeToolEventTitle(event: AcpRuntimeToolDisplayEvent): string {
+  const tool = typeof event.tool === "string" && event.tool.length > 0 ? event.tool : "tool";
+  const displayPreview = typeof event.displayPreview === "string" && event.displayPreview.length > 0
+    ? event.displayPreview
+    : undefined;
+  const targetSummary = typeof event.targetSummary === "string" && event.targetSummary.length > 0
+    ? event.targetSummary
+    : undefined;
+
+  return formatToolDisplayCall({
+    tool,
+    preview: displayPreview ?? targetSummary,
   });
 }

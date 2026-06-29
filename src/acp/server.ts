@@ -18,7 +18,7 @@ import { resolveTokens } from "../theme/token-resolver.js";
 import type { WorkspaceFsAdapter } from "../tools/workspace-tools.js";
 import type { ToolExecutionRecord } from "../tools/tool-executor.js";
 import { createSecurityPolicyForMode } from "../security/security-policy-factory.js";
-import { acpToolExecutionTitle } from "./tool-display.js";
+import { acpRuntimeToolEventTitle, acpToolExecutionTitle } from "./tool-display.js";
 
 type JsonRpcId = string | number | null;
 
@@ -484,7 +484,7 @@ export class AcpServer {
                       update: {
                         sessionUpdate: "tool_call_update",
                         toolCallId: event.stepId ?? event.tool,
-                        title: event.tool,
+                        title: acpRuntimeToolEventTitle(event),
                         kind: classifyToolKind(event.tool),
                         status: "in_progress"
                       }
@@ -500,7 +500,7 @@ export class AcpServer {
                       update: {
                         sessionUpdate: "tool_call_update",
                         toolCallId: event.tool,
-                        title: event.tool,
+                        title: acpRuntimeToolEventTitle(event),
                         kind: classifyToolKind(event.tool),
                         status: event.ok === false ? "completed" : "completed",
                         content: summarizeToolResult(event)
@@ -1082,7 +1082,7 @@ export class AcpServer {
             update: {
               sessionUpdate: "tool_call_update",
               toolCallId: String(event.stepId ?? event.tool ?? "tool"),
-              title: String(event.tool ?? "tool"),
+              title: acpRuntimeToolEventTitle(event),
               kind: classifyToolKind(String(event.tool ?? "tool")),
               status: "in_progress"
             }
@@ -1098,7 +1098,7 @@ export class AcpServer {
             update: {
               sessionUpdate: "tool_call_update",
               toolCallId: String(event.tool ?? "tool"),
-              title: String(event.tool ?? "tool"),
+              title: acpRuntimeToolEventTitle(event),
               kind: classifyToolKind(String(event.tool ?? "tool")),
               status: event.decision === "ask" ? "blocked" : event.ok === false ? "failed" : "completed",
               rawOutput: {

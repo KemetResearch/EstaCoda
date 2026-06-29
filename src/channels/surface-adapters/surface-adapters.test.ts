@@ -66,6 +66,7 @@ describe("PlainLogSurfaceAdapter", () => {
     const event: RuntimeEvent = { kind: "tool-start", tool: "terminal.run" };
     const out = adapter.renderToolActivity(event);
     expect(out).toContain("Run Command");
+    expect(out).not.toContain("terminal.run");
     expect(out).toContain("[>]");
     assertNoEmoji(out);
     assertNoAnsi(out);
