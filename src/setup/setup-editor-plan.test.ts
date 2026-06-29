@@ -127,6 +127,7 @@ describe("buildSetupEditorPlan", () => {
     expect(route.actions[0]?.id).toBe("repair-primary-provider");
     expect(route.actions[0]?.patch?.fields).toEqual(["provider.route"]);
     expect(plan.actions.some((action) => action.id === "edit-primary-model-route")).toBe(true);
+    expect(plan.actions.some((action) => action.id === "add-custom-provider-route")).toBe(true);
     expect(section(plan, "verification").actions[0]?.id).toBe("run-readonly-verification");
   });
 
@@ -279,6 +280,7 @@ describe("buildSetupEditorPlan", () => {
 
     expect(plan.actions.map((action) => action.id)).toEqual([
       "edit-primary-model-route",
+      "add-custom-provider-route",
       "edit-fallback-model-route",
       "edit-auxiliary-model-route",
       "edit-security-mode",

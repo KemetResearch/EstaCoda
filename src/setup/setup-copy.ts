@@ -489,6 +489,8 @@ export const SETUP_COPY_ENTRIES = [
   copy("setupEditor.actions.chooseLanguage.description", "Interface language and Arabic beta support.", "لغة الواجهة ودعم العربية التجريبي.", [], "interface-preference"),
   copy("setupEditor.actions.repairPrimaryProvider.description", "Repair the primary provider and model through the shared setup flow.", "أصلح المزوّد والنموذج الأساسي عبر إعداد مشترك.", [], "provider-selection"),
   copy("setupEditor.actions.editPrimaryModelRoute.description", "Default model used by the agent.", "النموذج الافتراضي الذي يستخدمه الوكيل.", [], "provider-selection"),
+  copy("setupEditor.actions.addCustomProviderRoute", "Custom OpenAI-compatible provider", "مزوّد مخصص متوافق مع OpenAI", [], "provider-selection"),
+  copy("setupEditor.actions.addCustomProviderRoute.description", "Add a named local, private, or enterprise OpenAI-compatible endpoint.", "أضف نقطة نهاية متوافقة مع OpenAI باسم مخصص، محلية أو خاصة أو مؤسسية.", ["OpenAI"], "provider-selection"),
   copy("setupEditor.actions.repairMissingCredential.description", "Repair the missing credential for the current active model.", "أصلح بيانات الاعتماد الناقصة للنموذج النشط الحالي.", [], "credential-reference"),
   copy("setupEditor.actions.editPrimaryCredentialReference.description", "Update the credential reference for the current active model.", "حدّث مرجع بيانات الاعتماد للنموذج النشط الحالي.", [], "credential-reference"),
   copy("setupEditor.actions.storeProviderCredentialReference.description", "Enter your {providerName} API key. It will not be shown while you type:", "أدخل مفتاح API الخاص بـ {providerName}. لن يظهر أثناء الكتابة:", ["{providerName}"], "credential-reference"),

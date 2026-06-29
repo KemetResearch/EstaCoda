@@ -658,6 +658,7 @@ export function setupEditorReviewSelectedAreaLabel(
 
   switch (selectedActionId) {
     case "edit-primary-model-route":
+    case "add-custom-provider-route":
     case "repair-primary-provider":
     case "edit-primary-credential-reference":
     case "repair-missing-credential":

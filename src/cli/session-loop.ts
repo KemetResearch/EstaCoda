@@ -1501,7 +1501,7 @@ type HandleSlashCommandInput = Parameters<typeof handleSlashCommand>[0];
 type SlashCommandRuntimeRefresh = Exclude<Awaited<ReturnType<typeof handleSlashCommand>>, boolean>;
 
 type ProvidersCommand =
-  | { readonly kind: "setup"; readonly scope: "all" | "local" }
+  | { readonly kind: "setup"; readonly scope: "all" | "local" | "custom" }
   | { readonly kind: "invalid"; readonly message: string };
 
 function parseProvidersCommand(args: string[]): ProvidersCommand {
@@ -1526,18 +1526,11 @@ function parseProvidersCommand(args: string[]): ProvidersCommand {
     normalized[0] === "custom" ||
     (normalized[0] === "setup" && normalized[1] === "custom")
   ) {
-    return {
-      kind: "invalid",
-      message: [
-        "Custom provider IDs are not exposed through /providers yet.",
-        "Use /providers local setup for local/private OpenAI-compatible endpoints.",
-        "Usage: /providers [local setup]"
-      ].join("\n")
-    };
+    return { kind: "setup", scope: "custom" };
   }
   return {
     kind: "invalid",
-    message: "Usage: /providers [local setup]"
+    message: "Usage: /providers [local setup|custom add]"
   };
 }
 
@@ -1565,6 +1558,9 @@ async function handleProvidersCommand(
   const flowEngine = command.scope === "local"
     ? await createProvidersCommandFlowEngine(input, profileId, ["local"])
     : undefined;
+  const defaultActionId = command.scope === "custom"
+    ? "add-custom-provider-route"
+    : "edit-primary-model-route";
 
   const result = await runConfigEditor({
     workspaceRoot,
@@ -1580,7 +1576,7 @@ async function handleProvidersCommand(
       profileId,
       mode: "strict",
     }),
-    defaultActionId: "edit-primary-model-route",
+    defaultActionId,
     renderInitialOverview: false,
     ...(flowEngine === undefined ? {} : { flowEngine }),
   });

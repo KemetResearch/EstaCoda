@@ -178,6 +178,7 @@ const SETUP_EDITOR_KEYS = [
   "setupEditor.sections.verification",
   "setupEditor.sections.exit",
   "setupEditor.actions.editPrimaryModelRoute",
+  "setupEditor.actions.addCustomProviderRoute",
   "setupEditor.actions.repairPrimaryProvider",
   "setupEditor.actions.editPrimaryCredentialReference",
   "setupEditor.actions.storeProviderCredentialReference",
@@ -205,6 +206,7 @@ const SETUP_EDITOR_KEYS = [
   "setupEditor.actions.chooseLanguage.description",
   "setupEditor.actions.repairPrimaryProvider.description",
   "setupEditor.actions.editPrimaryModelRoute.description",
+  "setupEditor.actions.addCustomProviderRoute.description",
   "setupEditor.actions.repairMissingCredential.description",
   "setupEditor.actions.editPrimaryCredentialReference.description",
   "setupEditor.actions.storeProviderCredentialReference.description",
@@ -1025,6 +1027,8 @@ describe("setup copy", () => {
     expect(rawSetupCopy("en", "setupEditor.prompt.action.body")).not.toContain("\x1b[");
     expect(rawSetupCopy("en", "setupEditor.actions.editPrimaryModelRoute")).toBe("Primary model");
     expect(rawSetupCopy("en", "setupEditor.actions.editPrimaryModelRoute.description")).toBe("Default model used by the agent.");
+    expect(rawSetupCopy("en", "setupEditor.actions.addCustomProviderRoute")).toBe("Custom OpenAI-compatible provider");
+    expect(rawSetupCopy("en", "setupEditor.actions.addCustomProviderRoute.description")).toBe("Add a named local, private, or enterprise OpenAI-compatible endpoint.");
     expect(rawSetupCopy("en", "setupEditor.actions.editFallbackModelRoute")).toBe("Fallback models");
     expect(rawSetupCopy("en", "setupEditor.actions.editFallbackModelRoute.description")).toBe("Backup model used if the primary model fails.");
     expect(rawSetupCopy("en", "setupEditor.actions.editAuxiliaryModelRoute")).toBe("Auxiliary models");
@@ -1105,6 +1109,8 @@ describe("setup copy", () => {
     expect(rawSetupCopy("ar", "setupEditor.prompt.openAiRoute.codex.description")).toBe("استخدم OpenAI Codex عبر OAuth. النموذج الافتراضي: gpt-5.5.");
     expect(rawSetupCopy("ar", "setupEditor.actions.editPrimaryModelRoute")).toBe("النموذج الأساسي");
     expect(rawSetupCopy("ar", "setupEditor.actions.editPrimaryModelRoute.description")).toBe("النموذج الافتراضي الذي يستخدمه الوكيل.");
+    expect(rawSetupCopy("ar", "setupEditor.actions.addCustomProviderRoute")).toBe("مزوّد مخصص متوافق مع OpenAI");
+    expect(rawSetupCopy("ar", "setupEditor.actions.addCustomProviderRoute.description")).toBe("أضف نقطة نهاية متوافقة مع OpenAI باسم مخصص، محلية أو خاصة أو مؤسسية.");
     expect(rawSetupCopy("ar", "setupEditor.actions.editFallbackModelRoute")).toBe("النماذج الاحتياطية");
     expect(rawSetupCopy("ar", "setupEditor.actions.editFallbackModelRoute.description")).toBe("نماذج احتياطية تُستخدم إذا فشل النموذج الأساسي.");
     expect(rawSetupCopy("ar", "setupEditor.actions.editAuxiliaryModelRoute")).toBe("النماذج المساعدة");

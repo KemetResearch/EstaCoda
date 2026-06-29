@@ -735,6 +735,7 @@ function editorDraftId(action: SetupEditorActionDraft): string {
 function kindForEditorAction(action: SetupEditorActionDraft): SetupDraftKind {
   switch (action.id) {
     case "edit-primary-model-route":
+    case "add-custom-provider-route":
     case "repair-primary-provider":
       return "provider-model-route";
     case "edit-fallback-model-route":

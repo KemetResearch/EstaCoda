@@ -115,7 +115,7 @@ describe("session-loop /model", () => {
     expect(outputChunks.join("")).toContain("model: qwen2.5:3b");
   });
 
-  it("/providers uses reviewed setup guards for non-interactive or unsupported custom paths", async () => {
+  it("/providers uses reviewed setup guards for non-interactive provider setup", async () => {
     const runtime = fakeRuntime({
       provider: "local",
       model: "qwen2.5:3b",
@@ -138,7 +138,7 @@ describe("session-loop /model", () => {
     expect(outputChunks.join("")).toContain("cannot open reviewed provider setup");
 
     outputChunks = [];
-    const customResult = await handleSlashCommand({
+    const customNoPromptResult = await handleSlashCommand({
       text: "/providers custom add",
       runtime,
       output,
@@ -147,9 +147,8 @@ describe("session-loop /model", () => {
       homeDir: tempHome
     });
 
-    expect(customResult).toBe(false);
-    expect(outputChunks.join("")).toContain("Custom provider IDs are not exposed through /providers yet.");
-    expect(outputChunks.join("")).toContain("Usage: /providers [local setup]");
+    expect(customNoPromptResult).toBe(false);
+    expect(outputChunks.join("")).toContain("cannot open reviewed provider setup");
   });
 
   it("/model picker uses prompt card selects for session provider and model", async () => {

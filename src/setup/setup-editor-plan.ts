@@ -233,6 +233,15 @@ function modelRouteSection(state: SetupEntryState, mode: SetupEditorPlanMode): S
         patch: scopedPatch(["provider.route"]),
       }),
       setupEditorAction({
+        id: "add-custom-provider-route",
+        copyKey: "setupEditor.actions.addCustomProviderRoute",
+        sectionId: "model-route",
+        effect: "draft-config-patch",
+        readOnly: false,
+        requiresExplicitApply: true,
+        patch: scopedPatch(["provider.route"]),
+      }),
+      setupEditorAction({
         id: "edit-fallback-model-route",
         copyKey: "setupEditor.actions.editFallbackModelRoute",
         sectionId: "model-route",

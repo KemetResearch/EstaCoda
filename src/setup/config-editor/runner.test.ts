@@ -237,6 +237,7 @@ describe("runConfigEditor", () => {
       typeof value === "object" && value !== null && "id" in value ? value.id : undefined
     )).toEqual([
       "edit-primary-model-route",
+      "add-custom-provider-route",
       "edit-fallback-model-route",
       "edit-auxiliary-model-route",
       "configure-channels",
@@ -367,7 +368,6 @@ describe("runConfigEditor", () => {
       applyExecutor: createReviewedSetupApplyExecutor({
         homeDir: tempDir,
         workspaceRoot,
-        collectVerification: () => readyVerification(profileConfigPath(tempDir)),
       }),
       output: { write: (value) => output.push(value) },
     });
@@ -504,7 +504,6 @@ describe("runConfigEditor", () => {
       applyExecutor: createReviewedSetupApplyExecutor({
         homeDir: tempDir,
         workspaceRoot,
-        collectVerification: () => readyVerification(profileConfigPath(tempDir)),
       }),
       output: { write: (value) => output.push(value) },
     });
@@ -1163,6 +1162,7 @@ describe("runConfigEditor", () => {
       applyExecutor: createReviewedSetupApplyExecutor({
         homeDir: tempDir,
         workspaceRoot,
+        collectVerification: () => readyVerification(profileConfigPath(tempDir)),
       }),
     });
 
@@ -1233,6 +1233,7 @@ describe("runConfigEditor", () => {
       applyExecutor: createReviewedSetupApplyExecutor({
         homeDir: tempDir,
         workspaceRoot,
+        collectVerification: () => readyVerification(profileConfigPath(tempDir)),
       }),
     });
 
@@ -2247,6 +2248,84 @@ describe("runConfigEditor", () => {
     expect(config.providers?.local?.baseUrl).toBeUndefined();
     expect(config.providers?.local?.apiKeyEnv).toBeUndefined();
     await expect(readFile(profileEnvPath(tempDir), "utf8")).rejects.toThrow();
+  });
+
+  it("adds a named custom OpenAI-compatible provider through endpoint-first setup", async () => {
+    await writeUserConfig(tempDir, localReadyConfig());
+    await trustWorkspace(tempDir, workspaceRoot);
+    const basePrompt = fakePrompt({
+      values: [
+        "enterprise-gateway",
+        "https://gateway.example.com/v1",
+        "Continue manually",
+        "enterprise-model",
+        "",
+        "Use API key from environment",
+        "ENTERPRISE_GATEWAY_API_KEY",
+        "Skip test",
+        "Review changes",
+        true,
+      ],
+    });
+    const questions: string[] = [];
+    const prompt = ((question: string, options?: { secret?: boolean }) => {
+      questions.push(question);
+      return basePrompt(question, options);
+    }) as Prompt;
+    prompt.select = basePrompt.select;
+    prompt.onboardingCard = basePrompt.onboardingCard;
+    prompt.close = basePrompt.close;
+
+    const result = await runConfigEditor({
+      homeDir: tempDir,
+      workspaceRoot,
+      prompt,
+      defaultActionId: "add-custom-provider-route",
+      applyExecutor: createReviewedSetupApplyExecutor({
+        homeDir: tempDir,
+        workspaceRoot,
+        collectVerification: () => readyVerification(profileConfigPath(tempDir)),
+      }),
+    });
+    const rawConfig = await readFile(profileConfigPath(tempDir), "utf8");
+    const config = JSON.parse(rawConfig) as {
+      model?: { provider?: string; id?: string };
+      providers?: Record<string, { kind?: string; baseUrl?: string; apiKeyEnv?: string; enableNetwork?: boolean }>;
+    };
+
+    expect(result.completed).toBe(true);
+    expect(result.selectedActionId).toBe("add-custom-provider-route");
+    expect(questions).toEqual([
+      "Provider ID: ",
+      "Endpoint URL [http://localhost:11434/v1]:",
+      "Model ID: ",
+      "Context window tokens [infer]: ",
+      "Environment variable [OPENAI_COMPATIBLE_API_KEY]:",
+    ]);
+    expect(result.reviewManifest?.sections["provider-model-network"][0]?.review.values).toEqual(expect.objectContaining({
+      provider: "enterprise-gateway",
+      model: "enterprise-model",
+      baseUrl: "https://gateway.example.com/v1",
+      modelSource: "manual",
+      modelListStatus: "notTested",
+      chatCompletionStatus: "skipped",
+      authMethod: "api_key",
+    }));
+    expect(result.reviewManifest?.sections["secret-refs-to-store"][0]?.review.values).toEqual(expect.objectContaining({
+      provider: "enterprise-gateway",
+      envVars: ["ENTERPRISE_GATEWAY_API_KEY"],
+      credentialValuesIncluded: false,
+    }));
+    expect(config.model).toEqual({ provider: "enterprise-gateway", id: "enterprise-model" });
+    expect(config.providers?.["enterprise-gateway"]).toEqual(expect.objectContaining({
+      kind: "openai-compatible",
+      baseUrl: "https://gateway.example.com/v1",
+      apiKeyEnv: "ENTERPRISE_GATEWAY_API_KEY",
+      enableNetwork: true,
+    }));
+    await expect(readFile(profileEnvPath(tempDir), "utf8")).rejects.toThrow();
+    expect(rawConfig).not.toContain("sk-");
+    expect(JSON.stringify(result)).not.toContain("sk-");
   });
 
   it("retries invalid local endpoint URLs before review and writes no secret for a blank API key", async () => {

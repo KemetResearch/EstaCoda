@@ -17,6 +17,7 @@ const PR4_ACTION_ORDER: readonly SetupRouteActionId[] = ["verify-setup", "show-d
 const PR6_EDITOR_ACTION_ORDER: readonly SetupEditorActionId[] = [
   "repair-primary-provider",
   "edit-primary-model-route",
+  "add-custom-provider-route",
   "repair-missing-credential",
   "edit-fallback-model-route",
   "edit-auxiliary-model-route",
@@ -289,6 +290,8 @@ function editorActionDescription(action: SetupEditorActionDraft, locale: SetupCo
       return setupCopyText(locale, "setupEditor.actions.repairPrimaryProvider.description");
     case "edit-primary-model-route":
       return setupCopyText(locale, "setupEditor.actions.editPrimaryModelRoute.description");
+    case "add-custom-provider-route":
+      return setupCopyText(locale, "setupEditor.actions.addCustomProviderRoute.description");
     case "edit-fallback-model-route":
       return setupCopyText(locale, "setupEditor.actions.editFallbackModelRoute.description");
     case "edit-auxiliary-model-route":
