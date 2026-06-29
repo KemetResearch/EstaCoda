@@ -11,7 +11,7 @@ import { DiscordSurfaceAdapter } from "./discord-surface-adapter.js";
 import { EmailSurfaceAdapter } from "./email-surface-adapter.js";
 import { WhatsAppSurfaceAdapter } from "./whatsapp-surface-adapter.js";
 import { renderChannelAssistantResponse } from "./channel-assistant-response.js";
-import { ChannelToolActivityRenderer, channelToolAction } from "./channel-tool-activity.js";
+import { ChannelToolActivityRenderer } from "./channel-tool-activity.js";
 import { renderPlainProgressLabel, plainActivityLabel } from "./channel-progress-label.js";
 import type { SurfaceAdapter } from "../../contracts/surface-adapter.js";
 import type { RuntimeEvent } from "../../contracts/runtime-event.js";
@@ -65,7 +65,8 @@ describe("PlainLogSurfaceAdapter", () => {
   it("renders channel-safe tool activity summary without emoji", () => {
     const event: RuntimeEvent = { kind: "tool-start", tool: "terminal.run" };
     const out = adapter.renderToolActivity(event);
-    expect(out).toContain("terminal.run");
+    expect(out).toContain("Run Command");
+    expect(out).not.toContain("terminal.run");
     expect(out).toContain("[>]");
     assertNoEmoji(out);
     assertNoAnsi(out);
@@ -162,7 +163,7 @@ describe("TelegramSurfaceAdapter", () => {
   it("renders tool activity with emoji", () => {
     const event: RuntimeEvent = { kind: "tool-start", tool: "terminal.run" };
     const out = adapter.renderToolActivity(event);
-    expect(out).toContain("terminal.run");
+    expect(out).toContain("Run Command");
     expect(hasEmoji(out)).toBe(true);
   });
 
@@ -263,7 +264,7 @@ describe("ChannelToolActivityRenderer", () => {
     const event: RuntimeEvent = { kind: "tool-start", tool: "file.write" };
     const out = renderer.render(event);
     expect(out).toContain("[>]");
-    expect(out).toContain("file.write");
+    expect(out).toContain("Write File");
     assertNoEmoji(out);
   });
 
@@ -299,29 +300,6 @@ describe("ChannelToolActivityRenderer", () => {
   });
 });
 
-// ──────────────────────────────────────────────────
-describe("channelToolAction", () => {
-  it("returns definition progressLabel when available", () => {
-    const def = {
-      name: "custom.tool",
-      description: "",
-      inputSchema: {},
-      riskClass: "read-only-local" as const,
-      toolsets: ["core"],
-      progressLabel: "Custom action",
-      maxResultSizeChars: 0,
-    };
-    expect(channelToolAction("custom.tool", def)).toBe("Custom action");
-  });
-
-  it("falls back to generic action names", () => {
-    expect(channelToolAction("workspace.open", undefined)).toBe("reading workspace");
-    expect(channelToolAction("terminal.run", undefined)).toBe("running process");
-    expect(channelToolAction("unknown", undefined)).toBe("running tool");
-  });
-});
-
-// ──────────────────────────────────────────────────
 describe("plainActivityLabel", () => {
   it("returns English label without emoji", () => {
     const label = plainActivityLabel("en", "thinking");

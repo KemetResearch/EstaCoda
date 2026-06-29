@@ -1,4 +1,5 @@
 import type { RuntimeEvent } from "../contracts/runtime-event.js";
+import { toolDisplayIcon, toolDisplayLabel } from "../ui/tool-display.js";
 
 export type ActivityLabelLocale = "en" | "ar";
 
@@ -77,9 +78,11 @@ export function renderChannelProgressLabel(
       return `${activityLabel(locale, "load_skill")}${event.name.length > 0 ? ` · ${event.name}` : ""}`;
     case "tool-start": {
       const summary = event.targetSummary?.trim();
+      const label = toolDisplayLabel(event.tool, locale);
+      const icon = toolDisplayIcon(event.tool, "channel");
       return summary === undefined || summary.length === 0
-        ? `${toolEmoji(event.tool)} ${event.tool}`
-        : `${toolEmoji(event.tool)} ${event.tool}: "${summary}"`;
+        ? `${icon} ${label}`
+        : `${icon} ${label}: "${summary}"`;
     }
     case "provider-attempt":
       return "";
@@ -105,114 +108,6 @@ function providerServingTransitionLabel(
   return transition === "fallback-active"
     ? "✦ Using fallback"
     : "✦ Primary model available again";
-}
-
-export function toolEmoji(tool: string): string {
-  return CHANNEL_TOOL_EMOJI[tool] ?? fallbackToolEmoji(tool);
-}
-
-const CHANNEL_TOOL_EMOJI: Record<string, string> = {
-  "playbook.plan": "🜁",
-  "trajectory.record": "🜃",
-  "python.probe": "𓆙",
-  "document.probe": "📄",
-  "web.search": "🔎",
-  "web.extract": "🌐",
-  "web.crawl": "🕷️",
-  "browser.status": "🧿",
-  "browser.snapshot": "📸",
-  "browser.click": "🖱️",
-  "browser.type": "⌨️",
-  "browser.scroll": "📜",
-  "browser.press": "⌨️",
-  "browser.back": "↩️",
-  "browser.get_images": "🖼️",
-  "browser.console": "🖥️",
-  "browser.cdp": "🔌",
-  "browser.screenshot": "📸",
-  "browser.vision": "👁️",
-  "browser.dialog": "💬",
-  "browser.navigate": "🧭",
-  "file.read": "📖",
-  "file.write": "✍️",
-  "file.replace": "🔧",
-  "file.search": "🔎",
-  "terminal.run": "🖥️",
-  "media.probe-ffmpeg": "🎬",
-  "media.inspect": "🖼️",
-  "media.extract-frame": "🎞️",
-  "artifact.record": "◆",
-  "voice.speak": "🔊",
-  "voice.transcribe": "🎙️",
-  "image.generate": "🎨",
-  "vision.analyze": "👁️",
-  "process.start": "▶️",
-  "process.list": "📋",
-  "process.logs": "📜",
-  "process.stop": "⏹️",
-  "workspace.trust.status": "🔐",
-  "workspace.trust.grant": "✅",
-  "workspace.trust.revoke": "❌",
-  "config.provider.status": "⚙️",
-  "config.security.status": "🔐",
-  "config.compression.status": "🗜️",
-  "config.security.setup": "🔐",
-  "config.web.setup": "🌐",
-  "config.browser.setup": "🧭",
-  "config.mcp.status": "🔌",
-  "config.mcp.setup": "🔌",
-  "config.telegram.setup": "💬",
-  "config.telegram.status": "💬",
-  "config.image.status": "🎨",
-  "config.provider.setup": "⚙️",
-  "config.image.setup": "🎨",
-  cronjob: "◷",
-  "memory.curate": "🜂",
-  "memory.file_compact": "🗜️",
-  "memory.file_compaction_restore": "↩️",
-  "skill.list": "📜",
-  "skill.read": "☥",
-  "skill.search": "🔎",
-  "skill.view": "☥",
-  "skill.inspect": "𓂀",
-  "skill.eval": "⚖️",
-  "skill.usage": "📈",
-  "skill.observe": "𓂀",
-  "skill.propose_patch": "🜏",
-  "skill.list_proposals": "📋",
-  "skill.review_proposals": "⚖️",
-  "skill.review_proposal": "⚖️",
-  "skill.approve_patch": "✅",
-  "skill.reject_patch": "❌",
-  "skill.promote_patch": "⬆️",
-  "skill.create": "✦",
-  "skill.patch": "🜏",
-  "skill.edit": "✍️",
-  "skill.delete": "🗑️",
-  "skill.rollback": "↩️",
-  "skill.reset": "🔄",
-  "skill.write_file": "✍️",
-  "skill.remove_file": "🗑️",
-  "skill.import": "📥",
-  "skill.export": "📤",
-  "knowledge.memory.inspect": "𓂀",
-  "knowledge.memory.deactivate": "⊘",
-  "knowledge.code.query": "𓂀",
-  delegate_task: "⚔️",
-  execute_code: "𓆙"
-};
-
-function fallbackToolEmoji(tool: string): string {
-  if (tool.startsWith("browser.") || tool.includes("browser")) return "🧿";
-  if (tool.startsWith("web.") || tool.includes("web")) return "🌐";
-  if (tool.startsWith("file.")) return "📄";
-  if (tool.startsWith("terminal.")) return "🖥️";
-  if (tool.startsWith("process.")) return "▶️";
-  if (tool.startsWith("skill.")) return "☥";
-  if (tool.startsWith("memory.")) return "🜂";
-  if (tool.startsWith("knowledge.")) return "𓂀";
-  if (tool.startsWith("config.")) return "⚙️";
-  return "⚙️";
 }
 
 export function activityKeyForTool(tool: string): ActivityLabelKey {

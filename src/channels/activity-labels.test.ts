@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { activityKeyForTool, renderChannelProgressLabel, toolEmoji } from "./activity-labels.js";
+import { activityKeyForTool, renderChannelProgressLabel } from "./activity-labels.js";
 
 describe("channel activity labels", () => {
   it("renders updated localized lifecycle labels", () => {
@@ -14,36 +14,28 @@ describe("channel activity labels", () => {
     expect(renderChannelProgressLabel({ kind: "provider-serving-transition", transition: "primary-recovered", provider: "openrouter", model: "k2" }, "ar")).toBe("✦ النموذج الأساسي متاح مجددًا · k2");
   });
 
-  it("renders tool starts with tool name and target summary", () => {
+  it("renders tool starts with display label and target summary", () => {
     expect(renderChannelProgressLabel({
       kind: "tool-start",
       tool: "file.search",
       targetSummary: "import.*python-env|from.*python-env"
-    })).toBe("🔎 file.search: \"import.*python-env|from.*python-env\"");
+    })).toBe("🔎 Search Files: \"import.*python-env|from.*python-env\"");
     expect(renderChannelProgressLabel({
       kind: "tool-start",
       tool: "terminal.run",
       targetSummary: "pnpm test"
-    })).toBe("🖥️ terminal.run: \"pnpm test\"");
+    })).toBe("🖥️ Run Command: \"pnpm test\"");
   });
 
   it("renders tool starts without summaries and falls back for unknown tools", () => {
-    expect(renderChannelProgressLabel({ kind: "tool-start", tool: "terminal.run" })).toBe("🖥️ terminal.run");
-    expect(renderChannelProgressLabel({ kind: "tool-start", tool: "web_search" })).toBe("🌐 web_search");
-    expect(renderChannelProgressLabel({ kind: "tool-start", tool: "mcp.custom_tool", targetSummary: "payload" })).toBe("⚙️ mcp.custom_tool: \"payload\"");
+    expect(renderChannelProgressLabel({ kind: "tool-start", tool: "terminal.run" })).toBe("🖥️ Run Command");
+    expect(renderChannelProgressLabel({ kind: "tool-start", tool: "web_search" })).toBe("🌐 Web Search");
+    expect(renderChannelProgressLabel({ kind: "tool-start", tool: "mcp.custom_tool", targetSummary: "payload" })).toBe("⚙️ Custom Tool: \"payload\"");
   });
 
-  it("uses mixed EstaCoda glyphs for selected tool families", () => {
-    expect(toolEmoji("skill.read")).toBe("☥");
-    expect(toolEmoji("skill.search")).toBe("🔎");
-    expect(toolEmoji("skill.view")).toBe("☥");
+  it("keeps category labels separate from exact display labels", () => {
     expect(activityKeyForTool("skill.read")).toBe("load_skill");
     expect(activityKeyForTool("skill.search")).toBe("load_skill");
     expect(activityKeyForTool("skill.view")).toBe("load_skill");
-    expect(toolEmoji("skill.create")).toBe("✦");
-    expect(toolEmoji("config.image.setup")).toBe("🎨");
-    expect(toolEmoji("image.generate")).toBe("🎨");
-    expect(toolEmoji("python.probe")).toBe("𓆙");
-    expect(toolEmoji("execute_code")).toBe("𓆙");
   });
 });

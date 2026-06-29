@@ -30,7 +30,7 @@ import type { ToolExecutionRecord } from "../tools/tool-executor.js";
 import { buildToolsMenuViewModel, buildSkillsMenuViewModel } from "./slash-menu.js";
 import { renderSessionHelp, buildSessionHelpViewModel } from "./session-help.js";
 import { commandRegistry } from "./command-registry.js";
-import { toolIcon } from "./tool-activity-renderer.js";
+import { toolDisplayIcon, toolDisplayLabel } from "../ui/tool-display.js";
 import {
   ToolActivityViewModelBuilder,
   buildSecurityAuditViewModel,
@@ -47,7 +47,7 @@ import {
 } from "../ui/view-models/builders.js";
 import { createSessionRenderer, type SessionRenderer } from "./session-renderer.js";
 import type { ResolvedTokens } from "../contracts/ui-tokens.js";
-import type { StartupDashboardViewModel, StatusViewModel, ToolActivityRailEvent, ViewModel } from "../contracts/view-model.js";
+import type { StartupDashboardViewModel, StatusViewModel, ViewModel } from "../contracts/view-model.js";
 import type { TerminalCapabilities } from "../contracts/ui.js";
 import {
   createSubmittedSteerTranscriptBlock,
@@ -57,13 +57,13 @@ import {
   renderCompletedActiveWorkSurface,
   renderOperatorConsoleLines,
   routeSteerKey,
-  type ActiveWorkRuntimeEvent,
   type OperatorConsoleStyle,
   type OperatorConsoleRuntimeHost,
   type QueuedSteerState,
   type SteerState,
   type TurnActivityState,
 } from "../ui/papyrus/operator-console/index.js";
+import { activeWorkEventFromToolRail } from "./operator-console-tool-display.js";
 import type { ParsedKeypress } from "../ui/input/parseKeypress.js";
 import { createKeypressStreamDispatcher } from "../ui/input/keyPressStreamDispatcher.js";
 import { createTerminalLifecycle } from "../ui/input/terminalLifecycle.js";
@@ -576,23 +576,6 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
           operatorConsoleLiveFrame?.setSteer(state);
         }
 
-        function activeWorkEventFromToolRail(
-          railEvent: ToolActivityRailEvent,
-          runtimeEvent: Extract<RuntimeEvent, { kind: "tool-start" | "tool-result" }>
-        ): ActiveWorkRuntimeEvent {
-          return {
-            id: railEvent.activityId,
-            toolName: railEvent.tool,
-            status: railEvent.status,
-            summary: railEvent.label,
-            target: railEvent.target,
-            durationMs: railEvent.elapsedMs,
-            detailsRef: railEvent.activityId,
-            riskClass: railEvent.riskClass,
-            fileChangeInspected: runtimeEvent.kind === "tool-result" && runtimeEvent.fileChangePreview !== undefined,
-          };
-        }
-
         function writeTurnBoundaryRows(rows: readonly string[], options: { readonly redrawLiveFrame?: boolean } = {}): void {
           if (rows.length === 0) return;
           const writeRows = () => {
@@ -813,7 +796,11 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
 	              let newPhase: string | undefined;
 	              if (operatorConsoleLiveFrame !== undefined && isToolActivityRuntimeEvent(event)) {
 	                const railEvent = activityBuilder.buildToolActivityRailEvent(event);
-	                operatorConsoleLiveFrame.applyActiveWorkEvent(activeWorkEventFromToolRail(railEvent, event));
+	                operatorConsoleLiveFrame.applyActiveWorkEvent(activeWorkEventFromToolRail({
+	                  railEvent,
+	                  runtimeEvent: event,
+	                  locale: renderer.locale === "ar" ? "ar" : "en",
+	                }));
 	                newPhase = "tool";
 	              } else if (operatorConsoleLiveFrame !== undefined) {
                   const operatorConsolePhase = operatorConsoleTransientPhaseForRuntimeEvent(event);
@@ -930,6 +917,7 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
 	          output,
 	          renderer,
 	          approvalPromptAdapter,
+	          locale: renderer.locale === "ar" ? "ar" : "en",
 	          operatorConsoleHost: operatorConsoleRuntimeHost,
 	          execution: response.toolExecutions.find((execution) => execution.decision === "ask")
         });
@@ -2052,6 +2040,7 @@ async function maybeHandleApprovalGate(input: {
   input?: NodeJS.ReadStream;
   renderer: { render(viewModel: import("../contracts/view-model.js").ViewModel): string };
   approvalPromptAdapter: ApprovalPromptAdapter;
+  locale?: import("../ui/tool-display.js").ToolDisplayLocale;
   operatorConsoleHost?: OperatorConsoleRuntimeHost;
   execution: ToolExecutionRecord | undefined;
 }): Promise<{
@@ -2075,6 +2064,7 @@ async function maybeHandleApprovalGate(input: {
         renderer: input.renderer,
         execution,
         allowPersistentApproval,
+        locale: input.locale,
         operatorConsoleHost: input.operatorConsoleHost,
       })
     );
@@ -2224,14 +2214,15 @@ async function renderManualToolExecution(
     toolInput: Record<string, unknown>;
   }
 ): Promise<void> {
-  output.write(`${toolIcon(input.tool)} calling ${input.tool}\n`);
+  const toolLabel = toolDisplayLabel(input.tool);
+  output.write(`${toolDisplayIcon(input.tool, "cli")} calling ${toolLabel}\n`);
   const execution = await runtime.executeTool?.(input);
   if (execution === undefined) {
-    output.write(`${toolIcon(input.tool)} ${input.tool} unavailable\n`);
+    output.write(`${toolDisplayIcon(input.tool, "cli")} ${toolLabel} unavailable\n`);
     return;
   }
 
-  output.write(`${toolIcon(input.tool)} ${input.tool} ${execution.result?.ok === true ? "done" : "failed"}\n`);
+  output.write(`${toolDisplayIcon(input.tool, "cli")} ${toolLabel} ${execution.result?.ok === true ? "done" : "failed"}\n`);
   if (execution.result?.content !== undefined && execution.result.content.length > 0) {
     output.write(`${execution.result.content}\n`);
   }

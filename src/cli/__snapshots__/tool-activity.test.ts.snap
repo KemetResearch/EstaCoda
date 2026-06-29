@@ -3,7 +3,7 @@
 exports[`tool-activity > Approval prompt > renders in narrow width > approval-narrow width 1`] = `
 "╭──────────────────────────────────────╮
 │ [38;2;255;180;84m[1m⚠ Permission required[0m[0m               │
-│   [2mTool  [0m  [38;2;64;224;208m⁦workspace.write⁩[0m            │
+│   [2mTool  [0m  [38;2;64;224;208m⁦Workspace Write⁩[0m            │
 │   [2mRisk  [0m  [38;2;255;180;84m⁦destructive-local⁩[0m          │
 │   [2mTarget[0m  ⁦src/index.ts⁩               │
 │                                      │
@@ -14,7 +14,7 @@ exports[`tool-activity > Approval prompt > renders in narrow width > approval-na
 exports[`tool-activity > Approval prompt > renders in no Unicode > approval-no Unicode 1`] = `
 "+----------------------------------------------------------------+
 | [38;2;255;180;84m[1m! Permission required[0m[0m                                          |
-|   [2mTool  [0m  [38;2;64;224;208m⁦workspace.write⁩[0m                                      |
+|   [2mTool  [0m  [38;2;64;224;208m⁦Workspace Write⁩[0m                                      |
 |   [2mRisk  [0m  [38;2;255;180;84m⁦destructive-local⁩[0m                                    |
 |   [2mTarget[0m  ⁦src/index.ts⁩                                         |
 |                                                                |
@@ -25,7 +25,7 @@ exports[`tool-activity > Approval prompt > renders in no Unicode > approval-no U
 exports[`tool-activity > Approval prompt > renders in no color > approval-no color 1`] = `
 "╭────────────────────────────────────────────────────────────────╮
 │ ⚠ Permission required                                         │
-│   Tool    ⁦workspace.write⁩                                      │
+│   Tool    ⁦Workspace Write⁩                                      │
 │   Risk    ⁦destructive-local⁩                                    │
 │   Target  ⁦src/index.ts⁩                                         │
 │                                                                │
@@ -34,7 +34,7 @@ exports[`tool-activity > Approval prompt > renders in no color > approval-no col
 `;
 
 exports[`tool-activity > Approval prompt > renders in plain > approval-plain 1`] = `
-"[WARN] Approval required: workspace.write
+"[WARN] Approval required: Workspace Write
 Target: src/index.ts
 Risk: destructive-local
   Target: src/index.ts
@@ -49,7 +49,7 @@ Actions:
 exports[`tool-activity > Approval prompt > renders in standard dark > approval-standard dark 1`] = `
 "╭────────────────────────────────────────────────────────────────╮
 │ [38;2;255;180;84m[1m⚠ Permission required[0m[0m                                         │
-│   [2mTool  [0m  [38;2;64;224;208m⁦workspace.write⁩[0m                                      │
+│   [2mTool  [0m  [38;2;64;224;208m⁦Workspace Write⁩[0m                                      │
 │   [2mRisk  [0m  [38;2;255;180;84m⁦destructive-local⁩[0m                                    │
 │   [2mTarget[0m  ⁦src/index.ts⁩                                         │
 │                                                                │
@@ -60,7 +60,7 @@ exports[`tool-activity > Approval prompt > renders in standard dark > approval-s
 exports[`tool-activity > Approval prompt > renders in standard light > approval-standard light 1`] = `
 "╭────────────────────────────────────────────────────────────────╮
 │ [38;2;180;83;9m[1m⚠ Permission required[0m[0m                                         │
-│   [2mTool  [0m  [38;2;0;140;149m⁦workspace.write⁩[0m                                      │
+│   [2mTool  [0m  [38;2;0;140;149m⁦Workspace Write⁩[0m                                      │
 │   [2mRisk  [0m  [38;2;180;83;9m⁦destructive-local⁩[0m                                    │
 │   [2mTarget[0m  ⁦src/index.ts⁩                                         │
 │                                                                │

@@ -106,18 +106,71 @@ describe("runtime tool activity events", () => {
       },
     });
 
-    expect(events).toContainEqual({
+    expect(events).toContainEqual(expect.objectContaining({
       kind: "tool-start",
       tool: "file.read",
       targetSummary: "src/app.ts",
+      displayPreview: "src/app.ts",
       activityId: "tc1",
-    });
+    }));
     expect(events).toContainEqual(expect.objectContaining({
       kind: "tool-result",
       tool: "file.read",
       targetSummary: "src/app.ts",
+      displayPreview: "src/app.ts",
       ok: true,
       activityId: "tc1",
+    }));
+  });
+
+  it("keeps security summaries separate from compact display previews", async () => {
+    const events: RuntimeEvent[] = [];
+    const command = "cd app && export CI=true && pnpm test && echo done";
+    const runner = new ToolPlanRunner({
+      toolCallPlanner: {
+        planFromProviderDelta: () => ({
+          id: "tc1",
+          tool: "terminal.run",
+          input: { command },
+          source: "provider-tool-call",
+          status: "planned",
+        }),
+      } as never,
+      toolExecutor: {
+        getToolDefinition: () => ({ ...fileReadTool, name: "terminal.run", progressLabel: "run command" }),
+        executeTool: vi.fn().mockResolvedValue(execution({
+          tool: { ...fileReadTool, name: "terminal.run", progressLabel: "run command" },
+          input: { command },
+          targetSummary: command,
+        })),
+      } as never,
+      runRecorder: runRecorder() as never,
+      sessionId: "s1",
+      maxConcurrentSafeTools: 1,
+    });
+
+    await runner.executePlans({
+      providerExecution: providerExecution(),
+      toolPlans: [],
+      trustedWorkspace: true,
+      remainingToolCalls: 1,
+      riskBaseline: "read-only-local",
+      onEvent: (event) => {
+        events.push(event);
+      },
+    });
+
+    expect(events).toContainEqual(expect.objectContaining({
+      kind: "tool-start",
+      tool: "terminal.run",
+      targetSummary: command,
+      displayPreview: "pnpm test",
+    }));
+    expect(events).toContainEqual(expect.objectContaining({
+      kind: "tool-result",
+      tool: "terminal.run",
+      targetSummary: command,
+      displayPreview: "pnpm test",
     }));
   });
 
@@ -153,13 +206,14 @@ describe("runtime tool activity events", () => {
       },
     });
 
-    expect(events).toContainEqual({
+    expect(events).toContainEqual(expect.objectContaining({
       kind: "tool-result",
       tool: "file.read",
       ok: false,
       targetSummary: "src/app.ts",
+      displayPreview: "src/app.ts",
       activityId: "tc1",
-    });
+    }));
   });
 
   it("emits failed tool results for invalid provider tool plans", async () => {

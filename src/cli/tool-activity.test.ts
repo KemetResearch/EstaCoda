@@ -645,11 +645,12 @@ describe("Session-loop tool activity rail wiring", () => {
     const builder = new ToolActivityViewModelBuilder({ tools: [] });
     const streamState = { lastWriteEndedWithNewline: true };
     const turnOutput = { hasOutput: false, lastOutputWasSpinner: false };
-    const event: RuntimeEvent = { kind: "tool-start", tool: "readFile", stepId: "1" };
+    const event: RuntimeEvent = { kind: "tool-start", tool: "terminal.run", stepId: "1" };
     renderRuntimeEvent(output, event, builder, renderer, streamState, undefined, turnOutput);
     expect(output.write).toHaveBeenCalled();
     const written = (output.write as ReturnType<typeof vi.fn>).mock.calls.map((c: unknown[]) => c[0]).join("");
-    expect(written).toContain("readFile");
+    expect(written).toContain("Run Command");
+    expect(written).not.toContain("terminal.run");
   });
 
   it("uses target summaries instead of raw provider arguments in rail events", () => {
@@ -677,6 +678,29 @@ describe("Session-loop tool activity rail wiring", () => {
     expect(start.target).toBe("src/app.ts");
     expect(result.target).toBe("src/app.ts");
     expect(provider.target).toBeUndefined();
+  });
+
+  it("does not fall back to raw tool ids as display targets", () => {
+    const builder = new ToolActivityViewModelBuilder({ tools: [] });
+
+    const start = builder.buildToolActivityRailEvent({
+      kind: "tool-start",
+      tool: "terminal.run",
+    });
+
+    expect(start.tool).toBe("terminal.run");
+    expect(start.target).toBe("Run Command");
+  });
+
+  it("builds timeline events with display labels", () => {
+    const builder = new ToolActivityViewModelBuilder({ tools: [] });
+
+    const start = builder.buildTimelineEvent({
+      kind: "tool-start",
+      tool: "terminal.run",
+    });
+
+    expect(start.tool).toBe("Run Command");
   });
 
   it("emits rail output for tool-result", () => {
@@ -766,6 +790,13 @@ describe("Backward-compatible string wrappers", () => {
     const event: RuntimeEvent = { kind: "tool-start", tool: "test", stepId: "1" };
     const output = renderer.render(event);
     expect(typeof output).toBe("string");
+  });
+
+  it("ToolActivityRenderer does not use raw tool ids as fallback targets", () => {
+    const renderer = new ToolActivityRenderer({ tools: [] });
+    const output = renderer.render({ kind: "tool-start", tool: "terminal.run" });
+    expect(output).toContain("Run Command");
+    expect(output).not.toContain("terminal.run");
   });
 
   it("ToolActivityRenderer includes target summaries", () => {

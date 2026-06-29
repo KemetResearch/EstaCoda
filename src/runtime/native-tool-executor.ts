@@ -3,6 +3,7 @@ import type { RuntimeEventSink } from "../contracts/runtime-event.js";
 import type { ToolCallPlan } from "../contracts/tool-plan.js";
 import type { ToolExecutor, ToolExecutionRecord } from "../tools/tool-executor.js";
 import { summarizeSecurityTarget } from "../tools/tool-executor.js";
+import { buildToolDisplayPreview } from "../tools/tool-target-summary.js";
 import { inferImageAspectRatio } from "../tools/image-tool-utils.js";
 import { emit } from "../utils/runtime-helpers.js";
 import { toolResultFileChangePreview, toolResultStats } from "./tool-plan-runner.js";
@@ -58,6 +59,7 @@ export class NativeToolExecutor {
       kind: "tool-start",
       tool: plan.tool,
       targetSummary: summarizeSecurityTarget(plan.tool, plan.input),
+      displayPreview: buildToolDisplayPreview(plan.tool, plan.input),
       activityId: plan.id
     });
 
@@ -78,6 +80,7 @@ export class NativeToolExecutor {
         tool: plan.tool,
         ok: false,
         targetSummary: summarizeSecurityTarget(plan.tool, plan.input),
+        displayPreview: buildToolDisplayPreview(plan.tool, plan.input),
         activityId: plan.id
       });
       return { executions: [], plans: [plan] };
@@ -99,6 +102,7 @@ export class NativeToolExecutor {
       ok: execution.result?.ok,
       fileChangePreview: toolResultFileChangePreview(execution),
       targetSummary: execution.targetSummary,
+      displayPreview: buildToolDisplayPreview(plan.tool, plan.input),
       activityId: plan.id,
       ...toolResultStats(execution)
     });

@@ -2231,7 +2231,7 @@ describe("runSessionLoop — active turn spinner", () => {
     });
 
     const rendered = stripAnsi(outputChunks.join(""));
-    const toolIndex = rendered.indexOf("browser.status");
+    const toolIndex = rendered.indexOf("Browser Status");
     const redrawnChromeIndex = rendered.indexOf("mock-model", toolIndex);
     expect(toolIndex).toBeGreaterThan(-1);
     expect(redrawnChromeIndex).toBeGreaterThan(toolIndex);
@@ -2502,7 +2502,7 @@ describe("runSessionLoop — active turn spinner", () => {
 
     const strippedChunks = outputChunks.map((chunk) => stripAnsi(chunk));
     const rendered = strippedChunks.join("");
-    expect(rendered).toContain("browser.status");
+    expect(rendered).toContain("Browser Status");
     expect(rendered).toContain("scribbling");
     expect(rendered).not.toContain("────────────────────────────────────────────────────────────────────────────────\n↳ hello\n────────────────────────────────────────────────────────────────────────────────");
   });
@@ -4453,8 +4453,8 @@ describe("runSessionLoop — active turn spinner", () => {
     expect(rendered).toContain("contemplating");
     expect(rendered).toContain("scribbling");
     // Tool output should be present
-    expect(rendered).toContain("browser.status");
-    const toolIndex = rendered.indexOf("browser.status");
+    expect(rendered).toContain("Browser Status");
+    const toolIndex = rendered.indexOf("Browser Status");
     expect(toolIndex).toBeGreaterThan(-1);
     // After the final assistant response, no spinner label should remain in the durable scrollback
     const assistantIndex = rendered.indexOf("Mock response");
@@ -4540,7 +4540,7 @@ describe("runSessionLoop — active turn spinner", () => {
     const rendered = outputChunks.join("");
     const permissionIndex = rendered.indexOf("[Approval] Approval required");
     expect(permissionIndex).toBeGreaterThan(-1);
-    expect(rendered).toContain("workspace.write");
+    expect(rendered).toContain("Workspace Write");
     expect(rendered).toContain("src/app.ts");
     expect(rendered).toContain("Permission denied.");
     expect(rendered.slice(permissionIndex)).not.toContain("contemplating");
@@ -4693,6 +4693,10 @@ describe("runSessionLoop — active turn spinner", () => {
     expect(resumedIndex).toBeGreaterThan(setupIndex);
     expect(rendered.slice(setupIndex)).not.toContain("↳ make image");
     expect(executeToolCalls).toEqual(["config.image.setup", "image.generate"]);
+    expect(rendered).toContain("calling Generate Image");
+    expect(rendered).toContain("Generate Image done");
+    expect(rendered).not.toContain("calling image.generate");
+    expect(rendered).not.toContain("image.generate done");
     expect(rendered).toContain("generated image");
     expect(secretPromptOptions).toHaveLength(1);
     expect(secretPromptOptions[0]?.onInputChange).toBeUndefined();
@@ -4917,7 +4921,7 @@ describe("runSessionLoop — active turn spinner", () => {
     expect(setApprovalsSpy).toHaveBeenCalledWith([
       expect.objectContaining({
         status: "pending",
-        action: "terminal.run",
+        action: "Run Command",
         target: "npm install left-pad",
         risk: "destructive-local",
         focusedControl: "approve",
@@ -4933,7 +4937,7 @@ describe("runSessionLoop — active turn spinner", () => {
       },
     ]);
     expect(result.rendered).toContain("Approval required");
-    expect(result.rendered).toContain("Action: terminal.run");
+    expect(result.rendered).toContain("Action: Run Command");
     expect(result.rendered).toContain("Target: npm install left-pad");
     expect(result.rendered).toContain("Risk: destructive-local");
     expect(result.rendered).toContain("❯ Approve once");
@@ -5111,7 +5115,7 @@ describe("runSessionLoop — active turn spinner", () => {
       },
     ]);
     expect(result.handleInputs).toEqual(["write file", "write file"]);
-    expect(result.rendered).toContain("[Approval] Approval required: workspace.write");
+    expect(result.rendered).toContain("[Approval] Approval required: Workspace Write");
     expect(result.rendered).toContain("Approval granted (once). Retrying now.");
   });
 
@@ -5179,7 +5183,7 @@ describe("runSessionLoop — active turn spinner", () => {
       },
     ]);
     expect(result.handleInputs).toEqual(["write file", "write file"]);
-    expect(result.rendered).toContain("[Approval] Approval required: terminal.run");
+    expect(result.rendered).toContain("[Approval] Approval required: Run Command");
     expect(result.rendered).toContain("Approval granted (once). Retrying now.");
   });
 
@@ -5191,7 +5195,7 @@ describe("runSessionLoop — active turn spinner", () => {
 
     expect(result.grants).toEqual([]);
     expect(result.handleInputs).toEqual(["write file"]);
-    expect(result.rendered).toContain("[Approval] Approval required: workspace.write");
+    expect(result.rendered).toContain("[Approval] Approval required: Workspace Write");
     expect(result.rendered).toContain("Permission denied.");
   });
 
@@ -5660,8 +5664,8 @@ describe("runSessionLoop — animated spinner behavior", () => {
     expect(rendered).toContain("contemplating");
     expect(rendered).toContain("scribbling");
     // Tool output should be present
-    expect(rendered).toContain("browser.status");
-    const toolIndex = rendered.indexOf("browser.status");
+    expect(rendered).toContain("Browser Status");
+    const toolIndex = rendered.indexOf("Browser Status");
     expect(toolIndex).toBeGreaterThan(-1);
     // After the final assistant response, no spinner label should remain in the durable scrollback
     const assistantIndex = rendered.indexOf("Mock response");

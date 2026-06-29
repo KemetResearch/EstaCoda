@@ -1312,7 +1312,7 @@ describe("TelegramAdapter", () => {
     });
 
     expect(calls.at(-1)?.method).toBe("sendMessage");
-    expect(calls.at(-1)?.body.text).toContain("terminal.run");
+    expect(calls.at(-1)?.body.text).toContain("Run Command");
   });
 
   it("delivery.startStreamingText append after segmentBreak starts a new Telegram message", async () => {

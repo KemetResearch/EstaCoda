@@ -14,6 +14,7 @@ import { assessCommandSafety } from "../security/command-safety.js";
 import type { TrajectoryRecorder } from "../trajectory/trajectory-recorder.js";
 import type { ToolRegistry } from "./tool-registry.js";
 import type { DelegateCallBudget } from "../delegation/delegate-call-budget.js";
+import { buildToolSecurityTargetSummary } from "./tool-target-summary.js";
 
 const MAX_STORED_TOOL_RESULT_CHARS = 12_000;
 const MAX_CONTEXT_SUMMARY_CHARS = 500;
@@ -526,27 +527,7 @@ function toDefinition(tool: ToolDefinition): ToolDefinition {
   };
 }
 
-export function summarizeSecurityTarget(toolName: string, input: Record<string, unknown>): string | undefined {
-  if ((toolName === "terminal.run" || toolName === "process.start") && typeof input.command === "string") {
-    return truncateSecuritySummary(input.command);
-  }
-
-  for (const key of ["path", "url", "file_path", "pattern", "query", "prompt", "goal"] as const) {
-    const summary = summarizeInputString(input[key]);
-    if (summary !== undefined) {
-      return summary;
-    }
-  }
-
-  for (const key of ["content", "text", "code", "script"] as const) {
-    const summary = summarizeInputString(input[key], { firstLineOnly: true });
-    if (summary !== undefined) {
-      return summary;
-    }
-  }
-
-  return undefined;
-}
+export const summarizeSecurityTarget = buildToolSecurityTargetSummary;
 
 function redactToolCallForPersistence(
   toolName: string,
@@ -744,20 +725,6 @@ function containsUrlUserInfoCredentials(value: string): boolean {
     }
   }
   return false;
-}
-
-function summarizeInputString(value: unknown, options?: { firstLineOnly?: boolean }): string | undefined {
-  if (typeof value !== "string") {
-    return undefined;
-  }
-  const selected = options?.firstLineOnly === true ? value.split(/\r?\n/u)[0] ?? "" : value;
-  const trimmed = selected.trim();
-  return trimmed.length === 0 ? undefined : truncateSecuritySummary(trimmed);
-}
-
-function truncateSecuritySummary(value: string): string {
-  const trimmed = value.trim().replace(/\s+/gu, " ");
-  return trimmed.length <= 120 ? trimmed : `${trimmed.slice(0, 117)}...`;
 }
 
 function normalizeCommandKey(value: string): string {

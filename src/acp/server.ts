@@ -18,6 +18,7 @@ import { resolveTokens } from "../theme/token-resolver.js";
 import type { WorkspaceFsAdapter } from "../tools/workspace-tools.js";
 import type { ToolExecutionRecord } from "../tools/tool-executor.js";
 import { createSecurityPolicyForMode } from "../security/security-policy-factory.js";
+import { acpRuntimeToolEventTitle, acpToolExecutionTitle } from "./tool-display.js";
 
 type JsonRpcId = string | number | null;
 
@@ -483,7 +484,7 @@ export class AcpServer {
                       update: {
                         sessionUpdate: "tool_call_update",
                         toolCallId: event.stepId ?? event.tool,
-                        title: event.tool,
+                        title: acpRuntimeToolEventTitle(event),
                         kind: classifyToolKind(event.tool),
                         status: "in_progress"
                       }
@@ -499,7 +500,7 @@ export class AcpServer {
                       update: {
                         sessionUpdate: "tool_call_update",
                         toolCallId: event.tool,
-                        title: event.tool,
+                        title: acpRuntimeToolEventTitle(event),
                         kind: classifyToolKind(event.tool),
                         status: event.ok === false ? "completed" : "completed",
                         content: summarizeToolResult(event)
@@ -583,7 +584,7 @@ export class AcpServer {
               update: {
                 sessionUpdate: "tool_call_update",
                 toolCallId: gated.targetKey ?? gated.tool.name,
-                title: gated.targetSummary ?? gated.tool.name,
+                title: acpToolExecutionTitle(gated),
                 kind: classifyToolKind(gated.tool.name),
                 status: "completed",
                 content: [{ type: "content", content: { type: "text", text: finalText } }]
@@ -645,7 +646,7 @@ export class AcpServer {
             update: {
               sessionUpdate: "tool_call_update",
               toolCallId: gated.targetKey ?? gated.tool.name,
-              title: gated.targetSummary ?? gated.tool.name,
+              title: acpToolExecutionTitle(gated),
               kind: classifyToolKind(gated.tool.name),
               status: "in_progress",
               content: [{ type: "content", content: { type: "text", text: "Permission granted. Resuming action." } }]
@@ -918,7 +919,7 @@ export class AcpServer {
         update: {
           sessionUpdate: "tool_call_update",
           toolCallId: execution.targetKey ?? execution.tool.name,
-          title: execution.targetSummary ?? execution.tool.name,
+          title: acpToolExecutionTitle(execution),
           kind: classifyToolKind(execution.tool.name),
           status: execution.decision === "allow"
             ? execution.result?.ok === false
@@ -986,7 +987,7 @@ export class AcpServer {
     targetSummary?: string;
   }): Promise<RequestPermissionOutcome> {
     const toolCallId = gated.targetKey ?? gated.tool.name;
-    const title = gated.targetSummary ?? gated.tool.name;
+    const title = acpToolExecutionTitle(gated);
     const toolCall = {
       sessionUpdate: "tool_call_update",
       toolCallId,
@@ -1081,7 +1082,7 @@ export class AcpServer {
             update: {
               sessionUpdate: "tool_call_update",
               toolCallId: String(event.stepId ?? event.tool ?? "tool"),
-              title: String(event.tool ?? "tool"),
+              title: acpRuntimeToolEventTitle(event),
               kind: classifyToolKind(String(event.tool ?? "tool")),
               status: "in_progress"
             }
@@ -1097,7 +1098,7 @@ export class AcpServer {
             update: {
               sessionUpdate: "tool_call_update",
               toolCallId: String(event.tool ?? "tool"),
-              title: String(event.tool ?? "tool"),
+              title: acpRuntimeToolEventTitle(event),
               kind: classifyToolKind(String(event.tool ?? "tool")),
               status: event.decision === "ask" ? "blocked" : event.ok === false ? "failed" : "completed",
               rawOutput: {
@@ -1423,14 +1424,14 @@ function summarizeToolContent(event: Record<string, unknown>): Array<Record<stri
 
 function formatToolExecutionSummary(execution: ToolExecutionRecord): string {
   if (execution.decision !== "allow") {
-    return `Permission required for: ${execution.targetSummary ?? execution.tool.name}`;
+    return `Permission required for: ${acpToolExecutionTitle(execution)}`;
   }
 
   if (execution.result?.ok === false) {
     if (typeof execution.result.content === "string" && execution.result.content.length > 0) {
       return execution.result.content;
     }
-    return `Command failed: ${execution.targetSummary ?? execution.tool.name}`;
+    return `Command failed: ${acpToolExecutionTitle(execution)}`;
   }
 
   return execution.result?.content?.trim().length

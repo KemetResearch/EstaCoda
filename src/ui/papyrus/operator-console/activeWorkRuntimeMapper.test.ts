@@ -65,6 +65,28 @@ describe("active work runtime mapper", () => {
     );
   });
 
+  it("preserves raw tool names while carrying localized display labels", () => {
+    const state = applyActiveWorkRuntimeEvent(createActiveWorkRuntimeState(), {
+      id: "read-1",
+      toolName: "file.read",
+      displayLabel: "قراءة ملف",
+      status: "running",
+      target: "src/app.ts",
+    });
+
+    expect(state.items[0]).toMatchObject({
+      id: "read-1",
+      toolName: "file.read",
+      displayLabel: "قراءة ملف",
+      status: "running",
+      target: "src/app.ts",
+    });
+
+    const rendered = renderActiveWorkSurface(state, { width: 80, height: 4, locale: "ar" }).join("\n");
+    expect(rendered).toContain("قراءة ملف");
+    expect(rendered).not.toContain("file.read");
+  });
+
   it("formats collapsed summaries from uncapped mapped live events", () => {
     let state = createActiveWorkRuntimeState();
     state = applyActiveWorkRuntimeEvent(state, { id: "run", toolName: "read_file", status: "running" });
@@ -134,7 +156,7 @@ describe("active work runtime mapper", () => {
     expect(rendered).toContain("تنفيذ الأدوات");
     expect(rendered).toContain("read_file");
     expect(rendered).toContain("src/ui/papyrus/screen/output.ts");
-    expect(rendered).toContain("00:03");
+    expect(rendered).toContain("3s");
     expect(rendered.split("\n").every((line) => stringWidth(line) <= 80)).toBe(true);
   });
 });

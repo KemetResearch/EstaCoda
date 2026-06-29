@@ -1,8 +1,8 @@
 import type { RuntimeEvent } from "../contracts/runtime-event.js";
 import type { Runtime } from "../runtime/create-runtime.js";
-import { ToolActivityRenderer, toolIcon } from "./tool-activity-renderer.js";
 import { ToolActivityViewModelBuilder } from "./tool-activity-view-models.js";
 import { renderPlain } from "../ui/renderers/plain-renderer.js";
+import { toolDisplayIcon, toolDisplayLabel } from "../ui/tool-display.js";
 
 export type OneShotPromptResult = {
   handled: boolean;
@@ -55,7 +55,7 @@ export async function runOneShotPrompt(options: OneShotPromptOptions): Promise<O
         : `provider: ${response.providerExecution.response.provider}/${response.providerExecution.response.model}`,
       response.toolExecutions.length === 0
         ? undefined
-        : `tools: ${response.toolExecutions.map((execution) => execution.tool.name).join(", ")}`,
+        : `tools: ${response.toolExecutions.map((execution) => toolDisplayLabel(execution.tool.name)).join(", ")}`,
       response.progress.length === 0
         ? undefined
         : `progress: ${response.progress.join(" -> ")}`
@@ -109,7 +109,7 @@ function renderOneShotEvent(
         ? `provider fallback: ${event.provider}/${event.model}`
         : `provider: ${event.provider}/${event.model}`);
     case "provider-tool-call":
-      return safeLine(`${toolIcon(event.name ?? "")} provider requested ${event.name ?? "unknown"}`);
+      return safeLine(`${toolDisplayIcon(event.name ?? "", "cli")} provider requested ${toolDisplayLabel(event.name ?? "provider-tool")}`);
     case "provider-result":
       return safeLine(event.ok
         ? `provider ready: ${event.provider}/${event.model}`

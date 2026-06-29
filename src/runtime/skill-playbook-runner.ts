@@ -6,6 +6,7 @@ import { compileSkillPlaybook } from "../skills/skill-playbook-planner.js";
 import { packetizeToolExecution, renderToolResultPacket } from "../tools/tool-result-packet.js";
 import { summarizeSecurityTarget } from "../tools/tool-executor.js";
 import type { ToolExecutor, ToolExecutionRecord } from "../tools/tool-executor.js";
+import { buildToolDisplayPreview } from "../tools/tool-target-summary.js";
 import { toolResultFileChangePreview, toolResultStats } from "./tool-plan-runner.js";
 import type { RunRecorder } from "./run-recorder.js";
 import type { SessionRuntimeContext } from "./session-runtime-context.js";
@@ -154,6 +155,7 @@ export class SkillPlaybookRunner {
           tool: preferredTool,
           stepId: input.step.id,
           targetSummary: summarizeSecurityTarget(preferredTool, toolInput),
+          displayPreview: buildToolDisplayPreview(preferredTool, toolInput),
           activityId
         });
         emittedStart = true;
@@ -180,6 +182,7 @@ export class SkillPlaybookRunner {
             tool: preferredTool,
             ok: false,
             targetSummary: summarizeSecurityTarget(preferredTool, toolInput),
+            displayPreview: buildToolDisplayPreview(preferredTool, toolInput),
             activityId
           });
         }
@@ -191,6 +194,7 @@ export class SkillPlaybookRunner {
           tool: execution.tool.name,
           stepId: input.step.id,
           targetSummary: execution.targetSummary,
+          displayPreview: buildToolDisplayPreview(execution.tool.name, toolInput),
           activityId
         });
       }
@@ -211,6 +215,7 @@ export class SkillPlaybookRunner {
         ok: execution.result?.ok,
         fileChangePreview: toolResultFileChangePreview(execution),
         targetSummary: execution.targetSummary,
+        displayPreview: buildToolDisplayPreview(execution.tool.name, toolInput),
         activityId,
         ...toolResultStats(execution)
       });

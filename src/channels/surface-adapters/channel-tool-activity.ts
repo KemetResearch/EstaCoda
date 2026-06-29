@@ -3,6 +3,8 @@
 
 import type { RuntimeEvent } from "../../contracts/runtime-event.js";
 import type { ToolDefinition } from "../../contracts/tool.js";
+import { toolDisplayLabel } from "../../ui/tool-display.js";
+import { formatCount, formatDuration, humanRisk } from "../../ui/tool-activity-format.js";
 
 export type ChannelToolActivityRendererOptions = {
   tools: readonly ToolDefinition[];
@@ -22,20 +24,20 @@ export class ChannelToolActivityRenderer {
   render(event: Extract<RuntimeEvent, { kind: "tool-start" | "tool-result" }>): string {
     if (event.kind === "tool-start") {
       this.#pushStart(this.#eventKey(event));
-      const target = event.targetSummary ?? event.tool;
-      return `[>] ${channelToolAction(event.tool, this.#tools.get(event.tool))} · preparing ${target}${event.stepId === undefined ? "" : ` · ${event.stepId}`}`;
+      const target = event.displayPreview ?? event.targetSummary;
+      return `[>] ${toolAction(event.tool, this.#tools.get(event.tool))} · preparing${target === undefined ? "" : ` ${target}`}${event.stepId === undefined ? "" : ` · ${event.stepId}`}`;
     }
 
     const elapsed = this.#popElapsed(this.#eventKey(event));
     const target = event.targetSummary === undefined ? "" : ` · ${event.targetSummary}`;
     if (event.decision !== undefined && event.decision !== "allow") {
-      return `! ${event.tool}${target} gated · ${humanRisk(event.riskClass)}${elapsed}`;
+      return `! ${toolAction(event.tool, this.#tools.get(event.tool))}${target} gated · ${humanRisk(event.riskClass)}${elapsed}`;
     }
 
     const status = event.ok === false ? "failed" : "done";
     const icon = event.ok === false ? "[X]" : "[OK]";
 
-    return `${icon} ${event.tool}${target} ${status}${elapsed}${renderChannelToolSize(event)}`;
+    return `${icon} ${toolAction(event.tool, this.#tools.get(event.tool))}${target} ${status}${elapsed}${renderChannelToolSize(event)}`;
   }
 
   #pushStart(tool: string): void {
@@ -74,7 +76,7 @@ export function renderChannelToolSize(
   return ` · ${formatCount(event.chars)} captured / ${formatCount(event.sentChars)} sent${event.truncated ? " / compressed" : ""}`;
 }
 
-export function channelToolAction(
+function toolAction(
   tool: string,
   definition: ToolDefinition | undefined
 ): string {
@@ -82,54 +84,5 @@ export function channelToolAction(
     return definition.progressLabel;
   }
 
-  if (tool.includes("artifact")) return "recording artifact";
-  if (tool.includes("media.extract-frame")) return "extracting preview frame";
-  if (tool.includes("media.inspect")) return "inspecting media";
-  if (tool.includes("media.probe")) return "checking media tools";
-  if (tool.includes("web.extract")) return "extracting web content";
-  if (tool.includes("browser.navigate")) return "navigating browser";
-  if (tool.includes("workspace")) return "reading workspace";
-  if (tool.includes("memory")) return "writing memory";
-  if (tool.includes("trajectory")) return "recording trajectory";
-  if (tool.includes("playbook")) return "planning playbook";
-  if (tool.includes("workflow")) return "planning workflow";
-  if (tool.includes("terminal") || tool.includes("process")) return "running process";
-  if (tool.includes("execute") || tool.includes("python")) return "executing code";
-  if (tool.includes("config")) return "updating config";
-  return "running tool";
-}
-
-function humanRisk(riskClass: string | undefined): string {
-  switch (riskClass) {
-    case "destructive-local":
-      return "destructive local action";
-    case "credential-access":
-      return "credential or secret access";
-    case "external-side-effect":
-      return "external side effect";
-    case "spend-money":
-      return "may spend money";
-    case "sandbox-escape":
-      return "sandbox boundary";
-    case "workspace-write":
-      return "workspace write";
-    default:
-      return riskClass ?? "policy gate";
-  }
-}
-
-function formatDuration(ms: number): string {
-  if (ms < 1_000) {
-    return `${Math.max(0, ms)}ms`;
-  }
-
-  return `${(ms / 1_000).toFixed(ms >= 10_000 ? 0 : 1)}s`;
-}
-
-function formatCount(value: number): string {
-  if (value >= 1_000) {
-    return `${(value / 1_000).toFixed(value >= 10_000 ? 0 : 1)}k`;
-  }
-
-  return String(value);
+  return toolDisplayLabel(tool);
 }
