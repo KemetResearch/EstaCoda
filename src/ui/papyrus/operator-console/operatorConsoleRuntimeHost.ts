@@ -20,6 +20,8 @@ import {
   type StartupDashboardState,
   type StatusRailState,
   type SteerState,
+  type StreamingSegment,
+  type StreamingState,
   type TerminalMetrics,
   type ToolActivityState,
   type TurnActivityState,
@@ -142,6 +144,14 @@ export class OperatorConsoleRuntimeHost {
     };
   }
 
+  setStreaming(streaming: StreamingState | undefined): void {
+    if (this.#disposed) return;
+    this.#state = {
+      ...this.#state,
+      ...(streaming === undefined ? { streaming: undefined } : { streaming: cloneStreamingState(streaming) }),
+    };
+  }
+
   setApprovals(approvals: readonly ApprovalCardState[]): void {
     if (this.#disposed) return;
     this.#state = {
@@ -225,6 +235,7 @@ function cloneOperatorConsoleState(state: OperatorConsoleState): OperatorConsole
     turnActivity: state.turnActivity === undefined ? undefined : cloneTurnActivityState(state.turnActivity),
     attachments: state.attachments.map(cloneAttachmentCardState),
     activeWork: cloneToolActivityState(state.activeWork),
+    streaming: state.streaming === undefined ? undefined : cloneStreamingState(state.streaming),
     approvals: state.approvals.map(cloneApprovalCardState),
     slash: state.slash === undefined ? undefined : cloneSlashMenuState(state.slash),
     steer: state.steer === undefined ? undefined : cloneSteerState(state.steer),
@@ -319,6 +330,17 @@ function cloneToolActivityState(activeWork: ToolActivityState): ToolActivityStat
 
 function cloneActiveWorkItem(item: ActiveWorkItem): ActiveWorkItem {
   return { ...item };
+}
+
+function cloneStreamingState(streaming: StreamingState): StreamingState {
+  return {
+    ...streaming,
+    segments: streaming.segments.map(cloneStreamingSegment),
+  };
+}
+
+function cloneStreamingSegment(segment: StreamingSegment): StreamingSegment {
+  return { ...segment };
 }
 
 function cloneApprovalCardState(approval: ApprovalCardState): ApprovalCardState {

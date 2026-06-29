@@ -3,6 +3,7 @@ import { stringWidth } from "../screen/stringWidth.js";
 import {
   createInitialOperatorConsoleState,
   createOperatorConsoleLayout,
+  renderOperatorConsoleLines,
   renderOperatorConsoleTextLines,
   type OperatorConsoleState,
 } from "./index.js";
@@ -195,6 +196,59 @@ describe("Papyrus operator console renderer", () => {
     );
     expect(output.at(-1)).toContain("◷ 01:12");
     expect(output.every((line) => stringWidth(line) <= 120)).toBe(true);
+  });
+
+  it("renders streaming segments and live tail between transcript and turn activity", () => {
+    const state = createState({
+      transcript: [{ id: "t1", role: "assistant", text: "Ready." }],
+      streaming: {
+        segments: [{
+          id: "segment-1",
+          role: "assistant",
+          text: "I am reading the operator console path.",
+        }],
+        tail: "Now checking the layout",
+        isStreaming: true,
+      },
+      turnActivity: { phase: "provider" },
+    });
+    const rendered = renderOperatorConsoleLines(
+      state,
+      createOperatorConsoleLayout(state, { width: 80, height: 18, isTty: true })
+    );
+    const output = rendered.map((line) => line.text);
+    const transcriptIndex = rendered.findIndex((line) => line.region === "transcript");
+    const streamingIndex = rendered.findIndex((line) => line.region === "streaming");
+    const tailIndex = output.findIndex((line) => line.includes("Now checking the layout"));
+    const turnActivityIndex = rendered.findIndex((line) => line.region === "turnActivity");
+
+    expect(streamingIndex).toBeGreaterThan(transcriptIndex);
+    expect(tailIndex).toBeGreaterThan(streamingIndex);
+    expect(turnActivityIndex).toBeGreaterThan(streamingIndex);
+    expect(output).toContainEqual(expect.stringContaining("assistant: I am reading the operator console path."));
+    expect(output).toContainEqual(expect.stringContaining("Now checking the layout"));
+    expect(output.every((line) => stringWidth(line) <= 80)).toBe(true);
+  });
+
+  it("does not render inactive streaming state", () => {
+    const state = createState({
+      streaming: {
+        segments: [{
+          id: "segment-1",
+          role: "assistant",
+          text: "hidden inactive segment",
+        }],
+        tail: "hidden inactive tail",
+        isStreaming: false,
+      },
+    });
+    const output = renderOperatorConsoleTextLines(
+      state,
+      createOperatorConsoleLayout(state, { width: 80, height: 12, isTty: true })
+    ).join("\n");
+
+    expect(output).not.toContain("Assistant stream");
+    expect(output).not.toContain("hidden inactive");
   });
 
   it("renders approval cards above active work, attachments, prompt, and status rail", () => {

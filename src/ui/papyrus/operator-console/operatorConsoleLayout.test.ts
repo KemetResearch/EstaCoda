@@ -24,6 +24,7 @@ describe("Papyrus operator console layout", () => {
       "startupDashboard",
       "setupPanel",
       "transcript",
+      "streaming",
       "approvals",
       "turnActivity",
       "activeWork",
@@ -92,6 +93,20 @@ describe("Papyrus operator console layout", () => {
       turnActivity: { phase: "thinking" },
     }));
     expect(regionKinds(layout)).toContain("turnActivity");
+  });
+
+  it("includes streaming only when streaming state is active", () => {
+    expect(regionKinds(createOperatorConsoleLayout(createState()))).not.toContain("streaming");
+
+    const layout = createOperatorConsoleLayout(createState({
+      streaming: streamingState(),
+    }));
+    expect(regionKinds(layout)).toContain("streaming");
+
+    const idle = createOperatorConsoleLayout(createState({
+      streaming: streamingState({ isStreaming: false }),
+    }));
+    expect(regionKinds(idle)).not.toContain("streaming");
   });
 
   it("includes approvals only when approval state is non-empty", () => {
@@ -245,12 +260,40 @@ describe("Papyrus operator console layout", () => {
 
     expect(visibleRegionKinds(layout)).toEqual(["prompt", "statusRail"]);
     expect(region(layout, "activeWork")).toMatchObject({ height: 0, visible: false });
+    expect(region(layout, "streaming")).toMatchObject({ height: 0, visible: false });
     expect(region(layout, "turnActivity")).toMatchObject({ height: 0, visible: false });
     expect(region(layout, "approvals")).toMatchObject({ height: 0, visible: false });
     expect(region(layout, "attachments")).toMatchObject({ height: 0, visible: false });
     expect(region(layout, "startupDashboard")).toMatchObject({ height: 0, visible: false });
     expect(region(layout, "setupPanel")).toMatchObject({ height: 0, visible: false });
     expect(region(layout, "transcript")).toMatchObject({ height: 0, visible: false });
+  });
+
+  it("keeps active work ahead of streaming under constrained height", () => {
+    const layout = createOperatorConsoleLayout(createState({
+      activeWork: {
+        items: [toolItem("tool-1", "running")],
+        scrollOffset: 0,
+        expanded: true,
+      },
+      streaming: streamingState(),
+      attachments: [pastedAttachment("paste-1")],
+    }), { width: 80, height: 3, isTty: true });
+
+    expect(visibleRegionKinds(layout)).toEqual(["activeWork", "prompt", "statusRail"]);
+    expect(region(layout, "streaming")).toMatchObject({ height: 0, visible: false });
+    expect(region(layout, "attachments")).toMatchObject({ height: 0, visible: false });
+  });
+
+  it("keeps streaming ahead of attachments on their priority tie", () => {
+    const layout = createOperatorConsoleLayout(createState({
+      streaming: streamingState(),
+      attachments: [pastedAttachment("paste-1")],
+    }), { width: 80, height: 3, isTty: true });
+
+    expect(visibleRegionKinds(layout)).toEqual(["streaming", "prompt", "statusRail"]);
+    expect(region(layout, "streaming")).toMatchObject({ height: 1, visible: true });
+    expect(region(layout, "attachments")).toMatchObject({ height: 0, visible: false });
   });
 
   it("keeps region bounds inside the terminal rectangle", () => {
@@ -288,6 +331,7 @@ function createFullState(input: Partial<OperatorConsoleState> = {}): OperatorCon
     startup: startupDashboard(),
     setupPanel: setupPanel(),
     transcript: [{ id: "t1", role: "assistant", text: "Ready." }],
+    streaming: streamingState(),
     approvals: [approval("approval-1")],
     turnActivity: { phase: "thinking" },
     activeWork: {
@@ -389,6 +433,18 @@ function approval(id: string) {
     action: "write file",
     target: "src/runtime/provider-turn-loop.ts",
     risk: "runtime behavior change",
+  };
+}
+
+function streamingState(input: Partial<NonNullable<OperatorConsoleState["streaming"]>> = {}) {
+  return {
+    segments: input.segments ?? [{
+      id: "segment-1",
+      role: "assistant" as const,
+      text: "Reviewing the runtime path.",
+    }],
+    tail: input.tail ?? "Checking the operator console",
+    isStreaming: input.isStreaming ?? true,
   };
 }
 

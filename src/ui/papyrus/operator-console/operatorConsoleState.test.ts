@@ -40,6 +40,7 @@ describe("Papyrus operator console state model", () => {
       "startupDashboard",
       "setupPanel",
       "transcript",
+      "streaming",
       "approvals",
       "turnActivity",
       "activeWork",
@@ -193,6 +194,7 @@ describe("Papyrus operator console state model", () => {
       scrollOffset: 0,
       expanded: false,
     });
+    expect(state.streaming).toBeUndefined();
     expect(state.approvals).toEqual([]);
     expect(state.slash).toBeUndefined();
     expect(state.steer).toBeUndefined();
@@ -238,6 +240,32 @@ describe("Papyrus operator console state model", () => {
       kind: "table",
       title: "Model route",
       selectedRowId: "openai",
+    });
+  });
+
+  it("constructs streaming state without runtime coupling", () => {
+    const state = createInitialOperatorConsoleState({
+      streaming: {
+        segments: [{
+          id: "segment-1",
+          role: "assistant",
+          text: "I will inspect the runtime path first.",
+          createdAtMs: 1_000,
+        }],
+        tail: "Then I will summarize",
+        isStreaming: true,
+      },
+    });
+
+    expect(state.streaming).toEqual({
+      segments: [{
+        id: "segment-1",
+        role: "assistant",
+        text: "I will inspect the runtime path first.",
+        createdAtMs: 1_000,
+      }],
+      tail: "Then I will summarize",
+      isStreaming: true,
     });
   });
 

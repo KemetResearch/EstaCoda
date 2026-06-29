@@ -137,6 +137,19 @@ export type ToolActivityState = {
   readonly frameIndex?: number;
 };
 
+export type StreamingSegment = {
+  readonly id: string;
+  readonly role: "assistant" | "system";
+  readonly text: string;
+  readonly createdAtMs?: number;
+};
+
+export type StreamingState = {
+  readonly segments: readonly StreamingSegment[];
+  readonly tail: string;
+  readonly isStreaming: boolean;
+};
+
 export type ApprovalControl = ApprovalFocusControl;
 
 export type ApprovalCardState = {
@@ -238,6 +251,7 @@ export type OperatorConsoleState = {
   readonly turnActivity?: TurnActivityState;
   readonly attachments: readonly AttachmentCardState[];
   readonly activeWork: ToolActivityState;
+  readonly streaming?: StreamingState;
   readonly approvals: readonly ApprovalCardState[];
   readonly slash?: SlashMenuState;
   readonly steer?: SteerState;
@@ -250,6 +264,7 @@ export type OperatorConsoleSurface =
   | "startupDashboard"
   | "setupPanel"
   | "transcript"
+  | "streaming"
   | "approvals"
   | "turnActivity"
   | "activeWork"
@@ -263,6 +278,7 @@ export const OPERATOR_CONSOLE_SURFACE_ORDER: readonly OperatorConsoleSurface[] =
   "startupDashboard",
   "setupPanel",
   "transcript",
+  "streaming",
   "approvals",
   "turnActivity",
   "activeWork",
@@ -284,6 +300,7 @@ export type CreateInitialOperatorConsoleStateInput = {
   readonly turnActivity?: TurnActivityState;
   readonly attachments?: readonly AttachmentCardState[];
   readonly activeWork?: ToolActivityState;
+  readonly streaming?: StreamingState;
   readonly approvals?: readonly ApprovalCardState[];
   readonly slash?: SlashMenuState;
   readonly steer?: SteerState;
@@ -310,6 +327,7 @@ export function createInitialOperatorConsoleState(
     ...(input.turnActivity === undefined ? {} : { turnActivity: input.turnActivity }),
     attachments: input.attachments ?? [],
     activeWork: input.activeWork ?? createDefaultToolActivityState(),
+    ...(input.streaming === undefined ? {} : { streaming: input.streaming }),
     approvals: input.approvals ?? [],
     ...(input.slash === undefined ? {} : { slash: input.slash }),
     ...(input.steer === undefined ? {} : { steer: input.steer }),
