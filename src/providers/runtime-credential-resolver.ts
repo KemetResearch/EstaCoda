@@ -20,6 +20,7 @@ export type RuntimeCredentialResolverOptions = {
   };
   metadata?: ProviderMetadata;
   homeDir?: string;
+  profileId?: string;
 };
 
 export type RuntimeCredentialDiagnostic = {
@@ -38,7 +39,7 @@ export async function resolveRuntimeCredential(
   // 0. OAuth credential resolution
   const oauthAuthMethod = options.route?.authMethod ?? options.providerConfig?.authMethod ?? options.metadata?.defaultAuthMethod;
   if (oauthAuthMethod !== undefined && isOAuthAuthMethod(oauthAuthMethod)) {
-    return await resolveOAuthCredential(options.providerId, oauthAuthMethod, options.homeDir);
+    return await resolveOAuthCredential(options.providerId, oauthAuthMethod, options.homeDir, options.profileId);
   }
 
   // 1. route explicit credential reference
@@ -104,9 +105,10 @@ export async function resolveRuntimeCredential(
 async function resolveOAuthCredential(
   providerId: string,
   authMethod: ProviderAuthMethod,
-  homeDir?: string
+  homeDir?: string,
+  profileId?: string
 ): Promise<RuntimeCredentialResolution> {
-  const oauthResult = await loadOAuthStore({ homeDir });
+  const oauthResult = await loadOAuthStore({ homeDir, profileId });
   const record = oauthResult.store.providers[providerId];
 
   if (record === undefined) {
@@ -123,7 +125,8 @@ async function resolveOAuthCredential(
     const refreshResult = await refreshOAuthToken({
       providerId,
       record,
-      homeDir
+      homeDir,
+      profileId
     });
 
     if (refreshResult.kind === "error") {
@@ -138,7 +141,7 @@ async function resolveOAuthCredential(
     }
 
     // Reload the store after successful refresh
-    const refreshed = await loadOAuthStore({ homeDir });
+    const refreshed = await loadOAuthStore({ homeDir, profileId });
     const refreshedRecord = refreshed.store.providers[providerId];
     if (refreshedRecord === undefined) {
       return {

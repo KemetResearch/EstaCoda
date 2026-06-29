@@ -426,7 +426,9 @@ async function determineCredentialAction(
     providerId,
     route: apiKeyEnv ? { apiKeyEnv } : undefined,
     providerConfig: apiKeyEnv ? { apiKeyEnv } : undefined,
-    metadata: meta
+    metadata: meta,
+    homeDir,
+    profileId
   });
 
   // Explicitly drop the credential object so the value is not accessible

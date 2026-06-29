@@ -28,6 +28,43 @@ function createMockFetch(response: {
   }) as unknown as ReturnType<typeof globalThis.fetch>;
 }
 
+function createSseFetch(input: {
+  chunks: string[];
+  capturedBodies?: unknown[];
+  ok?: boolean;
+  status?: number;
+  statusText?: string;
+  text?: string;
+}): typeof globalThis.fetch {
+  return async (_url, init) => {
+    input.capturedBodies?.push(JSON.parse(String(init?.body ?? "{}")));
+    return {
+      ok: input.ok ?? true,
+      status: input.status ?? 200,
+      statusText: input.statusText ?? "OK",
+      json: async () => ({}),
+      text: async () => input.text ?? "",
+      body: streamFromChunks(input.chunks)
+    } as unknown as ReturnType<typeof globalThis.fetch>;
+  };
+}
+
+function streamFromChunks(chunks: string[]): ReadableStream<Uint8Array> {
+  const encoder = new TextEncoder();
+  return new ReadableStream<Uint8Array>({
+    start(controller) {
+      for (const chunk of chunks) {
+        controller.enqueue(encoder.encode(chunk));
+      }
+      controller.close();
+    }
+  });
+}
+
+function sse(payload: unknown): string {
+  return `event: ${(payload as { type?: string }).type ?? "message"}\ndata: ${JSON.stringify(payload)}\n\n`;
+}
+
 const DEFAULT_ENDPOINT: ProviderEndpoint = {
   baseUrl: "https://api.openai.com/v1",
   apiKey: { kind: "env", name: "OPENAI_API_KEY" }
@@ -336,6 +373,16 @@ describe("openai-responses-provider", () => {
 
       const prepared = buildResponsesRequest(DEFAULT_ENDPOINT, request);
       expect(prepared.body.store).toBe(false);
+    });
+
+    it("includes stream true only when streaming is requested", () => {
+      const request: ProviderRequest = {
+        model: "gpt-4o",
+        messages: [{ role: "user", content: "Hello" }]
+      };
+
+      expect(buildResponsesRequest(DEFAULT_ENDPOINT, request).body).not.toHaveProperty("stream");
+      expect(buildResponsesRequest(DEFAULT_ENDPOINT, { ...request, stream: true }).body.stream).toBe(true);
     });
 
     it("maps maxTokens to max_output_tokens", () => {
@@ -912,23 +959,402 @@ describe("openai-responses-provider", () => {
   });
 
   describe("streaming", () => {
-    it("fails closed with structured provider error", async () => {
+    it("sends stream true and emits text deltas before done", async () => {
+      const capturedBodies: unknown[] = [];
       const provider = createOpenAIResponsesProvider({
         id: "codex",
-        endpoint: DEFAULT_ENDPOINT
+        endpoint: {
+          baseUrl: "https://api.openai.com/v1",
+          apiKey: { kind: "none" }
+        },
+        enableNetwork: true,
+        fetch: createSseFetch({
+          capturedBodies,
+          chunks: [
+            sse({ type: "response.output_text.delta", delta: "Hel" }),
+            sse({ type: "response.output_text.delta", delta: "lo" }),
+            sse({
+              type: "response.completed",
+              response: {
+                status: "completed",
+                output: [
+                  {
+                    type: "message",
+                    role: "assistant",
+                    content: [{ type: "output_text", text: "Hello" }]
+                  }
+                ],
+                usage: {
+                  input_tokens: 3,
+                  output_tokens: 2,
+                  total_tokens: 5
+                }
+              }
+            }),
+            "data: [DONE]\n\n"
+          ]
+        })
       });
 
-      const events: Array<{ kind: string; response?: { errorClass?: string } }> = [];
+      const events = [];
       for await (const event of provider.stream!({
         model: "codex-model",
         messages: [{ role: "user", content: "Hello" }]
       })) {
-        events.push(event as any);
+        events.push(event);
+      }
+
+      expect((capturedBodies[0] as { stream?: boolean }).stream).toBe(true);
+      expect(events.map((event) => event.kind)).toEqual([
+        "start",
+        "token",
+        "token",
+        "done"
+      ]);
+      expect(events.filter((event) => event.kind === "token").map((event) => event.text)).toEqual(["Hel", "lo"]);
+      const done = events.find((event) => event.kind === "done");
+      expect(done?.response.content).toBe("Hello");
+      expect(done?.response.usage).toEqual({
+        inputTokens: 3,
+        outputTokens: 2,
+        totalTokens: 5
+      });
+    });
+
+    it("maps streamed max_output_tokens incomplete responses to length finish", async () => {
+      const provider = createOpenAIResponsesProvider({
+        id: "codex",
+        endpoint: {
+          baseUrl: "https://api.openai.com/v1",
+          apiKey: { kind: "none" }
+        },
+        enableNetwork: true,
+        fetch: createSseFetch({
+          chunks: [
+            sse({ type: "response.output_text.delta", delta: "Partial" }),
+            sse({
+              type: "response.incomplete",
+              response: {
+                status: "incomplete",
+                incomplete_details: { reason: "max_output_tokens" },
+                output: [
+                  {
+                    type: "message",
+                    role: "assistant",
+                    content: [{ type: "output_text", text: "Partial" }]
+                  }
+                ]
+              }
+            })
+          ]
+        })
+      });
+
+      const events = [];
+      for await (const event of provider.stream!({
+        model: "codex-model",
+        messages: [{ role: "user", content: "Hello" }]
+      })) {
+        events.push(event);
+      }
+
+      expect(events.filter((event) => event.kind === "token").map((event) => event.text)).toEqual(["Partial"]);
+      const done = events.find((event) => event.kind === "done");
+      expect(done?.response.ok).toBe(true);
+      expect(done?.response.content).toBe("Partial");
+      expect(done?.response.finishReason).toBe("length");
+      expect(done?.response.incompleteReason).toBe("max_output_tokens");
+    });
+
+    it("collects streamed completion for the ChatGPT Codex backend", async () => {
+      const capturedBodies: unknown[] = [];
+      const provider = createOpenAIResponsesProvider({
+        id: "codex",
+        endpoint: {
+          baseUrl: "https://chatgpt.com/backend-api/codex",
+          apiKey: { kind: "none" }
+        },
+        enableNetwork: true,
+        fetch: createSseFetch({
+          capturedBodies,
+          chunks: [
+            sse({ type: "response.output_text.delta", delta: "Done" }),
+            sse({
+              type: "response.completed",
+              response: {
+                status: "completed",
+                output: [
+                  {
+                    type: "message",
+                    role: "assistant",
+                    content: [{ type: "output_text", text: "Done" }]
+                  }
+                ]
+              }
+            })
+          ]
+        })
+      });
+
+      const response = await provider.complete({
+        model: "codex-model",
+        messages: [{ role: "user", content: "Hello" }]
+      });
+
+      expect(response.ok).toBe(true);
+      expect(response.content).toBe("Done");
+      expect((capturedBodies[0] as { stream?: boolean }).stream).toBe(true);
+    });
+
+    it("preserves collected tool-call raw output for ChatGPT Codex complete via stream", async () => {
+      const provider = createOpenAIResponsesProvider({
+        id: "codex",
+        endpoint: {
+          baseUrl: "https://chatgpt.com/backend-api/codex",
+          apiKey: { kind: "none" }
+        },
+        enableNetwork: true,
+        fetch: createSseFetch({
+          chunks: [
+            sse({
+              type: "response.function_call_arguments.delta",
+              output_index: 0,
+              call_id: "call_1",
+              delta: "{\"path\":\"README.md\"}"
+            }),
+            sse({
+              type: "response.output_item.done",
+              output_index: 0,
+              item: {
+                type: "function_call",
+                call_id: "call_1",
+                name: "file.read",
+                arguments: "{\"path\":\"README.md\"}"
+              }
+            }),
+            sse({
+              type: "response.completed",
+              response: {
+                status: "completed",
+                output: [
+                  {
+                    type: "function_call",
+                    call_id: "call_1",
+                    name: "file.read",
+                    arguments: "{\"path\":\"README.md\"}"
+                  }
+                ]
+              }
+            })
+          ]
+        })
+      });
+
+      const response = await provider.complete({
+        model: "codex-model",
+        messages: [{ role: "user", content: "Hello" }]
+      });
+
+      expect(response.ok).toBe(true);
+      expect((response.raw as { output?: unknown[] }).output).toEqual([
+        {
+          type: "function_call",
+          call_id: "call_1",
+          name: "file.read",
+          arguments: "{\"path\":\"README.md\"}"
+        }
+      ]);
+    });
+
+    it("keeps ordinary Responses completion on the non-streaming JSON path", async () => {
+      const capturedBodies: unknown[] = [];
+      const provider = createOpenAIResponsesProvider({
+        id: "codex",
+        endpoint: {
+          baseUrl: "https://api.openai.com/v1",
+          apiKey: { kind: "none" }
+        },
+        enableNetwork: true,
+        fetch: async (_url, init) => {
+          capturedBodies.push(JSON.parse(String(init.body)));
+          return {
+            ok: true,
+            status: 200,
+            statusText: "OK",
+            json: async () => ({
+              status: "completed",
+              output: [
+                {
+                  type: "message",
+                  role: "assistant",
+                  content: [{ type: "output_text", text: "JSON done" }]
+                }
+              ]
+            }),
+            text: async () => "",
+            body: null
+          };
+        }
+      });
+
+      const response = await provider.complete({
+        model: "codex-model",
+        messages: [{ role: "user", content: "Hello" }]
+      });
+
+      expect(response.ok).toBe(true);
+      expect(response.content).toBe("JSON done");
+      expect(capturedBodies[0]).not.toHaveProperty("stream");
+    });
+
+    it("streams function call argument deltas without duplicating final arguments", async () => {
+      const provider = createOpenAIResponsesProvider({
+        id: "codex",
+        endpoint: {
+          baseUrl: "https://api.openai.com/v1",
+          apiKey: { kind: "none" }
+        },
+        enableNetwork: true,
+        fetch: createSseFetch({
+          chunks: [
+            sse({
+              type: "response.function_call_arguments.delta",
+              output_index: 0,
+              call_id: "call_1",
+              delta: "{\"path\""
+            }),
+            sse({
+              type: "response.function_call_arguments.delta",
+              output_index: 0,
+              call_id: "call_1",
+              delta: ":\"README.md\"}"
+            }),
+            sse({
+              type: "response.output_item.done",
+              output_index: 0,
+              item: {
+                type: "function_call",
+                call_id: "call_1",
+                name: "file.read",
+                arguments: "{\"path\":\"README.md\"}"
+              }
+            }),
+            sse({
+              type: "response.completed",
+              response: {
+                status: "completed",
+                output: [
+                  {
+                    type: "function_call",
+                    call_id: "call_1",
+                    name: "file.read",
+                    arguments: "{\"path\":\"README.md\"}"
+                  }
+                ]
+              }
+            })
+          ]
+        })
+      });
+
+      const toolEvents = [];
+      let doneResponse: unknown;
+      for await (const event of provider.stream!({
+        model: "codex-model",
+        messages: [{ role: "user", content: "Hello" }]
+      })) {
+        if (event.kind === "tool-call") {
+          toolEvents.push(event);
+        }
+        if (event.kind === "done") {
+          doneResponse = event.response;
+        }
+      }
+
+      expect(toolEvents.slice(0, 2)).toEqual([
+        expect.objectContaining({
+          index: 0,
+          id: "call_1",
+          argumentsText: "{\"path\""
+        }),
+        expect.objectContaining({
+          index: 0,
+          id: "call_1",
+          argumentsText: ":\"README.md\"}"
+        })
+      ]);
+      expect(toolEvents[2]).toEqual(expect.objectContaining({
+        index: 0,
+        id: "call_1",
+        name: "file.read"
+      }));
+      expect(toolEvents[2]).not.toHaveProperty("argumentsText");
+      expect((doneResponse as { raw?: { output?: unknown[] } }).raw?.output).toEqual([]);
+    });
+
+    it("maps response failed events to structured provider errors", async () => {
+      const provider = createOpenAIResponsesProvider({
+        id: "codex",
+        endpoint: {
+          baseUrl: "https://api.openai.com/v1",
+          apiKey: { kind: "none" }
+        },
+        enableNetwork: true,
+        fetch: createSseFetch({
+          chunks: [
+            sse({
+              type: "response.failed",
+              response: {
+                status: "failed",
+                error: {
+                  message: "Bad key",
+                  type: "invalid_api_key"
+                }
+              }
+            })
+          ]
+        })
+      });
+
+      const events = [];
+      for await (const event of provider.stream!({
+        model: "codex-model",
+        messages: [{ role: "user", content: "Hello" }]
+      })) {
+        events.push(event);
+      }
+
+      const error = events.find((event) => event.kind === "error");
+      expect(error?.response.ok).toBe(false);
+      expect(error?.response.content).toBe("Bad key");
+      expect(error?.response.errorClass).toBe("auth");
+    });
+
+    it("fails closed with a prepared streaming request when network is disabled", async () => {
+      const provider = createOpenAIResponsesProvider({
+        id: "codex",
+        endpoint: {
+          baseUrl: "https://api.openai.com/v1",
+          apiKey: { kind: "none" }
+        }
+      });
+
+      const events = [];
+      for await (const event of provider.stream!({
+        model: "codex-model",
+        messages: [{ role: "user", content: "Hello" }]
+      })) {
+        events.push(event);
       }
 
       expect(events).toHaveLength(1);
       expect(events[0].kind).toBe("error");
-      expect(events[0].response?.errorClass).toBe("unsupported");
+      const error = events[0];
+      if (error.kind !== "error") {
+        throw new Error("Expected streaming error event");
+      }
+      expect(error.response.errorClass).toBe("unsupported");
+      expect((error.response.raw as { body: { stream?: boolean } }).body.stream).toBe(true);
     });
   });
 

@@ -160,7 +160,9 @@ export async function diagnoseProviderLive(config: LoadedRuntimeConfig): Promise
   }
 
   const executor = new ProviderExecutor({
-    registry: config.providerRegistry
+    registry: config.providerRegistry,
+    homeDir: config.homeDir,
+    profileId: config.profileId
   });
   const execution = await executor.complete({
     provider: config.model.provider,

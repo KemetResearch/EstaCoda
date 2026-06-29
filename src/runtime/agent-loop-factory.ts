@@ -30,6 +30,7 @@ import {
   validateResolvedRouteForModelSwitch
 } from "../providers/provider-metadata.js";
 import type { ProviderRegistry } from "../providers/provider-registry.js";
+import { isOAuthAuthMethod } from "../providers/oauth/oauth-types.js";
 import { resolveRuntimeCredential } from "../providers/runtime-credential-resolver.js";
 import { assessHardlineFloor } from "../security/command-safety.js";
 import type { TrajectoryRecorder } from "../trajectory/trajectory-recorder.js";
@@ -101,6 +102,7 @@ export type DefaultChildAgentLoopFactoryOptions = {
   providerRegistry?: ProviderRegistry;
   providerConfigs?: Record<string, ChildProviderRouteConfig>;
   homeDir?: string;
+  profileId?: string;
   sessionDb: SessionDB;
   trajectoryRecorderFactory: (input: { profileId: string; sessionId: string }) => TrajectoryRecorder;
   responseLabel: string;
@@ -131,6 +133,7 @@ export class DefaultChildAgentLoopFactory implements ChildAgentLoopFactory {
   readonly #providerRegistry: ProviderRegistry | undefined;
   readonly #providerConfigs: Record<string, ChildProviderRouteConfig> | undefined;
   readonly #homeDir: string | undefined;
+  readonly #profileId: string | undefined;
   readonly #sessionDb: SessionDB;
   readonly #trajectoryRecorderFactory: (input: { profileId: string; sessionId: string }) => TrajectoryRecorder;
   readonly #responseLabel: string;
@@ -150,6 +153,7 @@ export class DefaultChildAgentLoopFactory implements ChildAgentLoopFactory {
     this.#providerRegistry = options.providerRegistry;
     this.#providerConfigs = options.providerConfigs;
     this.#homeDir = options.homeDir;
+    this.#profileId = options.profileId;
     this.#sessionDb = options.sessionDb;
     this.#trajectoryRecorderFactory = options.trajectoryRecorderFactory;
     this.#responseLabel = options.responseLabel;
@@ -175,6 +179,7 @@ export class DefaultChildAgentLoopFactory implements ChildAgentLoopFactory {
       providerRegistry: this.#providerRegistry,
       providerConfigs: this.#providerConfigs,
       homeDir: this.#homeDir,
+      profileId: this.#profileId,
       override: input.modelOverride
     });
     const suppressedRuntimeFeatures = suppressedFeaturesFromConfig(this.#delegationConfig);
@@ -301,6 +306,7 @@ async function deriveChildRoutes(input: {
   providerRegistry: ProviderRegistry | undefined;
   providerConfigs: Record<string, ChildProviderRouteConfig> | undefined;
   homeDir: string | undefined;
+  profileId: string | undefined;
   override: DelegateModelOverride | undefined;
 }): Promise<{ routes?: AgentLoopRouteInput; metadata?: DelegateModelOverrideMetadata }> {
   if (input.override === undefined) {
@@ -358,6 +364,7 @@ async function deriveChildRoutes(input: {
       providerRegistry: input.providerRegistry,
       providerConfigs: input.providerConfigs,
       homeDir: input.homeDir,
+      profileId: input.profileId,
       requestedProvider,
       requestedModel,
       metadataProvider,
@@ -393,6 +400,7 @@ async function deriveCrossProviderChildRoutes(input: {
   providerRegistry: ProviderRegistry | undefined;
   providerConfigs: Record<string, ChildProviderRouteConfig> | undefined;
   homeDir: string | undefined;
+  profileId: string | undefined;
   requestedProvider: string;
   requestedModel: string;
   metadataProvider: string;
@@ -471,7 +479,8 @@ async function deriveCrossProviderChildRoutes(input: {
     providerId: provider,
     route: { apiKeyEnv: route.apiKeyEnv, authMethod: route.authMethod },
     metadata: getProviderMetadata(provider),
-    homeDir: input.homeDir
+    homeDir: input.homeDir,
+    profileId: input.profileId
   });
   if (!credential.diagnostic.ok) {
     throw rejectedModelOverride("Child model override provider credentials are not configured.", {
@@ -522,7 +531,10 @@ function buildTargetProviderRoute(input: {
       reason: "invalid-route"
     });
   }
-  if (endpointAuth?.kind === "none" && providerConfig?.authMethod !== "none" && metadata.defaultAuthMethod !== "none") {
+  const configuredAuthMethod = providerConfig?.authMethod ?? metadata.defaultAuthMethod;
+  if (endpointAuth?.kind === "none" &&
+      configuredAuthMethod !== "none" &&
+      !isOAuthAuthMethod(configuredAuthMethod)) {
     throw rejectedModelOverride("Child model override provider credentials are not configured.", {
       provider: boundProviderMetadataText(input.provider),
       model: boundRouteMetadataText(input.model),
@@ -531,7 +543,7 @@ function buildTargetProviderRoute(input: {
   }
 
   const authMethod: ProviderAuthMethod | undefined = providerConfig?.authMethod
-    ?? (endpointAuth?.kind === "none" ? "none" : metadata.defaultAuthMethod);
+    ?? (endpointAuth?.kind === "none" && metadata.defaultAuthMethod === "none" ? "none" : metadata.defaultAuthMethod);
   const apiKeyEnv = providerConfig?.apiKeyEnv
     ?? (endpointAuth?.kind === "env" ? endpointAuth.name : undefined);
   const profile: ModelProfile = {

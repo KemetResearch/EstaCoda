@@ -758,7 +758,9 @@ export const webToolProvider: SessionToolProvider = {
         visionAuxiliaryRoute: ctx.visionRoute,
         mainRoute: ctx.mainRoute,
         providerExecutor: new ProviderExecutor({
-          registry: providerRegistry
+          registry: providerRegistry,
+          homeDir: ctx.homeDir,
+          profileId: ctx.profileId
         })
       }, input, signal)
     });

@@ -107,7 +107,11 @@ export async function runSessionsCommand(
         workspaceRoot: input.workspaceRoot,
         route: sessionSearchRoute,
         mainRoute: runtimeConfig.primaryModelRoute,
-        providerExecutor: new ProviderExecutor({ registry: runtimeConfig.providerRegistry })
+        providerExecutor: new ProviderExecutor({
+          registry: runtimeConfig.providerRegistry,
+          homeDir: runtimeConfig.homeDir,
+          profileId: runtimeConfig.profileId
+        })
       }).recall(query);
       return { ok: true, output: renderSessionRecallResult(result) };
     } finally {
