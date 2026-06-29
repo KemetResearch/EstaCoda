@@ -154,6 +154,7 @@ estacoda model setup codex              # OAuth device-code setup for Codex
 - `model setup codex` authenticates through OAuth device code flow, stores tokens in the selected profile's `auth.json`, and configures the `codex/gpt-5.5` route with auth method `oauth_device_pkce` and API mode `openai_responses`.
 - Bare `estacoda model` can also configure Codex where the nested OpenAI choice is enabled: choose `OpenAI`, then `Codex`. The `OpenAI Models` choice is the API-key OpenAI path; `Codex` is the OAuth path.
 - Setup Editor primary and fallback model-route edits can configure Codex through reviewed apply. OAuth tokens are written only after review approval; cancelling review after OAuth does not persist tokens. First-run onboarding and auxiliary model routes do not add Codex OAuth setup in this pass.
+- `/providers` is the interactive-session surface for provider status and reviewed provider setup. `/model` remains the model status/switching command, and `/models` is not a slash command.
 - `model fallback` manages the ordered fallback chain and is also accessible through the Setup Editor (`edit-fallback-model-route`). `estacoda model set` is deprecated and rejected.
 
 **Failure modes:**

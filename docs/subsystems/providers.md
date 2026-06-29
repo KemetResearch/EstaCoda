@@ -436,6 +436,7 @@ Cloud browser providers are separate from web research providers. Browserbase is
 - Auxiliary model routes remain unchanged in this pass and do not introduce Codex OAuth setup.
 - `estacoda model setup local` configures the built-in Local / Custom Endpoint route. It prompts for or accepts a `baseUrl`, keeps no-auth as the default, and stores an optional key as `OPENAI_COMPATIBLE_API_KEY` through the normal profile `.env` boundary. Endpoint/base URL changes must be reviewed and applied through provider-route drafts, not credential-only drafts.
 - `estacoda model setup custom` remains the separate named-provider path for OpenAI-compatible endpoints that should not use the built-in `local` provider ID.
+- The Setup Editor uses the same Local / Custom endpoint-first flow for primary, fallback, and auxiliary model routes. Endpoint discovery, manual model entry, optional auth, chat-completion testing, and review are shared; only the reviewed config scope changes.
 
 ## Provider Hardening
 

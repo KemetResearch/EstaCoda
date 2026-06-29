@@ -135,7 +135,7 @@ function registerAll(): void {
     name: "providers",
     aliases: ["provider"],
     category: "Setup",
-    description: "Configure local, private, or custom providers through reviewed setup.",
+    description: "Configure local or custom providers through reviewed setup.",
     visibility: "public",
     scope: "slash",
     usage: "/providers [local setup|custom add]",

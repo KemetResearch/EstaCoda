@@ -57,6 +57,10 @@ When `--api-key` is provided, setup stores the raw key only in the selected prof
 
 Use `estacoda model setup custom` instead when you need a separate named OpenAI-compatible provider ID rather than the built-in `local` route.
 
+In the Setup Editor, choose `Local / Custom` from the primary, fallback, or auxiliary model picker to use the same endpoint-first flow. EstaCoda first confirms the inference endpoint, then discovers models from `/models` when available, lets you choose a discovered model or enter a model ID manually, collects optional authentication, and offers a chat completion test before the reviewed apply step.
+
+In an interactive session, use `/providers` for provider setup and status. `/model` remains the command for inspecting or switching the active model, and `/models` is not a slash command; it is only the OpenAI-compatible HTTP API path used during endpoint discovery.
+
 ---
 
 ## Model Catalog and Discovery
