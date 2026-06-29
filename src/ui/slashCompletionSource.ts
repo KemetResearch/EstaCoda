@@ -9,6 +9,7 @@ const implementedSlashCommands = new Set([
   "help",
   "status",
   "model",
+  "providers",
   "reset",
   "tools",
   "browser",
@@ -41,11 +42,12 @@ const completionPriority = new Map([
   ["help", 0],
   ["status", 1],
   ["model", 2],
-  ["tools", 3],
-  ["skills", 4],
-  ["exit", 5],
-  ["interrupt", 6],
-  ["steer", 7],
+  ["providers", 3],
+  ["tools", 4],
+  ["skills", 5],
+  ["exit", 6],
+  ["interrupt", 7],
+  ["steer", 8],
 ]);
 
 const activeTurnCompletionPriority = new Map([
@@ -54,9 +56,10 @@ const activeTurnCompletionPriority = new Map([
   ["help", 2],
   ["status", 3],
   ["model", 4],
-  ["tools", 5],
-  ["skills", 6],
-  ["exit", 7],
+  ["providers", 5],
+  ["tools", 6],
+  ["skills", 7],
+  ["exit", 8],
 ]);
 
 export type SlashCompletionSourceOptions = {

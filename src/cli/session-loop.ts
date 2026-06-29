@@ -5,11 +5,11 @@ import type { Runtime } from "../runtime/create-runtime.js";
 import type { RuntimeEvent } from "../contracts/runtime-event.js";
 import type { SessionEvent } from "../contracts/session.js";
 import type { ToolResult } from "../contracts/tool.js";
-import type { ProviderExecutionSummary } from "../contracts/provider.js";
+import type { ProviderExecutionSummary, ProviderId } from "../contracts/provider.js";
 import type { ModelSwitchContext } from "../providers/model-switch-resolver.js";
 import { renderSessionRecallResult } from "../session/session-recall-service.js";
 import { renderSessionCompactionResult } from "../prompt/session-compression-service.js";
-import { createProviderModelSelectionFlow } from "../providers/provider-model-selection-flow.js";
+import { createProviderModelSelectionFlow, type FlowEngine } from "../providers/provider-model-selection-flow.js";
 import {
   applyModelSwitchPrimaryRoute,
   resolveEffectiveSessionModelOverride,
@@ -108,6 +108,8 @@ import {
   withSetupConsolePrompt,
   type SetupConsolePromptAdapterOptions,
 } from "../setup/config-editor/setupConsolePromptAdapter.js";
+import { runConfigEditor } from "../setup/config-editor/runner.js";
+import { createReviewedSetupApplyExecutor } from "../setup/review/apply-executor.js";
 
 export type SessionLoopOptions = {
   runtime: Runtime;
@@ -1213,6 +1215,8 @@ export async function handleSlashCommand(input: {
       input.output.write(`${input.renderer.render(input.runtime.getModelInfo())}\n\n`);
       return false;
     }
+    case "providers":
+      return handleProvidersCommand(input, args);
     case "reset":
       if (input.refreshRuntime === undefined) {
         input.output.write("This session cannot reset itself here. Start a new EstaCoda session to refresh skills and config.\n\n");
@@ -1495,6 +1499,147 @@ function withOptionalPapyrusCapabilityDiagnostics(
 
 type HandleSlashCommandInput = Parameters<typeof handleSlashCommand>[0];
 type SlashCommandRuntimeRefresh = Exclude<Awaited<ReturnType<typeof handleSlashCommand>>, boolean>;
+
+type ProvidersCommand =
+  | { readonly kind: "setup"; readonly scope: "all" | "local" }
+  | { readonly kind: "invalid"; readonly message: string };
+
+function parseProvidersCommand(args: string[]): ProvidersCommand {
+  const normalized = args.map((arg) => arg.toLowerCase());
+  if (normalized.length === 0) {
+    return { kind: "setup", scope: "all" };
+  }
+  if (
+    normalized.length === 1 &&
+    (normalized[0] === "local" || normalized[0] === "setup")
+  ) {
+    return { kind: "setup", scope: normalized[0] === "local" ? "local" : "all" };
+  }
+  if (
+    normalized.length === 2 &&
+    ((normalized[0] === "local" && normalized[1] === "setup") ||
+      (normalized[0] === "setup" && normalized[1] === "local"))
+  ) {
+    return { kind: "setup", scope: "local" };
+  }
+  if (
+    normalized[0] === "custom" ||
+    (normalized[0] === "setup" && normalized[1] === "custom")
+  ) {
+    return {
+      kind: "invalid",
+      message: [
+        "Custom provider IDs are not exposed through /providers yet.",
+        "Use /providers local setup for local/private OpenAI-compatible endpoints.",
+        "Usage: /providers [local setup]"
+      ].join("\n")
+    };
+  }
+  return {
+    kind: "invalid",
+    message: "Usage: /providers [local setup]"
+  };
+}
+
+async function handleProvidersCommand(
+  input: HandleSlashCommandInput,
+  args: string[]
+): Promise<boolean | SlashCommandRuntimeRefresh> {
+  const command = parseProvidersCommand(args);
+  if (command.kind === "invalid") {
+    input.output.write(`${command.message}\n\n`);
+    return false;
+  }
+
+  if (input.prompt === undefined) {
+    input.output.write([
+      "This session cannot open reviewed provider setup here.",
+      "Run estacoda setup --advanced from a terminal, or use /providers in an interactive session.",
+      ""
+    ].join("\n"));
+    return false;
+  }
+
+  const workspaceRoot = input.workspaceRoot ?? process.cwd();
+  const profileId = await runtimeProfileId(input.runtime);
+  const flowEngine = command.scope === "local"
+    ? await createProvidersCommandFlowEngine(input, profileId, ["local"])
+    : undefined;
+
+  const result = await runConfigEditor({
+    workspaceRoot,
+    homeDir: input.homeDir,
+    profileId,
+    prompt: input.prompt,
+    output: {
+      write: (value) => input.output.write(value),
+    },
+    applyExecutor: createReviewedSetupApplyExecutor({
+      workspaceRoot,
+      homeDir: input.homeDir,
+      profileId,
+      mode: "strict",
+    }),
+    defaultActionId: "edit-primary-model-route",
+    renderInitialOverview: false,
+    ...(flowEngine === undefined ? {} : { flowEngine }),
+  });
+
+  if (!shouldRefreshAfterProvidersSetup(result.applyEndState)) {
+    return false;
+  }
+
+  const refreshed = await refreshCurrentRuntime(input);
+  if (refreshed === undefined) {
+    input.output.write("Provider setup was applied. Start a new session before the next turn uses the updated provider route.\n\n");
+    return false;
+  }
+
+  return {
+    runtime: refreshed,
+    notice: (runtime) => [
+      "Provider setup applied.",
+      "The session config snapshot was refreshed.",
+      "",
+      runtime.describe()
+    ].join("\n")
+  };
+}
+
+async function createProvidersCommandFlowEngine(
+  input: HandleSlashCommandInput,
+  profileId: string,
+  providerIds: readonly ProviderId[]
+): Promise<FlowEngine> {
+  const loaded = await loadRuntimeConfig({
+    workspaceRoot: input.workspaceRoot ?? process.cwd(),
+    homeDir: input.homeDir,
+    profileId,
+  });
+  const flow = await createProviderModelSelectionFlow({
+    config: loaded.config,
+    providerRegistry: loaded.providerRegistry,
+    homeDir: input.homeDir,
+    profileId,
+    allowNetwork: false,
+    mode: "setup",
+  });
+  const allowed = new Set(providerIds);
+  return {
+    listProviderCandidates: async () =>
+      (await flow.listProviderCandidates()).filter((candidate) => allowed.has(candidate.id)),
+    listModelCandidates: (providerId) => flow.listModelCandidates(providerId),
+    resolveSelection: (providerId, modelId) => flow.resolveSelection(providerId, modelId),
+  };
+}
+
+function shouldRefreshAfterProvidersSetup(
+  applyEndState: Awaited<ReturnType<typeof runConfigEditor>>["applyEndState"]
+): boolean {
+  return applyEndState !== undefined &&
+    applyEndState.kind !== "blocked" &&
+    applyEndState.kind !== "cancelled";
+}
 
 type SessionModelCommand =
   | { kind: "show"; scope: "session" | "global" }

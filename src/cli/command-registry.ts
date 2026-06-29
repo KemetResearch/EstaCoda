@@ -132,6 +132,15 @@ function registerAll(): void {
     scope: "both",
   });
   commandRegistry.register({
+    name: "providers",
+    aliases: ["provider"],
+    category: "Setup",
+    description: "Configure local or private providers through reviewed setup.",
+    visibility: "public",
+    scope: "slash",
+    usage: "/providers [local setup]",
+  });
+  commandRegistry.register({
     name: "sessions",
     aliases: ["session"],
     category: "Session",
