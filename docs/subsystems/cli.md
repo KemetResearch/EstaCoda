@@ -370,7 +370,7 @@ After existing-user Setup Editor apply and verification, the flow returns with a
 
 Primary provider/model setup and repair use the shared provider/model flow. That flow applies provider visibility, runnable/configurable gates, and credential boundaries owned by the provider layer.
 
-The built-in `local` provider is displayed and documented as Local / private endpoint. It accepts local or private OpenAI-compatible endpoints such as Ollama, LM Studio, llama.cpp, vLLM, LiteLLM, or internal gateways. Local endpoint setup keeps no-auth as the default and adds a credential-reference draft only when an optional API key is entered. Endpoint/base URL changes are provider-route changes, not credential-only mutations.
+The built-in `local` provider is displayed and documented as Local / Custom Endpoint. It accepts local or custom OpenAI-compatible endpoints such as Ollama, LM Studio, llama.cpp, vLLM, LiteLLM, or internal gateways. Local endpoint setup keeps no-auth as the default and adds a credential-reference draft only when an optional API key is entered. Endpoint/base URL changes are provider-route changes, not credential-only mutations.
 
 Codex OAuth setup is implemented on the model setup and Setup Editor route surfaces, not in the Onboarding Wizard. Onboarding Wizard copy must not imply it can complete Codex OAuth until it deliberately delegates to that flow.
 

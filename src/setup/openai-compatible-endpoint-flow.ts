@@ -39,6 +39,7 @@ export type OpenAICompatibleModelChoice = {
 };
 
 export type OpenAICompatibleEndpointAction = "check" | "manual" | "auth" | "cancel";
+export type OpenAICompatibleEndpointIntroAction = "continue" | "change-endpoint" | "cancel";
 export type OpenAICompatibleModelSelection =
   | { readonly kind: "model"; readonly modelId: string }
   | { readonly kind: "manual" }
@@ -50,6 +51,21 @@ export type OpenAICompatibleChatTestSelection = "run" | "skip" | "not-tested";
 export type OpenAICompatibleSummaryDecision = "review" | "back" | "cancel";
 
 export type OpenAICompatibleEndpointFlowText = {
+  readonly intro: {
+    readonly title: string;
+    readonly body: string;
+    readonly current: string;
+    readonly currentNone: string;
+    readonly endpoint: string;
+    readonly defaultEndpoint: string;
+    readonly hasCurrentEndpoint: boolean;
+    readonly process: string;
+    readonly destination: string;
+    readonly continue: string;
+    readonly continueDescription: string;
+    readonly changeEndpoint: string;
+    readonly changeEndpointDescription: string;
+  };
   readonly endpoint: {
     readonly title: string;
     readonly body: string;
@@ -102,6 +118,11 @@ export type OpenAICompatibleEndpointFlowText = {
 };
 
 export type OpenAICompatibleEndpointFlowUi = {
+  readonly selectEndpointIntro: (input: {
+    readonly defaultBaseUrl: string;
+    readonly currentRoute?: OpenAICompatibleEndpointCurrentRoute;
+    readonly text: OpenAICompatibleEndpointFlowText["intro"];
+  }) => Promise<OpenAICompatibleEndpointIntroAction>;
   readonly promptBaseUrl: (input: {
     readonly defaultBaseUrl: string;
     readonly text: OpenAICompatibleEndpointFlowText["endpoint"];
@@ -161,10 +182,17 @@ export type OpenAICompatibleEndpointFlowUi = {
   }) => Promise<OpenAICompatibleSummaryDecision>;
 };
 
+export type OpenAICompatibleEndpointCurrentRoute = {
+  readonly providerId: string;
+  readonly modelId: string;
+  readonly baseUrl?: string;
+};
+
 export type OpenAICompatibleEndpointFlowOptions = {
   readonly providerId: ProviderId;
   readonly defaultBaseUrl: string;
   readonly defaultApiKeyEnv?: string;
+  readonly currentRoute?: OpenAICompatibleEndpointCurrentRoute;
   readonly locale: SetupCopyLocale;
   readonly ui: OpenAICompatibleEndpointFlowUi;
   readonly fetch?: FetchLike;
@@ -202,7 +230,7 @@ export async function collectOpenAICompatibleEndpointFlow(
   options: OpenAICompatibleEndpointFlowOptions
 ): Promise<OpenAICompatibleEndpointFlowResult> {
   const defaultApiKeyEnv = options.defaultApiKeyEnv ?? DEFAULT_API_KEY_ENV;
-  let baseUrl = await promptValidBaseUrl(options);
+  let baseUrl = await collectInitialBaseUrl(options);
   if (baseUrl === undefined) return { kind: "cancelled" };
   let authState: AuthState = { probeAuth: { kind: "none" } };
   let modelListCheck: OpenAICompatibleEndpointCheck = {
@@ -293,6 +321,23 @@ export async function collectOpenAICompatibleEndpointFlow(
       });
     }
   }
+}
+
+async function collectInitialBaseUrl(options: OpenAICompatibleEndpointFlowOptions): Promise<string | undefined> {
+  const introAction = await options.ui.selectEndpointIntro({
+    defaultBaseUrl: options.defaultBaseUrl,
+    currentRoute: options.currentRoute,
+    text: introText(options.locale, {
+      providerId: options.providerId,
+      defaultBaseUrl: options.defaultBaseUrl,
+      currentRoute: options.currentRoute,
+    }),
+  });
+  if (introAction === "cancel") return undefined;
+  if (introAction === "change-endpoint" || !isValidOpenAICompatibleEndpointBaseUrl(options.defaultBaseUrl)) {
+    return promptValidBaseUrl(options);
+  }
+  return options.defaultBaseUrl.replace(/\/$/, "");
 }
 
 export function isValidOpenAICompatibleEndpointBaseUrl(value: string): boolean {
@@ -601,6 +646,43 @@ function endpointText(
     manual: setupCopyText(locale, "setupEditor.prompt.openaiCompatible.endpoint.manual"),
     auth: setupCopyText(locale, "setupEditor.prompt.openaiCompatible.endpoint.auth"),
     invalid: formatSetupCopy(locale, "setupEditor.prompt.openaiCompatible.endpoint.invalid", { baseUrl }),
+  };
+}
+
+function introText(
+  locale: SetupCopyLocale,
+  input: {
+    readonly providerId: ProviderId;
+    readonly defaultBaseUrl: string;
+    readonly currentRoute?: OpenAICompatibleEndpointCurrentRoute;
+  }
+): OpenAICompatibleEndpointFlowText["intro"] {
+  const endpointBaseUrl = input.currentRoute?.providerId === input.providerId
+    ? input.currentRoute.baseUrl
+    : undefined;
+  return {
+    title: setupCopyText(locale, "setupEditor.prompt.openaiCompatible.intro.title"),
+    body: setupCopyText(locale, "setupEditor.prompt.openaiCompatible.intro.body"),
+    current: input.currentRoute === undefined
+      ? setupCopyText(locale, "setupEditor.prompt.openaiCompatible.intro.currentNone")
+      : formatSetupCopy(locale, "setupEditor.prompt.openaiCompatible.intro.current", {
+        providerId: input.currentRoute.providerId,
+        modelId: input.currentRoute.modelId,
+      }),
+    currentNone: setupCopyText(locale, "setupEditor.prompt.openaiCompatible.intro.currentNone"),
+    endpoint: formatSetupCopy(locale, "setupEditor.prompt.openaiCompatible.intro.endpoint", {
+      baseUrl: endpointBaseUrl ?? input.defaultBaseUrl,
+    }),
+    defaultEndpoint: formatSetupCopy(locale, "setupEditor.prompt.openaiCompatible.intro.defaultEndpoint", {
+      baseUrl: input.defaultBaseUrl,
+    }),
+    hasCurrentEndpoint: endpointBaseUrl !== undefined,
+    process: setupCopyText(locale, "setupEditor.prompt.openaiCompatible.intro.process"),
+    destination: setupCopyText(locale, "setupEditor.prompt.openaiCompatible.intro.destination"),
+    continue: setupCopyText(locale, "setupEditor.prompt.openaiCompatible.intro.continue"),
+    continueDescription: setupCopyText(locale, "setupEditor.prompt.openaiCompatible.intro.continue.description"),
+    changeEndpoint: setupCopyText(locale, "setupEditor.prompt.openaiCompatible.intro.changeEndpoint"),
+    changeEndpointDescription: setupCopyText(locale, "setupEditor.prompt.openaiCompatible.intro.changeEndpoint.description"),
   };
 }
 

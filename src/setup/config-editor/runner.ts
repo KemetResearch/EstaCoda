@@ -1015,7 +1015,11 @@ async function handleProviderRouteAction(
   }
 
   if (resolved.selection.credentialAction.kind === "endpoint") {
-    return reviewAndApplyOpenAICompatibleEndpointFlow(options, initialDecision, session, editorAction, resolved.selection);
+    return reviewAndApplyOpenAICompatibleEndpointFlow(options, initialDecision, session, editorAction, resolved.selection, {
+      providerId: loaded.primaryModelRoute.provider,
+      modelId: loaded.primaryModelRoute.id,
+      baseUrl: loaded.primaryModelRoute.baseUrl,
+    });
   }
 
   return reviewAndApplyResolvedRoute(options, initialDecision, session, editorAction, resolved.selection);
@@ -1026,7 +1030,12 @@ async function reviewAndApplyOpenAICompatibleEndpointFlow(
   initialDecision: SetupRouteDecision,
   session: NonNullable<SetupRouteDecision["setupEditorPlanSession"]>,
   editorAction: SetupEditorActionDraft,
-  resolution: ProviderModelSelectionResult
+  resolution: ProviderModelSelectionResult,
+  currentRoute?: {
+    readonly providerId: string;
+    readonly modelId: string;
+    readonly baseUrl?: string;
+  }
 ): Promise<RunOnceResult> {
   if (resolution.credentialAction.kind !== "endpoint") {
     throw new Error("OpenAI-compatible endpoint setup requires an endpoint credential action.");
@@ -1035,6 +1044,7 @@ async function reviewAndApplyOpenAICompatibleEndpointFlow(
     providerId: resolution.provider,
     defaultBaseUrl: resolution.credentialAction.baseUrl ?? resolution.baseUrl ?? "http://localhost:11434/v1",
     defaultApiKeyEnv: resolution.credentialAction.apiKeyEnv,
+    currentRoute,
   });
 }
 
@@ -1063,6 +1073,11 @@ async function handleCustomProviderRouteAction(
     providerId: customProvider.providerId,
     defaultBaseUrl: customProvider.defaultBaseUrl,
     defaultApiKeyEnv: customProvider.defaultApiKeyEnv,
+    currentRoute: {
+      providerId: loaded.primaryModelRoute.provider,
+      modelId: loaded.primaryModelRoute.id,
+      baseUrl: loaded.primaryModelRoute.baseUrl,
+    },
   });
 }
 
@@ -1178,12 +1193,18 @@ async function collectAndApplyOpenAICompatibleEndpointFlow(
     readonly providerId: ProviderId;
     readonly defaultBaseUrl: string;
     readonly defaultApiKeyEnv?: string;
+    readonly currentRoute?: {
+      readonly providerId: string;
+      readonly modelId: string;
+      readonly baseUrl?: string;
+    };
   }
 ): Promise<RunOnceResult> {
   const flowResult = await collectOpenAICompatibleEndpointFlow({
     providerId: input.providerId,
     defaultBaseUrl: input.defaultBaseUrl,
     defaultApiKeyEnv: input.defaultApiKeyEnv,
+    currentRoute: input.currentRoute,
     locale: options.locale,
     ui: createOpenAICompatibleEndpointFlowUi(options.prompt, options.locale),
     fetch: openAICompatibleSetupFetch(options),

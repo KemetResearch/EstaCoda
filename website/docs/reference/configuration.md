@@ -117,7 +117,7 @@ Additional provider routes, fallbacks, and metadata.
 }
 ```
 
-The built-in `local` provider can point at a local or private OpenAI-compatible endpoint. It defaults to `http://localhost:11434/v1` and no auth, so `apiKeyEnv` is optional:
+The built-in `local` provider can point at a local or custom OpenAI-compatible endpoint. It defaults to `http://localhost:11434/v1` and no auth, so `apiKeyEnv` is optional:
 
 ```json
 {
@@ -568,7 +568,7 @@ Telegram streaming runs before normal final-text routing. If streaming cannot de
 
 ## Secret handling
 
-- Provider setup writes raw API keys only to the selected profile `.env`, never to `config.json`. Local / private endpoints are no-auth by default and write a key only when one is provided.
+- Provider setup writes raw API keys only to the selected profile `.env`, never to `config.json`. Local / Custom endpoints are no-auth by default and write a key only when one is provided.
 - Voice setup review manifests show env-var references only. Raw Voice API keys are not stored in config, shown in review manifests, or inserted into prompt context.
 - Profile `.env` is chmodded to `0600` when written by the env secret store.
 - Runtime config loads the selected profile `.env` before execution.

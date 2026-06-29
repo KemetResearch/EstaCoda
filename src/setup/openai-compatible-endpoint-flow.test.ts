@@ -6,6 +6,7 @@ import {
   type OpenAICompatibleAuthSelection,
   type OpenAICompatibleChatTestSelection,
   type OpenAICompatibleEndpointAction,
+  type OpenAICompatibleEndpointIntroAction,
   type OpenAICompatibleEndpointFlowUi,
   type OpenAICompatibleModelChoice,
   type OpenAICompatibleModelSelection,
@@ -29,6 +30,7 @@ function response(input: {
 }
 
 type ScriptedUiInput = {
+  readonly introActions?: readonly OpenAICompatibleEndpointIntroAction[];
   readonly baseUrls?: readonly string[];
   readonly endpointActions?: readonly OpenAICompatibleEndpointAction[];
   readonly modelSelections?: readonly OpenAICompatibleModelSelection[];
@@ -44,7 +46,9 @@ type ScriptedUiInput = {
 function scriptedUi(input: ScriptedUiInput = {}): OpenAICompatibleEndpointFlowUi & {
   readonly observedModelChoices: OpenAICompatibleModelChoice[][];
   readonly summaryLines: string[][];
+  readonly introMessages: string[][];
 } {
+  const introActions = [...(input.introActions ?? ["continue"])];
   const baseUrls = [...(input.baseUrls ?? [""])];
   const endpointActions = [...(input.endpointActions ?? ["check"])];
   const modelSelections = [...(input.modelSelections ?? [{ kind: "model", modelId: "qwen2.5:7b" }])];
@@ -57,10 +61,23 @@ function scriptedUi(input: ScriptedUiInput = {}): OpenAICompatibleEndpointFlowUi
   const summaries = [...(input.summaries ?? ["review"])];
   const observedModelChoices: OpenAICompatibleModelChoice[][] = [];
   const summaryLines: string[][] = [];
+  const introMessages: string[][] = [];
 
   return {
     observedModelChoices,
     summaryLines,
+    introMessages,
+    selectEndpointIntro: async ({ text }) => {
+      introMessages.push([
+        text.body,
+        text.current,
+        text.endpoint,
+        text.defaultEndpoint,
+        text.process,
+        text.destination,
+      ]);
+      return introActions.shift() ?? "continue";
+    },
     promptBaseUrl: async () => baseUrls.shift() ?? "",
     selectEndpointAction: async () => endpointActions.shift() ?? "cancel",
     selectModel: async ({ choices }) => {
@@ -167,8 +184,38 @@ describe("openai-compatible endpoint flow", () => {
     });
   });
 
+  it("shows current route and default endpoint in the intro step", async () => {
+    const ui = scriptedUi({
+      endpointActions: ["manual"],
+      manualModelIds: ["manual-local"],
+      authSelections: ["none"],
+      chatTests: ["skip"],
+    });
+
+    const result = await collectOpenAICompatibleEndpointFlow({
+      providerId: "local",
+      defaultBaseUrl: "http://localhost:11434/v1",
+      currentRoute: {
+        providerId: "codex",
+        modelId: "gpt-5.5",
+      },
+      locale: "en",
+      ui,
+      fetch: async () => response({ ok: true }),
+    });
+
+    expect(result.kind).toBe("ready");
+    expect(ui.introMessages[0]).toEqual(expect.arrayContaining([
+      "Current: codex/gpt-5.5",
+      "Default endpoint: http://localhost:11434/v1",
+      expect.stringContaining("/models"),
+      "Requests will be sent to the endpoint you choose.",
+    ]));
+  });
+
   it("treats Ctrl+C during endpoint URL entry as cancellation", async () => {
     const ui = scriptedUi({
+      introActions: ["change-endpoint"],
       baseUrls: ["\u0003"],
     });
 

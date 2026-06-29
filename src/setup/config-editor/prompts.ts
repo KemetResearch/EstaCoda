@@ -12,6 +12,7 @@ import type {
   OpenAICompatibleAuthSelection,
   OpenAICompatibleChatTestSelection,
   OpenAICompatibleEndpointAction,
+  OpenAICompatibleEndpointIntroAction,
   OpenAICompatibleEndpointFlowUi,
   OpenAICompatibleModelSelection,
   OpenAICompatibleSummaryDecision,
@@ -194,6 +195,45 @@ export function createOpenAICompatibleEndpointFlowUi(
 ): OpenAICompatibleEndpointFlowUi {
   const target = setupPromptContext(prompt, locale);
   return {
+    selectEndpointIntro: ({ currentRoute, text }) => promptSetupChoice<OpenAICompatibleEndpointIntroAction>(prompt, {
+      title: text.title,
+      message: [
+        text.body,
+        currentRoute === undefined ? text.currentNone : text.current,
+        text.hasCurrentEndpoint ? text.endpoint : text.defaultEndpoint,
+        "",
+        text.process,
+        text.destination,
+        "",
+      ].join("\n"),
+      columns: setupChoiceColumns(locale),
+      tableDirection: setupChoiceTableDirection(locale),
+      tableWidth: setupChoiceTableWidth(locale),
+      tableMaxWidth: setupChoiceTableMaxWidth(locale),
+      tableAlign: setupChoiceTableAlign(locale),
+      showColumnHeaders: false,
+      choices: [
+        {
+          id: "continue-local-custom-endpoint",
+          label: text.continue,
+          description: text.continueDescription,
+          value: "continue" as const,
+        },
+        {
+          id: "change-local-custom-endpoint",
+          label: text.changeEndpoint,
+          description: text.changeEndpointDescription,
+          value: "change-endpoint" as const,
+        },
+        setupNavigationChoice({
+          id: "cancel",
+          label: setupCopyText(locale, "setupEditor.review.cancel"),
+          description: setupCopyText(locale, "setupEditor.review.cancel.description"),
+          value: "cancel" as const,
+        }),
+      ],
+      defaultValue: "continue" as const,
+    }),
     promptBaseUrl: async ({ defaultBaseUrl, text, error }) => {
       if (error !== undefined) {
         await showSetupCard(target, {

@@ -258,6 +258,18 @@ const SETUP_EDITOR_KEYS = [
   "setupEditor.prompt.localEndpoint.baseUrl",
   "setupEditor.prompt.localEndpoint.apiKeyOptional",
   "setupEditor.result.localEndpointInvalid",
+  "setupEditor.prompt.openaiCompatible.intro.title",
+  "setupEditor.prompt.openaiCompatible.intro.body",
+  "setupEditor.prompt.openaiCompatible.intro.current",
+  "setupEditor.prompt.openaiCompatible.intro.currentNone",
+  "setupEditor.prompt.openaiCompatible.intro.endpoint",
+  "setupEditor.prompt.openaiCompatible.intro.defaultEndpoint",
+  "setupEditor.prompt.openaiCompatible.intro.process",
+  "setupEditor.prompt.openaiCompatible.intro.destination",
+  "setupEditor.prompt.openaiCompatible.intro.continue",
+  "setupEditor.prompt.openaiCompatible.intro.continue.description",
+  "setupEditor.prompt.openaiCompatible.intro.changeEndpoint",
+  "setupEditor.prompt.openaiCompatible.intro.changeEndpoint.description",
   "setupEditor.prompt.openaiCompatible.endpoint.title",
   "setupEditor.prompt.openaiCompatible.endpoint.body",
   "setupEditor.prompt.openaiCompatible.endpoint.baseUrl",
@@ -855,7 +867,7 @@ describe("setup copy", () => {
     expect(resolveSetupCopy("en", "onboarding.providers.description.deepseek")).toBe("Cost-efficient models for primary or auxiliary use. Direct API.");
     expect(resolveSetupCopy("en", "onboarding.providers.description.google")).toBe("Gemini models with strong utility and multimodal coverage. Direct API.");
     expect(resolveSetupCopy("en", "onboarding.providers.description.kimi")).toBe("Moonshot Kimi models with strong quality/cost balance. Direct API.");
-    expect(resolveSetupCopy("en", "onboarding.providers.description.local")).toBe("OpenAI-compatible local or private endpoint. API key optional.");
+    expect(resolveSetupCopy("en", "onboarding.providers.description.local")).toBe("OpenAI-compatible local or custom endpoint. API key optional.");
     expect(resolveSetupCopy("en", "onboarding.providers.description.openai")).toBe("Frontier models for high-quality primary reasoning. Direct API.");
     expect(resolveSetupCopy("en", "onboarding.providers.description.openrouter")).toBe("Pay-per-use aggregator for routing across many model providers.");
     expect(resolveSetupCopy("en", "onboarding.providers.description.zai")).toBe("GLM models with strong quality/cost balance. Direct API.");
@@ -1028,7 +1040,7 @@ describe("setup copy", () => {
     expect(rawSetupCopy("en", "setupEditor.actions.editPrimaryModelRoute")).toBe("Primary model");
     expect(rawSetupCopy("en", "setupEditor.actions.editPrimaryModelRoute.description")).toBe("Default model used by the agent.");
     expect(rawSetupCopy("en", "setupEditor.actions.addCustomProviderRoute")).toBe("Custom OpenAI-compatible provider");
-    expect(rawSetupCopy("en", "setupEditor.actions.addCustomProviderRoute.description")).toBe("Add a named local, private, or enterprise OpenAI-compatible endpoint.");
+    expect(rawSetupCopy("en", "setupEditor.actions.addCustomProviderRoute.description")).toBe("Add a named local, custom, or enterprise OpenAI-compatible endpoint.");
     expect(rawSetupCopy("en", "setupEditor.actions.editFallbackModelRoute")).toBe("Fallback models");
     expect(rawSetupCopy("en", "setupEditor.actions.editFallbackModelRoute.description")).toBe("Backup model used if the primary model fails.");
     expect(rawSetupCopy("en", "setupEditor.actions.editAuxiliaryModelRoute")).toBe("Auxiliary models");
@@ -1110,7 +1122,7 @@ describe("setup copy", () => {
     expect(rawSetupCopy("ar", "setupEditor.actions.editPrimaryModelRoute")).toBe("النموذج الأساسي");
     expect(rawSetupCopy("ar", "setupEditor.actions.editPrimaryModelRoute.description")).toBe("النموذج الافتراضي الذي يستخدمه الوكيل.");
     expect(rawSetupCopy("ar", "setupEditor.actions.addCustomProviderRoute")).toBe("مزوّد مخصص متوافق مع OpenAI");
-    expect(rawSetupCopy("ar", "setupEditor.actions.addCustomProviderRoute.description")).toBe("أضف نقطة نهاية متوافقة مع OpenAI باسم مخصص، محلية أو خاصة أو مؤسسية.");
+    expect(rawSetupCopy("ar", "setupEditor.actions.addCustomProviderRoute.description")).toBe("أضف نقطة نهاية متوافقة مع OpenAI باسم مخصص، محلية أو مخصصة أو مؤسسية.");
     expect(rawSetupCopy("ar", "setupEditor.actions.editFallbackModelRoute")).toBe("النماذج الاحتياطية");
     expect(rawSetupCopy("ar", "setupEditor.actions.editFallbackModelRoute.description")).toBe("نماذج احتياطية تُستخدم إذا فشل النموذج الأساسي.");
     expect(rawSetupCopy("ar", "setupEditor.actions.editAuxiliaryModelRoute")).toBe("النماذج المساعدة");
@@ -1198,7 +1210,12 @@ describe("setup copy", () => {
   });
 
   it("contains OpenAI-compatible endpoint-first setup editor copy", () => {
-    expect(rawSetupCopy("en", "setupEditor.prompt.openaiCompatible.endpoint.title")).toBe("Local / Private Endpoint");
+    expect(rawSetupCopy("en", "setupEditor.prompt.openaiCompatible.intro.title")).toBe("Local / Custom Endpoint");
+    expect(rawSetupCopy("en", "setupEditor.prompt.openaiCompatible.intro.current")).toBe("Current: {providerId}/{modelId}");
+    expect(rawSetupCopy("en", "setupEditor.prompt.openaiCompatible.intro.defaultEndpoint")).toBe("Default endpoint: {baseUrl}");
+    expect(rawSetupCopy("en", "setupEditor.prompt.openaiCompatible.intro.process")).toContain("/models");
+    expect(rawSetupCopy("en", "setupEditor.prompt.openaiCompatible.intro.changeEndpoint.description")).toBe("Enter a different OpenAI-compatible base URL.");
+    expect(rawSetupCopy("en", "setupEditor.prompt.openaiCompatible.endpoint.title")).toBe("Local / Custom Endpoint");
     expect(rawSetupCopy("en", "setupEditor.prompt.openaiCompatible.endpoint.body")).toBe("Connect EstaCoda to an OpenAI-compatible inference endpoint.");
     expect(rawSetupCopy("en", "setupEditor.prompt.openaiCompatible.endpoint.baseUrl")).toBe("Endpoint URL [{baseUrl}] - press ENTER to use this default:");
     expect(rawSetupCopy("en", "setupEditor.prompt.openaiCompatible.endpoint.destination")).toBe("Requests will be sent to {baseUrl}.");
@@ -1217,6 +1234,15 @@ describe("setup copy", () => {
   });
 
   it("isolates OpenAI-compatible setup Arabic technical tokens", () => {
+    expect(resolveSetupCopy("ar", "setupEditor.prompt.openaiCompatible.intro.body")).toContain(isolateLtr("EstaCoda"));
+    expect(resolveSetupCopy("ar", "setupEditor.prompt.openaiCompatible.intro.body")).toContain(isolateLtr("OpenAI"));
+    expect(resolveSetupCopy("ar", "setupEditor.prompt.openaiCompatible.intro.current")).toContain(isolateLtr("{providerId}"));
+    expect(resolveSetupCopy("ar", "setupEditor.prompt.openaiCompatible.intro.current")).toContain(isolateLtr("{modelId}"));
+    expect(resolveSetupCopy("ar", "setupEditor.prompt.openaiCompatible.intro.defaultEndpoint")).toContain(isolateLtr("{baseUrl}"));
+    expect(resolveSetupCopy("ar", "setupEditor.prompt.openaiCompatible.intro.process")).toContain(isolateLtr("EstaCoda"));
+    expect(resolveSetupCopy("ar", "setupEditor.prompt.openaiCompatible.intro.process")).toContain(isolateLtr("/models"));
+    expect(resolveSetupCopy("ar", "setupEditor.prompt.openaiCompatible.intro.changeEndpoint.description")).toContain(isolateLtr("URL"));
+    expect(resolveSetupCopy("ar", "setupEditor.prompt.openaiCompatible.intro.changeEndpoint.description")).toContain(isolateLtr("OpenAI"));
     expect(resolveSetupCopy("ar", "setupEditor.prompt.openaiCompatible.endpoint.body")).toContain(isolateLtr("EstaCoda"));
     expect(resolveSetupCopy("ar", "setupEditor.prompt.openaiCompatible.endpoint.body")).toContain(isolateLtr("OpenAI"));
     expect(resolveSetupCopy("ar", "setupEditor.prompt.openaiCompatible.endpoint.baseUrl")).toContain(isolateLtr("URL"));

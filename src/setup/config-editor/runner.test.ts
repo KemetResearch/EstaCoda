@@ -2232,7 +2232,6 @@ describe("runConfigEditor", () => {
 
     expect(result.completed).toBe(true);
     expect(questions).toEqual([
-      "Endpoint URL [http://localhost:11434/v1] - press ENTER to use this default:",
       "Context window tokens [infer]: ",
     ]);
     expect(result.reviewManifest?.sections["provider-model-network"][0]?.review.values).toEqual(expect.objectContaining({
@@ -2256,6 +2255,7 @@ describe("runConfigEditor", () => {
     const basePrompt = fakePrompt({
       values: [
         "enterprise-gateway",
+        "Change endpoint",
         "https://gateway.example.com/v1",
         "Continue manually",
         "enterprise-model",
@@ -2406,6 +2406,7 @@ describe("runConfigEditor", () => {
     const basePrompt = fakePrompt({
       values: [
         "Local",
+        "Change endpoint",
         "not a url",
         "http://127.0.0.1:9999/v1",
         "Continue manually",
@@ -2475,6 +2476,7 @@ describe("runConfigEditor", () => {
       prompt: fakePrompt({
         values: [
           "Local",
+          "Change endpoint",
           "https://private.local/v1",
           "Continue manually",
           "private-local-model",
@@ -2532,6 +2534,7 @@ describe("runConfigEditor", () => {
         prompt: fakePrompt({
           values: [
             "Local",
+            "Change endpoint",
             "https://private.local/v1",
             "Continue manually",
             "env-local-model",

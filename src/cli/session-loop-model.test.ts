@@ -319,7 +319,7 @@ describe("session-loop /model", () => {
       {
         id: "local",
         cells: {
-          name: "Local / Private",
+          name: "Local / Custom",
           details: "http://localhost:11434/v1",
         },
         current: true,

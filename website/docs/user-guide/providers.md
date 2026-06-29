@@ -37,9 +37,9 @@ At runtime, EstaCoda reads `process.env[apiKeyEnv]` for credentialed routes and 
 
 ---
 
-## Local / Private Endpoint
+## Local / Custom Endpoint
 
-The built-in `local` provider is the simple path for OpenAI-compatible local or private endpoints. It works for tools such as Ollama, LM Studio, llama.cpp server, vLLM, LiteLLM, or an internal OpenAI-compatible gateway when that endpoint exposes the expected `/v1` API shape.
+The built-in `local` provider is the simple path for OpenAI-compatible local or custom endpoints. It works for tools such as Ollama, LM Studio, llama.cpp server, vLLM, LiteLLM, or an internal OpenAI-compatible gateway when that endpoint exposes the expected `/v1` API shape.
 
 Defaults:
 
@@ -314,7 +314,7 @@ estacoda model setup
 
 **Missing API key:** A credentialed route is non-runnable. Run `estacoda model setup` or set the environment variable. The default `local` route does not require an API key unless you configured one.
 
-**Local endpoint unreachable:** Check that the local/private OpenAI-compatible server is running, that the configured `baseUrl` includes the `/v1` path when required by the server, and that any optional key is present in the selected profile `.env`.
+**Local endpoint unreachable:** Check that the local/custom OpenAI-compatible server is running, that the configured `baseUrl` includes the `/v1` path when required by the server, and that any optional key is present in the selected profile `.env`.
 
 **Invalid model name:** The catalog does not recognize the model. Check the provider's documentation and update `config.json`.
 

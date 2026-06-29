@@ -117,7 +117,7 @@ model.staleTimeoutMs / model.fallbacks[].staleTimeoutMs
 }
 ```
 
-يمكن للمزود المدمج `local` أن يشير إلى نقطة نهاية محلية أو خاصة متوافقة مع OpenAI. قيمته الافتراضية هي `http://localhost:11434/v1` وبلا اعتماد، لذلك يكون `apiKeyEnv` اختياريًا:
+يمكن للمزود المدمج `local` أن يشير إلى نقطة نهاية محلية أو مخصصة متوافقة مع OpenAI. قيمته الافتراضية هي `http://localhost:11434/v1` وبلا اعتماد، لذلك يكون `apiKeyEnv` اختياريًا:
 
 ```json
 {

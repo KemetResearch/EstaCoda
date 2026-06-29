@@ -31,7 +31,7 @@ function hostedMetadata(): ProviderMetadata {
 function localMetadata(): ProviderMetadata {
   return {
     id: "local",
-    displayName: "Local / Private",
+    displayName: "Local / Custom",
     catalogKnown: true,
     configurable: true,
     runnable: true,
