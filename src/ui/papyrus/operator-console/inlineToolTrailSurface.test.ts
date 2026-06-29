@@ -3,7 +3,7 @@ import { stringWidth } from "../screen/stringWidth.js";
 import { formatInlineToolTrailRow } from "./inlineToolTrailSurface.js";
 
 describe("Papyrus operator console inline tool trail surface", () => {
-  it("formats running tool rows with active-work symbols and clock time", () => {
+  it("formats running tool rows with active-work symbols and compact elapsed time", () => {
     const row = formatInlineToolTrailRow({
       id: "read-1",
       sequence: 1,
@@ -16,7 +16,7 @@ describe("Papyrus operator console inline tool trail surface", () => {
 
     expect(row).toContain("◷ read_file");
     expect(row).toContain("src/cli/session-loop.ts");
-    expect(row).toContain("00:03");
+    expect(row).toContain("3s");
     expect(stringWidth(row)).toBeLessThanOrEqual(72);
   });
 
@@ -39,10 +39,10 @@ describe("Papyrus operator console inline tool trail surface", () => {
     }, 56);
 
     expect(succeeded).toContain("✓ read_file");
-    expect(succeeded).toContain("00:01");
+    expect(succeeded).toContain("1s");
     expect(failed).toContain("✗ terminal.run");
     expect(failed).toContain("denied");
-    expect(failed).toContain("00:00");
+    expect(failed).toContain("0s");
   });
 
   it("stays within narrow terminal widths", () => {

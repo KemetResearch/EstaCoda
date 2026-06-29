@@ -43,7 +43,7 @@ describe("Papyrus operator console transcript surface", () => {
     expect(rendered).toContain("I inspected the runtime path.");
     expect(rendered).toContain("✓ read_file");
     expect(rendered).toContain("src/cli/session-loop.ts");
-    expect(rendered).toContain("00:01");
+    expect(rendered).toContain("1s");
     expect(rendered).not.toContain("Tool │");
     expect(rows.every((line) => stringWidth(line) <= 80)).toBe(true);
   });

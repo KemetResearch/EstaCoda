@@ -12,6 +12,10 @@ export function buildToolSecurityTargetSummary(toolName: string, input: Record<s
     return truncateSecuritySummary(input.command);
   }
 
+  if (toolName === "terminal.inspect") {
+    return terminalInspectArgvPreview(input.argv, { securitySummary: true });
+  }
+
   for (const key of ["path", "url", "file_path", "pattern", "query", "prompt", "goal"] as const) {
     const summary = summarizeInputString(input[key]);
     if (summary !== undefined) {
@@ -32,6 +36,10 @@ export function buildToolSecurityTargetSummary(toolName: string, input: Record<s
 export function buildToolDisplayPreview(toolName: string, input: Record<string, unknown>): string | undefined {
   if ((toolName === "terminal.run" || toolName === "process.start") && typeof input.command === "string") {
     return compactCommandPreview(input.command);
+  }
+
+  if (toolName === "terminal.inspect") {
+    return terminalInspectArgvPreview(input.argv);
   }
 
   if (toolName === "file.read") {
@@ -139,6 +147,27 @@ function compactCommandPreview(command: string): string | undefined {
   const pipeCompacted = compactPipes(head);
   const suffix = displaySegments.length > 1 ? ` + ${displaySegments.length - 1} cmds` : "";
   return truncateDisplayPreview(`${redactSecretsInString(pipeCompacted)}${suffix}`);
+}
+
+function terminalInspectArgvPreview(
+  value: unknown,
+  options: { readonly securitySummary?: boolean } = {}
+): string | undefined {
+  if (!Array.isArray(value) || value.length === 0) return undefined;
+  if (!value.every((entry): entry is string => typeof entry === "string")) return undefined;
+  const parts = value.map((entry) => entry.trim()).filter((entry) => entry.length > 0);
+  if (parts.length === 0) return undefined;
+  const rendered = parts.map(formatArgvPartForDisplay).join(" ");
+  const redacted = redactSecretsInString(rendered);
+  return options.securitySummary === true
+    ? truncateSecuritySummary(redacted)
+    : truncateDisplayPreview(redacted);
+}
+
+function formatArgvPartForDisplay(value: string): string {
+  if (!/\s/u.test(value)) return value;
+  const escaped = value.replace(/\\/gu, "\\\\").replace(/"/gu, "\\\"");
+  return `"${escaped}"`;
 }
 
 function compactPipes(command: string): string {

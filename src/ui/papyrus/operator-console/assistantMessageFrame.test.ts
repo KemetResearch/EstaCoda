@@ -83,7 +83,7 @@ describe("Papyrus operator console assistant message frame", () => {
     expect(rendered).toContain("I'll inspect the runtime path first.");
     expect(rendered).toContain("◷ read_file");
     expect(rendered).toContain("src/cli/session-loop.ts");
-    expect(rendered).toContain("00:03");
+    expect(rendered).toContain("3s");
     expect(rendered).toContain("The session loop wires deltas through the console.▍");
     expect(rows.every((line) => stringWidth(line) <= 84)).toBe(true);
   });

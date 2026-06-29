@@ -1,7 +1,12 @@
 import { truncateVisible } from "../../renderers/layout.js";
 import { stringWidth } from "../screen/stringWidth.js";
-import { ACTIVE_WORK_STATUS_SYMBOLS } from "./activeWorkSurface.js";
+import {
+  ACTIVE_WORK_STATUS_SYMBOLS,
+  formatActiveWorkDuration,
+} from "./activeWorkSurface.js";
 import type { InlineToolTrailEntry } from "./operatorConsoleState.js";
+
+const TOOL_DETAIL_GAP_CELLS = 3;
 
 export function formatInlineToolTrailRow(entry: InlineToolTrailEntry, width: number): string {
   const normalizedWidth = normalizeDimension(width);
@@ -10,7 +15,7 @@ export function formatInlineToolTrailRow(entry: InlineToolTrailEntry, width: num
   const symbol = ACTIVE_WORK_STATUS_SYMBOLS[entry.status];
   const tool = normalizeText(entry.displayLabel ?? entry.toolName, "tool");
   const detail = normalizeText(entry.target ?? entry.summary, entry.status);
-  const duration = formatInlineToolTrailDuration(resolveEntryDurationMs(entry));
+  const duration = formatActiveWorkDuration(resolveEntryDurationMs(entry));
   const prefix = `  ${symbol} `;
   if (normalizedWidth <= stringWidth(prefix) + 1) return truncateVisible(prefix.trimEnd(), normalizedWidth, "");
 
@@ -19,11 +24,12 @@ export function formatInlineToolTrailRow(entry: InlineToolTrailEntry, width: num
   if (available <= 0) return truncateVisible(`${prefix}${tool}`, normalizedWidth, "");
 
   const toolCells = Math.min(18, Math.max(1, Math.min(available, Math.floor(available * 0.35))));
-  const detailGapCells = available > toolCells ? 1 : 0;
+  const detailGapCells = available > toolCells ? Math.min(TOOL_DETAIL_GAP_CELLS, available - toolCells) : 0;
   const detailCells = Math.max(0, available - toolCells - detailGapCells);
   const renderedTool = padVisibleEnd(truncateVisible(tool, toolCells, ""), toolCells);
   const renderedDetail = detailCells <= 0 ? "" : padVisibleEnd(truncateVisible(detail, detailCells, ""), detailCells);
-  const row = `${prefix}${renderedTool}${detailGapCells > 0 ? ` ${renderedDetail}` : ""}${durationPart}`;
+  const detailGap = " ".repeat(detailGapCells);
+  const row = `${prefix}${renderedTool}${detailGapCells > 0 ? `${detailGap}${renderedDetail}` : ""}${durationPart}`;
 
   return truncateVisible(row, normalizedWidth, "");
 }
@@ -34,13 +40,6 @@ function resolveEntryDurationMs(entry: InlineToolTrailEntry): number {
     return entry.endedAtMs - entry.startedAtMs;
   }
   return 0;
-}
-
-function formatInlineToolTrailDuration(durationMs: number): string {
-  const totalSeconds = Math.max(0, Math.floor(durationMs / 1000));
-  const minutes = Math.floor(totalSeconds / 60);
-  const seconds = totalSeconds % 60;
-  return `${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
 }
 
 function padVisibleEnd(value: string, width: number): string {
