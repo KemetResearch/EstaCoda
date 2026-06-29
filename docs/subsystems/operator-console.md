@@ -56,6 +56,7 @@ The live console must support this vertical order:
 
 ```text
 startup/transcript
+live assistant streaming, if present
 approvals, if present
 active work, if present
 queued steer, if present
@@ -88,6 +89,7 @@ type OperatorConsoleState = {
   prompt: PromptSurfaceState;
   status: StatusRailState;
   attachments: AttachmentCardState[];
+  streaming?: StreamingState;
   activeWork: ToolActivityState;
   approvals: ApprovalCardState[];
   slash?: SlashMenuState;
@@ -155,6 +157,7 @@ Visual order supported:
 
 ```text
 startup/transcript
+live assistant streaming, if present
 active work, if present
 queued steer, if present
 attachments, if present
@@ -348,6 +351,59 @@ Completed tool work: 3 running steps resolved, 42 total tool events, 1 file chan
 Active work is live telemetry. It should not dump full operational detail into
 the transcript by default.
 
+### Phase E2: Live Assistant Streaming
+
+Live assistant streaming is the Operator Console view of visible provider text
+while a local interactive CLI turn is in flight:
+
+```text
+User:
+explain the setup editor flow
+Assistant:
+The setup editor is split into detection, review, apply, and verification.
+╭─ Active work ─────────────────────────────────────────────────────────╮
+│ ◷ reading setup editor files                                   00:04  │
+╰───────────────────────────────────────────────────────────────────────╯
+╭─ Steer current turn ──────────────────────────────────────────────────╮
+│ ›                                                                      │
+╰───────────────────────────────────────────────────────────────────────╯
+kimi-k2.7-code ● │ ctx [▰▱▱▱▱▱▱▱▱▱] 7% │ session 00:31
+```
+
+Streaming contract:
+
+- Provider-layer reasoning filtering is authoritative. Reasoning fragments,
+  hidden chain-of-thought, and provider-only control text must be filtered before
+  any delta reaches the Operator Console.
+- Papyrus consumes visible deltas only. The streaming surface must not parse,
+  infer, recover, or render hidden reasoning from provider events.
+- Local interactive Operator Console turns receive visible text through
+  `runtime.handle({ onDelta })`. Plain CLI turns keep the append-only stdout
+  `provider-token` path and must not be converted to managed-frame rendering.
+- `onSegmentBreak` is tool-boundary-only in this pass. It seals the current
+  visible assistant segment before tool progress appears; it is not a general
+  markdown, paragraph, or reasoning delimiter.
+- If a provider attempt reports `provider-result.willFallback`, the Operator
+  Console resets live streaming for that attempt before fallback output starts.
+  Failed-attempt text must not survive into the visible fallback stream.
+- Final assistant response dedupe depends on non-empty visible streaming output:
+  `tail.trim().length > 0 || segments.some((segment) => segment.text.trim().length > 0)`.
+  Whitespace-only or fully filtered streams still render the finalized assistant
+  response normally.
+- The streaming layout priority is `STREAMING_PRIORITY = 5`. It sits above
+  transcript (`TRANSCRIPT_PRIORITY = 6`) and below higher-priority interactive
+  surfaces such as active work, approvals, prompt, slash, and status. Constrained
+  terminals may hide streaming before those interactive/status surfaces.
+- Raw prompt frame rebuilds must restore streaming after `host.clear()`. The
+  ordering is part of the contract because `clear()` removes transient host
+  state before the snapshot is replayed into the new frame.
+- Completing streaming is atomic: flush the current tail into transcript blocks,
+  append those transcript blocks, clear live streaming state, stop the streaming
+  refresh timer, and refresh once.
+- Streaming refreshes share the Operator Console refresh path with animation
+  ticks. Back-to-back timer wakeups should be coalesced or dropped rather than
+  fighting over terminal writes.
+
 ### Phase F: Inline Approval Cards
 
 Approval required:
@@ -524,6 +580,7 @@ kimi-k2.7-code ● │ ctx [▰▱▱▱▱▱▱▱▱▱] 18.4k/262k 7% │ se
 | Runtime host and state | `src/ui/papyrus/operator-console/operatorConsoleRuntimeHost.ts`, `src/ui/papyrus/operator-console/operatorConsoleState.ts` |
 | Layout and deterministic text render | `src/ui/papyrus/operator-console/operatorConsoleLayout.ts`, `src/ui/papyrus/operator-console/operatorConsoleRenderer.ts` |
 | Prompt/status surfaces | `src/ui/papyrus/operator-console/promptSurface.ts`, `src/ui/papyrus/operator-console/statusRailSurface.ts` |
+| Live assistant streaming | `src/ui/papyrus/operator-console/streamingSurface.ts`, `src/cli/live-operator-console-controller.ts`, `src/cli/session-loop.ts` |
 | Active work | `src/ui/papyrus/operator-console/activeWorkSurface.ts`, `src/ui/papyrus/operator-console/activeWorkRuntimeMapper.ts` |
 | Approvals | `src/ui/papyrus/operator-console/approvalSurface.ts`, `src/ui/papyrus/operator-console/approvalRuntimeMapper.ts` |
 | Steering | `src/ui/papyrus/operator-console/steerSurface.ts` |
