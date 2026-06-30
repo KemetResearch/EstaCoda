@@ -2873,9 +2873,7 @@ function renderFreshSessionNotice(
     "",
     freshSessionRow(
       "security",
-      status.securityMode === "open"
-        ? `${formatSecurityMode(status.securityMode)} | ${useUnicode ? "↯ " : ""}YOLO mode`
-        : formatSecurityMode(status.securityMode)
+      formatFreshSessionSecurity(status.securityMode, useUnicode)
     ),
     freshSessionRow(
       "skills",
@@ -2890,6 +2888,13 @@ function renderFreshSessionNotice(
 
 function freshSessionRow(label: string, value: string): string {
   return `${label.padEnd(10, " ")} ${value}`;
+}
+
+function formatFreshSessionSecurity(mode: string, useUnicode: boolean): string {
+  const baseMode = mode.replace(/\s+\(YOLO\)$/u, "");
+  return baseMode === "open"
+    ? `${formatSecurityMode(baseMode)} | ${useUnicode ? "↯ " : ""}YOLO mode`
+    : formatSecurityMode(mode);
 }
 
 function formatSecurityMode(mode: string): string {

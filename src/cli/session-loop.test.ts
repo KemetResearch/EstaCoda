@@ -4161,7 +4161,7 @@ describe("runSessionLoop — active turn spinner", () => {
         agentName: "EstaCoda",
         model: { provider: "kimi", id: "kimi-k2.7-code" },
         profileId: "default",
-        securityMode: "open",
+        securityMode: "open (YOLO)",
         skillCount: 17,
         skillAutonomy: "autonomous",
         toolCount: 96,
