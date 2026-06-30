@@ -34,7 +34,8 @@ export const ACTIVE_WORK_STATUS_SYMBOLS: Readonly<Record<ActiveWorkItemStatus, s
 const LTR_ISOLATE_START = "\u2068";
 const LTR_ISOLATE_END = "\u2069";
 const TOOL_DETAIL_GAP_CELLS = 3;
-const ARABIC_DURATION_DETAIL_GAP_CELLS = 4;
+const DURATION_DETAIL_GAP_CELLS = 3;
+const ARABIC_DURATION_DETAIL_GAP_CELLS = 7;
 
 export function hasActiveWork(state: ToolActivityState): boolean {
   return state.items.length > 0;
@@ -199,7 +200,7 @@ function formatActiveWorkRow(
   if (width <= 8) return truncateVisibleCells(`${symbol} ${rawTool}`, width);
 
   const prefixCells = stringWidth(symbol) + 1;
-  const durationPartCells = width >= 16 ? stringWidth(duration) + 1 : 0;
+  const durationPartCells = width >= 16 ? stringWidth(duration) + DURATION_DETAIL_GAP_CELLS : 0;
   const availableMainCells = Math.max(0, width - prefixCells - durationPartCells);
   if (availableMainCells <= 0) return truncateVisibleCells(`${symbol} ${rawTool}`, width);
 
@@ -212,7 +213,7 @@ function formatActiveWorkRow(
   const left = `${symbol} ${padVisibleEnd(tool, toolCells)}${detailGapCells > 0 ? `${detailGap}${padVisibleEnd(detail, detailCells)}` : ""}`;
 
   if (durationPartCells === 0) return truncateVisibleCells(left, width);
-  const row = `${left} ${isolateIfNeeded(duration, locale)}`;
+  const row = `${left}${" ".repeat(DURATION_DETAIL_GAP_CELLS)}${isolateIfNeeded(duration, locale)}`;
   return truncateVisibleCells(row, width);
 }
 

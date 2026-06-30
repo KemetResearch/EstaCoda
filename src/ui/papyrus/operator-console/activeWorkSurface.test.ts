@@ -242,6 +242,23 @@ describe("Papyrus operator console active work surface", () => {
     expect(output).toContain("0.1s");
   });
 
+  it("keeps long English targets from crowding the duration and right frame edge", () => {
+    const output = renderActiveWorkSurface(createState({
+      items: [
+        item("search-tools", "succeeded", {
+          toolName: "terminal.run",
+          displayLabel: "Run Command",
+          target: "git log --oneline -20 -- 'src/**/tool*' 'src/**/native-tool*' 'src/**/mcp*'",
+          durationMs: 200,
+        }),
+      ],
+    }), { width: 96, height: 3 });
+    const row = output.find((line) => line.includes("Run Command")) ?? "";
+
+    expect(row).toMatch(/ {3,}0\.2s\s+│$/u);
+    expect(output.every((line) => stringWidth(line) <= 96)).toBe(true);
+  });
+
   it("shows a live working timer in the active work header when turn timing is available", () => {
     const output = renderActiveWorkSurface(createState({
       startedAtMs: 1_000,
@@ -344,7 +361,7 @@ describe("Papyrus operator console active work surface", () => {
     expect(row).toContain("قراءة ملف");
     expect(row).toContain("✓");
     expect(row.indexOf("0.1s")).toBeLessThan(row.indexOf("src/app.ts"));
-    expect(row).toMatch(/0\.1s {4,}src\/app\.ts/u);
+    expect(row).toMatch(/0\.1s {7,}src\/app\.ts/u);
     expect(row.indexOf("src/app.ts")).toBeLessThan(row.indexOf("قراءة ملف"));
     expect(row.indexOf("قراءة ملف")).toBeLessThan(row.indexOf("✓"));
     expect(output.every((line) => stringWidth(line) <= 72)).toBe(true);
@@ -368,7 +385,7 @@ describe("Papyrus operator console active work surface", () => {
     expect(row).toContain("قراءة ملف");
     expect(row).toContain("✓");
     expect(row.indexOf("0.1s")).toBeLessThan(row.indexOf("src/done.ts"));
-    expect(row).toMatch(/0\.1s {4,}src\/done\.ts/u);
+    expect(row).toMatch(/0\.1s {7,}src\/done\.ts/u);
     expect(row.indexOf("src/done.ts")).toBeLessThan(row.indexOf("قراءة ملف"));
     expect(row.indexOf("قراءة ملف")).toBeLessThan(row.indexOf("✓"));
     expect(output.every((line) => stringWidth(line) <= 72)).toBe(true);
