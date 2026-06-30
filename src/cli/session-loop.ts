@@ -51,6 +51,7 @@ import type { StartupDashboardViewModel, StatusViewModel, ViewModel } from "../c
 import type { TerminalCapabilities } from "../contracts/ui.js";
 import {
   createSubmittedSteerTranscriptBlock,
+  ActiveWorkRuntimeEventMapper,
   createOperatorConsoleRuntimeHost,
   createOperatorConsoleStyle,
   mapStartupDashboardViewModelToOperatorConsoleState,
@@ -63,7 +64,6 @@ import {
   type SteerState,
   type TurnActivityState,
 } from "../ui/papyrus/operator-console/index.js";
-import { activeWorkEventFromToolRail } from "./operator-console-tool-display.js";
 import type { ParsedKeypress } from "../ui/input/parseKeypress.js";
 import { createKeypressStreamDispatcher } from "../ui/input/keyPressStreamDispatcher.js";
 import { createTerminalLifecycle } from "../ui/input/terminalLifecycle.js";
@@ -285,6 +285,9 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
   const sessionStartedAtMs = now();
   let activityBuilder = new ToolActivityViewModelBuilder({
     tools: runtime.tools()
+  });
+  let activeWorkEventMapper = new ActiveWorkRuntimeEventMapper({
+    locale: renderer.locale === "ar" ? "ar" : "en",
   });
   let activeTurn: AbortController | undefined;
   let clearActiveTurnChrome: () => void = () => undefined;
@@ -515,6 +518,9 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
           resetTurnRailState();
           activityBuilder = new ToolActivityViewModelBuilder({
             tools: runtime.tools()
+          });
+          activeWorkEventMapper = new ActiveWorkRuntimeEventMapper({
+            locale: renderer.locale === "ar" ? "ar" : "en",
           });
           output.write(`${shouldExit.notice(runtime)}\n\n`);
           continue;
@@ -810,16 +816,11 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
 	              if (operatorConsoleLiveFrame !== undefined && event.kind === "provider-result" && event.willFallback) {
 	                operatorConsoleLiveFrame.resetStreaming();
 	              }
-	              let newPhase: string | undefined;
-	              if (operatorConsoleLiveFrame !== undefined && isToolActivityRuntimeEvent(event)) {
-	                const railEvent = activityBuilder.buildToolActivityRailEvent(event);
-	                operatorConsoleLiveFrame.applyActiveWorkEvent(activeWorkEventFromToolRail({
-	                  railEvent,
-	                  runtimeEvent: event,
-	                  locale: renderer.locale === "ar" ? "ar" : "en",
-	                }));
-	                newPhase = "tool";
-	              } else if (operatorConsoleLiveFrame !== undefined) {
+              let newPhase: string | undefined;
+              if (operatorConsoleLiveFrame !== undefined && isToolActivityRuntimeEvent(event)) {
+                operatorConsoleLiveFrame.applyActiveWorkEvent(activeWorkEventMapper.build(event));
+                newPhase = "tool";
+              } else if (operatorConsoleLiveFrame !== undefined) {
                   const operatorConsolePhase = operatorConsoleTransientPhaseForRuntimeEvent(event);
                   if (operatorConsolePhase === null) {
                     clearOperatorConsoleLiveFrame();
