@@ -74,9 +74,11 @@ export function renderActiveWorkSurface(
   const contentWidth = Math.max(0, width - 4);
   const contentRows = Math.max(1, height - 2);
   const sorted = sortActiveWorkItems(state);
-  const title = state.startedAtMs !== undefined
-    ? `${copy.runningTools}  ◷ ${isolateIfNeeded(formatClockDuration(resolveActiveWorkElapsedMs(state)), options.locale)}`
-    : copy.runningTools;
+  const title = formatActiveWorkTitle(
+    copy.runningTools,
+    state.startedAtMs === undefined ? undefined : formatClockDuration(resolveActiveWorkElapsedMs(state)),
+    options.locale
+  );
 
   return [
     renderTopBorder(title, width),
@@ -188,6 +190,11 @@ function formatActiveWorkRow(
   const rawTool = renderedTool.trim().length === 0 ? "tool" : renderedTool.trim();
   const rawDetail = (item.target ?? item.summary).trim();
   const duration = formatActiveWorkDuration(resolveDurationMs(item));
+
+  if (locale === "ar") {
+    return formatArabicActiveWorkRow({ symbol, rawTool, rawDetail, duration, width });
+  }
+
   if (width <= 8) return truncateVisibleCells(`${symbol} ${rawTool}`, width);
 
   const prefixCells = stringWidth(symbol) + 1;
@@ -205,6 +212,40 @@ function formatActiveWorkRow(
 
   if (durationPartCells === 0) return truncateVisibleCells(left, width);
   const row = `${left} ${isolateIfNeeded(duration, locale)}`;
+  return truncateVisibleCells(row, width);
+}
+
+function formatArabicActiveWorkRow(input: {
+  readonly symbol: string;
+  readonly rawTool: string;
+  readonly rawDetail: string;
+  readonly duration: string;
+  readonly width: number;
+}): string {
+  const { symbol, rawTool, rawDetail, duration, width } = input;
+  if (width <= 8) return truncateVisibleCells(`${rawTool} ${symbol}`, width);
+
+  const durationPartCells = width >= 16 ? stringWidth(duration) + 1 : 0;
+  const availableMainCells = Math.max(0, width - durationPartCells);
+  if (availableMainCells <= 0) return truncateVisibleCells(`${rawTool} ${symbol}`, width);
+
+  const actionCells = Math.min(18, Math.max(1, Math.min(availableMainCells, Math.floor(availableMainCells * 0.35))));
+  const symbolCells = stringWidth(symbol);
+  const actionGapCells = actionCells > symbolCells ? 1 : 0;
+  const toolCells = Math.max(0, actionCells - symbolCells - actionGapCells);
+  const detailGapCells = availableMainCells > actionCells ? Math.min(TOOL_DETAIL_GAP_CELLS, availableMainCells - actionCells) : 0;
+  const detailCells = Math.max(0, availableMainCells - actionCells - detailGapCells);
+  const durationPart = durationPartCells === 0 ? "" : `${isolateIfNeeded(duration, "ar")} `;
+  const detail = detailCells <= 0
+    ? ""
+    : padVisibleEnd(isolateIfNeeded(truncateVisibleCells(rawDetail, detailCells), "ar"), detailCells);
+  const tool = toolCells <= 0 ? "" : isolateIfNeeded(truncateVisibleCells(rawTool, toolCells), "ar");
+  const action = padVisibleStart(
+    `${tool}${actionGapCells > 0 && tool.length > 0 ? " " : ""}${symbol}`,
+    actionCells
+  );
+  const detailGap = " ".repeat(detailGapCells);
+  const row = `${durationPart}${detailGapCells > 0 ? `${detail}${detailGap}` : detail}${action}`;
   return truncateVisibleCells(row, width);
 }
 
@@ -280,6 +321,18 @@ function formatClockDuration(durationMs: number): string {
   return `${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
 }
 
+function formatActiveWorkTitle(
+  runningTools: string,
+  duration: string | undefined,
+  locale: OperatorConsoleLocale | undefined
+): string {
+  if (duration === undefined) return runningTools;
+  const isolatedDuration = isolateIfNeeded(duration, locale);
+  return locale === "ar"
+    ? `${isolatedDuration} ◷ ${runningTools}`
+    : `${runningTools}  ◷ ${isolatedDuration}`;
+}
+
 export function formatActiveWorkDuration(durationMs: number): string {
   const safeMs = Math.max(0, Number.isFinite(durationMs) ? durationMs : 0);
   if (safeMs < 60_000) {
@@ -324,6 +377,11 @@ function padRows(rows: readonly string[], count: number): readonly string[] {
 function padVisibleEnd(value: string, width: number): string {
   const padCells = Math.max(0, width - stringWidth(value));
   return `${value}${" ".repeat(padCells)}`;
+}
+
+function padVisibleStart(value: string, width: number): string {
+  const padCells = Math.max(0, width - stringWidth(value));
+  return `${" ".repeat(padCells)}${value}`;
 }
 
 function isolateIfNeeded(value: string, locale: OperatorConsoleLocale | undefined): string {
