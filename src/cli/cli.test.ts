@@ -393,6 +393,39 @@ describe("runCliCommand setup prompt factory dispatch", () => {
       configurable: true,
       value: true,
     });
+    setupFlowMock.collectSetupRoute.mockResolvedValue({ kind: "first-run-onboarding" });
+    setupFlowMock.runFirstRunSetup.mockResolvedValue({
+      completed: true,
+      exitCode: 0,
+      output: "Verification passed. Setup is ready.",
+      setupConsoleRenderedOutput: true,
+    });
+
+    const result = await runCliCommand({
+      argv: ["setup"],
+      workspaceRoot: tempDir,
+      homeDir: tempDir,
+    });
+
+    expect(result).toMatchObject({
+      handled: true,
+      exitCode: 0,
+      output: "",
+    });
+    expect(setupFlowMock.runFirstRunSetup).toHaveBeenCalledWith(expect.objectContaining({
+      setupConsole: expect.objectContaining({
+        input: process.stdin,
+        output: process.stdout,
+      }),
+    }));
+    expect(interactivePromptMock.close).toHaveBeenCalledOnce();
+  });
+
+  it("does not duplicate setup-editor setup-console final output as plain command output", async () => {
+    Object.defineProperty(process.stdin, "isTTY", {
+      configurable: true,
+      value: true,
+    });
     setupFlowMock.collectSetupRoute.mockResolvedValue({ kind: "configured-menu" });
     setupFlowMock.runConfigEditorSetup.mockResolvedValue({
       completed: true,

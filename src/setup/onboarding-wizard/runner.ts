@@ -6,13 +6,17 @@ import { defaultProfileId, readActiveProfile, resolveProfileStateHome } from "..
 import { ensureDefaultProfileState } from "../../cli/profile-state.js";
 import type { Prompt } from "../../cli/prompt-contract.js";
 import { withPromptUiContext } from "../../cli/prompt-contract.js";
+import type { PromptCardStatusLine } from "../../contracts/view-model.js";
 import { promptUiContextForLocale } from "../../contracts/ui.js";
 import { promptForApiKeyInput } from "../../cli/secret-prompt.js";
 import {
+  preserveSetupConsoleOnPromptClose,
+  setupConsoleControllerForPrompt,
   withSetupConsolePrompt,
   type SetupConsolePromptAdapterOptions,
 } from "../config-editor/setupConsolePromptAdapter.js";
 import { isolateLtr } from "../../ui/bidi.js";
+import type { SetupPanelState } from "../../ui/papyrus/operator-console/index.js";
 import {
   createProviderModelSelectionFlow,
   type FlowEngine,
@@ -125,6 +129,7 @@ export type FirstRunSetupRunnerResult = {
   readonly applyPlanningResult: SetupApplyPlanningResult;
   readonly applyEndState?: SetupApplyEndState;
   readonly gatewayServiceActivationResult?: GatewayServiceActivationResult;
+  readonly setupConsoleRenderedOutput?: boolean;
 };
 
 function onboardingPromptForLocale(
@@ -606,9 +611,18 @@ export async function runFirstRunSetup(
         });
         const reviewManifest = buildSetupReviewManifest([draftBundle]);
         const summaryText = renderOnboardingWizardSummary(wizardState, interfaceChoice.language);
-        write(options, `${summaryText}\n`);
+        const summaryRenderedInSetupConsole = setupConsoleControllerForPrompt(promptContext.prompt) !== undefined;
+        if (!summaryRenderedInSetupConsole) {
+          write(options, `${summaryText}\n`);
+        }
 
-        const summaryAction = await promptOnboardingSummaryAction(promptContext, interfaceChoice.language, summaryText, options.defaultSelections?.reviewAccepted ?? true);
+        const summaryAction = await promptOnboardingSummaryAction(
+          promptContext,
+          interfaceChoice.language,
+          summaryText,
+          options.defaultSelections?.reviewAccepted ?? true,
+          { renderSummaryInPrompt: summaryRenderedInSetupConsole }
+        );
         if (summaryAction === "back") {
           draft.optionalInitialScreen = draft.summaryBackTarget === "optional-menu" ? "capability-menu" : "start";
           step = draft.summaryBackTarget ?? "optional-start";
@@ -695,6 +709,7 @@ export async function runFirstRunSetup(
   const output = workspaceTrusted || !completed
     ? [renderedApplyOutput, gatewayServiceActivationOutput].filter((line): line is string => line !== undefined).join("\n")
     : setupCopyText(language, "onboarding.workspace.trust.deferredFinal");
+  const setupConsoleRenderedOutput = renderOnboardingSetupConsoleReadOnlyOutput(localizedOptions.prompt, language, output);
 
   return {
     completed,
@@ -709,6 +724,7 @@ export async function runFirstRunSetup(
     applyPlanningResult,
     applyEndState,
     gatewayServiceActivationResult,
+    setupConsoleRenderedOutput,
   };
 }
 
@@ -933,11 +949,19 @@ async function promptOnboardingSummaryAction(
   promptContext: SetupPromptContext,
   locale: SetupCopyLocale,
   summaryText: string,
-  defaultReviewAccepted: boolean
+  defaultReviewAccepted: boolean,
+  options: {
+    readonly renderSummaryInPrompt?: boolean;
+  } = {}
 ): Promise<SummaryAction> {
   return promptSetupChoice(promptContext, {
     title: setupCopyText(locale, "onboarding.summary.confirmTitle"),
-    message: `${summaryText}\n\n${setupCopyText(locale, "onboarding.summary.confirmMessage")}\n`,
+    message: options.renderSummaryInPrompt === true
+      ? `${setupCopyText(locale, "onboarding.summary.confirmMessage")}\n`
+      : `${summaryText}\n\n${setupCopyText(locale, "onboarding.summary.confirmMessage")}\n`,
+    ...(options.renderSummaryInPrompt === true
+      ? { statusLines: onboardingSummaryStatusLines(summaryText, locale) }
+      : {}),
     choices: [
       {
         id: "confirm",
@@ -960,6 +984,88 @@ async function promptOnboardingSummaryAction(
     ],
     defaultValue: defaultReviewAccepted ? "confirm" : "cancel",
   });
+}
+
+function onboardingSummaryStatusLines(
+  summaryText: string,
+  locale: SetupCopyLocale
+): readonly PromptCardStatusLine[] {
+  const direction = locale === "ar" ? "rtl" : "ltr";
+  const lines = summaryText
+    .split(/\r?\n/u)
+    .map((line) => line.trimEnd())
+    .filter((line) => line.trim().length > 0);
+  const contentLines = lines[0] === setupCopyText(locale, "onboarding.summary.confirmTitle")
+    ? lines.slice(1)
+    : lines;
+  return contentLines.map((line) => ({
+    text: line,
+    tone: "muted" as const,
+    direction,
+  }));
+}
+
+function renderOnboardingSetupConsoleReadOnlyOutput(
+  prompt: Prompt,
+  locale: SetupCopyLocale,
+  output: string
+): boolean {
+  const controller = setupConsoleControllerForPrompt(prompt);
+  if (controller === undefined || output.trim().length === 0) return false;
+
+  controller.render(onboardingReadOnlyOutputPanel(locale, output));
+  preserveSetupConsoleOnPromptClose(prompt);
+  return true;
+}
+
+function onboardingReadOnlyOutputPanel(
+  locale: SetupCopyLocale,
+  output: string
+): SetupPanelState {
+  const outputLines = output
+    .split(/\r?\n/u)
+    .map((line) => line.trimEnd())
+    .filter((line) => line.trim().length > 0);
+  return {
+    kind: "table",
+    layout: "choiceMenu",
+    title: setupCopyText(locale, "setupApply.result.title"),
+    description: setupCopyText(locale, "setupEditor.readOnlyPanel.description"),
+    statusLines: [{
+      text: setupCopyText(locale, "setupEditor.readOnlyPanel.footer"),
+      tone: "muted",
+      direction: locale === "ar" ? "rtl" : "ltr",
+    }],
+    locale,
+    rows: outputLines.length > 0
+      ? outputLines.map((line, index) => onboardingReadOnlyOutputRow(line, index))
+      : [onboardingReadOnlyOutputRow(setupCopyText(locale, "setupEditor.readOnlyPanel.footer"), 0)],
+    footer: setupCopyText(locale, "setupEditor.readOnlyPanel.footer"),
+  };
+}
+
+function onboardingReadOnlyOutputRow(
+  line: string,
+  index: number
+): SetupPanelState["rows"][number] {
+  const labeled = /^([^:]{1,28}):\s*(.*)$/u.exec(line);
+  if (labeled !== null) {
+    return {
+      id: `line-${index}`,
+      provider: labeled[1]!.trim(),
+      model: "",
+      status: labeled[2]!.trim(),
+      notes: "",
+    };
+  }
+
+  return {
+    id: `line-${index}`,
+    provider: "",
+    model: "",
+    status: line,
+    notes: "",
+  };
 }
 
 async function promptForCanonicalWorkspaceRoot(

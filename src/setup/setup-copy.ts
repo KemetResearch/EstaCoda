@@ -908,6 +908,7 @@ export const SETUP_COPY_ENTRIES = [
   copy("setupApply.review.approved", "Review approved. An apply plan can be prepared without executing it.", "تمت الموافقة على المراجعة. يمكن تجهيز خطة تطبيق دون تنفيذ.", [], "setup-review"),
   copy("setupApply.review.cancelled", "Review cancelled. No apply plan, config write, or trust grant will be created.", "أُلغيت المراجعة. لن تُنشأ خطة تطبيق أو كتابة إعدادات أو منح ثقة.", [], "none"),
   copy("setupApply.review.blocked", "Review is blocked by {blockerCount} item(s).", "المراجعة محظورة بسبب {blockerCount} عنصر/عناصر.", ["{blockerCount}"], "config-repair"),
+  copy("setupApply.result.title", "Setup result", "نتيجة الإعداد", [], "setup-review"),
   copy("setupApply.plan.ready", "Dry-run apply plan prepared from structured review data.", "تم تجهيز خطة تطبيق دون تنفيذ من بيانات مراجعة منظمة.", [], "config-write"),
   copy("setupApply.operations.configPatch", "Scoped config patch for {scope} in {configPath}.", "تعديل إعدادات محدود لـ {scope} داخل {configPath}.", ["{scope}", "{configPath}"], "config-write"),
   copy("setupApply.operations.credentialReference", "Credential reference operation for {envVar}.", "عملية مرجع بيانات اعتماد لـ {envVar}.", ["{envVar}"], "credential-reference"),

@@ -453,7 +453,7 @@ async function interactiveSetup(options: CliOptions, input: { readonly advanced:
       return {
         handled: true,
         exitCode: result.exitCode,
-        output: result.output,
+        output: setupConsole !== undefined && result.setupConsoleRenderedOutput === true ? "" : result.output,
         launchRequested: result.launchRequested === true,
       };
     }
