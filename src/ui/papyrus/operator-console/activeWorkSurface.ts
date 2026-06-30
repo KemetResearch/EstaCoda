@@ -34,6 +34,7 @@ export const ACTIVE_WORK_STATUS_SYMBOLS: Readonly<Record<ActiveWorkItemStatus, s
 const LTR_ISOLATE_START = "\u2068";
 const LTR_ISOLATE_END = "\u2069";
 const TOOL_DETAIL_GAP_CELLS = 3;
+const ARABIC_DURATION_DETAIL_GAP_CELLS = 4;
 
 export function hasActiveWork(state: ToolActivityState): boolean {
   return state.items.length > 0;
@@ -225,7 +226,7 @@ function formatArabicActiveWorkRow(input: {
   const { symbol, rawTool, rawDetail, duration, width } = input;
   if (width <= 8) return truncateVisibleCells(`${rawTool} ${symbol}`, width);
 
-  const durationPartCells = width >= 16 ? stringWidth(duration) + 1 : 0;
+  const durationPartCells = width >= 16 ? stringWidth(duration) + ARABIC_DURATION_DETAIL_GAP_CELLS : 0;
   const availableMainCells = Math.max(0, width - durationPartCells);
   if (availableMainCells <= 0) return truncateVisibleCells(`${rawTool} ${symbol}`, width);
 
@@ -235,7 +236,9 @@ function formatArabicActiveWorkRow(input: {
   const toolCells = Math.max(0, actionCells - symbolCells - actionGapCells);
   const detailGapCells = availableMainCells > actionCells ? Math.min(TOOL_DETAIL_GAP_CELLS, availableMainCells - actionCells) : 0;
   const detailCells = Math.max(0, availableMainCells - actionCells - detailGapCells);
-  const durationPart = durationPartCells === 0 ? "" : `${isolateIfNeeded(duration, "ar")} `;
+  const durationPart = durationPartCells === 0
+    ? ""
+    : `${isolateIfNeeded(duration, "ar")}${" ".repeat(ARABIC_DURATION_DETAIL_GAP_CELLS)}`;
   const detail = detailCells <= 0
     ? ""
     : padVisibleEnd(isolateIfNeeded(truncateVisibleCells(rawDetail, detailCells), "ar"), detailCells);

@@ -344,6 +344,7 @@ describe("Papyrus operator console active work surface", () => {
     expect(row).toContain("قراءة ملف");
     expect(row).toContain("✓");
     expect(row.indexOf("0.1s")).toBeLessThan(row.indexOf("src/app.ts"));
+    expect(row).toMatch(/0\.1s {4,}src\/app\.ts/u);
     expect(row.indexOf("src/app.ts")).toBeLessThan(row.indexOf("قراءة ملف"));
     expect(row.indexOf("قراءة ملف")).toBeLessThan(row.indexOf("✓"));
     expect(output.every((line) => stringWidth(line) <= 72)).toBe(true);
@@ -367,6 +368,7 @@ describe("Papyrus operator console active work surface", () => {
     expect(row).toContain("قراءة ملف");
     expect(row).toContain("✓");
     expect(row.indexOf("0.1s")).toBeLessThan(row.indexOf("src/done.ts"));
+    expect(row).toMatch(/0\.1s {4,}src\/done\.ts/u);
     expect(row.indexOf("src/done.ts")).toBeLessThan(row.indexOf("قراءة ملف"));
     expect(row.indexOf("قراءة ملف")).toBeLessThan(row.indexOf("✓"));
     expect(output.every((line) => stringWidth(line) <= 72)).toBe(true);
