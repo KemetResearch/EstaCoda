@@ -2861,7 +2861,7 @@ function renderFreshSessionNotice(
   const useUnicode = renderer.capabilities?.supportsUnicode === true;
   const useColor = renderer.capabilities?.supportsColor === true &&
     renderer.tokens?.contract.behavior.allowAnsiColor === true;
-  const brandLine = `${useUnicode ? "𓂀  " : ""}${status.agentName} ready`;
+  const brandLine = `${useUnicode ? "𓂀  " : ""}${freshSessionAgentName(status.agentName)} ready`;
   const profileSeparator = useUnicode ? "·" : "-";
   const lines = [
     `New session ${runtime.sessionId}`,
@@ -2888,6 +2888,10 @@ function renderFreshSessionNotice(
 
 function freshSessionRow(label: string, value: string): string {
   return `${label.padEnd(10, " ")} ${value}`;
+}
+
+function freshSessionAgentName(agentName: string): string {
+  return agentName.replace(/^𓂀\s*/u, "").trimStart();
 }
 
 function formatFreshSessionSecurity(mode: string, useUnicode: boolean): string {

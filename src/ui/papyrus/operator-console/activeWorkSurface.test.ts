@@ -259,6 +259,34 @@ describe("Papyrus operator console active work surface", () => {
     expect(output.every((line) => stringWidth(line) <= 96)).toBe(true);
   });
 
+  it("keeps right frame edges aligned for completed read-file rows", () => {
+    const output = renderActiveWorkSurface(createState({
+      expanded: true,
+      startedAtMs: 0,
+      updatedAtMs: 55_000,
+      items: [
+        "docs/subsystems/tools.md",
+        "src/contracts/tool.ts",
+        "src/contracts/tool-context.ts",
+        "src/contracts/tool-plan.ts",
+        "src/tools/tool-registry.ts",
+        "src/tools/tool-call-planner.ts",
+        "src/tools/tool-executor.ts",
+        "src/tools/tool-schema.ts",
+        "src/runtime/native-tool-executor.ts",
+        "src/delegation/toolset-security.ts",
+      ].map((target, index) => item(`read-${index}`, "succeeded", {
+        displayLabel: "Read File",
+        target,
+        durationMs: index % 3 === 0 ? 100 : 0,
+      })),
+    }), { width: 154, height: 12 });
+
+    expect(output).toHaveLength(12);
+    expect(output.every((line) => stringWidth(line) === 154)).toBe(true);
+    expect(output.every((line) => line.endsWith(line.startsWith("╭") ? "╮" : line.startsWith("╰") ? "╯" : "│"))).toBe(true);
+  });
+
   it("shows a live working timer in the active work header when turn timing is available", () => {
     const output = renderActiveWorkSurface(createState({
       startedAtMs: 1_000,

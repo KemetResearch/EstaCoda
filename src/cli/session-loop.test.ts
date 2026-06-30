@@ -4158,7 +4158,7 @@ describe("runSessionLoop — active turn spinner", () => {
       sessionId: "fresh-session",
       getStatus: () => ({
         kind: "status" as const,
-        agentName: "EstaCoda",
+        agentName: "𓂀 EstaCoda",
         model: { provider: "kimi", id: "kimi-k2.7-code" },
         profileId: "default",
         securityMode: "open (YOLO)",
@@ -4193,6 +4193,8 @@ describe("runSessionLoop — active turn spinner", () => {
     expect(rendered).toContain("⧖ 5m 12s");
     const afterReset = rendered.slice(rendered.indexOf("New session fresh-session"));
     expect(afterReset).toContain("𓂀  EstaCoda ready");
+    expect(afterReset).not.toContain("𓂀  𓂀");
+    expect(afterReset).not.toContain("𓂀EstaCoda");
     expect(afterReset).toContain("default profile · kimi/kimi-k2.7-code");
     expect(afterReset).toContain("security   Open | ↯ YOLO mode");
     expect(afterReset).toContain("skills     17 autonomous");
