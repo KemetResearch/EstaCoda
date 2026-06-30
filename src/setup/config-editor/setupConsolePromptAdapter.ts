@@ -496,7 +496,7 @@ function onboardingCardToSetupPanel(card: BuildOnboardingPromptCardInput): Setup
   const bodyLines = card.bodyLines
     .map((line) => line.trim())
     .filter((line) => line.length > 0);
-  const description = bodyLines.join(" ");
+  const description = bodyLines.join("\n");
   const technicalStatusLines = (card.technicalLines ?? [])
     .filter((line) => line.trim().length > 0)
     .map((line) => ({ text: line, tone: "muted" as const, direction: "ltr" as const }));

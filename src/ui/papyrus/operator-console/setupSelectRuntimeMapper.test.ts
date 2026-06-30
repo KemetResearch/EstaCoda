@@ -146,6 +146,22 @@ describe("Operator Console setup select runtime mapper", () => {
     });
   });
 
+  it("preserves intentional multiline setup choice body copy", () => {
+    const state = mapSetupSelectToSetupPanelState({
+      title: "Setup language",
+      body: "Choose the language EstaCoda uses for setup and CLI guidance.\nاختر اللغة التي يستخدمها EstaCoda في الإعداد وإرشادات الطرفية.\n",
+      selectedIndex: 0,
+      options: [
+        { id: "en", label: "English" },
+        { id: "ar", label: "العربية" },
+      ],
+    });
+
+    expect(state?.description).toBe(
+      "Choose the language EstaCoda uses for setup and CLI guidance.\nاختر اللغة التي يستخدمها EstaCoda في الإعداد وإرشادات الطرفية."
+    );
+  });
+
   it("maps existing setup name/details cells without changing semantic option values", () => {
     const state = mapSetupSelectToSetupPanelState({
       title: "Primary provider",

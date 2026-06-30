@@ -22,16 +22,17 @@ export function getSetupPanelSurfaceDesiredHeight(state: SetupSurfaceState, widt
   if (state.kind === "textInput") return Math.max(8, textEntryDescriptionLineCount(state.description, width) + 6);
   const statusLineCount = state.statusLines?.length ?? 0;
   const navigationSeparatorCount = state.rows.some((row) => row.group === "navigation") ? 1 : 0;
+  const descriptionLineCount = panelDescriptionLineCount(state, width);
   if (state.locale === "ar") {
-    return Math.max(8, state.rows.length * 2 + navigationSeparatorCount + 6 + statusLineCount);
+    return Math.max(8, state.rows.length * 2 + navigationSeparatorCount + 5 + descriptionLineCount + statusLineCount);
   }
   const renderedRows = state.layout === "choiceMenu"
     ? choiceMenuRenderedRowCount(state, Math.max(1, width - 4))
     : state.rows.length;
-  const baseRows = renderedRows + navigationSeparatorCount + 7 + statusLineCount;
+  const baseRows = renderedRows + navigationSeparatorCount + 6 + descriptionLineCount + statusLineCount;
   return normalizeDimension(width) >= WIDE_TABLE_MIN_WIDTH
     ? Math.max(8, baseRows)
-    : Math.max(8, renderedRows * 4 + 4 + statusLineCount);
+    : Math.max(8, renderedRows * 4 + 3 + descriptionLineCount + statusLineCount);
 }
 
 export function renderSetupPanelSurface(
@@ -59,7 +60,7 @@ function renderSetupTablePanel(
   const footer = state.footer ?? copy.footer;
   const rows = [
     renderSetupPanelTopBorder(state.title, state.locale, width, style),
-    renderPanelDescriptionRow(description, state.locale, contentWidth, width),
+    ...renderPanelDescriptionRows(description, state.locale, contentWidth, width),
     ...renderStatusLines(state.statusLines, contentWidth, width, style),
     renderContentRow("", contentWidth, width),
     ...(state.locale === "ar"
@@ -410,6 +411,12 @@ function sanitizeInlineText(value: string): string {
 
 function textEntryDescriptionLineCount(description: string, width: number): number {
   const contentWidth = Math.max(1, normalizeDimension(width) - 4);
+  return renderableDescriptionLines(description, contentWidth).length;
+}
+
+function panelDescriptionLineCount(state: SetupPanelState, width: number): number {
+  const contentWidth = Math.max(1, normalizeDimension(width) - 4);
+  const description = state.description ?? resolveSetupCopy(state.locale).modelDescription;
   return renderableDescriptionLines(description, contentWidth).length;
 }
 

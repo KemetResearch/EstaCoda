@@ -42,6 +42,25 @@ describe("Papyrus operator console setup panel surface", () => {
     expect(output.every((line) => stringWidth(line) <= 44)).toBe(true);
   });
 
+  it("renders intentional multiline setup descriptions", () => {
+    const output = renderSetupPanelSurface({
+      kind: "table",
+      layout: "choiceMenu",
+      title: "Setup language",
+      description: "Choose the language EstaCoda uses for setup and CLI guidance.\nاختر اللغة التي يستخدمها EstaCoda في الإعداد وإرشادات الطرفية.",
+      rows: [
+        { id: "en", provider: "English", model: "", status: "", notes: "" },
+        { id: "ar", provider: "العربية", model: "", status: "", notes: "" },
+      ],
+      selectedRowId: "en",
+    }, { width: 96 });
+    const text = output.join("\n");
+
+    expect(text).toContain("Choose the language EstaCoda uses for setup and CLI guidance.");
+    expect(text).toContain("اختر اللغة التي يستخدمها EstaCoda في الإعداد وإرشادات الطرفية.");
+    expect(output.every((line) => stringWidth(line) <= 96)).toBe(true);
+  });
+
   it("truncates long provider, model, status, and notes safely", () => {
     const output = renderSetupPanelSurface({
       ...modelRoutePanel(),
