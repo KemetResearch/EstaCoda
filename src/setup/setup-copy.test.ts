@@ -692,7 +692,7 @@ describe("setup copy", () => {
     expect(copy["onboarding.welcome"]).toContain("اضبط مساحة العمل");
     expect(copy["onboarding.welcome"]).toContain(isolateLtr("EstaCoda"));
     expect(rawSetupCopy("en", "onboarding.interfaceLanguage")).toContain("Choose the language EstaCoda uses for setup and CLI guidance.");
-    expect(rawSetupCopy("en", "onboarding.interfaceLanguage")).toContain("اختر اللغة التي يستخدمها EstaCoda في الإعداد وإرشادات الطرفية.");
+    expect(rawSetupCopy("en", "onboarding.interfaceLanguage")).toContain(`اختر اللغة التي تستخدمها ${isolateLtr("EstaCoda")} للإعداد وإرشادات الطرفية.`);
     expect(rawSetupCopy("ar", "onboarding.workspace.root")).toBe("اختر مساحة العمل التي سيستخدمها EstaCoda.");
     expect(rawSetupCopy("en", "onboarding.workspace.deferTrustAction.description")).not.toContain("Warning:");
     expect(copy["setupEditor.summary.repairFirst"]).toContain("لا جدوى من تلميع إعداد لا يعمل");

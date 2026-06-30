@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { isolateLtr } from "../../../ui/bidi.js";
 import { mapSetupSelectToSetupPanelState } from "./setupSelectRuntimeMapper.js";
 
 describe("Operator Console setup select runtime mapper", () => {
@@ -149,7 +150,7 @@ describe("Operator Console setup select runtime mapper", () => {
   it("preserves intentional multiline setup choice body copy", () => {
     const state = mapSetupSelectToSetupPanelState({
       title: "Setup language",
-      body: "Choose the language EstaCoda uses for setup and CLI guidance.\nاختر اللغة التي يستخدمها EstaCoda في الإعداد وإرشادات الطرفية.\n",
+      body: `Choose the language EstaCoda uses for setup and CLI guidance.\nاختر اللغة التي تستخدمها ${isolateLtr("EstaCoda")} للإعداد وإرشادات الطرفية.\n`,
       selectedIndex: 0,
       options: [
         { id: "en", label: "English" },
@@ -158,7 +159,7 @@ describe("Operator Console setup select runtime mapper", () => {
     });
 
     expect(state?.description).toBe(
-      "Choose the language EstaCoda uses for setup and CLI guidance.\nاختر اللغة التي يستخدمها EstaCoda في الإعداد وإرشادات الطرفية."
+      `Choose the language EstaCoda uses for setup and CLI guidance.\nاختر اللغة التي تستخدمها ${isolateLtr("EstaCoda")} للإعداد وإرشادات الطرفية.`
     );
   });
 
