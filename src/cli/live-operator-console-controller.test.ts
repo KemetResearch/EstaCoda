@@ -351,6 +351,24 @@ describe("LiveOperatorConsoleController", () => {
     expect(text).toContain("The answer is arriving▍");
     expect(text).not.toContain("Assistant stream");
   });
+
+  it("keeps live active work renders bounded to the configured terminal height", () => {
+    const output = createOutput();
+    const { controller, runtimeHost } = createControllerFixture(output);
+
+    for (let index = 0; index < 20; index += 1) {
+      controller.applyActiveWorkEvent({
+        id: `read-${index}`,
+        toolName: "read_file",
+        status: "running",
+        target: `src/file-${index}.ts`,
+      });
+    }
+
+    expect(runtimeHost.getState().terminal.height).toBe(12);
+    expect(runtimeHost.render().lines.length).toBeLessThanOrEqual(12);
+    expect(stripAnsi(output.text())).toContain("Running tools");
+  });
 });
 
 function createController(

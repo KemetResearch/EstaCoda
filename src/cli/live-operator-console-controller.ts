@@ -4,7 +4,6 @@ import { createLineEditorState } from "../ui/input/lineEditor.js";
 import {
   applyActiveWorkRuntimeEvent,
   createActiveWorkRuntimeState,
-  getActiveWorkSurfaceDesiredHeight,
   normalizeActiveWorkRuntimeEventId,
   type ActiveWorkItem,
   type ActiveWorkRuntimeEvent,
@@ -233,7 +232,7 @@ export class LiveOperatorConsoleController {
       state: createLineEditorState(this.#steer?.mode === "drafting" ? this.#steer.draft : ""),
       operatorConsole: {
         enabled: true,
-        terminal: this.#terminalSnapshotForRender(activeWork),
+        terminal: this.#terminal,
         status: this.#getStatus(),
         transcript: this.#transcript,
         turnActivity: this.#turnActivity,
@@ -269,17 +268,6 @@ export class LiveOperatorConsoleController {
     };
     this.#activeWorkFrameIndex += 1;
     return snapshot;
-  }
-
-  #terminalSnapshotForRender(activeWork: ToolActivityState): Partial<TerminalMetrics> {
-    const requestedHeight = getActiveWorkSurfaceDesiredHeight(activeWork);
-    if (requestedHeight <= 0) return this.#terminal;
-    const surroundingChromeRows = 32;
-    const currentHeight = this.#terminal.height ?? 0;
-    return {
-      ...this.#terminal,
-      height: Math.max(currentHeight, requestedHeight + surroundingChromeRows),
-    };
   }
 
   #advanceAnimationFrame(): void {
