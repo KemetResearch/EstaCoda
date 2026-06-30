@@ -23,7 +23,7 @@ function createMockSnapshot(): Record<string, unknown> {
       { id: "kimi", name: "Kimi" },
       { id: "google", name: "Google" },
       { id: "openrouter", name: "OpenRouter" },
-      { id: "local", name: "Local / Private" },
+      { id: "local", name: "Local / Custom" },
       { id: "codex", name: "OpenAI Codex" },
       { id: "fal", name: "Fal" }
     ],
@@ -242,7 +242,7 @@ function localAdapter(): {
 } {
   return {
     id: "local" as ProviderId,
-    name: "Local / Private",
+    name: "Local / Custom",
     executable: true,
     health() {
       return { available: true };

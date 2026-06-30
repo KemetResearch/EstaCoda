@@ -35,6 +35,37 @@ describe("selectProviderModelRoute", () => {
     expect(prompt.calls).toHaveLength(2);
   });
 
+  it("defers local model selection to the endpoint-first setup flow for configured modes", async () => {
+    for (const mode of ["primary", "fallback", "auxiliary"] as const) {
+      const flow = fakeFlow({
+        providers: [providerCandidate("local", "Local", 2)],
+        models: {
+          local: [
+            modelCandidate("local", "seed-model"),
+            modelCandidate("local", "other-local-model"),
+          ],
+        },
+      });
+      const prompt = fakePrompt(["local"]);
+
+      const result = await selectProviderModelRoute({
+        prompt,
+        flowEngine: flow.engine,
+        locale: "en",
+        mode,
+        endpointFirstProviderIds: ["local"],
+        allowCancel: true,
+      });
+
+      expect(result).toEqual({
+        kind: "selected",
+        selection: selectionResult("local", "seed-model"),
+      });
+      expect(flow.resolved).toEqual([{ providerId: "local", modelId: "seed-model" }]);
+      expect(prompt.calls.map((call) => call.title)).toEqual([`${mode === "primary" ? "Primary" : mode === "fallback" ? "Fallback" : "Auxiliary"} provider`]);
+    }
+  });
+
   it("returns diagnostic when no providers are available", async () => {
     const flow = fakeFlow({ providers: [] });
     const prompt = fakePrompt();
@@ -577,7 +608,7 @@ describe("selectProviderModelRoute", () => {
     expect(providerCandidateDescription("en", providerCandidate("deepseek", "DeepSeek", 1))).toBe("Cost-efficient models for primary or auxiliary use. Direct API.");
     expect(providerCandidateDescription("en", providerCandidate("google", "Google", 1))).toBe("Gemini models with strong utility and multimodal coverage. Direct API.");
     expect(providerCandidateDescription("en", providerCandidate("kimi", "Kimi", 1))).toBe("Moonshot Kimi models with strong quality/cost balance. Direct API.");
-    expect(providerCandidateDescription("en", providerCandidate("local", "Local / Private", 1))).toBe("OpenAI-compatible local or private endpoint. API key optional.");
+    expect(providerCandidateDescription("en", providerCandidate("local", "Local / Custom", 1))).toBe("OpenAI-compatible local or custom endpoint. API key optional.");
     expect(providerCandidateDescription("en", providerCandidate("openai", "OpenAI", 1))).toBe("Frontier models for high-quality primary reasoning. Direct API.");
     expect(providerCandidateDescription("en", providerCandidate("openrouter", "OpenRouter", 1))).toBe("Pay-per-use aggregator for routing across many model providers.");
     expect(providerCandidateDescription("en", providerCandidate("zai", "Z.AI", 1))).toBe("GLM models with strong quality/cost balance. Direct API.");

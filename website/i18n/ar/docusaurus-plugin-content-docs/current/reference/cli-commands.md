@@ -132,7 +132,7 @@ estacoda model diagnose                 # تشخيص كامل مع حالة ال
 estacoda model auxiliary status         # جاهزية المسارات المساعدة
 estacoda model fallback                 # إدارة سلسلة الاحتياطي
 estacoda model setup local [--base-url <url>] [--model <id>] [--api-key <key>] [--context-window <n>]
-                                        # تهيئة نقطة نهاية محلية / خاصة متوافقة مع OpenAI
+                                        # تهيئة نقطة نهاية محلية / مخصصة متوافقة مع OpenAI
 estacoda model setup custom --base-url <url> [--provider-id <id>] [--model <id>] [--api-key-env <env>] [--context-window <n>]
                                         # تهيئة مزود مخصص باسم منفصل ومتوافق مع OpenAI
 estacoda model setup codex              # إعداد OAuth device-code لـ Codex
@@ -147,7 +147,7 @@ estacoda model setup codex              # إعداد OAuth device-code لـ Code
 
 **السلوك:**
 - `estacoda model` الصافي يفتح منتقي تفاعلي في وضع الإعداد عند توفر TTY؛ وإلا يطبع نظرة عامة.
-- `model setup local` يهيئ المزود المدمج `local` لـ Ollama أو LM Studio أو llama.cpp أو vLLM أو نقطة نهاية محلية/خاصة أخرى متوافقة مع OpenAI. القيمة الافتراضية هي `http://localhost:11434/v1`، ولا يحتاج مفتاح API افتراضيًا، ويخزن `--api-key` الاختياري باسم `OPENAI_COMPATIBLE_API_KEY`.
+- `model setup local` يهيئ المزود المدمج `local` لـ Ollama أو LM Studio أو llama.cpp أو vLLM أو نقطة نهاية محلية/مخصصة أخرى متوافقة مع OpenAI. القيمة الافتراضية هي `http://localhost:11434/v1`، ولا يحتاج مفتاح API افتراضيًا، ويخزن `--api-key` الاختياري باسم `OPENAI_COMPATIBLE_API_KEY`.
 - `model setup custom` يهيئ معرف مزود OpenAI-compatible منفصلًا مع `baseUrl` صريح؛ استخدمه عندما تحتاج هوية مزود مستقلة عن المزود المدمج `local`.
 - `model setup codex` يُ authenticate عبر تدفق رمز الجهاز OAuth، ويخزن الرموز في `auth.json` داخل الملف الشخصي المحدد، ويُهيئ مسار `codex/gpt-5.5` مع طريقة المصادقة `oauth_device_pkce` ونمط API `openai_responses`.
 - يمكن لأمر `estacoda model` الصافي أيضًا إعداد Codex عندما يكون خيار OpenAI المتداخل مفعّلًا: اختر `OpenAI`، ثم `Codex`. خيار `OpenAI Models` هو مسار مفتاح API لـ OpenAI؛ وخيار `Codex` هو مسار OAuth.

@@ -65,6 +65,14 @@ function sse(payload: unknown): string {
   return `event: ${(payload as { type?: string }).type ?? "message"}\ndata: ${JSON.stringify(payload)}\n\n`;
 }
 
+function syntheticJwt(payload: unknown): string {
+  return [
+    Buffer.from(JSON.stringify({ alg: "none", typ: "JWT" })).toString("base64url"),
+    Buffer.from(JSON.stringify(payload)).toString("base64url"),
+    "signature"
+  ].join(".");
+}
+
 const DEFAULT_ENDPOINT: ProviderEndpoint = {
   baseUrl: "https://api.openai.com/v1",
   apiKey: { kind: "env", name: "OPENAI_API_KEY" }
@@ -365,6 +373,46 @@ describe("openai-responses-provider", () => {
       expect(prepared.body.tools).toEqual(request.tools);
     });
 
+    it("converts nested tools only for the ChatGPT Codex backend", () => {
+      const request: ProviderRequest = {
+        model: "gpt-5.5",
+        messages: [{ role: "user", content: "Hello" }],
+        tools: [{
+          type: "function",
+          function: {
+            name: "get_weather",
+            description: "Read the weather.",
+            parameters: {
+              type: "object",
+              properties: {
+                city: { type: "string" }
+              }
+            }
+          }
+        }]
+      };
+
+      const codexPrepared = buildResponsesRequest({
+        baseUrl: "https://chatgpt.com/backend-api/codex",
+        apiKey: { kind: "none" }
+      }, request, undefined, "codex");
+
+      expect(codexPrepared.body.tools).toEqual([{
+        type: "function",
+        name: "get_weather",
+        description: "Read the weather.",
+        parameters: {
+          type: "object",
+          properties: {
+            city: { type: "string" }
+          }
+        }
+      }]);
+
+      const directPrepared = buildResponsesRequest(DEFAULT_ENDPOINT, request, "sk-test", "codex");
+      expect(directPrepared.body.tools).toEqual(request.tools);
+    });
+
     it("sets store to false", () => {
       const request: ProviderRequest = {
         model: "gpt-4o",
@@ -396,6 +444,43 @@ describe("openai-responses-provider", () => {
       expect(prepared.body.max_output_tokens).toBe(1024);
       expect(prepared.body).not.toHaveProperty("max_tokens");
       expect(prepared.body).not.toHaveProperty("max_completion_tokens");
+    });
+
+    it("omits max_output_tokens only for the ChatGPT Codex backend", () => {
+      const request: ProviderRequest = {
+        model: "gpt-5.5",
+        messages: [{ role: "user", content: "Hello" }],
+        maxTokens: 1024
+      };
+
+      const codexPrepared = buildResponsesRequest({
+        baseUrl: "https://chatgpt.com/backend-api/codex",
+        apiKey: { kind: "none" }
+      }, request, undefined, "codex");
+      expect(codexPrepared.body).not.toHaveProperty("max_output_tokens");
+
+      const directPrepared = buildResponsesRequest(DEFAULT_ENDPOINT, request, "sk-test", "codex");
+      expect(directPrepared.body.max_output_tokens).toBe(1024);
+    });
+
+    it("does not apply Codex backend compatibility to non-https lookalike endpoints", () => {
+      const request: ProviderRequest = {
+        model: "gpt-5.5",
+        messages: [{ role: "user", content: "Hello" }],
+        maxTokens: 1024,
+        tools: [{ type: "function", function: { name: "get_weather" } }]
+      };
+
+      const prepared = buildResponsesRequest({
+        baseUrl: "http://chatgpt.com/backend-api/codex",
+        apiKey: { kind: "none" }
+      }, request, undefined, "codex");
+
+      expect(prepared.body.max_output_tokens).toBe(1024);
+      expect(prepared.body.tools).toEqual(request.tools);
+      expect(prepared.headers).not.toHaveProperty("User-Agent");
+      expect(prepared.headers).not.toHaveProperty("originator");
+      expect(prepared.headers).not.toHaveProperty("ChatGPT-Account-ID");
     });
 
     it("omits max_output_tokens when maxTokens is undefined", () => {
@@ -454,6 +539,151 @@ describe("openai-responses-provider", () => {
       const input = prepared.body.input as Array<{ role: string; content: unknown }>;
       expect(input[2].role).toBe("user");
       expect(input[2].content).toBe("Sunny, 72F");
+    });
+
+    it("adds Codex backend compatibility headers from OAuth JWT claims", () => {
+      const token = syntheticJwt({
+        "https://api.openai.com/auth": {
+          chatgpt_account_id: "account-123"
+        }
+      });
+
+      const prepared = buildResponsesRequest({
+        baseUrl: "https://chatgpt.com/backend-api/codex",
+        apiKey: { kind: "none" }
+      }, {
+        model: "gpt-5.5",
+        messages: [{ role: "user", content: "Hello" }]
+      }, token, "codex");
+
+      expect(prepared.headers["User-Agent"]).toBe("codex_cli_rs/0.0.0 (EstaCoda)");
+      expect(prepared.headers.originator).toBe("codex_cli_rs");
+      expect(prepared.headers["ChatGPT-Account-ID"]).toBe("account-123");
+      expect(prepared.headers.authorization).toBe(`Bearer ${token}`);
+    });
+
+    it("omits ChatGPT account header for malformed Codex JWTs without throwing", () => {
+      const prepared = buildResponsesRequest({
+        baseUrl: "https://chatgpt.com/backend-api/codex",
+        apiKey: { kind: "none" }
+      }, {
+        model: "gpt-5.5",
+        messages: [{ role: "user", content: "Hello" }]
+      }, "not-a-jwt", "codex");
+
+      expect(prepared.headers["User-Agent"]).toBe("codex_cli_rs/0.0.0 (EstaCoda)");
+      expect(prepared.headers.originator).toBe("codex_cli_rs");
+      expect(prepared.headers).not.toHaveProperty("ChatGPT-Account-ID");
+    });
+
+    it("does not add Codex backend headers for direct OpenAI Responses", () => {
+      const token = syntheticJwt({
+        "https://api.openai.com/auth": {
+          chatgpt_account_id: "account-123"
+        }
+      });
+
+      const prepared = buildResponsesRequest(DEFAULT_ENDPOINT, {
+        model: "gpt-5.5",
+        messages: [{ role: "user", content: "Hello" }]
+      }, token, "codex");
+
+      expect(prepared.headers).not.toHaveProperty("User-Agent");
+      expect(prepared.headers).not.toHaveProperty("originator");
+      expect(prepared.headers).not.toHaveProperty("ChatGPT-Account-ID");
+      expect(prepared.headers.authorization).toBe(`Bearer ${token}`);
+    });
+
+    it("does not apply Codex backend compatibility to non-Codex providers", () => {
+      const request: ProviderRequest = {
+        model: "gpt-5.5",
+        messages: [{ role: "user", content: "Hello" }],
+        maxTokens: 1024,
+        tools: [{ type: "function", function: { name: "get_weather" } }]
+      };
+
+      const prepared = buildResponsesRequest({
+        baseUrl: "https://chatgpt.com/backend-api/codex",
+        apiKey: { kind: "none" }
+      }, request, undefined, "openai-responses");
+
+      expect(prepared.body.max_output_tokens).toBe(1024);
+      expect(prepared.body.tools).toEqual(request.tools);
+      expect(prepared.headers).not.toHaveProperty("User-Agent");
+      expect(prepared.headers).not.toHaveProperty("originator");
+      expect(prepared.headers).not.toHaveProperty("ChatGPT-Account-ID");
+    });
+
+    it("converts native tool-call history only for the ChatGPT Codex backend", () => {
+      const request: ProviderRequest = {
+        model: "gpt-5.5",
+        messages: [
+          { role: "user", content: "Read a file" },
+          {
+            role: "assistant",
+            content: "",
+            toolCalls: [{
+              id: "call_1",
+              name: "file.read",
+              argumentsText: "{\"path\":\"README.md\"}"
+            }]
+          },
+          {
+            role: "tool",
+            toolCallId: "call_1",
+            content: "file contents"
+          }
+        ]
+      };
+
+      const codexPrepared = buildResponsesRequest({
+        baseUrl: "https://chatgpt.com/backend-api/codex",
+        apiKey: { kind: "none" }
+      }, request, undefined, "codex");
+
+      expect(codexPrepared.body.input).toEqual([
+        { role: "user", content: "Read a file" },
+        {
+          type: "function_call",
+          call_id: "call_1",
+          name: "file.read",
+          arguments: "{\"path\":\"README.md\"}"
+        },
+        {
+          type: "function_call_output",
+          call_id: "call_1",
+          output: "file contents"
+        }
+      ]);
+
+      const directPrepared = buildResponsesRequest(DEFAULT_ENDPOINT, request, "sk-test", "codex");
+      const directInput = directPrepared.body.input as Array<{ role?: string; content?: unknown }>;
+      expect(directInput[1]).toEqual({
+        role: "assistant",
+        content: ""
+      });
+      expect(directInput[2]).toEqual({
+        role: "user",
+        content: "file contents"
+      });
+    });
+
+    it("degrades orphan Codex tool messages to user content", () => {
+      const prepared = buildResponsesRequest({
+        baseUrl: "https://chatgpt.com/backend-api/codex",
+        apiKey: { kind: "none" }
+      }, {
+        model: "gpt-5.5",
+        messages: [
+          { role: "user", content: "Hello" },
+          { role: "tool", content: "orphan result" }
+        ]
+      }, undefined, "codex");
+
+      expect(prepared.body.input).toEqual([
+        { role: "user", content: "Hello" },
+        { role: "user", content: "orphan result" }
+      ]);
     });
   });
 
@@ -1064,6 +1294,49 @@ describe("openai-responses-provider", () => {
       expect(done?.response.content).toBe("Partial");
       expect(done?.response.finishReason).toBe("length");
       expect(done?.response.incompleteReason).toBe("max_output_tokens");
+    });
+
+    it("treats streamed completed responses with null error as successful", async () => {
+      const provider = createOpenAIResponsesProvider({
+        id: "codex",
+        endpoint: {
+          baseUrl: "https://chatgpt.com/backend-api/codex",
+          apiKey: { kind: "none" }
+        },
+        enableNetwork: true,
+        fetch: createSseFetch({
+          chunks: [
+            sse({ type: "response.output_text.delta", delta: "Hello" }),
+            sse({
+              type: "response.completed",
+              response: {
+                status: "completed",
+                error: null,
+                output: []
+              }
+            }),
+            "data: [DONE]\n\n"
+          ]
+        })
+      });
+
+      const events = [];
+      for await (const event of provider.stream!({
+        model: "codex-model",
+        messages: [{ role: "user", content: "Hello" }]
+      })) {
+        events.push(event);
+      }
+
+      expect(events.map((event) => event.kind)).toEqual([
+        "start",
+        "token",
+        "done"
+      ]);
+      const done = events.find((event) => event.kind === "done");
+      expect(done?.response.ok).toBe(true);
+      expect(done?.response.content).toBe("Hello");
+      expect(done?.response.errorClass).toBeUndefined();
     });
 
     it("collects streamed completion for the ChatGPT Codex backend", async () => {

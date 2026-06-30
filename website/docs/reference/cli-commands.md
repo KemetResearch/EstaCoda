@@ -134,7 +134,7 @@ estacoda model diagnose                 # full diagnostic with executable status
 estacoda model auxiliary status         # auxiliary route readiness
 estacoda model fallback                 # manage fallback chain
 estacoda model setup local [--base-url <url>] [--model <id>] [--api-key <key>] [--context-window <n>]
-                                        # configure Local / private OpenAI-compatible endpoint
+                                        # configure Local / Custom OpenAI-compatible endpoint
 estacoda model setup custom --base-url <url> [--provider-id <id>] [--model <id>] [--api-key-env <env>] [--context-window <n>]
                                         # configure named custom OpenAI-compatible provider
 estacoda model setup codex              # OAuth device-code setup for Codex
@@ -149,11 +149,12 @@ estacoda model setup codex              # OAuth device-code setup for Codex
 
 **Behavior:**
 - Bare `estacoda model` opens an interactive picker in setup mode when a TTY is available; otherwise prints an overview.
-- `model setup local` configures the built-in `local` provider for Ollama, LM Studio, llama.cpp, vLLM, or another OpenAI-compatible local/private endpoint. It defaults to `http://localhost:11434/v1`, requires no API key by default, and stores an optional `--api-key` as `OPENAI_COMPATIBLE_API_KEY`.
+- `model setup local` configures the built-in `local` provider for Ollama, LM Studio, llama.cpp, vLLM, or another OpenAI-compatible local/custom endpoint. It defaults to `http://localhost:11434/v1`, requires no API key by default, and stores an optional `--api-key` as `OPENAI_COMPATIBLE_API_KEY`.
 - `model setup custom` configures a separate named OpenAI-compatible provider ID with an explicit `baseUrl`; use it when you need more than the built-in `local` provider identity.
 - `model setup codex` authenticates through OAuth device code flow, stores tokens in the selected profile's `auth.json`, and configures the `codex/gpt-5.5` route with auth method `oauth_device_pkce` and API mode `openai_responses`.
 - Bare `estacoda model` can also configure Codex where the nested OpenAI choice is enabled: choose `OpenAI`, then `Codex`. The `OpenAI Models` choice is the API-key OpenAI path; `Codex` is the OAuth path.
 - Setup Editor primary and fallback model-route edits can configure Codex through reviewed apply. OAuth tokens are written only after review approval; cancelling review after OAuth does not persist tokens. First-run onboarding and auxiliary model routes do not add Codex OAuth setup in this pass.
+- `/providers` is the interactive-session surface for provider status and reviewed provider setup. `/model` remains the model status/switching command, and `/models` is not a slash command.
 - `model fallback` manages the ordered fallback chain and is also accessible through the Setup Editor (`edit-fallback-model-route`). `estacoda model set` is deprecated and rejected.
 
 **Failure modes:**

@@ -173,6 +173,19 @@ export function isConfigEditorActionId(
   return actions.some((action) => action.id === id);
 }
 
+export function configEditorHiddenDirectAction(
+  session: SetupEditorPlanSession,
+  id: string,
+  copyValues: Record<string, SetupPromptValue> = {},
+  locale: SetupCopyLocale = "en"
+): ConfigEditorRenderedAction | undefined {
+  if (id !== "add-custom-provider-route") {
+    return undefined;
+  }
+  const action = session.plan.actions.find((candidate) => candidate.id === id);
+  return action === undefined ? undefined : renderEditorAction(action, copyValues, locale);
+}
+
 function renderRouteAction(
   action: SetupRouteAction,
   locale: SetupCopyLocale
@@ -289,6 +302,8 @@ function editorActionDescription(action: SetupEditorActionDraft, locale: SetupCo
       return setupCopyText(locale, "setupEditor.actions.repairPrimaryProvider.description");
     case "edit-primary-model-route":
       return setupCopyText(locale, "setupEditor.actions.editPrimaryModelRoute.description");
+    case "add-custom-provider-route":
+      return setupCopyText(locale, "setupEditor.actions.addCustomProviderRoute.description");
     case "edit-fallback-model-route":
       return setupCopyText(locale, "setupEditor.actions.editFallbackModelRoute.description");
     case "edit-auxiliary-model-route":

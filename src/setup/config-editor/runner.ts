@@ -15,6 +15,7 @@ import {
   type FlowEngine,
   type ProviderModelSelectionResult,
 } from "../../providers/provider-model-selection-flow.js";
+import type { FetchLike as OpenAICompatibleFetchLike } from "../../providers/openai-compatible-provider.js";
 import {
   selectProviderModelRoute,
   type ProviderModelPromptResult,
@@ -51,15 +52,23 @@ import {
 import type { SetupVerificationReport } from "../verification.js";
 import type { SetupCopyKey, SetupCopyLocale } from "../setup-copy.js";
 import {
+  collectOpenAICompatibleEndpointFlow,
+  type OpenAICompatibleEndpointFlowResult,
+} from "../openai-compatible-endpoint-flow.js";
+import {
   formatSetupCopy,
   promptSetupChoice,
   renderSetupApplyEndState,
   renderSetupApplyPlanningResult,
+  setupOutputLine,
   setupProviderCredentialQuestion,
+  setupPromptContext,
   setupCopyText,
+  showSetupCard,
 } from "../setup-prompts.js";
 import { isolateLtr } from "../../ui/bidi.js";
 import {
+  createOpenAICompatibleEndpointFlowUi,
   promptConfigEditorAction,
   promptConfigEditorReviewApproval,
   promptAuxiliaryModelTask,
@@ -81,6 +90,7 @@ import {
 } from "./setupConsolePromptAdapter.js";
 import {
   configEditorActions,
+  configEditorHiddenDirectAction,
   isConfigEditorActionId,
   renderConfigEditor,
   renderConfigEditorDiagnosticsForLocale,
@@ -328,7 +338,13 @@ async function runConfigEditorOnce(
     };
   }
 
-  if (!isConfigEditorActionId(selectedAction.id, actions)) {
+  const allowedAction = actions.find((action) => action.id === selectedAction.id)
+    ?? (defaultActionId === undefined
+      ? undefined
+      : configEditorHiddenDirectAction(session, selectedAction.id, {
+        workspacePath: options.workspaceRoot,
+      }, locale));
+  if (allowedAction === undefined) {
     const output = formatSetupCopy(locale, "setupEditor.result.unavailableAction", {
       actionId: selectedAction.id,
     });
@@ -340,11 +356,6 @@ async function runConfigEditorOnce(
       initialDecision,
       selectedActionId: selectedAction.id,
     };
-  }
-
-  const allowedAction = actions.find((action) => action.id === selectedAction.id);
-  if (allowedAction === undefined) {
-    throw new Error(`Allowed setup editor action ${selectedAction.id} was not found.`);
   }
 
   return handleAction(localizedOptions, initialDecision, session, allowedAction);
@@ -529,6 +540,8 @@ async function handleAction(
     case "edit-primary-model-route":
     case "repair-primary-provider":
       return handleProviderRouteAction(options, initialDecision, session, action);
+    case "add-custom-provider-route":
+      return handleCustomProviderRouteAction(options, initialDecision, session, action);
     case "edit-fallback-model-route":
       return handleFallbackRouteAction(options, initialDecision, session, action);
     case "edit-auxiliary-model-route":
@@ -1001,7 +1014,277 @@ async function handleProviderRouteAction(
     return handleProviderRoutePromptExit(options, initialDecision, action.id, resolved);
   }
 
+  if (resolved.selection.credentialAction.kind === "endpoint") {
+    return reviewAndApplyOpenAICompatibleEndpointFlow(options, initialDecision, session, editorAction, resolved.selection, {
+      providerId: loaded.primaryModelRoute.provider,
+      modelId: loaded.primaryModelRoute.id,
+      baseUrl: loaded.primaryModelRoute.baseUrl,
+    });
+  }
+
   return reviewAndApplyResolvedRoute(options, initialDecision, session, editorAction, resolved.selection);
+}
+
+async function reviewAndApplyOpenAICompatibleEndpointFlow(
+  options: LocalizedConfigEditorRunnerOptions,
+  initialDecision: SetupRouteDecision,
+  session: NonNullable<SetupRouteDecision["setupEditorPlanSession"]>,
+  editorAction: SetupEditorActionDraft,
+  resolution: ProviderModelSelectionResult,
+  currentRoute?: {
+    readonly providerId: string;
+    readonly modelId: string;
+    readonly baseUrl?: string;
+  }
+): Promise<RunOnceResult> {
+  if (resolution.credentialAction.kind !== "endpoint") {
+    throw new Error("OpenAI-compatible endpoint setup requires an endpoint credential action.");
+  }
+  return collectAndApplyOpenAICompatibleEndpointFlow(options, initialDecision, session, editorAction, {
+    providerId: resolution.provider,
+    defaultBaseUrl: resolution.credentialAction.baseUrl ?? resolution.baseUrl ?? "http://localhost:11434/v1",
+    defaultApiKeyEnv: resolution.credentialAction.apiKeyEnv,
+    currentRoute,
+  });
+}
+
+async function handleCustomProviderRouteAction(
+  options: LocalizedConfigEditorRunnerOptions,
+  initialDecision: SetupRouteDecision,
+  session: NonNullable<SetupRouteDecision["setupEditorPlanSession"]>,
+  action: ConfigEditorRenderedAction
+): Promise<RunOnceResult> {
+  const editorAction = requireEditorAction(action);
+  const loaded = await loadRuntimeConfig(options);
+  const customProvider = await collectCustomOpenAICompatibleProviderId(options, loaded.config);
+  if (customProvider.kind === "cancel") {
+    const output = setupCopyText(options.locale, "setupEditor.result.exitWithoutChanges");
+    write(options, `${output}\n`);
+    return {
+      completed: true,
+      exitCode: 0,
+      output,
+      initialDecision,
+      selectedActionId: editorAction.id,
+    };
+  }
+
+  return collectAndApplyOpenAICompatibleEndpointFlow(options, initialDecision, session, editorAction, {
+    providerId: customProvider.providerId,
+    defaultBaseUrl: customProvider.defaultBaseUrl,
+    defaultApiKeyEnv: customProvider.defaultApiKeyEnv,
+    currentRoute: {
+      providerId: loaded.primaryModelRoute.provider,
+      modelId: loaded.primaryModelRoute.id,
+      baseUrl: loaded.primaryModelRoute.baseUrl,
+    },
+  });
+}
+
+type CustomOpenAICompatibleProviderIdResult =
+  | {
+      readonly kind: "selected";
+      readonly providerId: ProviderId;
+      readonly defaultBaseUrl: string;
+      readonly defaultApiKeyEnv: string;
+    }
+  | { readonly kind: "cancel" };
+
+async function collectCustomOpenAICompatibleProviderId(
+  options: LocalizedConfigEditorRunnerOptions,
+  config: Awaited<ReturnType<typeof loadRuntimeConfig>>["config"]
+): Promise<CustomOpenAICompatibleProviderIdResult> {
+  const target = setupPromptContext(options.prompt, options.locale);
+  let error: string | undefined;
+
+  for (;;) {
+    await showSetupCard(target, {
+      title: setupCopyText(options.locale, "setupEditor.prompt.openaiCompatible.custom.title"),
+      bodyLines: [
+        setupCopyText(options.locale, "setupEditor.prompt.openaiCompatible.endpoint.body"),
+        ...(error === undefined ? [] : [error]),
+      ],
+      options: [],
+    });
+
+    const providerId = (await options.prompt(setupOutputLine(
+      options.locale,
+      `${setupCopyText(options.locale, "setupEditor.prompt.openaiCompatible.custom.providerId")} `
+    ))).trim();
+    if (providerId.length === 0) {
+      return { kind: "cancel" };
+    }
+
+    if (!isValidCustomProviderId(providerId)) {
+      error = formatSetupCopy(options.locale, "setupEditor.prompt.openaiCompatible.custom.invalidProviderId", {
+        providerId,
+      });
+      continue;
+    }
+
+    const existingProvider = config.providers?.[providerId];
+    const existingBaseUrl = existingProvider?.baseUrl;
+    const defaultApiKeyEnv = existingProvider?.apiKeyEnv ?? "OPENAI_COMPATIBLE_API_KEY";
+    if (existingBaseUrl !== undefined && existingBaseUrl.length > 0) {
+      const conflictChoice = await promptSetupChoice(target, {
+        title: setupCopyText(options.locale, "setupEditor.prompt.openaiCompatible.custom.title"),
+        message: `${formatSetupCopy(options.locale, "setupEditor.prompt.openaiCompatible.custom.conflict", {
+          providerId,
+          baseUrl: existingBaseUrl,
+        })}\n`,
+        choices: [
+          {
+            id: "edit-existing-provider",
+            label: setupCopyText(options.locale, "setupEditor.prompt.openaiCompatible.custom.editExisting"),
+            description: formatSetupCopy(options.locale, "setupEditor.prompt.openaiCompatible.endpoint.destination", {
+              baseUrl: existingBaseUrl,
+            }),
+            value: "edit-existing" as const,
+          },
+          {
+            id: "use-different-provider-id",
+            label: setupCopyText(options.locale, "setupEditor.prompt.openaiCompatible.custom.useDifferentId"),
+            description: setupCopyText(options.locale, "setupEditor.prompt.openaiCompatible.custom.providerId"),
+            value: "use-different" as const,
+          },
+          {
+            id: "cancel-custom-provider",
+            label: setupCopyText(options.locale, "setupEditor.review.cancel"),
+            description: setupCopyText(options.locale, "setupEditor.review.cancel.description"),
+            value: "cancel" as const,
+          },
+        ],
+        defaultValue: "edit-existing" as const,
+      });
+      if (conflictChoice === "cancel") {
+        return { kind: "cancel" };
+      }
+      if (conflictChoice === "use-different") {
+        error = undefined;
+        continue;
+      }
+      return {
+        kind: "selected",
+        providerId,
+        defaultBaseUrl: existingBaseUrl,
+        defaultApiKeyEnv,
+      };
+    }
+
+    return {
+      kind: "selected",
+      providerId,
+      defaultBaseUrl: "http://localhost:11434/v1",
+      defaultApiKeyEnv,
+    };
+  }
+}
+
+function isValidCustomProviderId(providerId: string): providerId is ProviderId {
+  return /^[a-zA-Z0-9._-]{1,64}$/u.test(providerId);
+}
+
+async function collectAndApplyOpenAICompatibleEndpointFlow(
+  options: LocalizedConfigEditorRunnerOptions,
+  initialDecision: SetupRouteDecision,
+  session: NonNullable<SetupRouteDecision["setupEditorPlanSession"]>,
+  editorAction: SetupEditorActionDraft,
+  input: {
+    readonly providerId: ProviderId;
+    readonly defaultBaseUrl: string;
+    readonly defaultApiKeyEnv?: string;
+    readonly currentRoute?: {
+      readonly providerId: string;
+      readonly modelId: string;
+      readonly baseUrl?: string;
+    };
+  }
+): Promise<RunOnceResult> {
+  const flowResult = await collectOpenAICompatibleEndpointFlow({
+    providerId: input.providerId,
+    defaultBaseUrl: input.defaultBaseUrl,
+    defaultApiKeyEnv: input.defaultApiKeyEnv,
+    currentRoute: input.currentRoute,
+    locale: options.locale,
+    ui: createOpenAICompatibleEndpointFlowUi(options.prompt, options.locale),
+    fetch: openAICompatibleSetupFetch(options),
+    initialEnv: process.env,
+  });
+
+  if (flowResult.kind !== "ready") {
+    if (flowResult.kind === "back") {
+      return menuBackResult(initialDecision, editorAction.id);
+    }
+    const output = setupCopyText(options.locale, "setupEditor.result.exitWithoutChanges");
+    write(options, `${output}\n`);
+    return {
+      completed: true,
+      exitCode: 0,
+      output,
+      initialDecision,
+      selectedActionId: editorAction.id,
+    };
+  }
+
+  return reviewAndApplyOpenAICompatibleEndpointResult(options, initialDecision, session, editorAction, flowResult);
+}
+
+async function reviewAndApplyOpenAICompatibleEndpointResult(
+  options: LocalizedConfigEditorRunnerOptions,
+  initialDecision: SetupRouteDecision,
+  session: NonNullable<SetupRouteDecision["setupEditorPlanSession"]>,
+  editorAction: SetupEditorActionDraft,
+  flowResult: Extract<OpenAICompatibleEndpointFlowResult, { readonly kind: "ready" }>
+): Promise<RunOnceResult> {
+  const verificationAction = session.plan.actions.find((candidate) => candidate.id === "run-readonly-verification");
+  const routeAction = endpointRouteActionForEditorAction(editorAction, flowResult.routeAction);
+  const draftActions = [
+    routeAction,
+    ...(flowResult.credentialAction === undefined ? [] : [flowResult.credentialAction]),
+    ...(verificationAction === undefined ? [] : [verificationAction]),
+  ];
+  const stateHome = resolveStateHome({ homeDir: options.homeDir });
+  const profileConfigPath = activeProfileConfigPath(options);
+  const draftBundle = buildSetupEditorActionDraftBundle(session, draftActions, {
+    configPath: profileConfigPath,
+    workspaceRoot: options.workspaceRoot,
+    trustStorePath: options.trustStorePath ?? stateHome.trustJsonPath,
+  });
+  const reviewManifest = buildSetupReviewManifest([draftBundle]);
+  const reviewAccepted = await promptConfigEditorReviewApproval(options.prompt, {
+    selectedActionId: editorAction.id,
+    reviewManifest,
+  }, options.locale);
+  const applyPlanningResult = planSetupApply(reviewAccepted
+    ? { kind: "approved-review-result", manifest: reviewManifest }
+    : { kind: "cancelled-review-result", manifest: reviewManifest, reason: "User cancelled review." });
+
+  return finalizeReviewedApply({
+    options,
+    initialDecision,
+    selectedActionId: editorAction.id,
+    reviewManifest,
+    applyPlanningResult,
+    deferredSecretWrites: flowResult.pendingCredentialWrite === undefined
+      ? undefined
+      : [flowResult.pendingCredentialWrite],
+  });
+}
+
+function endpointRouteActionForEditorAction(
+  editorAction: SetupEditorActionDraft,
+  endpointRouteAction: SetupEditorActionDraft
+): SetupEditorActionDraft {
+  if (editorAction.id === "edit-fallback-model-route" || editorAction.id === "edit-auxiliary-model-route") {
+    return {
+      ...editorAction,
+      reviewValues: {
+        ...editorAction.reviewValues,
+        ...endpointRouteAction.reviewValues,
+      },
+    };
+  }
+  return endpointRouteAction;
 }
 
 async function handleFallbackRouteAction(
@@ -1029,7 +1312,7 @@ async function handleFallbackRouteAction(
     return handleProviderRoutePromptExit(options, initialDecision, action.id, resolved);
   }
 
-  return reviewAndApplyResolvedRoute(options, initialDecision, session, {
+  const selectedAction: SetupEditorActionDraft = {
     ...editorAction,
     reviewValues: {
       ...editorAction.reviewValues,
@@ -1042,7 +1325,23 @@ async function handleFallbackRouteAction(
           }
         : {}),
     },
-  }, resolved.selection);
+  };
+  if (resolved.selection.credentialAction.kind === "endpoint") {
+    return collectAndApplyOpenAICompatibleEndpointFlow(options, initialDecision, session, selectedAction, {
+      providerId: resolved.selection.provider,
+      defaultBaseUrl: resolved.selection.credentialAction.baseUrl ?? resolved.selection.baseUrl ?? "http://localhost:11434/v1",
+      defaultApiKeyEnv: resolved.selection.credentialAction.apiKeyEnv,
+      currentRoute: currentFallback === undefined
+        ? undefined
+        : {
+            providerId: currentFallback.provider,
+            modelId: currentFallback.id,
+            baseUrl: currentFallback.baseUrl,
+          },
+    });
+  }
+
+  return reviewAndApplyResolvedRoute(options, initialDecision, session, selectedAction, resolved.selection);
 }
 
 async function handleAuxiliaryRouteAction(
@@ -1067,18 +1366,34 @@ async function handleAuxiliaryRouteAction(
     return handleProviderRoutePromptExit(options, initialDecision, action.id, resolved);
   }
 
-  return reviewAndApplyResolvedRoute(options, initialDecision, session, {
+  const selectedAction: SetupEditorActionDraft = {
     ...editorAction,
     reviewValues: {
       ...editorAction.reviewValues,
       auxiliaryTask,
     },
-  }, resolved.selection);
+  };
+  if (resolved.selection.credentialAction.kind === "endpoint") {
+    return collectAndApplyOpenAICompatibleEndpointFlow(options, initialDecision, session, selectedAction, {
+      providerId: resolved.selection.provider,
+      defaultBaseUrl: resolved.selection.credentialAction.baseUrl ?? resolved.selection.baseUrl ?? "http://localhost:11434/v1",
+      defaultApiKeyEnv: resolved.selection.credentialAction.apiKeyEnv,
+      currentRoute: currentAuxiliaryRoute === undefined
+        ? undefined
+        : {
+            providerId: currentAuxiliaryRoute.provider,
+            modelId: currentAuxiliaryRoute.id,
+            baseUrl: currentAuxiliaryRoute.baseUrl,
+          },
+    });
+  }
+
+  return reviewAndApplyResolvedRoute(options, initialDecision, session, selectedAction, resolved.selection);
 }
 
 function auxiliaryRouteFromSlot(
   slot: AuxiliaryModelSlotInput | undefined
-): { readonly provider: string; readonly id: string } | undefined {
+): { readonly provider: string; readonly id: string; readonly baseUrl?: string } | undefined {
   if (slot === undefined) {
     return undefined;
   }
@@ -1098,6 +1413,7 @@ function auxiliaryRouteFromSlot(
   return {
     provider: slot.provider,
     id: slot.id,
+    baseUrl: slot.baseUrl,
   };
 }
 
@@ -1426,6 +1742,27 @@ function activeProfileConfigPath(options: Pick<ConfigEditorRunnerOptions, "homeD
   return resolveProfileStateHome({ homeDir: options.homeDir, profileId }).configPath;
 }
 
+function openAICompatibleSetupFetch(
+  options: Pick<ConfigEditorRunnerOptions, "providerFetch">
+): OpenAICompatibleFetchLike | undefined {
+  if (options.providerFetch === undefined) return undefined;
+  return async (url, init) => {
+    const response = await options.providerFetch!(url, {
+      method: init.method,
+      headers: init.headers,
+      body: init.body,
+    });
+    return {
+      ok: response.ok,
+      status: response.status,
+      statusText: response.statusText,
+      json: response.json,
+      text: async () => "",
+      body: null,
+    };
+  };
+}
+
 async function reviewAndApplyResolvedRoute(
   options: LocalizedConfigEditorRunnerOptions,
   initialDecision: SetupRouteDecision,
@@ -1516,6 +1853,9 @@ async function selectResolvedProviderRoute(
     locale: options.locale,
     currentProviderId: currentRoute.currentProviderId,
     currentModelId: currentRoute.currentModelId,
+    endpointFirstProviderIds: mode === "primary" || mode === "fallback" || mode === "auxiliary"
+      ? ["local", "openai-compatible"]
+      : [],
     allowBack: true,
     allowCancel: true,
     mode,

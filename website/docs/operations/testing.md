@@ -69,6 +69,7 @@ Smoke tests are the integration safety net. They exercise product flows with moc
 Current smoke cases include:
 
 - bare launch
+- provider setup endpoint-first flow
 - init lifecycle
 - update dry run
 - pack lifecycle
@@ -246,6 +247,14 @@ Capture evidence with:
 4. Run install/package validators when touching release surfaces.
 5. Run live operator validation when changing live providers, channels, browser, voice, installer, or Arabic terminal behavior.
 6. Capture failures with logs, traces, screenshots, and reproduction steps.
+
+For the Local / Custom provider setup stack, useful focused checks are:
+
+```bash
+pnpm exec vitest run src/setup/config-editor/runner.test.ts src/setup/provider-model-route-prompt.test.ts src/setup/openai-compatible-endpoint-flow.test.ts
+pnpm exec vitest run src/cli/session-loop-model.test.ts src/setup/setup-copy.test.ts
+pnpm run smoke -- --id provider-setup-endpoint-first
+```
 
 ## Related docs
 

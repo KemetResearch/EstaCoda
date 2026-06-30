@@ -178,6 +178,7 @@ const SETUP_EDITOR_KEYS = [
   "setupEditor.sections.verification",
   "setupEditor.sections.exit",
   "setupEditor.actions.editPrimaryModelRoute",
+  "setupEditor.actions.addCustomProviderRoute",
   "setupEditor.actions.repairPrimaryProvider",
   "setupEditor.actions.editPrimaryCredentialReference",
   "setupEditor.actions.storeProviderCredentialReference",
@@ -205,6 +206,7 @@ const SETUP_EDITOR_KEYS = [
   "setupEditor.actions.chooseLanguage.description",
   "setupEditor.actions.repairPrimaryProvider.description",
   "setupEditor.actions.editPrimaryModelRoute.description",
+  "setupEditor.actions.addCustomProviderRoute.description",
   "setupEditor.actions.repairMissingCredential.description",
   "setupEditor.actions.editPrimaryCredentialReference.description",
   "setupEditor.actions.storeProviderCredentialReference.description",
@@ -256,6 +258,79 @@ const SETUP_EDITOR_KEYS = [
   "setupEditor.prompt.localEndpoint.baseUrl",
   "setupEditor.prompt.localEndpoint.apiKeyOptional",
   "setupEditor.result.localEndpointInvalid",
+  "setupEditor.prompt.openaiCompatible.intro.title",
+  "setupEditor.prompt.openaiCompatible.intro.body",
+  "setupEditor.prompt.openaiCompatible.intro.current",
+  "setupEditor.prompt.openaiCompatible.intro.currentNone",
+  "setupEditor.prompt.openaiCompatible.intro.endpoint",
+  "setupEditor.prompt.openaiCompatible.intro.defaultEndpoint",
+  "setupEditor.prompt.openaiCompatible.intro.process",
+  "setupEditor.prompt.openaiCompatible.intro.destination",
+  "setupEditor.prompt.openaiCompatible.intro.continue",
+  "setupEditor.prompt.openaiCompatible.intro.continue.description",
+  "setupEditor.prompt.openaiCompatible.intro.changeEndpoint",
+  "setupEditor.prompt.openaiCompatible.intro.changeEndpoint.description",
+  "setupEditor.prompt.openaiCompatible.endpoint.title",
+  "setupEditor.prompt.openaiCompatible.endpoint.body",
+  "setupEditor.prompt.openaiCompatible.endpoint.baseUrl",
+  "setupEditor.prompt.openaiCompatible.endpoint.destination",
+  "setupEditor.prompt.openaiCompatible.endpoint.changeEndpoint.description",
+  "setupEditor.prompt.openaiCompatible.endpoint.check",
+  "setupEditor.prompt.openaiCompatible.endpoint.manual",
+  "setupEditor.prompt.openaiCompatible.endpoint.auth",
+  "setupEditor.prompt.openaiCompatible.endpoint.invalid",
+  "setupEditor.prompt.openaiCompatible.checking",
+  "setupEditor.prompt.openaiCompatible.models.title",
+  "setupEditor.prompt.openaiCompatible.models.discovered",
+  "setupEditor.prompt.openaiCompatible.models.failed",
+  "setupEditor.prompt.openaiCompatible.models.failureReason",
+  "setupEditor.prompt.openaiCompatible.models.possibleCauses",
+  "setupEditor.prompt.openaiCompatible.models.enterManual",
+  "setupEditor.prompt.openaiCompatible.models.changeEndpoint",
+  "setupEditor.prompt.openaiCompatible.models.discoveredBadge",
+  "setupEditor.prompt.openaiCompatible.models.reasoningBadge",
+  "setupEditor.prompt.openaiCompatible.models.embeddingBadge",
+  "setupEditor.prompt.openaiCompatible.modelId.title",
+  "setupEditor.prompt.openaiCompatible.modelId.question",
+  "setupEditor.prompt.openaiCompatible.contextWindow.question",
+  "setupEditor.prompt.openaiCompatible.contextWindow.hint",
+  "setupEditor.prompt.openaiCompatible.auth.title",
+  "setupEditor.prompt.openaiCompatible.auth.body",
+  "setupEditor.prompt.openaiCompatible.auth.none",
+  "setupEditor.prompt.openaiCompatible.auth.env",
+  "setupEditor.prompt.openaiCompatible.auth.enter",
+  "setupEditor.prompt.openaiCompatible.auth.envQuestion",
+  "setupEditor.prompt.openaiCompatible.auth.secretQuestion",
+  "setupEditor.prompt.openaiCompatible.auth.secretStorage",
+  "setupEditor.prompt.openaiCompatible.test.title",
+  "setupEditor.prompt.openaiCompatible.test.body",
+  "setupEditor.prompt.openaiCompatible.test.run",
+  "setupEditor.prompt.openaiCompatible.test.skip",
+  "setupEditor.prompt.openaiCompatible.test.passed",
+  "setupEditor.prompt.openaiCompatible.test.failed",
+  "setupEditor.prompt.openaiCompatible.test.notTested",
+  "setupEditor.prompt.openaiCompatible.summary.title",
+  "setupEditor.prompt.openaiCompatible.summary.provider",
+  "setupEditor.prompt.openaiCompatible.summary.endpoint",
+  "setupEditor.prompt.openaiCompatible.summary.model",
+  "setupEditor.prompt.openaiCompatible.summary.sourceDiscovered",
+  "setupEditor.prompt.openaiCompatible.summary.sourceManual",
+  "setupEditor.prompt.openaiCompatible.summary.authNone",
+  "setupEditor.prompt.openaiCompatible.summary.authEnv",
+  "setupEditor.prompt.openaiCompatible.summary.modelListPassed",
+  "setupEditor.prompt.openaiCompatible.summary.modelListFailed",
+  "setupEditor.prompt.openaiCompatible.summary.modelListNotTested",
+  "setupEditor.prompt.openaiCompatible.summary.chatPassed",
+  "setupEditor.prompt.openaiCompatible.summary.chatFailed",
+  "setupEditor.prompt.openaiCompatible.summary.chatNotTested",
+  "setupEditor.prompt.openaiCompatible.summary.toolsUnknown",
+  "setupEditor.prompt.openaiCompatible.summary.review",
+  "setupEditor.prompt.openaiCompatible.custom.title",
+  "setupEditor.prompt.openaiCompatible.custom.providerId",
+  "setupEditor.prompt.openaiCompatible.custom.invalidProviderId",
+  "setupEditor.prompt.openaiCompatible.custom.conflict",
+  "setupEditor.prompt.openaiCompatible.custom.useDifferentId",
+  "setupEditor.prompt.openaiCompatible.custom.editExisting",
   "setupEditor.prompt.openAiRoute.title",
   "setupEditor.prompt.openAiRoute.body",
   "setupEditor.prompt.openAiRoute.openAiModels",
@@ -793,7 +868,7 @@ describe("setup copy", () => {
     expect(resolveSetupCopy("en", "onboarding.providers.description.deepseek")).toBe("Cost-efficient models for primary or auxiliary use. Direct API.");
     expect(resolveSetupCopy("en", "onboarding.providers.description.google")).toBe("Gemini models with strong utility and multimodal coverage. Direct API.");
     expect(resolveSetupCopy("en", "onboarding.providers.description.kimi")).toBe("Moonshot Kimi models with strong quality/cost balance. Direct API.");
-    expect(resolveSetupCopy("en", "onboarding.providers.description.local")).toBe("OpenAI-compatible local or private endpoint. API key optional.");
+    expect(resolveSetupCopy("en", "onboarding.providers.description.local")).toBe("OpenAI-compatible local or custom endpoint. API key optional.");
     expect(resolveSetupCopy("en", "onboarding.providers.description.openai")).toBe("Frontier models for high-quality primary reasoning. Direct API.");
     expect(resolveSetupCopy("en", "onboarding.providers.description.openrouter")).toBe("Pay-per-use aggregator for routing across many model providers.");
     expect(resolveSetupCopy("en", "onboarding.providers.description.zai")).toBe("GLM models with strong quality/cost balance. Direct API.");
@@ -965,6 +1040,8 @@ describe("setup copy", () => {
     expect(rawSetupCopy("en", "setupEditor.prompt.action.body")).not.toContain("\x1b[");
     expect(rawSetupCopy("en", "setupEditor.actions.editPrimaryModelRoute")).toBe("Primary model");
     expect(rawSetupCopy("en", "setupEditor.actions.editPrimaryModelRoute.description")).toBe("Default model used by the agent.");
+    expect(rawSetupCopy("en", "setupEditor.actions.addCustomProviderRoute")).toBe("Custom OpenAI-compatible provider");
+    expect(rawSetupCopy("en", "setupEditor.actions.addCustomProviderRoute.description")).toBe("Add a named local, custom, or enterprise OpenAI-compatible endpoint.");
     expect(rawSetupCopy("en", "setupEditor.actions.editFallbackModelRoute")).toBe("Fallback models");
     expect(rawSetupCopy("en", "setupEditor.actions.editFallbackModelRoute.description")).toBe("Backup model used if the primary model fails.");
     expect(rawSetupCopy("en", "setupEditor.actions.editAuxiliaryModelRoute")).toBe("Auxiliary models");
@@ -1045,6 +1122,8 @@ describe("setup copy", () => {
     expect(rawSetupCopy("ar", "setupEditor.prompt.openAiRoute.codex.description")).toBe("استخدم OpenAI Codex عبر OAuth. النموذج الافتراضي: gpt-5.5.");
     expect(rawSetupCopy("ar", "setupEditor.actions.editPrimaryModelRoute")).toBe("النموذج الأساسي");
     expect(rawSetupCopy("ar", "setupEditor.actions.editPrimaryModelRoute.description")).toBe("النموذج الافتراضي الذي يستخدمه الوكيل.");
+    expect(rawSetupCopy("ar", "setupEditor.actions.addCustomProviderRoute")).toBe("مزوّد مخصص متوافق مع OpenAI");
+    expect(rawSetupCopy("ar", "setupEditor.actions.addCustomProviderRoute.description")).toBe("أضف نقطة نهاية متوافقة مع OpenAI باسم مخصص، محلية أو مخصصة أو مؤسسية.");
     expect(rawSetupCopy("ar", "setupEditor.actions.editFallbackModelRoute")).toBe("النماذج الاحتياطية");
     expect(rawSetupCopy("ar", "setupEditor.actions.editFallbackModelRoute.description")).toBe("نماذج احتياطية تُستخدم إذا فشل النموذج الأساسي.");
     expect(rawSetupCopy("ar", "setupEditor.actions.editAuxiliaryModelRoute")).toBe("النماذج المساعدة");
@@ -1129,6 +1208,85 @@ describe("setup copy", () => {
     expect(resolveSetupCopy("ar", "setupEditor.prompt.localEndpoint.apiKeyOptional")).toContain(isolateLtr("{envVar}"));
     expect(resolveSetupCopy("ar", "setupEditor.result.localEndpointInvalid")).toContain(isolateLtr("URL"));
     expect(resolveSetupCopy("ar", "setupEditor.result.localEndpointInvalid")).toContain(isolateLtr("{baseUrl}"));
+  });
+
+  it("contains OpenAI-compatible endpoint-first setup editor copy", () => {
+    expect(rawSetupCopy("en", "setupEditor.prompt.openaiCompatible.intro.title")).toBe("Local / Custom Endpoint");
+    expect(rawSetupCopy("en", "setupEditor.prompt.openaiCompatible.intro.current")).toBe("Current: {providerId}/{modelId}");
+    expect(rawSetupCopy("en", "setupEditor.prompt.openaiCompatible.intro.defaultEndpoint")).toBe("Default endpoint: {baseUrl}");
+    expect(rawSetupCopy("en", "setupEditor.prompt.openaiCompatible.intro.process")).toContain("1. Choose or confirm the endpoint URL");
+    expect(rawSetupCopy("en", "setupEditor.prompt.openaiCompatible.intro.process")).toContain("2. Try to discover models from /models");
+    expect(rawSetupCopy("en", "setupEditor.prompt.openaiCompatible.intro.continue.description")).toBe("Continue with this endpoint.");
+    expect(rawSetupCopy("en", "setupEditor.prompt.openaiCompatible.intro.changeEndpoint.description")).toBe("Enter a different OpenAI-compatible base URL.");
+    expect(rawSetupCopy("en", "setupEditor.prompt.openaiCompatible.endpoint.title")).toBe("Local / Custom Endpoint");
+    expect(rawSetupCopy("en", "setupEditor.prompt.openaiCompatible.endpoint.body")).toBe("Connect EstaCoda to an OpenAI-compatible inference endpoint.");
+    expect(rawSetupCopy("en", "setupEditor.prompt.openaiCompatible.endpoint.baseUrl")).toBe("Endpoint URL [{baseUrl}] - press ENTER to keep it:");
+    expect(rawSetupCopy("en", "setupEditor.prompt.openaiCompatible.endpoint.destination")).toBe("Requests will be sent to {baseUrl}.");
+    expect(rawSetupCopy("en", "setupEditor.prompt.openaiCompatible.endpoint.changeEndpoint.description")).toBe("Enter a different endpoint URL.");
+    expect(rawSetupCopy("en", "setupEditor.prompt.openaiCompatible.checking")).toBe("Checking {baseUrl}/models ...");
+    expect(rawSetupCopy("en", "setupEditor.prompt.openaiCompatible.models.discovered")).toBe("Models discovered: {count}");
+    expect(rawSetupCopy("en", "setupEditor.prompt.openaiCompatible.models.possibleCauses")).toBe("The endpoint may be offline, require authentication, or not expose /models.");
+    expect(rawSetupCopy("en", "setupEditor.prompt.openaiCompatible.contextWindow.question")).toBe("Context window tokens [infer]:");
+    expect(rawSetupCopy("en", "setupEditor.prompt.openaiCompatible.auth.env")).toBe("Use API key from environment");
+    expect(rawSetupCopy("en", "setupEditor.prompt.openaiCompatible.auth.secretStorage")).toBe("The raw key will be stored in the selected profile .env only.");
+    expect(rawSetupCopy("en", "setupEditor.prompt.openaiCompatible.test.body")).toBe("Test {modelId} with /chat/completions before saving.");
+    expect(rawSetupCopy("en", "setupEditor.prompt.openaiCompatible.summary.sourceDiscovered")).toBe("Source: discovered from /models");
+    expect(rawSetupCopy("en", "setupEditor.prompt.openaiCompatible.custom.conflict")).toBe("Provider \"{providerId}\" is already configured with {baseUrl}.");
+
+    expect(rawSetupCopy("ar", "setupEditor.prompt.openaiCompatible.auth.env")).toBe("استخدم مفتاح API من متغير بيئة");
+    expect(rawSetupCopy("ar", "setupEditor.prompt.openaiCompatible.custom.conflict")).toBe("المزوّد \"{providerId}\" مضبوط مسبقًا مع {baseUrl}.");
+  });
+
+  it("isolates OpenAI-compatible setup Arabic technical tokens", () => {
+    expect(resolveSetupCopy("ar", "setupEditor.prompt.openaiCompatible.intro.body")).toContain(isolateLtr("EstaCoda"));
+    expect(resolveSetupCopy("ar", "setupEditor.prompt.openaiCompatible.intro.body")).toContain(isolateLtr("OpenAI"));
+    expect(resolveSetupCopy("ar", "setupEditor.prompt.openaiCompatible.intro.current")).toContain(isolateLtr("{providerId}"));
+    expect(resolveSetupCopy("ar", "setupEditor.prompt.openaiCompatible.intro.current")).toContain(isolateLtr("{modelId}"));
+    expect(resolveSetupCopy("ar", "setupEditor.prompt.openaiCompatible.intro.defaultEndpoint")).toContain(isolateLtr("{baseUrl}"));
+    expect(resolveSetupCopy("ar", "setupEditor.prompt.openaiCompatible.intro.process")).toContain(isolateLtr("EstaCoda"));
+    expect(resolveSetupCopy("ar", "setupEditor.prompt.openaiCompatible.intro.process")).toContain(isolateLtr("/models"));
+    expect(resolveSetupCopy("ar", "setupEditor.prompt.openaiCompatible.intro.changeEndpoint.description")).toContain(isolateLtr("URL"));
+    expect(resolveSetupCopy("ar", "setupEditor.prompt.openaiCompatible.intro.changeEndpoint.description")).toContain(isolateLtr("OpenAI"));
+    expect(resolveSetupCopy("ar", "setupEditor.prompt.openaiCompatible.endpoint.body")).toContain(isolateLtr("EstaCoda"));
+    expect(resolveSetupCopy("ar", "setupEditor.prompt.openaiCompatible.endpoint.body")).toContain(isolateLtr("OpenAI"));
+    expect(resolveSetupCopy("ar", "setupEditor.prompt.openaiCompatible.endpoint.baseUrl")).toContain(isolateLtr("URL"));
+    expect(resolveSetupCopy("ar", "setupEditor.prompt.openaiCompatible.endpoint.baseUrl")).toContain(isolateLtr("{baseUrl}"));
+    expect(resolveSetupCopy("ar", "setupEditor.prompt.openaiCompatible.endpoint.baseUrl")).toContain(isolateLtr("ENTER"));
+    expect(resolveSetupCopy("ar", "setupEditor.prompt.openaiCompatible.endpoint.destination")).toContain(isolateLtr("{baseUrl}"));
+    expect(resolveSetupCopy("ar", "setupEditor.prompt.openaiCompatible.endpoint.changeEndpoint.description")).toContain(isolateLtr("URL"));
+    expect(resolveSetupCopy("ar", "setupEditor.prompt.openaiCompatible.checking")).toContain(isolateLtr("{baseUrl}"));
+    expect(resolveSetupCopy("ar", "setupEditor.prompt.openaiCompatible.checking")).toContain(isolateLtr("/models"));
+    expect(resolveSetupCopy("ar", "setupEditor.prompt.openaiCompatible.models.possibleCauses")).toContain(isolateLtr("/models"));
+    expect(resolveSetupCopy("ar", "setupEditor.prompt.openaiCompatible.auth.body")).toContain(isolateLtr("API"));
+    expect(resolveSetupCopy("ar", "setupEditor.prompt.openaiCompatible.auth.secretQuestion")).toContain(isolateLtr("API"));
+    expect(resolveSetupCopy("ar", "setupEditor.prompt.openaiCompatible.auth.secretQuestion")).toContain(isolateLtr("{envVar}"));
+    expect(resolveSetupCopy("ar", "setupEditor.prompt.openaiCompatible.auth.secretStorage")).toContain(isolateLtr(".env"));
+    expect(resolveSetupCopy("ar", "setupEditor.prompt.openaiCompatible.test.body")).toContain(isolateLtr("{modelId}"));
+    expect(resolveSetupCopy("ar", "setupEditor.prompt.openaiCompatible.test.body")).toContain(isolateLtr("/chat/completions"));
+    expect(resolveSetupCopy("ar", "setupEditor.prompt.openaiCompatible.summary.sourceDiscovered")).toContain(isolateLtr("/models"));
+    expect(resolveSetupCopy("ar", "setupEditor.prompt.openaiCompatible.summary.authEnv")).toContain(isolateLtr("{envVar}"));
+    expect(resolveSetupCopy("ar", "setupEditor.prompt.openaiCompatible.custom.title")).toContain(isolateLtr("OpenAI"));
+    expect(resolveSetupCopy("ar", "setupEditor.prompt.openaiCompatible.custom.invalidProviderId")).toContain(isolateLtr("{providerId}"));
+    expect(resolveSetupCopy("ar", "setupEditor.prompt.openaiCompatible.custom.conflict")).toContain(isolateLtr("{providerId}"));
+    expect(resolveSetupCopy("ar", "setupEditor.prompt.openaiCompatible.custom.conflict")).toContain(isolateLtr("{baseUrl}"));
+  });
+
+  it("isolates finalized providers command tokens for future setup copy", () => {
+    expect(resolveSetupCopy("ar", "setupEditor.prompt.openaiCompatible.models.possibleCauses")).toContain(isolateLtr("/models"));
+    expect(formatSetupCopy("ar", "setupEditor.prompt.openaiCompatible.endpoint.destination", {
+      baseUrl: "http://localhost:11434/v1",
+    })).toContain(isolateLtr("http://localhost:11434/v1"));
+    expect(formatSetupCopy("ar", "setupEditor.prompt.openaiCompatible.auth.secretQuestion", {
+      envVar: "OPENAI_COMPATIBLE_API_KEY",
+    })).toContain(isolateLtr("OPENAI_COMPATIBLE_API_KEY"));
+    expect(setupTechnicalToken("ar", "/model")).toBe(isolateLtr("/model"));
+    expect(setupTechnicalToken("ar", "/providers")).toBe(isolateLtr("/providers"));
+    expect(setupTechnicalToken("ar", "/providers local setup")).toBe(isolateLtr("/providers local setup"));
+    expect(setupTechnicalToken("ar", "/providers custom add")).toBe(isolateLtr("/providers custom add"));
+    expect(setupTechnicalToken("ar", "/chat/completions")).toBe(isolateLtr("/chat/completions"));
+    expect(setupTechnicalToken("ar", "OPENAI_COMPATIBLE_API_KEY")).toBe(isolateLtr("OPENAI_COMPATIBLE_API_KEY"));
+    expect(setupTechnicalToken("ar", ".env")).toBe(isolateLtr(".env"));
+    expect(setupTechnicalToken("ar", "OpenAI-compatible")).toBe(isolateLtr("OpenAI-compatible"));
   });
 
   it("contains onboarding local endpoint prompt copy", () => {

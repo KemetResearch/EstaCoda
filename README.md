@@ -26,7 +26,7 @@ Built by Kemet Research.
 | A real operator terminal | CLI sessions with tool execution, approvals, profile state, durable history, and shaped bidirectional Arabic rendering. |
 | An agent that follows you | CLI and Telegram as the strongest channels, gated WhatsApp through an isolated bridge, and Discord/Email adapters for operator-validated deployments. |
 | Work that runs without babysitting | Cron jobs and durable workflows that can run unattended and deliver results back to you. |
-| Model freedom | OpenRouter, Kimi, DeepSeek, OpenAI, Google, local/private endpoints, and other configured providers. |
+| Model freedom | OpenRouter, Kimi, DeepSeek, OpenAI, Google, local/custom endpoints, and other configured providers. |
 | More than chat | Web research, browser automation, hosted voice providers, image generation, files, shell commands, and tool workflows. |
 | Power without mystery mutation | Explicit proposals, evidence, approval, rollback, and hard safety boundaries. |
 
@@ -124,9 +124,9 @@ EstaCoda distinguishes between live-proven, configurable, experimental, and emer
 | DeepSeek | Live-proven |
 | OpenRouter | Live-proven |
 | Google | Configurable |
-| Local / private endpoint | Supported through OpenAI-compatible local or private endpoints, with optional API key auth |
+| Local / custom endpoint | Supported through OpenAI-compatible local or custom endpoints, with optional API key auth |
 
-Use the built-in `local` provider for Ollama, LM Studio, llama.cpp, vLLM, or another OpenAI-compatible local/private endpoint. Custom OpenAI-compatible providers remain available when you need a separate named provider ID with an explicit `baseUrl`. Catalog-known providers are not automatically runnable; check the provider reference before treating one as a primary route.
+Use the built-in `local` provider for Ollama, LM Studio, llama.cpp, vLLM, or another OpenAI-compatible local/custom endpoint. Custom OpenAI-compatible providers remain available when you need a separate named provider ID with an explicit `baseUrl`. Catalog-known providers are not automatically runnable; check the provider reference before treating one as a primary route.
 
 ### Channels
 

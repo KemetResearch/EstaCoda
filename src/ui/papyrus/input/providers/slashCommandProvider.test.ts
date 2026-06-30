@@ -32,7 +32,7 @@ describe("Papyrus slash command suggestion provider", () => {
       "/help",
       "/status",
       "/model",
-      "/tools",
+      "/providers",
     ]);
   });
 

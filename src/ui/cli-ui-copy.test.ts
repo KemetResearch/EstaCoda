@@ -35,6 +35,29 @@ describe("chromeCopy — en", () => {
     expect(copy.startupInteractiveCommands).toBe("Interactive Commands:");
     expect(copy.startupPromptHint).toBe("Type a message. Use /help for commands or /exit to leave.");
   });
+
+  it("returns English providers chrome copy", () => {
+    const copy = chromeCopy("en");
+    expect(copy.slashCommandProvidersDescription).toBe("Browse providers, endpoints, credentials, and model readiness");
+    expect(copy.providersTitle).toBe("Providers");
+    expect(copy.providersActiveRoute).toBe("Active route");
+    expect(copy.providersConfiguredProviders).toBe("Configured providers");
+    expect(copy.providersLocalSetupHint).toBe("Run /providers local setup to configure a local endpoint.");
+    expect(copy.providersDiagnosticsTitle).toBe("Provider Diagnostics");
+    expect(copy.providersEndpoint).toBe("Endpoint");
+    expect(copy.providersCredential).toBe("Credential");
+    expect(copy.providersEndpointCheck).toBe("Endpoint check");
+    expect(copy.providersCredentialCheck).toBe("Credential check");
+    expect(copy.providersSetup).toBe("Setup");
+    expect(copy.providersEndpointCheckConfigOnly).toBe("config only; no live network probe");
+    expect(copy.providersCredentialCheckConfigOnly).toBe("environment/profile references only");
+    expect(copy.providersModelCount(1)).toBe("1 model");
+    expect(copy.providersModelCount(2)).toBe("2 models");
+    expect(copy.providersStatusReady).toBe("ready");
+    expect(copy.providersStatusMissingCredential).toBe("missing credential");
+    expect(copy.providersStatusEndpointFailed).toBe("endpoint check failed");
+    expect(copy.providersStatusNotConfigured).toBe("not configured");
+  });
 });
 
 describe("chromeCopy — ar", () => {
@@ -79,6 +102,28 @@ describe("chromeCopy — ar", () => {
     expect(copy.startupCommandModel).toBe("\u0627\u0639\u0631\u0636 \u0627\u0644\u0646\u0645\u0648\u0630\u062c \u0627\u0644\u0646\u0634\u0637");
     expect(copy.startupPromptHint).toContain(isolateLtr("/help"));
     expect(copy.startupPromptHint).toContain(isolateLtr("/exit"));
+  });
+
+  it("returns Arabic providers chrome copy with isolated command hints", () => {
+    const copy = chromeCopy("ar");
+    expect(copy.slashCommandProvidersDescription).toBe("استعرض المزوّدين ونقاط النهاية وبيانات الاعتماد وجاهزية النماذج");
+    expect(copy.providersTitle).toBe("المزوّدون");
+    expect(copy.providersActiveRoute).toBe("المسار النشط");
+    expect(copy.providersConfiguredProviders).toBe("المزوّدون المضبوطون");
+    expect(copy.providersLocalSetupHint).toContain(isolateLtr("/providers local setup"));
+    expect(copy.providersDiagnosticsTitle).toBe("تشخيص المزوّدين");
+    expect(copy.providersEndpoint).toBe("نقطة النهاية");
+    expect(copy.providersCredential).toBe("بيانات الاعتماد");
+    expect(copy.providersEndpointCheck).toBe("فحص نقطة النهاية");
+    expect(copy.providersCredentialCheck).toBe("فحص بيانات الاعتماد");
+    expect(copy.providersSetup).toBe("الإعداد");
+    expect(copy.providersEndpointCheckConfigOnly).toBe("من الإعدادات فقط؛ لا يوجد فحص شبكة مباشر");
+    expect(copy.providersCredentialCheckConfigOnly).toBe("مراجع البيئة/الملف الشخصي فقط");
+    expect(copy.providersModelCount(2)).toBe("2 نموذج");
+    expect(copy.providersStatusReady).toBe("جاهز");
+    expect(copy.providersStatusMissingCredential).toBe("بيانات الاعتماد ناقصة");
+    expect(copy.providersStatusEndpointFailed).toBe("فشل فحص نقطة النهاية");
+    expect(copy.providersStatusNotConfigured).toBe("غير مضبوط");
   });
 });
 

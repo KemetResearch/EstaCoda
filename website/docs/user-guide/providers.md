@@ -37,9 +37,9 @@ At runtime, EstaCoda reads `process.env[apiKeyEnv]` for credentialed routes and 
 
 ---
 
-## Local / Private Endpoint
+## Local / Custom Endpoint
 
-The built-in `local` provider is the simple path for OpenAI-compatible local or private endpoints. It works for tools such as Ollama, LM Studio, llama.cpp server, vLLM, LiteLLM, or an internal OpenAI-compatible gateway when that endpoint exposes the expected `/v1` API shape.
+The built-in `local` provider is the simple path for OpenAI-compatible local or custom endpoints. It works for tools such as Ollama, LM Studio, llama.cpp server, vLLM, LiteLLM, or an internal OpenAI-compatible gateway when that endpoint exposes the expected `/v1` API shape.
 
 Defaults:
 
@@ -56,6 +56,10 @@ estacoda model setup local --base-url http://localhost:1234/v1 --model private-m
 When `--api-key` is provided, setup stores the raw key only in the selected profile `.env` as `OPENAI_COMPATIBLE_API_KEY` and stores only the env-var reference in config. When no key is provided, local remains a no-auth route.
 
 Use `estacoda model setup custom` instead when you need a separate named OpenAI-compatible provider ID rather than the built-in `local` route.
+
+In the Setup Editor, choose `Local / Custom` from the primary, fallback, or auxiliary model picker to use the same endpoint-first flow. EstaCoda first confirms the inference endpoint, then discovers models from `/models` when available, lets you choose a discovered model or enter a model ID manually, collects optional authentication, and offers a chat completion test before the reviewed apply step.
+
+In an interactive session, use `/providers` for provider setup and status. `/model` remains the command for inspecting or switching the active model, and `/models` is not a slash command; it is only the OpenAI-compatible HTTP API path used during endpoint discovery.
 
 ---
 
@@ -314,7 +318,7 @@ estacoda model setup
 
 **Missing API key:** A credentialed route is non-runnable. Run `estacoda model setup` or set the environment variable. The default `local` route does not require an API key unless you configured one.
 
-**Local endpoint unreachable:** Check that the local/private OpenAI-compatible server is running, that the configured `baseUrl` includes the `/v1` path when required by the server, and that any optional key is present in the selected profile `.env`.
+**Local endpoint unreachable:** Check that the local/custom OpenAI-compatible server is running, that the configured `baseUrl` includes the `/v1` path when required by the server, and that any optional key is present in the selected profile `.env`.
 
 **Invalid model name:** The catalog does not recognize the model. Check the provider's documentation and update `config.json`.
 

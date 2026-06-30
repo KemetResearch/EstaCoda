@@ -72,7 +72,7 @@ describe("buildSlashCompletionViewModel", () => {
     expect(vm.absoluteSelectedIndex).toBe(4);
     expect(vm.visibleStartIndex).toBe(3);
     expect(vm.selectedIndex).toBe(1);
-    expect(vm.options.map((option) => option.label)).toEqual(["/tools", "/skills", "/exit"]);
+    expect(vm.options.map((option) => option.label)).toEqual(["/providers", "/tools", "/skills"]);
   });
 
   it("returns safe metadata for empty completion results", () => {

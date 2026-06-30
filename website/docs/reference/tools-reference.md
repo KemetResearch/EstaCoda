@@ -499,7 +499,7 @@ The tool call matched a hard safety rule and was rejected regardless of mode or 
 
 ### Missing Provider Key
 
-The tool requires an API key or token that is not present in the environment or `.env`. No-auth routes, such as the default Local / private endpoint route, do not require a key; for those routes, check endpoint reachability and `baseUrl` instead.
+The tool requires an API key or token that is not present in the environment or `.env`. No-auth routes, such as the default Local / Custom Endpoint route, do not require a key; for those routes, check endpoint reachability and `baseUrl` instead.
 
 **Recovery:** Set the expected env var or run `estacoda setup` / `estacoda model setup` for the provider.
 

@@ -1,5 +1,6 @@
 export type SetupEditorActionId =
   | "edit-primary-model-route"
+  | "add-custom-provider-route"
   | "repair-primary-provider"
   | "edit-primary-credential-reference"
   | "store-provider-credential-reference"
