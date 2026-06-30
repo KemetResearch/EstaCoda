@@ -1,4 +1,4 @@
-import { isolateLtr, LRI, PDI, RLI } from "../ui/bidi.js";
+import { isolateLtr, isolateRtl, LRI, PDI, RLI } from "../ui/bidi.js";
 
 export type SetupCopyLocale = "en" | "ar";
 
@@ -189,7 +189,7 @@ export const SETUP_COPY_ENTRIES = [
   copy("onboarding.welcome.title", "EstaCoda Onboarding Wizard", "معالج تهيئة EstaCoda", [], "none"),
   copy("onboarding.common.begin", "Begin", "ابدأ", [], "none"),
   copy("onboarding.welcome.validation.acknowledged", "Confirm to continue setup.", "أكّد للمتابعة في الإعداد.", [], "none"),
-  copy("onboarding.interfaceLanguage", `Choose the language EstaCoda uses for setup and CLI guidance.\nاختر اللغة التي تستخدمها ${isolateLtr("EstaCoda")} للإعداد وإرشادات الطرفية.`, `Choose the language EstaCoda uses for setup and CLI guidance.\nاختر اللغة التي تستخدمها ${isolateLtr("EstaCoda")} للإعداد وإرشادات الطرفية.`, [], "interface-preference"),
+  copy("onboarding.interfaceLanguage", `Choose the language EstaCoda uses for setup and CLI guidance.\n${isolateRtl(`اختر اللغة التي تستخدمها ${isolateLtr("EstaCoda")} للإعداد وإرشادات الطرفية.`)}`, `Choose the language EstaCoda uses for setup and CLI guidance.\n${isolateRtl(`اختر اللغة التي تستخدمها ${isolateLtr("EstaCoda")} للإعداد وإرشادات الطرفية.`)}`, [], "interface-preference"),
   copy("onboarding.interfaceLanguage.title", "Setup language", "لغة الإعداد", [], "interface-preference"),
   copy("onboarding.interfaceLanguage.options.en.label", "English", "English", [], "interface-preference"),
   copy("onboarding.interfaceLanguage.options.ar.label", "العربية", "العربية", [], "interface-preference"),

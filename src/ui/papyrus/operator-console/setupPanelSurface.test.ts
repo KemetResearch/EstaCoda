@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { stringWidth } from "../screen/stringWidth.js";
 import { resolveTokens } from "../../../theme/token-resolver.js";
-import { isolateLtr, LRI, RLI } from "../../../ui/bidi.js";
+import { isolateLtr, isolateRtl, LRI, RLI } from "../../../ui/bidi.js";
 import {
   createOperatorConsoleStyle,
   renderSetupPanelSurface,
@@ -47,7 +47,7 @@ describe("Papyrus operator console setup panel surface", () => {
       kind: "table",
       layout: "choiceMenu",
       title: "Setup language",
-      description: `Choose the language EstaCoda uses for setup and CLI guidance.\nاختر اللغة التي تستخدمها ${isolateLtr("EstaCoda")} للإعداد وإرشادات الطرفية.`,
+      description: `Choose the language EstaCoda uses for setup and CLI guidance.\n${isolateRtl(`اختر اللغة التي تستخدمها ${isolateLtr("EstaCoda")} للإعداد وإرشادات الطرفية.`)}`,
       rows: [
         { id: "en", provider: "English", model: "", status: "", notes: "" },
         { id: "ar", provider: "العربية", model: "", status: "", notes: "" },
@@ -57,7 +57,7 @@ describe("Papyrus operator console setup panel surface", () => {
     const text = output.join("\n");
 
     expect(text).toContain("Choose the language EstaCoda uses for setup and CLI guidance.");
-    expect(text).toContain(`اختر اللغة التي تستخدمها ${isolateLtr("EstaCoda")} للإعداد وإرشادات الطرفية.`);
+    expect(text).toContain(isolateRtl(`اختر اللغة التي تستخدمها ${isolateLtr("EstaCoda")} للإعداد وإرشادات الطرفية.`));
     expect(output.every((line) => stringWidth(line) <= 96)).toBe(true);
   });
 
