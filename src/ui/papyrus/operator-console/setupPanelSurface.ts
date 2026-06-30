@@ -5,6 +5,7 @@ import type {
   SetupPanelState,
   SetupPanelStatusLine,
   SetupSurfaceState,
+  TextEntryPanelState,
 } from "./operatorConsoleState.js";
 import { styleBold, styleColor, type OperatorConsoleStyle } from "./operatorConsoleStyle.js";
 
@@ -18,6 +19,7 @@ const WIDE_TABLE_MIN_WIDTH = 72;
 
 export function getSetupPanelSurfaceDesiredHeight(state: SetupSurfaceState, width: number): number {
   if (state.kind === "secret") return state.optional === true ? 8 : 10;
+  if (state.kind === "textInput") return 8;
   const statusLineCount = state.statusLines?.length ?? 0;
   const navigationSeparatorCount = state.rows.some((row) => row.group === "navigation") ? 1 : 0;
   if (state.locale === "ar") {
@@ -37,6 +39,8 @@ export function renderSetupPanelSurface(
   if (width <= 0) return [];
   const rows = state.kind === "secret"
     ? renderSecretEntryPanel(state, width, options.style)
+    : state.kind === "textInput"
+    ? renderTextEntryPanel(state, width, options.style)
     : renderSetupTablePanel(state, width, options.style);
   return options.height === undefined ? rows : rows.slice(0, normalizeDimension(options.height));
 }
@@ -333,10 +337,51 @@ function renderSecretEntryPanel(
   return rows;
 }
 
+function renderTextEntryPanel(
+  state: TextEntryPanelState,
+  width: number,
+  style: OperatorConsoleStyle | undefined
+): readonly string[] {
+  const contentWidth = Math.max(0, width - 4);
+  const value = sanitizeInlineText(state.value.length === 0
+    ? state.placeholder ?? ""
+    : state.value);
+  const rows = [
+    renderSetupPanelTopBorder(state.title, state.locale, width, style),
+    renderPanelDescriptionRow(state.description, state.locale, contentWidth, width),
+    renderContentRow("", contentWidth, width),
+    renderTextInputValueRow(value, state.value.length === 0, state.locale, contentWidth, width, style),
+    renderContentRow("", contentWidth, width),
+    renderFooterRow(state.footer, state.locale, contentWidth, width, style),
+    renderBottomBorder(width),
+  ];
+  return rows;
+}
+
+function renderTextInputValueRow(
+  value: string,
+  empty: boolean,
+  locale: SetupPanelState["locale"],
+  contentWidth: number,
+  width: number,
+  style: OperatorConsoleStyle | undefined
+): string {
+  const displayValue = empty
+    ? styleSecondary(value, style)
+    : value;
+  if (locale !== "ar") return renderContentRow(displayValue, contentWidth, width);
+  const localized = localizeChoiceCell(displayValue);
+  return renderContentRow(padVisibleStart(truncateVisibleCells(localized, contentWidth), contentWidth), contentWidth, width);
+}
+
 function maskSecretValue(state: SecretEntryPanelState): string {
   if (state.maskedValue !== undefined && state.maskedValue.length > 0) return state.maskedValue;
   const rawWidth = state.rawValue === undefined ? 0 : stringWidth(state.rawValue);
   return "•".repeat(Math.max(8, Math.min(64, rawWidth)));
+}
+
+function sanitizeInlineText(value: string): string {
+  return value.replace(/[\r\n\t]/gu, " ");
 }
 
 type SetupCopy = {

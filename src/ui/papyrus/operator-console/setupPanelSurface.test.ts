@@ -7,6 +7,7 @@ import {
   renderSetupPanelSurface,
   type SecretEntryPanelState,
   type SetupPanelState,
+  type TextEntryPanelState,
 } from "./index.js";
 
 describe("Papyrus operator console setup panel surface", () => {
@@ -259,6 +260,19 @@ describe("Papyrus operator console setup panel surface", () => {
     expect(text).toContain("Enter continue without key · Esc back");
   });
 
+  it("renders visible text entry panels without masking typed values", () => {
+    const output = renderSetupPanelSurface(textEntryPanel(), { width: 72 });
+    const text = output.join("\n");
+
+    expect(output[0]).toContain("Workspace");
+    expect(text).toContain("Enter workspace path.");
+    expect(text).toContain("/Users/ahnwy/project child");
+    expect(text).not.toContain("/Users/ahnwy/project\nchild");
+    expect(text).toContain("Enter save · Ctrl+C cancel");
+    expect(text).not.toContain("••••");
+    expect(output.every((line) => stringWidth(line) <= 72)).toBe(true);
+  });
+
   it("never renders raw secret when raw value is modeled without a masked value", () => {
     const output = renderSetupPanelSurface({
       ...requiredSecretPanel(),
@@ -354,5 +368,16 @@ function requiredSecretPanel(): SecretEntryPanelState {
     rawValue: "sk-live-raw-secret",
     envVar: "OPENAI_API_KEY",
     footer: "Enter save · Esc back · Ctrl+C exit",
+  };
+}
+
+function textEntryPanel(): TextEntryPanelState {
+  return {
+    kind: "textInput",
+    title: "Workspace",
+    description: "Enter workspace path.",
+    value: "/Users/ahnwy/project\nchild",
+    placeholder: "[leave empty]",
+    footer: "Enter save · Ctrl+C cancel",
   };
 }

@@ -236,6 +236,54 @@ describe("withSetupConsolePrompt", () => {
     expect(output.text()).toBe("");
   });
 
+  it("routes visible setup text input through a setup console panel", async () => {
+    const input = createInput();
+    const output = createOutput();
+    const prompt = createPrompt({
+      select: createSelect("base").select,
+      answer: "base-answer",
+    });
+    const wrapped = withSetupConsolePrompt(prompt, { input, output });
+    const onInputChange = vi.fn();
+
+    const pending = wrapped("Workspace path: ", {
+      placeholder: "/Users/ahnwy/project",
+      onInputChange,
+    });
+    await Promise.resolve();
+    input.write("/tmp/estacoda-workspace\r");
+    const result = await pending;
+    const text = stripAnsi(output.text());
+
+    expect(result).toBe("/tmp/estacoda-workspace");
+    expect(text).toContain("Workspace");
+    expect(text).toContain("Workspace path");
+    expect(text).toContain("/Users/ahnwy/project");
+    expect(text).toContain("/tmp/estacoda-workspace");
+    expect(text).toContain("Enter save · Ctrl+C cancel");
+    expect(text).not.toContain("••••");
+    expect(output.text()).toContain("\x1b[?25l");
+    expect(output.text()).toContain("\x1b[?25h");
+    expect(input.rawModes).toEqual([true, false]);
+    expect(onInputChange).toHaveBeenCalledWith("/tmp/estacoda-workspace");
+  });
+
+  it("keeps non-TTY visible setup text on the existing prompt behavior", async () => {
+    const input = createInput({ isTTY: false });
+    const output = createOutput();
+    const createController = vi.fn();
+    const prompt = createPrompt({
+      select: createSelect("base").select,
+      answer: "base-answer",
+    });
+    const wrapped = withSetupConsolePrompt(prompt, { input, output, createController });
+
+    await expect(wrapped("Workspace path: ")).resolves.toBe("base-answer");
+
+    expect(createController).not.toHaveBeenCalled();
+    expect(output.text()).toBe("");
+  });
+
   it("routes setup secret submit through a masked setup console panel", async () => {
     const input = createInput();
     const output = createOutput();
@@ -272,24 +320,31 @@ describe("withSetupConsolePrompt", () => {
     expect(input.rawModes).toEqual([true, false]);
   });
 
-  it("preserves prompt methods and clears setup frames on close", async () => {
+  it("clears setup frames on close after setup console prompt surfaces", async () => {
     const input = createInput();
     const output = createOutput();
     const controller = createSetupOperatorConsoleController({ output });
     const clear = vi.spyOn(controller, "clear");
-    const submit = vi.fn(async () => ({ text: "submitted" }));
     const onboardingCard = vi.fn();
     const close = vi.fn();
     const prompt = createPrompt({
       select: createSelect("base").select,
-      submit,
+      submit: vi.fn(async () => ({ text: "base-submit" })),
       onboardingCard,
       close,
     });
     const wrapped = withSetupConsolePrompt(prompt, { input, output, controller });
 
-    await expect(wrapped("Question?")).resolves.toBe("answer");
-    await expect(wrapped.submit!("Submit?")).resolves.toEqual({ text: "submitted" });
+    const textPrompt = wrapped("Question?");
+    await Promise.resolve();
+    input.write("typed answer\r");
+    await expect(textPrompt).resolves.toBe("typed answer");
+
+    const submitPrompt = wrapped.submit!("Submit?");
+    await Promise.resolve();
+    input.write("submitted answer\r");
+    await expect(submitPrompt).resolves.toEqual({ text: "submitted answer" });
+
     const onboardingInput = {
       title: "Welcome",
       bodyLines: ["Body"],
@@ -304,7 +359,6 @@ describe("withSetupConsolePrompt", () => {
 
     wrapped.close?.();
 
-    expect(submit).toHaveBeenCalledWith("Submit?", undefined);
     expect(onboardingCard).not.toHaveBeenCalled();
     expect(stripAnsi(output.text())).toContain("Welcome");
     expect(clear).toHaveBeenCalled();
