@@ -1,10 +1,11 @@
 import type { Readable, Writable } from "node:stream";
 import type { SelectPromptInput } from "../../cli/interactive-select.js";
 import type { Prompt, PromptOptions, PromptSubmission } from "../../cli/prompt-contract.js";
+import type { BuildOnboardingPromptCardInput } from "../../ui/view-models/builders.js";
 import { createKeypressStreamDispatcher } from "../../ui/input/keyPressStreamDispatcher.js";
 import type { ParsedKeypress } from "../../ui/input/parseKeypress.js";
 import { SecretPromptController } from "../../ui/papyrus/input/secretPromptController.js";
-import type { OperatorConsoleStyle } from "../../ui/papyrus/operator-console/index.js";
+import type { OperatorConsoleStyle, SetupPanelState } from "../../ui/papyrus/operator-console/index.js";
 import { mapSetupSelectToSetupPanelState } from "../../ui/papyrus/operator-console/setupSelectRuntimeMapper.js";
 import {
   applySelectKey,
@@ -85,6 +86,7 @@ export function withSetupConsolePrompt(
       if (promptOptions?.secret === true && hasLiveSetupConsole(options.input, options.output)) {
         return readSecretWithSetupConsole(question, options, getController(), prompt.uiContext?.locale);
       }
+      clearActiveSetupPanel(options, ownedController);
       return prompt(question, promptOptions);
     },
     {
@@ -95,12 +97,19 @@ export function withSetupConsolePrompt(
           if (promptOptions?.secret === true && hasLiveSetupConsole(options.input, options.output)) {
             return { text: await readSecretWithSetupConsole(question, options, getController(), prompt.uiContext?.locale) };
           }
+          clearActiveSetupPanel(options, ownedController);
           return prompt.submit!(question, promptOptions);
         },
       select,
       onboardingCard: prompt.onboardingCard === undefined
         ? undefined
-        : prompt.onboardingCard,
+        : async (card: BuildOnboardingPromptCardInput): Promise<void> => {
+          if (!hasLiveSetupConsole(options.input, options.output)) {
+            await prompt.onboardingCard!(card);
+            return;
+          }
+          renderOnboardingCardWithSetupConsole(card, getController());
+        },
       close: () => {
         if (!preserveOnClose) {
           options.controller?.clear();
@@ -115,6 +124,15 @@ export function withSetupConsolePrompt(
       },
     }
   );
+}
+
+function clearActiveSetupPanel(
+  options: SetupConsolePromptAdapterOptions,
+  ownedController: SetupOperatorConsoleController | undefined
+): void {
+  if (!hasLiveSetupConsole(options.input, options.output)) return;
+  options.controller?.clear();
+  ownedController?.clear();
 }
 
 export function setupConsoleControllerForPrompt(prompt: Prompt): SetupOperatorConsoleController | undefined {
@@ -365,6 +383,62 @@ function hasLiveSetupConsole(
   output: SetupOperatorConsoleOutput
 ): boolean {
   return Boolean((input as TtyReadable).isTTY && output.isTTY);
+}
+
+function renderOnboardingCardWithSetupConsole(
+  card: BuildOnboardingPromptCardInput,
+  controller: SetupOperatorConsoleController
+): void {
+  controller.render(onboardingCardToSetupPanel(card));
+}
+
+function onboardingCardToSetupPanel(card: BuildOnboardingPromptCardInput): SetupPanelState {
+  const locale = card.locale === "ar" ? "ar" : "en";
+  const bodyLines = card.bodyLines
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0);
+  const description = bodyLines.join(" ");
+  const technicalStatusLines = (card.technicalLines ?? [])
+    .filter((line) => line.trim().length > 0)
+    .map((line) => ({ text: line, tone: "muted" as const, direction: "ltr" as const }));
+  const selectedIndex = normalizeIndex(card.selectedOptionIndex, card.options.length);
+  const selected = card.options[selectedIndex];
+  const descriptionFields = description.length > 0 ? { description } : {};
+  const selectedRowFields = selected === undefined ? {} : { selectedRowId: onboardingCardOptionId(selected, selectedIndex) };
+  return {
+    kind: "table",
+    layout: "choiceMenu",
+    title: card.title,
+    ...descriptionFields,
+    locale,
+    statusLines: [
+      ...(card.statusLines ?? []),
+      ...technicalStatusLines,
+    ],
+    rows: card.options.map((option, index) => {
+      const details = option.description ?? option.cells?.details ?? option.badges?.join(" · ") ?? "";
+      const badges = option.description === undefined && option.cells?.details === undefined
+        ? ""
+        : option.badges?.join(" · ") ?? "";
+      return {
+        id: onboardingCardOptionId(option, index),
+        provider: option.label,
+        model: "",
+        status: details,
+        notes: badges,
+        ...(option.group === undefined ? {} : { group: option.group }),
+      };
+    }),
+    ...selectedRowFields,
+    footer: card.hint ?? "",
+  };
+}
+
+function onboardingCardOptionId(
+  option: BuildOnboardingPromptCardInput["options"][number],
+  index: number
+): string {
+  return option.id || `option-${index}`;
 }
 
 function secretPanelTitle(question: string, locale: "en" | "ar"): string {

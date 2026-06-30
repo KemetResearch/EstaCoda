@@ -111,6 +111,38 @@ describe("withSetupConsolePrompt", () => {
     expect(text).not.toContain("Selected:");
   });
 
+  it("renders onboarding cards through the setup console when live", async () => {
+    const input = createInput();
+    const output = createOutput();
+    const onboardingCard = vi.fn();
+    const prompt = createPrompt({ onboardingCard });
+    const wrapped = withSetupConsolePrompt(prompt, { input, output });
+
+    await wrapped.onboardingCard?.(onboardingCardInput());
+    const text = stripAnsi(output.text());
+
+    expect(onboardingCard).not.toHaveBeenCalled();
+    expect(text).toContain("Welcome");
+    expect(text).toContain("Start guided setup.");
+    expect(text).toContain("~/.estacoda/profiles/default/config.json");
+    expect(text).toContain("Begin");
+    expect(output.text()).not.toMatch(forbiddenManagedRegionOutput);
+  });
+
+  it("keeps non-TTY onboarding cards on the base prompt behavior", async () => {
+    const input = createInput({ isTTY: false });
+    const output = createOutput();
+    const onboardingCard = vi.fn();
+    const prompt = createPrompt({ onboardingCard });
+    const wrapped = withSetupConsolePrompt(prompt, { input, output });
+    const card = onboardingCardInput();
+
+    await wrapped.onboardingCard?.(card);
+
+    expect(onboardingCard).toHaveBeenCalledWith(card);
+    expect(output.text()).toBe("");
+  });
+
   it("routes setup secret input through a masked setup console panel", async () => {
     const input = createInput();
     const output = createOutput();
@@ -273,7 +305,8 @@ describe("withSetupConsolePrompt", () => {
     wrapped.close?.();
 
     expect(submit).toHaveBeenCalledWith("Submit?", undefined);
-    expect(onboardingCard).toHaveBeenCalledWith(onboardingInput);
+    expect(onboardingCard).not.toHaveBeenCalled();
+    expect(stripAnsi(output.text())).toContain("Welcome");
     expect(clear).toHaveBeenCalled();
     expect(close).toHaveBeenCalledOnce();
   });
@@ -371,6 +404,24 @@ function choiceMenuSelection(): SelectPromptInput<string> {
     hint: "↑↓ navigate   ENTER select",
     locale: "en",
     direction: "ltr",
+  };
+}
+
+function onboardingCardInput() {
+  return {
+    title: "Welcome",
+    bodyLines: ["Start guided setup."],
+    technicalLines: ["~/.estacoda/profiles/default/config.json"],
+    options: [
+      {
+        id: "begin",
+        label: "Begin",
+        description: "Open the first setup step.",
+      },
+    ],
+    selectedOptionIndex: 0,
+    locale: "en" as const,
+    direction: "ltr" as const,
   };
 }
 
