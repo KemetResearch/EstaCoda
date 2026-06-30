@@ -19,16 +19,19 @@ const WIDE_TABLE_MIN_WIDTH = 72;
 
 export function getSetupPanelSurfaceDesiredHeight(state: SetupSurfaceState, width: number): number {
   if (state.kind === "secret") return state.optional === true ? 8 : 10;
-  if (state.kind === "textInput") return 8;
+  if (state.kind === "textInput") return Math.max(8, textEntryDescriptionLineCount(state.description, width) + 6);
   const statusLineCount = state.statusLines?.length ?? 0;
   const navigationSeparatorCount = state.rows.some((row) => row.group === "navigation") ? 1 : 0;
   if (state.locale === "ar") {
     return Math.max(8, state.rows.length * 2 + navigationSeparatorCount + 6 + statusLineCount);
   }
-  const baseRows = state.rows.length + navigationSeparatorCount + 7 + statusLineCount;
+  const renderedRows = state.layout === "choiceMenu"
+    ? choiceMenuRenderedRowCount(state, Math.max(1, width - 4))
+    : state.rows.length;
+  const baseRows = renderedRows + navigationSeparatorCount + 7 + statusLineCount;
   return normalizeDimension(width) >= WIDE_TABLE_MIN_WIDTH
     ? Math.max(8, baseRows)
-    : Math.max(8, state.rows.length * 4 + 4 + statusLineCount);
+    : Math.max(8, renderedRows * 4 + 4 + statusLineCount);
 }
 
 export function renderSetupPanelSurface(
@@ -136,6 +139,13 @@ function renderChoiceMenuRows(
     }
 
     const selected = row.id === state.selectedRowId;
+    if (isFullWidthOutputRow(row)) {
+      for (const line of wrapVisibleCells(row.status, contentWidth)) {
+        rows.push(renderContentRow(line, contentWidth, width));
+      }
+      continue;
+    }
+
     const marker = selected ? selectedMarker : "";
     const detail = choiceMenuDetail(row);
     const line = state.locale === "ar"
@@ -236,6 +246,20 @@ function choiceMenuDetail(row: SetupPanelState["rows"][number]): string {
   if (row.notes.length === 0 || row.notes === row.status) return row.status;
   if (row.status.length === 0) return row.notes;
   return `${row.status} · ${row.notes}`;
+}
+
+function choiceMenuRenderedRowCount(state: SetupPanelState, contentWidth: number): number {
+  return state.rows.reduce((count, row) => {
+    if (!isFullWidthOutputRow(row)) return count + 1;
+    return count + Math.max(1, wrapVisibleCells(row.status, contentWidth).length);
+  }, 0);
+}
+
+function isFullWidthOutputRow(row: SetupPanelState["rows"][number]): boolean {
+  return row.provider.trim().length === 0 &&
+    row.model.trim().length === 0 &&
+    row.notes.trim().length === 0 &&
+    row.status.trim().length > 0;
 }
 
 function formatArabicOptionLabel(label: string, selected: boolean): string {
@@ -348,7 +372,7 @@ function renderTextEntryPanel(
     : state.value);
   const rows = [
     renderSetupPanelTopBorder(state.title, state.locale, width, style),
-    renderPanelDescriptionRow(state.description, state.locale, contentWidth, width),
+    ...renderPanelDescriptionRows(state.description, state.locale, contentWidth, width),
     renderContentRow("", contentWidth, width),
     renderTextInputValueRow(value, state.value.length === 0, state.locale, contentWidth, width, style),
     renderContentRow("", contentWidth, width),
@@ -382,6 +406,30 @@ function maskSecretValue(state: SecretEntryPanelState): string {
 
 function sanitizeInlineText(value: string): string {
   return value.replace(/[\r\n\t]/gu, " ");
+}
+
+function textEntryDescriptionLineCount(description: string, width: number): number {
+  const contentWidth = Math.max(1, normalizeDimension(width) - 4);
+  return renderableDescriptionLines(description, contentWidth).length;
+}
+
+function renderPanelDescriptionRows(
+  description: string,
+  locale: SetupPanelState["locale"],
+  contentWidth: number,
+  width: number
+): readonly string[] {
+  return renderableDescriptionLines(description, contentWidth).map((line) =>
+    renderPanelDescriptionRow(line, locale, contentWidth, width)
+  );
+}
+
+function renderableDescriptionLines(description: string, contentWidth: number): readonly string[] {
+  const lines = description.split(/\r?\n/u);
+  const rendered = lines.flatMap((line) =>
+    line.trim().length === 0 ? [""] : wrapVisibleCells(line.trimEnd(), contentWidth)
+  );
+  return rendered.length > 0 ? rendered : [""];
 }
 
 type SetupCopy = {

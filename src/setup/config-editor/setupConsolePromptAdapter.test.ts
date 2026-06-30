@@ -268,6 +268,37 @@ describe("withSetupConsolePrompt", () => {
     expect(onInputChange).toHaveBeenCalledWith("/tmp/estacoda-workspace");
   });
 
+  it("clears the previous setup card before redrawing visible text input", async () => {
+    const input = createInput();
+    const output = createOutput();
+    const prompt = createPrompt({
+      select: createSelect("base").select,
+      onboardingCard: () => undefined,
+    });
+    const wrapped = withSetupConsolePrompt(prompt, { input, output });
+
+    await wrapped.onboardingCard?.({
+      title: "Workspace",
+      bodyLines: ["Select the workspace EstaCoda should use."],
+      options: [{ id: "workspace", label: "/tmp/project" }],
+      selectedOptionIndex: 0,
+      locale: "en",
+      direction: "ltr",
+    });
+
+    const pending = wrapped("Workspace path: ");
+    await Promise.resolve();
+    input.write("/tmp/other");
+    await Promise.resolve();
+
+    const finalScreen = replayTerminal(output.text()).join("\n");
+    expect(finalScreen.match(/𓂀  Workspace/gu) ?? []).toHaveLength(1);
+    expect(finalScreen).toContain("/tmp/other");
+
+    input.write("\r");
+    await expect(pending).resolves.toBe("/tmp/other");
+  });
+
   it("keeps non-TTY visible setup text on the existing prompt behavior", async () => {
     const input = createInput({ isTTY: false });
     const output = createOutput();
@@ -562,4 +593,58 @@ function createOutput(): Writable & {
 
 function stripAnsi(value: string): string {
   return value.replace(/\x1b\[[0-9;?]*[ -/]*[@-~]/gu, "");
+}
+
+function replayTerminal(output: string): readonly string[] {
+  const lines = [""];
+  let row = 0;
+  let column = 0;
+  let index = 0;
+
+  const ensureRow = () => {
+    while (lines.length <= row) lines.push("");
+  };
+
+  while (index < output.length) {
+    const char = output[index]!;
+    if (char === "\x1b") {
+      const match = /^\x1b\[([0-9;?]*)([A-Za-z])/u.exec(output.slice(index));
+      if (match !== null) {
+        const parameters = match[1] ?? "";
+        const command = match[2];
+        if (command === "A") {
+          const amount = Number.parseInt(parameters, 10);
+          row = Math.max(0, row - (Number.isFinite(amount) ? amount : 1));
+          ensureRow();
+        } else if (command === "K") {
+          ensureRow();
+          lines[row] = lines[row]!.slice(0, column);
+        }
+        index += match[0].length;
+        continue;
+      }
+    }
+
+    if (char === "\r") {
+      column = 0;
+      index += 1;
+      continue;
+    }
+
+    if (char === "\n") {
+      row += 1;
+      column = 0;
+      ensureRow();
+      index += 1;
+      continue;
+    }
+
+    ensureRow();
+    const line = lines[row]!;
+    lines[row] = `${line.slice(0, column)}${char}${line.slice(column + 1)}`;
+    column += 1;
+    index += 1;
+  }
+
+  return lines.map((line) => stripAnsi(line).trimEnd()).filter((line) => line.trim().length > 0);
 }

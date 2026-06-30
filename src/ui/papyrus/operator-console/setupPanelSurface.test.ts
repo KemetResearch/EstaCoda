@@ -266,10 +266,36 @@ describe("Papyrus operator console setup panel surface", () => {
 
     expect(output[0]).toContain("Workspace");
     expect(text).toContain("Enter workspace path.");
+    expect(text).toContain("Press Enter to use the current default");
+    expect(text).toContain("Current default: /Users/ahnwy/project");
     expect(text).toContain("/Users/ahnwy/project child");
     expect(text).not.toContain("/Users/ahnwy/project\nchild");
     expect(text).toContain("Enter save · Ctrl+C cancel");
     expect(text).not.toContain("••••");
+    expect(output.every((line) => stringWidth(line) <= 72)).toBe(true);
+  });
+
+  it("wraps full-width setup output rows without truncating long blockers", () => {
+    const message = "Verification blocked setup because of Missing env var DEEPSEEK_API_KEY for route deepseek/deepseek-v4.";
+    const output = renderSetupPanelSurface({
+      kind: "table",
+      layout: "choiceMenu",
+      title: "Setup result",
+      description: "Review setup output without applying changes.",
+      rows: [{
+        id: "line-0",
+        provider: "",
+        model: "",
+        status: message,
+        notes: "",
+      }],
+      footer: "Read-only output",
+    }, { width: 72 });
+    const text = output.join("\n");
+
+    expect(text).toContain("DEEPSEEK_API_KEY");
+    expect(text).toContain("deepseek/deepseek-v4.");
+    expect(text).not.toContain("route..");
     expect(output.every((line) => stringWidth(line) <= 72)).toBe(true);
   });
 
@@ -375,7 +401,7 @@ function textEntryPanel(): TextEntryPanelState {
   return {
     kind: "textInput",
     title: "Workspace",
-    description: "Enter workspace path.",
+    description: "Enter workspace path.\nPress Enter to use the current default.\n\nCurrent default: /Users/ahnwy/project",
     value: "/Users/ahnwy/project\nchild",
     placeholder: "[leave empty]",
     footer: "Enter save · Ctrl+C cancel",

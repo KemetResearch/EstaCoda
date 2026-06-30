@@ -67,8 +67,8 @@ import {
   renderSetupApplyPlanningResult,
   setupNavigationChoice,
   setupProviderCredentialQuestion,
-  setupPromptWithDefault,
   setupPromptContext,
+  setupTechnicalToken,
   type SetupChoiceResult,
   type SetupPromptContext,
   setupCopyText,
@@ -1078,13 +1078,12 @@ async function promptForCanonicalWorkspaceRoot(
   while (true) {
     await showSetupCard(setupPromptContext(options.prompt, language), {
       title: setupCopyText(language, "onboarding.workspace.title"),
-      bodyLines: [setupCopyText(language, "onboarding.workspace.root")],
-      technicalLines: [defaultWorkspaceRoot],
+      bodyLines: onboardingWorkspacePromptLines(language, defaultWorkspaceRoot),
       options: [{ id: "workspace", label: defaultWorkspaceRoot, technical: true }],
     });
     const requestedWorkspaceRoot = await promptSetupStringWithDefault(
       options.prompt,
-      setupPromptWithDefault(language, setupCopyText(language, "onboarding.workspace.root"), defaultWorkspaceRoot),
+      onboardingWorkspacePromptWithDefault(language, defaultWorkspaceRoot),
       defaultWorkspaceRoot
     );
     const validation = await validateOnboardingWorkspacePath(requestedWorkspaceRoot);
@@ -1132,6 +1131,27 @@ async function promptForCanonicalWorkspaceRoot(
 
     defaultWorkspaceRoot = requestedWorkspaceRoot;
   }
+}
+
+function onboardingWorkspacePromptWithDefault(
+  locale: SetupCopyLocale,
+  defaultWorkspaceRoot: string
+): string {
+  return `${onboardingWorkspacePromptLines(locale, defaultWorkspaceRoot).join("\n")}\n`;
+}
+
+function onboardingWorkspacePromptLines(
+  locale: SetupCopyLocale,
+  defaultWorkspaceRoot: string
+): readonly string[] {
+  return [
+    setupCopyText(locale, "onboarding.workspace.root"),
+    setupCopyText(locale, "onboarding.workspace.root.defaultInstruction"),
+    "",
+    formatSetupCopy(locale, "onboarding.workspace.root.currentDefault", {
+      workspacePath: setupTechnicalToken(locale, defaultWorkspaceRoot),
+    }),
+  ];
 }
 
 async function createDefaultFlowEngine(options: CollectSetupEntryStateOptions): Promise<FlowEngine> {

@@ -454,6 +454,7 @@ async function readTextWithSetupConsole(
     ttyInput.on("data", onData);
     ttyInput.setRawMode?.(true);
     ttyInput.resume?.();
+    controller.clear();
     options.output.write(HIDE_CURSOR);
     cursorHidden = true;
     render();
