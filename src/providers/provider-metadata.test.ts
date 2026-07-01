@@ -119,7 +119,7 @@ describe("provider-metadata", () => {
     });
 
     it("defaults native tool history support off for custom and deferred providers", () => {
-      for (const id of ["custom-corp", "codex", "anthropic", "minimax", "nous", "local", "google", "openrouter", "zai"] as const) {
+      for (const id of ["custom-corp", "codex", "anthropic", "minimax", "nous", "local", "google", "zai"] as const) {
         const metadata = getProviderMetadata(id as ProviderId);
         expect(metadata.supportsNativeToolHistory).not.toBe(true);
         expect(metadata.allowReasoningEchoPlaceholder).not.toBe(true);
@@ -146,6 +146,10 @@ describe("provider-metadata", () => {
         reasoningEchoField: "reasoning_content",
         reasoningEchoRequiredForToolCalls: true,
         reasoningEchoProviderFamily: "kimi"
+      });
+      expect(getProviderMetadata("openrouter")).toMatchObject({
+        apiMode: "openai_chat_completions",
+        supportsNativeToolHistory: true
       });
       expect(getProviderMetadata("codex").apiMode).toBe("openai_responses");
       expect(getProviderMetadata("codex").supportsNativeToolHistory).not.toBe(true);

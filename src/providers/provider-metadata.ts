@@ -150,7 +150,8 @@ const BUILT_IN_METADATA: Record<string, ProviderMetadata> = {
     authMethods: ["api_key"],
     defaultAuthMethod: "api_key",
     allowsCustomBaseUrl: true,
-    requiresModelSelection: true
+    requiresModelSelection: true,
+    supportsNativeToolHistory: true
   },
   zai: {
     id: "zai",
