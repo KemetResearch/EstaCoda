@@ -11,7 +11,7 @@ import {
   optionalPromptId,
   setupModuleContextFromConfig,
 } from "./optional-capability-flow.js";
-import { browserSetupModule, voiceSetupModule, webSearchSetupModule, type SetupModuleContext } from "./setup-modules.js";
+import { browserSetupModule, visionSetupModule, voiceSetupModule, webSearchSetupModule, type SetupModuleContext } from "./setup-modules.js";
 
 describe("optional Search capability flow", () => {
   let tempDir: string;
@@ -25,10 +25,12 @@ describe("optional Search capability flow", () => {
 
   afterEach(async () => {
     vi.restoreAllMocks();
-    delete process.env.BRAVE_SEARCH_API_KEY;
-    delete process.env.OPENAI_API_KEY;
-    await rm(tempDir, { recursive: true, force: true });
-  });
+	    delete process.env.BRAVE_SEARCH_API_KEY;
+	    delete process.env.OPENAI_API_KEY;
+	    delete process.env.BYTEPLUS_ARK_API_KEY;
+	    delete process.env.ARK_API_KEY;
+	    await rm(tempDir, { recursive: true, force: true });
+	  });
 
   it("maps configure-web-search to the web-search optional module", () => {
     expect(optionalCapabilityModuleForAction("configure-web-search")).toBe(webSearchSetupModule);
@@ -177,6 +179,62 @@ describe("optional Search capability flow", () => {
         ddgsCapabilityStatus: "ready",
         ddgsSetupConfirmed: false,
       });
+    }
+  });
+
+  it("collects a reviewed deferred BytePlus image generation secret", async () => {
+    const seenQuestions: { question: string; secret: boolean }[] = [];
+
+    const collected = await collectOptionalCapabilityContext(options({
+      values: ["byteplus", "", ""],
+      secret: "byteplus-secret",
+      seenQuestions,
+    }), baseContext(), visionSetupModule);
+
+    expect(collected.kind).toBe("configured");
+    if (collected.kind === "configured") {
+      expect(collected.context.vision).toMatchObject({
+        provider: "byteplus",
+        model: "seedream-5-0-260128",
+        apiKeyEnv: "BYTEPLUS_ARK_API_KEY",
+        baseUrl: "https://ark.ap-southeast.bytepluses.com/api/v3",
+        credentialSurface: "image-generation",
+        credentialEnvVars: ["BYTEPLUS_ARK_API_KEY"],
+        credentialReady: true,
+        credentialValuesIncluded: false,
+      });
+      expect(collected.pendingCredentialWrites).toEqual([
+        { envVarName: "BYTEPLUS_ARK_API_KEY", value: "byteplus-secret" },
+      ]);
+      expect(JSON.stringify(collected.context)).not.toContain("byteplus-secret");
+    }
+    expect(seenQuestions).toContainEqual({
+      question: "Enter image generation provider API key for BYTEPLUS_ARK_API_KEY: ",
+      secret: true,
+    });
+  });
+
+  it("reuses an existing ARK_API_KEY for BytePlus image generation", async () => {
+    process.env.ARK_API_KEY = "existing-byteplus-secret";
+
+    const collected = await collectOptionalCapabilityContext(options({
+      values: ["byteplus", "", "", "existing"],
+      secret: "should-not-be-read",
+    }), baseContext(), visionSetupModule);
+
+    expect(collected.kind).toBe("configured");
+    if (collected.kind === "configured") {
+      expect(collected.context.vision).toMatchObject({
+        provider: "byteplus",
+        model: "seedream-5-0-260128",
+        apiKeyEnv: "ARK_API_KEY",
+        credentialSurface: "image-generation",
+        credentialEnvVars: ["ARK_API_KEY"],
+        credentialReady: true,
+      });
+      expect(collected.pendingCredentialWrites).toEqual([]);
+      expect(JSON.stringify(collected)).not.toContain("existing-byteplus-secret");
+      expect(JSON.stringify(collected)).not.toContain("should-not-be-read");
     }
   });
 

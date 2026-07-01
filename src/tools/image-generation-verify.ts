@@ -141,6 +141,12 @@ function interpretSafeProviderProbe(response: Awaited<ReturnType<ImageGeneration
       message: `Provider endpoint is not reachable: ${response.status} ${response.statusText}`
     };
   }
+  if (response.status === 404) {
+    return {
+      ok: false,
+      message: `Provider capability check endpoint was not found: ${response.status} ${response.statusText}`
+    };
+  }
   return {
     ok: true,
     message: response.ok ? "Provider capability check passed." : `Provider endpoint reachable (${response.status} ${response.statusText}).`

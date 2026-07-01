@@ -103,7 +103,7 @@ Precedence is route-specific: `model` or fallback route value, then `providers.<
 | Provider | Maturity | Notes |
 |---|---|---|
 | **FAL** | `live-proven` | Default image generation provider. Requires `FAL_KEY`. |
-| **BytePlus / Seedream** | `live-proven` | Requires `BYTEPLUS_API_KEY`. |
+| **BytePlus / Seedream** | `live-proven` | Requires `BYTEPLUS_ARK_API_KEY`; reviewed setup can also reuse an existing `ARK_API_KEY`. |
 
 ---
 

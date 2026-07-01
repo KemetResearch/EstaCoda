@@ -4,7 +4,7 @@ import { randomUUID } from "node:crypto";
 import type { ArtifactStore } from "../artifacts/artifact-store.js";
 import { setupNeeded } from "../capabilities/capability-setup.js";
 import type { LoadedRuntimeConfig } from "../config/runtime-config.js";
-import { defaultImageApiKeyEnv, defaultImageBaseUrl, defaultImageModel } from "../contracts/image-generation.js";
+import { defaultImageApiKeyEnv, defaultImageBaseUrl, defaultImageModel, resolveImageModel } from "../contracts/image-generation.js";
 import type { RegisteredTool, SessionToolProvider } from "../contracts/tool.js";
 
 export type ImageGenerationFetchLike = (url: string, init?: {
@@ -153,6 +153,17 @@ async function generateImage(input: {
     return generated;
   }
 
+  if ("bytes" in generated) {
+    return {
+      ok: true,
+      bytes: generated.bytes,
+      mimeType: generated.mimeType,
+      model: generated.model,
+      aspectRatio: input.aspectRatio,
+      seed: provider === "byteplus" ? undefined : input.seed
+    };
+  }
+
   const imageBytes = await fetcher(generated.url, { signal: input.signal });
   if (!imageBytes.ok) {
     return {
@@ -172,7 +183,7 @@ async function generateImage(input: {
     mimeType: mimeFromImageDownload(generated.url, imageBytes.headers?.get("content-type") ?? undefined),
     model: generated.model,
     aspectRatio: input.aspectRatio,
-    seed: input.seed,
+    seed: provider === "byteplus" ? undefined : input.seed,
     sourceUrl: generated.url
   };
 }
@@ -187,7 +198,7 @@ async function submitFalRequest(
     signal?: AbortSignal;
   },
   fetcher: ImageGenerationFetchLike
-): Promise<{ ok: true; url: string; model: string } | { ok: false; content: string; metadata?: Record<string, unknown> }> {
+): Promise<GeneratedImageReference | { ok: false; content: string; metadata?: Record<string, unknown> }> {
   const model = input.model ?? input.imageGen.fal?.model ?? input.imageGen.model;
   const apiKeyEnv = input.imageGen.fal?.apiKeyEnv ?? input.imageGen.apiKeyEnv ?? "FAL_KEY";
   const apiKey = process.env[apiKeyEnv];
@@ -226,8 +237,9 @@ async function submitBytePlusRequest(
     signal?: AbortSignal;
   },
   fetcher: ImageGenerationFetchLike
-): Promise<{ ok: true; url: string; model: string } | { ok: false; content: string; metadata?: Record<string, unknown> }> {
-  const model = input.model ?? input.imageGen.byteplus?.model ?? input.imageGen.model;
+): Promise<GeneratedImageReference | { ok: false; content: string; metadata?: Record<string, unknown> }> {
+  const model = resolveImageModel("byteplus", input.model ?? input.imageGen.byteplus?.model ?? input.imageGen.model)
+    ?? defaultImageModel("byteplus");
   const apiKeyEnv = input.imageGen.byteplus?.apiKeyEnv ?? input.imageGen.apiKeyEnv ?? defaultImageApiKeyEnv("byteplus");
   const apiKey = process.env[apiKeyEnv];
   if (apiKey === undefined || apiKey.length === 0) {
@@ -239,7 +251,7 @@ async function submitBytePlusRequest(
   }
 
   const baseUrl = (input.imageGen.byteplus?.baseUrl ?? input.imageGen.baseUrl ?? defaultImageBaseUrl("byteplus")).replace(/\/$/, "");
-  const response = await fetcher(`${baseUrl}/images/generations`, {
+  const response = await fetchWithTransientRetry(fetcher, `${baseUrl}/images/generations`, {
     method: "POST",
     headers: {
       authorization: `Bearer ${apiKey}`,
@@ -249,19 +261,57 @@ async function submitBytePlusRequest(
       model,
       prompt: input.prompt,
       size: bytePlusSize(input.aspectRatio),
-      seed: input.seed,
-      response_format: "url"
+      output_format: "png",
+      response_format: "url",
+      watermark: false
     }),
     signal: input.signal
   });
   return parseImageResponse(response, "byteplus", model);
 }
 
+async function fetchWithTransientRetry(
+  fetcher: ImageGenerationFetchLike,
+  url: string,
+  init: Parameters<ImageGenerationFetchLike>[1],
+  maxAttempts = 3
+): ReturnType<ImageGenerationFetchLike> {
+  let lastResponse: Awaited<ReturnType<ImageGenerationFetchLike>> | undefined;
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
+    const response = await fetcher(url, init);
+    lastResponse = response;
+    if (!isTransientProviderFailure(response.status) || attempt === maxAttempts - 1) {
+      return response;
+    }
+    await sleep(250 * (attempt + 1), init?.signal);
+  }
+  return lastResponse!;
+}
+
+function isTransientProviderFailure(status: number): boolean {
+  return status === 429 || status >= 500;
+}
+
+async function sleep(ms: number, signal?: AbortSignal): Promise<void> {
+  if (signal?.aborted === true) return;
+  await new Promise<void>((resolve) => {
+    const timer = setTimeout(resolve, ms);
+    signal?.addEventListener("abort", () => {
+      clearTimeout(timer);
+      resolve();
+    }, { once: true });
+  });
+}
+
+type GeneratedImageReference =
+  | { ok: true; url: string; model: string }
+  | { ok: true; bytes: Buffer; mimeType: string; model: string };
+
 async function parseImageResponse(
   response: Awaited<ReturnType<ImageGenerationFetchLike>>,
   provider: string,
   model: string
-): Promise<{ ok: true; url: string; model: string } | { ok: false; content: string; metadata?: Record<string, unknown> }> {
+): Promise<GeneratedImageReference | { ok: false; content: string; metadata?: Record<string, unknown> }> {
   const raw = await response.text();
   if (!response.ok) {
     return {
@@ -273,15 +323,19 @@ async function parseImageResponse(
 
   const parsed = tryJson(raw);
   const url = firstImageUrl(parsed);
-  if (url === undefined) {
+  if (url !== undefined) {
+    return { ok: true, url, model };
+  }
+  const b64Json = firstImageB64Json(parsed);
+  if (b64Json === undefined) {
     return {
       ok: false,
-      content: "Image generation response did not include an image URL.",
+      content: "Image generation response did not include an image URL or b64_json payload.",
       metadata: { provider, model, response: parsed ?? raw }
     };
   }
 
-  return { ok: true, url, model };
+  return { ok: true, bytes: Buffer.from(b64Json, "base64"), mimeType: "image/png", model };
 }
 
 async function globalImageFetch(url: string, init?: Parameters<ImageGenerationFetchLike>[1]): ReturnType<ImageGenerationFetchLike> {
@@ -301,6 +355,14 @@ function firstImageUrl(value: any): string | undefined {
   if (typeof value?.image?.url === "string") return value.image.url;
   if (typeof value?.data?.[0]?.url === "string") return value.data[0].url;
   if (typeof value?.url === "string") return value.url;
+  return undefined;
+}
+
+function firstImageB64Json(value: any): string | undefined {
+  if (typeof value?.images?.[0]?.b64_json === "string") return value.images[0].b64_json;
+  if (typeof value?.image?.b64_json === "string") return value.image.b64_json;
+  if (typeof value?.data?.[0]?.b64_json === "string") return value.data[0].b64_json;
+  if (typeof value?.b64_json === "string") return value.b64_json;
   return undefined;
 }
 
@@ -324,12 +386,33 @@ function imageGenerationFailureMessage(
   model: string
 ): string {
   const parsed = tryJson(raw);
-  const code = parsed?.error?.code;
+  const code = typeof parsed?.error?.code === "string" ? parsed.error.code : undefined;
   if (provider === "byteplus" && code === "ModelNotOpen") {
     return [
       `Image generation request failed: ${status} ${statusText}`,
       `BytePlus ModelArk says model ${model} is not activated for this account.`,
       "Activate this model in the Ark Console, or choose another enabled image model with `estacoda image models --provider byteplus` and `estacoda image setup --provider byteplus --model-version seedream-5`.",
+      raw
+    ].join("\n");
+  }
+  if (provider === "byteplus" && (status === 429 || code?.toLowerCase().includes("rate") === true)) {
+    return [
+      `Image generation request failed: ${status} ${statusText}`,
+      "BytePlus ModelArk rate-limited the request. Retry after a short wait or check the image model RPM quota.",
+      raw
+    ].join("\n");
+  }
+  if (provider === "byteplus" && code !== undefined && /quota|balance|insufficient/i.test(code)) {
+    return [
+      `Image generation request failed: ${status} ${statusText}`,
+      "BytePlus ModelArk reported a quota or balance problem for this account.",
+      raw
+    ].join("\n");
+  }
+  if (provider === "byteplus" && code !== undefined && /content|policy|safety|sensitive/i.test(code)) {
+    return [
+      `Image generation request failed: ${status} ${statusText}`,
+      "BytePlus ModelArk rejected the prompt or image request under its content policy.",
       raw
     ].join("\n");
   }

@@ -17,7 +17,7 @@ It is not a built-in model capability. You need a provider account, an API key, 
 | FAL | `fal-ai/flux-2/klein/9b` | `FAL_KEY` | `https://fal.run` |
 | BytePlus / Seedream | `seedream-5-0-260128` | `BYTEPLUS_ARK_API_KEY` | `https://ark.ap-southeast.bytepluses.com/api/v3` |
 
-FAL is the default provider. BytePlus model access is version-specific; the model must be activated in your Ark Console account before use.
+FAL is the default provider. BytePlus model access is version-specific; the model must be activated in your Ark Console account before use. EstaCoda also recognizes an existing BytePlus `ARK_API_KEY` credential during reviewed setup, matching BytePlus examples.
 
 ## Setup
 
@@ -26,7 +26,7 @@ Configure the provider in the selected profile:
 ```bash
 estacoda image setup --provider fal --model fal-ai/flux-2/klein/9b --api-key-env FAL_KEY
 estacoda image setup --provider byteplus --model-version seedream-5 --api-key-env BYTEPLUS_ARK_API_KEY
-estacoda image setup --provider fal --api-key <key>
+estacoda image setup --provider byteplus --api-key <key>
 ```
 
 Setup writes provider configuration into `~/.estacoda/profiles/<id>/config.json` under the `imageGen` key. If you pass `--api-key`, the command stores the secret in the profile `.env` file and references it by env var name.
@@ -77,8 +77,8 @@ Example:
 ```
 
 - `provider`: `fal` or `byteplus`.
-- `model`: exact provider model id or an alias resolved at runtime.
-- `useGateway`: whether to route through a gateway broker. In v0.1.0 this remains `false` for direct provider calls.
+- `model`: exact provider model id or an alias resolved during setup and runtime tool calls.
+- `useGateway`: legacy config field. Image generation currently uses direct provider calls.
 - Provider blocks (`fal`, `byteplus`) can override `model`, `apiKeyEnv`, and `baseUrl`.
 
 ## Tool behavior
@@ -92,7 +92,7 @@ Parameters:
 | `prompt` | `string` | yes | The text prompt. |
 | `aspectRatio` | `string` | no | `square`, `landscape`, or `portrait`. Defaults to square. |
 | `model` | `string` | no | Overrides the configured model for this request. |
-| `seed` | `number` | no | Optional seed for reproducibility. |
+| `seed` | `number` | no | Optional seed for FAL requests. BytePlus requests omit this field because it is not documented by ModelArk Seedream. |
 
 Aspect ratio mapping:
 
@@ -101,6 +101,8 @@ Aspect ratio mapping:
 | `square` | `square_hd` | `1920x1920` |
 | `landscape` | `landscape_16_9` | `2560x1440` |
 | `portrait` | `portrait_16_9` | `1440x2560` |
+
+BytePlus requests use ModelArk's OpenAI-compatible endpoint with `response_format: "url"`, `output_format: "png"`, and `watermark: false`. EstaCoda can also consume BytePlus `b64_json` responses if a provider or future configuration returns them.
 
 Result:
 

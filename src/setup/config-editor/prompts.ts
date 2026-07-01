@@ -1,6 +1,7 @@
 import type { Prompt } from "../../cli/prompt-contract.js";
 import { promptForApiKeyInput } from "../../cli/secret-prompt.js";
 import type { BrowserBackendKind, BrowserCloudProviderKind } from "../../contracts/browser.js";
+import { defaultImageApiKeyEnv, defaultImageBaseUrl, defaultImageModel } from "../../contracts/image-generation.js";
 import type { AuxiliaryModelTask } from "../../contracts/provider.js";
 import type { SecurityApprovalMode } from "../../contracts/security.js";
 import type { PromptCardStatusLine } from "../../contracts/view-model.js";
@@ -104,6 +105,7 @@ export type VisionCapabilityResult = {
   readonly provider: ImageGenerationProvider;
   readonly model: string;
   readonly apiKeyEnv: string;
+  readonly baseUrl: string;
   readonly useGateway: boolean;
 };
 
@@ -1617,6 +1619,7 @@ export function promptVisionCapability(
     readonly provider?: ImageGenerationProvider;
     readonly model?: string;
     readonly apiKeyEnv?: string;
+    readonly baseUrl?: string;
     readonly useGateway?: boolean;
   },
   locale: SetupCopyLocale,
@@ -1628,6 +1631,7 @@ export function promptVisionCapability(
     readonly provider?: ImageGenerationProvider;
     readonly model?: string;
     readonly apiKeyEnv?: string;
+    readonly baseUrl?: string;
     readonly useGateway?: boolean;
   },
   locale?: SetupCopyLocale,
@@ -1639,6 +1643,7 @@ export async function promptVisionCapability(
     readonly provider?: ImageGenerationProvider;
     readonly model?: string;
     readonly apiKeyEnv?: string;
+    readonly baseUrl?: string;
     readonly useGateway?: boolean;
   },
   locale: SetupCopyLocale = "en",
@@ -1671,31 +1676,25 @@ export async function promptVisionCapability(
     return providerResult;
   }
   const provider = setupChoiceSelectedValue(providerResult);
+  const providerCurrent = current.provider === provider;
   const model = await promptSetupStringWithDefault(
     prompt,
     setupPromptLabel(locale, setupCopyText(locale, "setupEditor.prompt.vision.model")),
-    current.model ?? "fal-ai/imagen4/preview"
+    (providerCurrent ? current.model : undefined) ?? defaultImageModel(provider)
   );
   const apiKeyEnv = await promptSetupStringWithDefault(
     prompt,
     setupPromptLabel(locale, setupCopyText(locale, "setupEditor.prompt.vision.apiKeyEnv")),
-    current.apiKeyEnv ?? "FAL_KEY"
+    (providerCurrent ? current.apiKeyEnv : undefined) ?? defaultImageApiKeyEnv(provider)
   );
-  const useGateway = await promptSetupChoice(prompt, {
-    title: setupCopyText(locale, "setupModules.vision.title"),
-    message: `${setupCopyText(locale, "setupEditor.prompt.vision.useGateway")}?\n`,
-    choices: [
-      { id: "gateway-no", label: "No", value: false },
-      { id: "gateway-yes", label: "Yes", value: true },
-    ],
-    defaultValue: current.useGateway ?? false,
-  });
+  const baseUrl = (providerCurrent ? current.baseUrl : undefined) ?? defaultImageBaseUrl(provider);
 
   return {
     provider,
     model,
     apiKeyEnv,
-    useGateway,
+    baseUrl,
+    useGateway: current.useGateway ?? false,
   };
 }
 

@@ -629,7 +629,6 @@ describe("runConfigEditor", () => {
         "fal",
         "",
         "",
-        false,
         "disabled",
         "unchanged",
         "skip",
@@ -739,14 +738,10 @@ describe("runConfigEditor", () => {
     expect(optionalActionInput?.options.find((option) => option.id === "voice-skip")?.group).toBe("navigation");
     expect(incompleteChannelInput?.options.every((option) => option.group === "navigation")).toBe(true);
     expect(incompleteTelegramInput?.options.every((option) => option.group === "navigation")).toBe(true);
-    expect(selectInputs.find((input) =>
+    expect(selectInputs.some((input) =>
       input.title === "Image generation" &&
-      input.options.some((option) => option.id === "gateway-no")
-    )?.columns).toBeUndefined();
-    expect(selectInputs.find((input) =>
-      input.title === "Image generation" &&
-      input.options.some((option) => option.id === "gateway-no")
-    )?.options.find((option) => option.id === "gateway-no")?.group).toBeUndefined();
+      input.options.some((option) => option.id === "gateway-no" || option.id === "gateway-yes")
+    )).toBe(false);
   });
 
   it("keeps language and confirmation setup prompts stacked", async () => {
@@ -767,7 +762,6 @@ describe("runConfigEditor", () => {
         "fal",
         "",
         "",
-        true,
       ],
     });
     const selectInputs: SelectPromptInput<unknown>[] = [];
@@ -802,7 +796,7 @@ describe("runConfigEditor", () => {
     expect(ddgs).toEqual({ provider: "ddgs", ddgsSetupConfirmed: false });
     expect(browser.backend).toBe("local-cdp");
     expect(browser.autoLaunch).toBe(false);
-    expect(vision.useGateway).toBe(true);
+    expect(vision.useGateway).toBe(false);
 
     const languageInput = selectInputs.find((input) => input.title === "Setup language");
     expect(languageInput?.columns).toBeUndefined();
@@ -824,19 +818,15 @@ describe("runConfigEditor", () => {
     expect(selectInputs.find((input) => input.title === "Setup next action")?.columns).toBeUndefined();
     expect(selectInputs.find((input) => input.title === "DDGS setup")?.columns).toBeUndefined();
     expect(selectInputs.find((input) => input.title === "Local supervised browser")?.columns).toBeUndefined();
-    expect(selectInputs.find((input) =>
+    expect(selectInputs.some((input) =>
       input.title === "Image generation" &&
-      input.options.some((option) => option.id === "gateway-yes")
-    )?.columns).toBeUndefined();
+      input.options.some((option) => option.id === "gateway-no" || option.id === "gateway-yes")
+    )).toBe(false);
     expect(languageInput?.statusLines).toBeUndefined();
     const trustInput = selectInputs.find((input) => input.title === "Workspace trust");
     const reviewInput = selectInputs.find((input) => input.title === "Finalize configuration");
     const postApplyInput = selectInputs.find((input) => input.title === "Setup next action");
     const autoLaunchInput = selectInputs.find((input) => input.title === "Local supervised browser");
-    const gatewayInput = selectInputs.find((input) =>
-      input.title === "Image generation" &&
-      input.options.some((option) => option.id === "gateway-yes")
-    );
     expect(trustInput?.options.find((option) => option.id === "trust")?.group).toBeUndefined();
     expect(trustInput?.options.find((option) => option.id === "cancel")?.group).toBe("navigation");
     expect(reviewInput?.options.find((option) => option.id === "approve")?.group).toBeUndefined();
@@ -846,8 +836,6 @@ describe("runConfigEditor", () => {
     ]);
     expect(postApplyInput?.options.find((option) => option.id === "exit")?.group).toBe("navigation");
     expect(autoLaunchInput?.options.find((option) => option.id === "browser-auto-launch-no")?.group).toBeUndefined();
-    expect(gatewayInput?.options.find((option) => option.id === "gateway-no")?.group).toBeUndefined();
-    expect(gatewayInput?.options.find((option) => option.id === "gateway-yes")?.group).toBeUndefined();
   });
 
   it("shows current language and Back in the setup editor language selector without adding columns", async () => {
@@ -4818,14 +4806,13 @@ describe("runConfigEditor", () => {
       homeDir: tempDir,
       workspaceRoot,
       prompt: fakePrompt({
-        values: [
-          "enable",
+	        values: [
+	          "enable",
           "fal",
           "fal-ai/imagen4/preview",
           "FAL_KEY",
-          false,
-          true,
         ],
+        secret: "sk-image-secret",
       }),
       defaultActionId: "configure-image-generation",
       applyExecutor: createReviewedSetupApplyExecutor({
@@ -4847,9 +4834,10 @@ describe("runConfigEditor", () => {
     expect(result.reviewManifest?.sections["enabled-optional-capabilities"].map((line) => line.sourceDraftIds[0])).toEqual([
       "setup-module.vision.capability",
     ]);
-    expect(config.imageGen?.provider).toBe("fal");
-    expect(config.imageGen?.fal?.apiKeyEnv).toBe("FAL_KEY");
-    expect(config.channels).toBeUndefined();
+	    expect(config.imageGen?.provider).toBe("fal");
+	    expect(config.imageGen?.fal?.apiKeyEnv).toBe("FAL_KEY");
+	    expect(rawConfig).not.toContain("sk-image-secret");
+	    expect(config.channels).toBeUndefined();
     expect(config.tts).toBeUndefined();
     expect(config.stt).toBeUndefined();
     expect(config.browser).toBeUndefined();

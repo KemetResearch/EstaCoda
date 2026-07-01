@@ -779,6 +779,7 @@ export const SETUP_COPY_ENTRIES = [
   copy("setupEditor.prompt.vision.provider", "Image-generation provider", "مزوّد توليد الصور", [], "optional-capability"),
   copy("setupEditor.prompt.vision.model", "Image-generation model", "نموذج توليد الصور", [], "optional-capability"),
   copy("setupEditor.prompt.vision.apiKeyEnv", "Image-generation API key environment variable", "متغير بيئة مفتاح API لتوليد الصور", [], "optional-capability"),
+  copy("setupEditor.prompt.vision.secretValue", "Enter image generation provider API key for {envVar}:", "أدخل مفتاح API لمزوّد توليد الصور لـ {envVar}:", ["API", "envVar"], "credential-reference"),
   copy("setupEditor.prompt.vision.useGateway", "Use the configured image gateway setting", "استخدم إعداد image gateway المهيأ", [], "optional-capability"),
   copy("setupEditor.prompt.webSearch.provider.title", "Search provider", "مزوّد بحث الويب", [], "optional-capability"),
   copy("setupEditor.prompt.webSearch.provider.body", "Choose the provider EstaCoda should use for web.search.", "اختر المزوّد الذي ستستخدمه EstaCoda لـ web.search.", [], "optional-capability"),
