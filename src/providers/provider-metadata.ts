@@ -32,6 +32,7 @@ export type ProviderMetadata = {
   apiMode: ProviderApiMode;
   defaultBaseUrl?: string;
   defaultApiKeyEnv?: string;
+  defaultHeaders?: Record<string, string>;
   authMethods: ProviderAuthMethod[];
   defaultAuthMethod: ProviderAuthMethod;
   allowsCustomBaseUrl: boolean;
@@ -147,6 +148,10 @@ const BUILT_IN_METADATA: Record<string, ProviderMetadata> = {
     apiMode: "openai_chat_completions",
     defaultBaseUrl: "https://openrouter.ai/api/v1",
     defaultApiKeyEnv: "OPENROUTER_API_KEY",
+    defaultHeaders: {
+      "HTTP-Referer": "https://estacoda.kemetresearch.com",
+      "X-Title": "EstaCoda"
+    },
     authMethods: ["api_key"],
     defaultAuthMethod: "api_key",
     allowsCustomBaseUrl: true,

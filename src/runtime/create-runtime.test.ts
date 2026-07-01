@@ -3972,6 +3972,14 @@ describe("createDefaultProviderRegistry", () => {
     expect(zai).toBeDefined();
     expect(zai!.executable).not.toBe(false);
     expect(zai!.endpoint?.baseUrl).toBe("https://api.z.ai/api/paas/v4");
+
+    const openrouter = registry.get("openrouter");
+    expect(openrouter).toBeDefined();
+    expect(openrouter!.executable).not.toBe(false);
+    expect(openrouter!.endpoint?.headers).toMatchObject({
+      "HTTP-Referer": "https://estacoda.kemetresearch.com",
+      "X-Title": "EstaCoda"
+    });
   });
 
   it("registers selected zai model through the OpenAI-compatible adapter path", () => {

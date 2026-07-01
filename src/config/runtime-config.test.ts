@@ -2986,6 +2986,70 @@ describe("buildProviderRegistry custom provider baseUrl behavior", () => {
     await rm(workspace, { recursive: true, force: true });
   });
 
+  it("known OpenRouter provider applies metadata attribution headers", async () => {
+    const workspace = await mkdtemp(join(tmpdir(), "estacoda-config-test-"));
+    try {
+      await mkdir(dirname(profileConfigPath(workspace)), { recursive: true });
+      await writeFile(profileConfigPath(workspace), JSON.stringify({
+        model: { provider: "openrouter", id: "openrouter/auto" },
+        providers: {
+          openrouter: {
+            kind: "openai-compatible",
+            models: ["openrouter/auto"]
+          }
+        }
+      }));
+
+      const loaded = await loadRuntimeConfig({
+        workspaceRoot: workspace,
+        homeDir: workspace
+      });
+
+      const adapter = loaded.providerRegistry.get("openrouter");
+      expect(adapter).toBeDefined();
+      expect(adapter?.endpoint?.headers).toMatchObject({
+        "HTTP-Referer": "https://estacoda.kemetresearch.com",
+        "X-Title": "EstaCoda"
+      });
+    } finally {
+      await rm(workspace, { recursive: true, force: true });
+    }
+  });
+
+  it("known OpenRouter provider lets configured headers override metadata defaults", async () => {
+    const workspace = await mkdtemp(join(tmpdir(), "estacoda-config-test-"));
+    try {
+      await mkdir(dirname(profileConfigPath(workspace)), { recursive: true });
+      await writeFile(profileConfigPath(workspace), JSON.stringify({
+        model: { provider: "openrouter", id: "openrouter/auto" },
+        providers: {
+          openrouter: {
+            kind: "openai-compatible",
+            headers: {
+              "HTTP-Referer": "https://workspace.example.com",
+              "X-Custom": "value"
+            },
+            models: ["openrouter/auto"]
+          }
+        }
+      }));
+
+      const loaded = await loadRuntimeConfig({
+        workspaceRoot: workspace,
+        homeDir: workspace
+      });
+
+      const adapter = loaded.providerRegistry.get("openrouter");
+      expect(adapter?.endpoint?.headers).toEqual({
+        "HTTP-Referer": "https://workspace.example.com",
+        "X-Title": "EstaCoda",
+        "X-Custom": "value"
+      });
+    } finally {
+      await rm(workspace, { recursive: true, force: true });
+    }
+  });
+
   it("loadRuntimeConfig primary route for custom provider without baseUrl has baseUrl === undefined", async () => {
     const workspace = await mkdtemp(join(tmpdir(), "estacoda-config-test-"));
     await mkdir(dirname(profileConfigPath(workspace)), { recursive: true });

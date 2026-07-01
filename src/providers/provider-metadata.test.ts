@@ -71,6 +71,14 @@ describe("provider-metadata", () => {
       expect(getProviderDefaultBaseUrl("nous")).toBeUndefined();
     });
 
+    it("keeps OpenRouter attribution defaults in provider metadata", () => {
+      expect(getProviderMetadata("openrouter").defaultHeaders).toEqual({
+        "HTTP-Referer": "https://estacoda.kemetresearch.com",
+        "X-Title": "EstaCoda"
+      });
+      expect(getProviderMetadata("openai").defaultHeaders).toBeUndefined();
+    });
+
     it("defaultApiKeyEnv matches runtime-config and create-runtime expectations", () => {
       expect(getDefaultApiKeyEnv("openai")).toBe("OPENAI_API_KEY");
       expect(getDefaultApiKeyEnv("deepseek")).toBe("DEEPSEEK_API_KEY");

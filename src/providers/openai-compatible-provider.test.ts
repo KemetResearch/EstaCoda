@@ -272,6 +272,32 @@ describe("createOpenAICompatibleProvider timeout classification", () => {
 });
 
 describe("buildOpenAICompatibleRequest", () => {
+  it("uses endpoint headers without adding provider-specific attribution in the adapter", () => {
+    const prepared = buildOpenAICompatibleRequest(DEFAULT_ENDPOINT, {
+      model: "openrouter/auto",
+      messages: [{ role: "user", content: "Hello" }]
+    }, undefined, "openrouter");
+
+    expect(prepared.headers).not.toHaveProperty("HTTP-Referer");
+    expect(prepared.headers).not.toHaveProperty("X-Title");
+  });
+
+  it("passes configured endpoint headers through to requests", () => {
+    const prepared = buildOpenAICompatibleRequest({
+      ...DEFAULT_ENDPOINT,
+      headers: {
+        "HTTP-Referer": "https://estacoda.kemetresearch.com",
+        "X-Title": "EstaCoda"
+      }
+    }, {
+      model: "openrouter/auto",
+      messages: [{ role: "user", content: "Hello" }]
+    }, undefined, "openrouter");
+
+    expect(prepared.headers["HTTP-Referer"]).toBe("https://estacoda.kemetresearch.com");
+    expect(prepared.headers["X-Title"]).toBe("EstaCoda");
+  });
+
   it("uses max_completion_tokens for direct OpenAI Chat Completions", () => {
     const prepared = buildOpenAICompatibleRequest(DEFAULT_ENDPOINT, {
       model: "gpt-5",

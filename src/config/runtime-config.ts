@@ -2214,7 +2214,7 @@ export function buildProviderRegistry(config: EstaCodaConfig, options: {
             apiKey: providerConfig.apiKeyEnv === undefined
               ? { kind: "none" }
               : { kind: "env", name: providerConfig.apiKeyEnv },
-            headers: providerConfig.headers
+            headers: mergeProviderEndpointHeaders(metadata.defaultHeaders, providerConfig.headers)
           } satisfies ProviderEndpoint,
           models: enrichModelProfiles({
             provider: providerId,
@@ -2234,7 +2234,7 @@ export function buildProviderRegistry(config: EstaCodaConfig, options: {
           apiKey: providerConfig.apiKeyEnv === undefined
             ? { kind: "none" }
             : { kind: "env", name: providerConfig.apiKeyEnv },
-          headers: providerConfig.headers
+          headers: mergeProviderEndpointHeaders(metadata.defaultHeaders, providerConfig.headers)
         } satisfies ProviderEndpoint,
         models: enrichModelProfiles({
           provider: providerId,
@@ -2271,6 +2271,19 @@ export function buildProviderRegistry(config: EstaCodaConfig, options: {
   }
 
   return registry;
+}
+
+function mergeProviderEndpointHeaders(
+  defaultHeaders: Record<string, string> | undefined,
+  configuredHeaders: Record<string, string> | undefined
+): Record<string, string> | undefined {
+  if (defaultHeaders === undefined && configuredHeaders === undefined) {
+    return undefined;
+  }
+  return {
+    ...(defaultHeaders ?? {}),
+    ...(configuredHeaders ?? {})
+  };
 }
 
 export async function saveRuntimeConfig(path: string, config: EstaCodaConfig): Promise<void> {
