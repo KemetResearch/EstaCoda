@@ -57,7 +57,6 @@ export type ProviderUxKind =
   | "hosted"
   | "local"
   | "custom-openai-compatible"
-  | "openrouter"
   | "aggregator";
 
 export type ProviderSetupMode =

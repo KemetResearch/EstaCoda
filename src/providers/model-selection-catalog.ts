@@ -728,7 +728,7 @@ function isEndpointReady(baseUrl?: string): boolean {
 function inferProviderUxKind(providerId: ProviderId, baseUrl?: string): ProviderUxKind {
   const meta = getProviderMetadata(providerId);
   if (meta.id === "local") return "local";
-  if (meta.id === "openrouter") return "openrouter";
+  if (meta.id === "openrouter") return "aggregator";
   if (baseUrl !== undefined && meta.allowsCustomBaseUrl) return "custom-openai-compatible";
   return "hosted";
 }
