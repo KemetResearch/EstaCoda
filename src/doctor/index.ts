@@ -4,14 +4,14 @@ import { loadRuntimeConfig } from "../config/runtime-config.js";
 import { resolveHomeDir } from "../config/home-dir.js";
 import { resolveStateHome } from "../config/state-home.js";
 import { defaultProfileId, readActiveProfile, resolveProfileStateHome } from "../config/profile-home.js";
-import { collectSetupEntryState } from "../setup/setup-entry-state.js";
+import { collectSetupEntryState, type SetupEntryState } from "../setup/setup-entry-state.js";
 import {
   diagnoseProviderConfig,
   diagnoseProviderLive
 } from "../config/provider-diagnostics.js";
 import type { ProviderDiagnostic, ProviderLiveDiagnostic } from "../config/provider-diagnostics.js";
-import { isBackupReady } from "../lifecycle/state-preservation.js";
 import { PackRegistry } from "../packs/pack-registry.js";
+import { diagnoseBackupReadiness } from "./checks/backup-readiness.js";
 import { diagnoseConfigHygiene, type ConfigHygieneDiagnostic } from "./checks/config-hygiene.js";
 import {
   diagnoseDirectoryStructure,
@@ -31,18 +31,21 @@ import type {
 } from "./types.js";
 
 export async function runDoctor(options: CliOptions, args: string[] = []): Promise<CliCommandResult> {
-  const setupState = await collectSetupEntryState(options);
+  const activeProfile = readActiveProfileForDoctor({ homeDir: options.homeDir });
+  const activeProfileId = activeProfile.profileId;
+  const selectedProfile = options.profileId ?? activeProfileId;
+  const effectiveOptions = { ...options, profileId: selectedProfile };
+  const setupStateResult = await collectDoctorSetupEntryState(effectiveOptions, selectedProfile);
+  const setupState = setupStateResult.setupState;
   let config: Awaited<ReturnType<typeof loadRuntimeConfig>> | undefined;
   let configSyntaxError: string | undefined;
-  const activeProfileId = readActiveProfile({ homeDir: options.homeDir }).profileId ?? defaultProfileId();
-  const selectedProfile = selectedProfileId(options);
   const selectedProfilePaths = resolveProfileStateHome({ homeDir: options.homeDir, profileId: selectedProfile });
   const activeProfilePaths = resolveProfileStateHome({ homeDir: options.homeDir, profileId: activeProfileId });
   const stateHome = resolveStateHome({ homeDir: options.homeDir });
   const directoryDiagnostic = await diagnoseDirectoryStructure({ homeDir: options.homeDir, profileId: selectedProfile });
 
   try {
-    config = await loadRuntimeConfig(options);
+    config = await loadRuntimeConfig(effectiveOptions);
   } catch (error) {
     configSyntaxError = error instanceof Error ? error.message : String(error);
   }
@@ -66,6 +69,8 @@ export async function runDoctor(options: CliOptions, args: string[] = []): Promi
   const selectedProfileConfigMissing = !await pathExists(selectedProfilePaths.configPath);
   const trustStoreOk = await trustStoreHealthy(stateHome.trustJsonPath);
 
+  warnings.push(...activeProfile.warnings);
+  warnings.push(...setupStateResult.warnings);
   if (activeProfileMissing) {
     warnings.push(`Active profile is missing: ${activeProfileId}`);
   }
@@ -102,7 +107,7 @@ export async function runDoctor(options: CliOptions, args: string[] = []): Promi
 
   // State directory backup integrity
   const homeDir = resolveHomeDir(options.homeDir);
-  const backupReady = await isBackupReady(homeDir);
+  const backupReady = await diagnoseBackupReadiness({ homeDir });
   if (!backupReady.ok) {
     warnings.push(`State backup not ready: ${backupReady.reason}`);
   }
@@ -455,8 +460,86 @@ const DOCTOR_LABELS: Record<DoctorLabelKey, Record<DoctorLocale, string>> = {
   checks: { en: "Checks", ar: "الفحوصات" }
 };
 
-function selectedProfileId(options: Pick<CliOptions, "homeDir" | "profileId">): string {
-  return options.profileId ?? readActiveProfile({ homeDir: options.homeDir }).profileId ?? defaultProfileId();
+function readActiveProfileForDoctor(options: Pick<CliOptions, "homeDir">): {
+  readonly profileId: string;
+  readonly warnings: readonly string[];
+} {
+  try {
+    return {
+      profileId: readActiveProfile({ homeDir: options.homeDir }).profileId ?? defaultProfileId(),
+      warnings: []
+    };
+  } catch (error) {
+    return {
+      profileId: defaultProfileId(),
+      warnings: [`Active profile state is invalid: ${errorMessage(error)}`]
+    };
+  }
+}
+
+async function collectDoctorSetupEntryState(
+  options: CliOptions & { profileId: string },
+  selectedProfile: string
+): Promise<{ readonly setupState: SetupEntryState; readonly warnings: readonly string[] }> {
+  try {
+    return {
+      setupState: await collectSetupEntryState({ ...options, readOnly: true }),
+      warnings: []
+    };
+  } catch (error) {
+    const message = errorMessage(error);
+    return {
+      setupState: fallbackSetupEntryState(options, selectedProfile, message),
+      warnings: [`Setup state could not be fully collected: ${message}`]
+    };
+  }
+}
+
+function fallbackSetupEntryState(
+  options: Pick<CliOptions, "homeDir" | "workspaceRoot">,
+  selectedProfile: string,
+  message: string
+): SetupEntryState {
+  const providerDiagnostic: ProviderDiagnostic = {
+    status: "blocked",
+    lines: ["Provider check skipped because setup state could not load."],
+    warnings: [message]
+  };
+  return {
+    kind: "broken-config",
+    recommendedAction: "repair-config",
+    configSources: [],
+    configPaths: {
+      profile: resolveProfileStateHome({ homeDir: options.homeDir, profileId: selectedProfile }).configPath
+    },
+    providerReadiness: "unknown",
+    workspaceTrust: "unknown",
+    workspaceVerification: "unknown",
+    stateDirectoryWritable: false,
+    missingCredentials: { envVars: [], providers: [] },
+    setupVerification: {
+      stateWritable: false,
+      envFilePresent: false,
+      envFileSecure: true,
+      workspaceTrusted: false,
+      securityModeLabel: "Unknown",
+      securityModeValue: "unknown",
+      skillAutonomyLabel: "Unknown",
+      skillAutonomyValue: "unknown",
+      providerDiagnostic,
+      toolStatus: "skipped",
+      configSources: [],
+      warnings: [message],
+      issueCodes: ["doctor-setup-state-invalid"]
+    },
+    warnings: [message],
+    blockers: [message],
+    error: message
+  };
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
 }
 
 function hasFlag(args: string[], ...flags: string[]): boolean {

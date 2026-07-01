@@ -1,4 +1,4 @@
-import { mkdir, rm, writeFile } from "node:fs/promises";
+import { mkdir, rm, rmdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { Runtime } from "../../runtime/create-runtime.js";
 import type { LiveToolDiagnostic } from "../types.js";
@@ -67,6 +67,7 @@ export async function diagnoseLiveToolCall(input: {
     };
   } finally {
     await rm(probePath, { force: true });
+    await rmdir(doctorDir).catch(() => undefined);
   }
 }
 

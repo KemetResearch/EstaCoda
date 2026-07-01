@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { spawn } from "node:child_process";
-import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { tmpdir } from "node:os";
 import { runCliCommand } from "./cli.js";
@@ -417,6 +417,41 @@ describe("cli setup command", () => {
     expect(result.exitCode).toBe(1);
     expect(result.output).toContain("Config syntax error:");
     expect(result.output).toMatch(/Model:\s+unknown\/unknown/u);
+  });
+
+  it("doctor reports invalid active profile state instead of throwing", async () => {
+    const workspaceRoot = join(tempDir, "workspace");
+    await writeUserConfig(tempDir, localReadyConfig());
+    await writeFile(join(tempDir, ".estacoda", "active-profile.json"), "{", "utf8");
+
+    const result = await runCliCommand({
+      argv: ["doctor"],
+      workspaceRoot,
+      homeDir: tempDir,
+      interactive: false,
+    });
+
+    expect(result.handled).toBe(true);
+    expect(result.exitCode).toBe(1);
+    expect(result.output).toContain("Active profile state is invalid:");
+    expect(result.output).toMatch(/Profile:\s+default/u);
+  });
+
+  it("doctor does not create setup or backup probe files", async () => {
+    const workspaceRoot = join(tempDir, "workspace");
+    await writeUserConfig(tempDir, localReadyConfig());
+    await trustWorkspace(tempDir, workspaceRoot);
+
+    const result = await runCliCommand({
+      argv: ["doctor"],
+      workspaceRoot,
+      homeDir: tempDir,
+      interactive: false,
+    });
+
+    expect(result.handled).toBe(true);
+    await expect(stat(join(tempDir, ".estacoda", ".verify"))).rejects.toThrow();
+    await expect(stat(join(tempDir, ".estacoda", ".backups"))).rejects.toThrow();
   });
 
   it("keeps live CLI entrypoints free of the legacy interactive onboarding runner", async () => {
