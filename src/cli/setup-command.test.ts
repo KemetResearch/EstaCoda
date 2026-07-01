@@ -9,6 +9,7 @@ import type { SelectPromptInput } from "./interactive-select.js";
 import { WorkspaceTrustStore } from "../security/workspace-trust-store.js";
 import { resolveGlobalStateHome, resolveProfileStateHome } from "../config/profile-home.js";
 import { runInitCommand } from "./init-command.js";
+import { CURRENT_OAUTH_STORE_VERSION } from "../providers/oauth/oauth-types.js";
 
 async function makeTempDir(): Promise<string> {
   return mkdtemp(join(tmpdir(), "estacoda-cli-setup-test-"));
@@ -452,6 +453,52 @@ describe("cli setup command", () => {
     expect(result.handled).toBe(true);
     await expect(stat(join(tempDir, ".estacoda", ".verify"))).rejects.toThrow();
     await expect(stat(join(tempDir, ".estacoda", ".backups"))).rejects.toThrow();
+  });
+
+  it("doctor renders operational diagnostics without leaking OAuth or MCP secrets", async () => {
+    const workspaceRoot = join(tempDir, "workspace");
+    const profilePaths = resolveProfileStateHome({ homeDir: tempDir, profileId: "default" });
+    await writeUserConfig(tempDir, {
+      ...(localReadyConfig() as Record<string, unknown>),
+      mcpServers: {
+        localDev: {
+          command: "sh",
+          args: ["-c", "node server.js"],
+          env: {
+            API_TOKEN: "super-secret-mcp-token"
+          }
+        }
+      }
+    });
+    await mkdir(dirname(profilePaths.authJsonPath), { recursive: true });
+    await writeFile(profilePaths.authJsonPath, `${JSON.stringify({
+      version: CURRENT_OAUTH_STORE_VERSION,
+      providers: {
+        codex: {
+          authMethod: "oauth_device_pkce",
+          accessToken: "secret-access-token",
+          refreshToken: "secret-refresh-token",
+          expiresAt: "2025-01-01T00:00:00.000Z"
+        }
+      }
+    })}\n`, "utf8");
+
+    const result = await runCliCommand({
+      argv: ["doctor"],
+      workspaceRoot,
+      homeDir: tempDir,
+      interactive: false,
+    });
+
+    expect(result.handled).toBe(true);
+    expect(result.output).toContain("OAuth");
+    expect(result.output).toContain("MCP");
+    expect(result.output).toContain("External tools");
+    expect(result.output).toContain("OAuth credentials are expired for providers: codex");
+    expect(result.output).toContain("MCP server localDev passes secret-looking env keys: API_TOKEN");
+    expect(result.output).not.toContain("secret-access-token");
+    expect(result.output).not.toContain("secret-refresh-token");
+    expect(result.output).not.toContain("super-secret-mcp-token");
   });
 
   it("doctor --fix creates only safe local state skeleton repairs", async () => {

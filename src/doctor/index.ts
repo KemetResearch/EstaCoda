@@ -18,7 +18,10 @@ import {
   type DirectoryStructureDiagnostic
 } from "./checks/directory-structure.js";
 import { collectMissingProfileEnv } from "./checks/env-coverage.js";
+import { diagnoseExternalTools, type ExternalToolDiagnostic } from "./checks/external-tools.js";
 import { diagnoseLiveToolCall } from "./checks/live-tool.js";
+import { diagnoseMcpSecurity, type McpSecurityDiagnostic } from "./checks/mcp-security.js";
+import { diagnoseOAuthStatus, type OAuthStatusDiagnostic } from "./checks/oauth-status.js";
 import { diagnoseSQLiteHealth, type SQLiteHealthDiagnostic } from "./checks/sqlite-health.js";
 import { renderDoctorReport } from "./cli-renderer.js";
 import { runDoctorFix } from "./fix-engine.js";
@@ -60,6 +63,8 @@ export async function runDoctor(options: CliOptions, args: string[] = []): Promi
   const stateHome = resolveStateHome({ homeDir: options.homeDir });
   const directoryDiagnostic = await diagnoseDirectoryStructure({ homeDir: options.homeDir, profileId: selectedProfile });
   const sqliteHealth = await diagnoseSQLiteHealth({ homeDir: options.homeDir });
+  const oauthStatus = await diagnoseOAuthStatus({ homeDir: options.homeDir, profileId: selectedProfile });
+  const externalTools = await diagnoseExternalTools();
 
   try {
     config = await loadRuntimeConfig(effectiveOptions);
@@ -67,6 +72,7 @@ export async function runDoctor(options: CliOptions, args: string[] = []): Promi
     configSyntaxError = error instanceof Error ? error.message : String(error);
   }
   const configHygiene = await diagnoseConfigHygiene(selectedProfilePaths.configPath);
+  const mcpSecurity = diagnoseMcpSecurity(config);
 
   const providerDiagnostic = config === undefined
     ? setupState.setupVerification.providerDiagnostic
@@ -106,12 +112,18 @@ export async function runDoctor(options: CliOptions, args: string[] = []): Promi
 
   warnings.push(...directoryDiagnostic.warnings);
   warnings.push(...sqliteHealth.warnings);
+  warnings.push(...oauthStatus.warnings);
+  warnings.push(...mcpSecurity.warnings);
+  warnings.push(...externalTools.warnings);
   warnings.push(...configHygiene.warnings);
   warnings.push(...providerDiagnostic.warnings);
   warnings.push(...(liveProviderDiagnostic?.warnings ?? []));
   warnings.push(...(liveToolDiagnostic?.warnings ?? []));
   notes.push(...directoryDiagnostic.notes);
   notes.push(...sqliteHealth.notes);
+  notes.push(...oauthStatus.notes);
+  notes.push(...mcpSecurity.notes);
+  notes.push(...externalTools.notes);
 
   if (configSyntaxError !== undefined) {
     warnings.push(`Config syntax error: ${configSyntaxError}`);
@@ -168,6 +180,9 @@ export async function runDoctor(options: CliOptions, args: string[] = []): Promi
     configHygiene,
     directoryDiagnostic,
     sqliteHealth,
+    oauthStatus,
+    mcpSecurity,
+    externalTools,
     activeProfileMissing,
     selectedProfileConfigMissing,
     trustStoreOk,
@@ -208,6 +223,9 @@ type BuildDoctorReportInput = {
   readonly configHygiene: ConfigHygieneDiagnostic;
   readonly directoryDiagnostic: DirectoryStructureDiagnostic;
   readonly sqliteHealth: SQLiteHealthDiagnostic;
+  readonly oauthStatus: OAuthStatusDiagnostic;
+  readonly mcpSecurity: McpSecurityDiagnostic;
+  readonly externalTools: ExternalToolDiagnostic;
   readonly activeProfileMissing: boolean;
   readonly selectedProfileConfigMissing: boolean;
   readonly trustStoreOk: boolean;
@@ -249,12 +267,30 @@ function buildDoctorReport(input: BuildDoctorReportInput): DoctorReport {
       firstOrReady(input.providerDiagnostic.warnings, input.locale)
     ),
     check(
+      "oauth",
+      label(input.locale, "oauth"),
+      input.oauthStatus.status === "warning" ? "warning" : "healthy",
+      oauthSummary(input.oauthStatus, input.locale)
+    ),
+    check(
       "models",
       label(input.locale, "models"),
       input.model === "unknown/unknown" || input.modelContextWindowWarning ? "warning" : "healthy",
       input.model
     ),
     check("capabilities", label(input.locale, "capabilities"), "healthy", input.browserBackend),
+    check(
+      "mcp",
+      label(input.locale, "mcp"),
+      input.mcpSecurity.status === "warning" ? "warning" : "healthy",
+      mcpSummary(input.mcpSecurity, input.locale)
+    ),
+    check(
+      "external-tools",
+      label(input.locale, "externalTools"),
+      input.externalTools.status === "warning" ? "warning" : "healthy",
+      externalToolsSummary(input.externalTools, input.locale)
+    ),
     check("memory", label(input.locale, "memory"), "healthy"),
     check(
       "sessions",
@@ -370,6 +406,31 @@ function sqliteSummary(diagnostic: SQLiteHealthDiagnostic, locale: DoctorLocale)
   return locale === "ar" ? `${count} جلسات` : `${count} sessions`;
 }
 
+function oauthSummary(diagnostic: OAuthStatusDiagnostic, locale: DoctorLocale): string {
+  const expiredCount = diagnostic.providerStatuses.filter((provider) => provider.status === "expired").length;
+  if (diagnostic.warnings.length > 0 && expiredCount > 0) {
+    return locale === "ar" ? `${expiredCount} منتهية` : `${expiredCount} expired`;
+  }
+  const readyCount = diagnostic.providerStatuses.filter((provider) => provider.status === "ready").length;
+  if (readyCount === 0) return locale === "ar" ? "لا توجد سجلات" : "no records";
+  return locale === "ar" ? `${readyCount} جاهزة` : `${readyCount} ready`;
+}
+
+function mcpSummary(diagnostic: McpSecurityDiagnostic, locale: DoctorLocale): string {
+  if (diagnostic.serverCount === 0) return locale === "ar" ? "لا توجد خوادم" : "no servers";
+  if (diagnostic.warnings.length > 0) {
+    return locale === "ar" ? `${diagnostic.warnings.length} تحذيرات` : `${diagnostic.warnings.length} warning(s)`;
+  }
+  return locale === "ar" ? `${diagnostic.enabledCount}/${diagnostic.serverCount} مفعلة` : `${diagnostic.enabledCount}/${diagnostic.serverCount} enabled`;
+}
+
+function externalToolsSummary(diagnostic: ExternalToolDiagnostic, locale: DoctorLocale): string {
+  if (diagnostic.missingRequired.length > 0) {
+    return locale === "ar" ? `${diagnostic.missingRequired.length} مفقودة` : `${diagnostic.missingRequired.length} missing`;
+  }
+  return locale === "ar" ? `${diagnostic.available.length} متاحة` : `${diagnostic.available.length} available`;
+}
+
 function providerSeverity(diagnostic: ProviderDiagnostic): DoctorCheckSeverity {
   if (diagnostic.status === "blocked") return "blocked";
   if (diagnostic.status === "warning") return "warning";
@@ -444,11 +505,16 @@ function warningDetailLines(warning: string, locale: DoctorLocale): readonly str
   if (missingEnv !== undefined) {
     return [locale === "ar" ? `المتغيرات: ${missingEnv}` : `Env: ${missingEnv}`];
   }
+  const mcpServer = /^MCP server ([^ ]+) /iu.exec(warning)?.[1];
+  if (mcpServer !== undefined) {
+    return [locale === "ar" ? `الخادم: ${mcpServer}` : `Server: ${mcpServer}`];
+  }
   return undefined;
 }
 
 function warningCommand(warning: string): string | undefined {
   if (/Config syntax error/iu.test(warning)) return "estacoda setup --interactive";
+  if (/OAuth credentials are expired/iu.test(warning)) return "estacoda model setup";
   if (/Provider setup is incomplete|missing required values|Missing API key/iu.test(warning)) return "estacoda model setup";
   return undefined;
 }
@@ -462,6 +528,17 @@ function localizeWarningTitle(warning: string, locale: DoctorLocale): string {
   if (/Selected profile config is missing/iu.test(warning)) return "إعدادات الملف الشخصي المحدد غير موجودة";
   if (/Selected profile .* is missing or invalid/iu.test(warning)) return "حالة الملف الشخصي غير مكتملة";
   if (/Selected profile .* is not private/iu.test(warning)) return "ملف خاص في الملف الشخصي أذوناته واسعة";
+  if (/auth\.json/iu.test(warning)) return "ملف OAuth غير صالح";
+  if (/OAuth credentials are expired/iu.test(warning)) return "اعتمادات OAuth منتهية";
+  if (/MCP server .* shell wrapper/iu.test(warning)) return "خادم MCP يستخدم غلاف shell";
+  if (/MCP server .* shell execution flags/iu.test(warning)) return "خادم MCP يمرر أعلام تنفيذ shell";
+  if (/MCP server .* secret-looking env keys/iu.test(warning)) return "خادم MCP يمرر أسماء متغيرات تبدو سرية";
+  if (/MCP server .* broad tool exposure/iu.test(warning)) return "خادم MCP يعرّض أدوات بشكل واسع";
+  if (/MCP server .* network MCP trust/iu.test(warning)) return "خادم MCP يستخدم ثقة شبكة";
+  if (/MCP server .* invalid HTTP URL/iu.test(warning)) return "خادم MCP لديه رابط HTTP غير صالح";
+  if (/MCP server .* explicit resource risk class/iu.test(warning)) return "خادم MCP يعرّض موارد دون فئة مخاطر";
+  if (/MCP server .* explicit prompt risk class/iu.test(warning)) return "خادم MCP يعرّض مطالبات دون فئة مخاطر";
+  if (/Required external tools are missing/iu.test(warning)) return "أدوات خارجية مطلوبة غير موجودة";
   if (/SQLite session DB schema is missing required tables/iu.test(warning)) return "قاعدة بيانات الجلسات تنقصها جداول مطلوبة";
   if (/SQLite session DB schema is missing auxiliary tables/iu.test(warning)) return "قاعدة بيانات الجلسات تنقصها جداول إضافية";
   if (/SQLite session DB schema is missing required columns/iu.test(warning)) return "قاعدة بيانات الجلسات تنقصها أعمدة مطلوبة";
@@ -489,8 +566,11 @@ type DoctorLabelKey =
   | "state"
   | "configuration"
   | "providers"
+  | "oauth"
   | "models"
   | "capabilities"
+  | "mcp"
+  | "externalTools"
   | "memory"
   | "sessions"
   | "skills"
@@ -505,8 +585,11 @@ const DOCTOR_LABELS: Record<DoctorLabelKey, Record<DoctorLocale, string>> = {
   state: { en: "State", ar: "الحالة" },
   configuration: { en: "Configuration", ar: "الإعدادات" },
   providers: { en: "Providers", ar: "المزوّدون" },
+  oauth: { en: "OAuth", ar: "OAuth" },
   models: { en: "Models", ar: "النماذج" },
   capabilities: { en: "Capabilities", ar: "القدرات" },
+  mcp: { en: "MCP", ar: "MCP" },
+  externalTools: { en: "External tools", ar: "الأدوات الخارجية" },
   memory: { en: "Memory", ar: "الذاكرة" },
   sessions: { en: "Sessions", ar: "الجلسات" },
   skills: { en: "Skills", ar: "المهارات" },
