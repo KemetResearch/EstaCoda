@@ -65,9 +65,6 @@ export async function diagnoseDirectoryStructure(options: {
     { path: profilePaths.imageCachePath, expected: "directory" as const, label: "image cache directory" },
     { path: profilePaths.tempPath, expected: "directory" as const, label: "temp directory" },
     { path: profilePaths.configPath, expected: "file" as const, label: "config.json" },
-    { path: profilePaths.userMdPath, expected: "file" as const, label: "USER.md" },
-    { path: profilePaths.soulMdPath, expected: "file" as const, label: "SOUL.md" },
-    { path: profilePaths.memoryMdPath, expected: "file" as const, label: "MEMORY.md" },
     { path: profilePaths.promotionsPath, expected: "file" as const, label: "promotions.json" }
   ]) {
     const issue = await diagnosePath(entry.path, entry.expected);

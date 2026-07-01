@@ -24,6 +24,7 @@ import {
 import { collectMissingProfileEnv } from "./checks/env-coverage.js";
 import { diagnoseExternalTools, type ExternalToolDiagnostic } from "./checks/external-tools.js";
 import { diagnoseLiveToolCall } from "./checks/live-tool.js";
+import { diagnoseMemoryHealth, type MemoryHealthDiagnostic } from "./checks/memory-health.js";
 import { diagnoseMcpSecurity, type McpSecurityDiagnostic } from "./checks/mcp-security.js";
 import { diagnoseOAuthStatus, type OAuthStatusDiagnostic } from "./checks/oauth-status.js";
 import { diagnoseProviderChain, type ProviderChainDiagnostic } from "./checks/provider-chain.js";
@@ -70,6 +71,7 @@ export async function runDoctor(options: CliOptions, args: string[] = []): Promi
   const sqliteHealth = await diagnoseSQLiteHealth({ homeDir: options.homeDir });
   const oauthStatus = await diagnoseOAuthStatus({ homeDir: options.homeDir, profileId: selectedProfile });
   const externalTools = await diagnoseExternalTools();
+  const memoryHealth = await diagnoseMemoryHealth({ homeDir: options.homeDir, profileId: selectedProfile });
 
   try {
     config = await loadRuntimeConfig(effectiveOptions);
@@ -121,6 +123,7 @@ export async function runDoctor(options: CliOptions, args: string[] = []): Promi
   warnings.push(...oauthStatus.warnings);
   warnings.push(...mcpSecurity.warnings);
   warnings.push(...externalTools.warnings);
+  warnings.push(...memoryHealth.warnings);
   warnings.push(...providerChain.warnings);
   warnings.push(...configHygiene.warnings);
   warnings.push(...providerDiagnostic.warnings);
@@ -131,6 +134,7 @@ export async function runDoctor(options: CliOptions, args: string[] = []): Promi
   notes.push(...oauthStatus.notes);
   notes.push(...mcpSecurity.notes);
   notes.push(...externalTools.notes);
+  notes.push(...memoryHealth.notes);
 
   if (configSyntaxError !== undefined) {
     warnings.push(`Config syntax error: ${configSyntaxError}`);
@@ -191,6 +195,7 @@ export async function runDoctor(options: CliOptions, args: string[] = []): Promi
     oauthStatus,
     mcpSecurity,
     externalTools,
+    memoryHealth,
     activeProfileMissing,
     selectedProfileConfigMissing,
     trustStoreOk,
@@ -235,6 +240,7 @@ type BuildDoctorReportInput = {
   readonly oauthStatus: OAuthStatusDiagnostic;
   readonly mcpSecurity: McpSecurityDiagnostic;
   readonly externalTools: ExternalToolDiagnostic;
+  readonly memoryHealth: MemoryHealthDiagnostic;
   readonly activeProfileMissing: boolean;
   readonly selectedProfileConfigMissing: boolean;
   readonly trustStoreOk: boolean;
@@ -300,7 +306,12 @@ function buildDoctorReport(input: BuildDoctorReportInput): DoctorReport {
       input.externalTools.status === "warning" ? "warning" : "healthy",
       externalToolsSummary(input.externalTools, input.locale)
     ),
-    check("memory", label(input.locale, "memory"), "healthy"),
+    check(
+      "memory",
+      label(input.locale, "memory"),
+      memorySeverity(input.memoryHealth),
+      memorySummary(input.memoryHealth, input.locale)
+    ),
     check(
       "sessions",
       label(input.locale, "sessions"),
@@ -452,6 +463,21 @@ function externalToolsSummary(diagnostic: ExternalToolDiagnostic, locale: Doctor
   return locale === "ar" ? `${diagnostic.available.length} متاحة` : `${diagnostic.available.length} available`;
 }
 
+function memorySeverity(diagnostic: MemoryHealthDiagnostic): DoctorCheckSeverity {
+  if (diagnostic.status === "blocked") return "blocked";
+  if (diagnostic.status === "warning") return "warning";
+  return "healthy";
+}
+
+function memorySummary(diagnostic: MemoryHealthDiagnostic, locale: DoctorLocale): string {
+  if (diagnostic.problemFiles.length > 0) {
+    return locale === "ar"
+      ? `${diagnostic.problemFiles.length} مشاكل في ملفات الذاكرة`
+      : `${diagnostic.problemFiles.length} memory file issue(s)`;
+  }
+  return locale === "ar" ? "ملفات الذاكرة جاهزة" : "file profile ready";
+}
+
 function providerSeverity(diagnostic: ProviderDiagnostic, chain: ProviderChainDiagnostic): DoctorCheckSeverity {
   if (diagnostic.status === "blocked") return "blocked";
   if (chain.routes.some((route) => route.kind === "primary" && route.status === "blocked")) return "blocked";
@@ -563,6 +589,8 @@ function localizeWarningTitle(warning: string, locale: DoctorLocale): string {
   if (/MCP server .* explicit resource risk class/iu.test(warning)) return "خادم MCP يعرّض موارد دون فئة مخاطر";
   if (/MCP server .* explicit prompt risk class/iu.test(warning)) return "خادم MCP يعرّض مطالبات دون فئة مخاطر";
   if (/Required external tools are missing/iu.test(warning)) return "أدوات خارجية مطلوبة غير موجودة";
+  if (/Memory profile root is missing or invalid/iu.test(warning)) return "جذر ذاكرة الملف الشخصي غير موجود أو غير صالح";
+  if (/Memory file .* is not usable/iu.test(warning)) return "ملف ذاكرة غير قابل للاستخدام";
   if (/SQLite session DB schema is missing required tables/iu.test(warning)) return "قاعدة بيانات الجلسات تنقصها جداول مطلوبة";
   if (/SQLite session DB schema is missing auxiliary tables/iu.test(warning)) return "قاعدة بيانات الجلسات تنقصها جداول إضافية";
   if (/SQLite session DB schema is missing required columns/iu.test(warning)) return "قاعدة بيانات الجلسات تنقصها أعمدة مطلوبة";
