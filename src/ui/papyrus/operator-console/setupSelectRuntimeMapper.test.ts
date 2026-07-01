@@ -188,7 +188,7 @@ describe("Operator Console setup select runtime mapper", () => {
         provider: "OpenAI",
         model: "",
         status: "Hosted OpenAI models. API key required.",
-        notes: "current",
+        notes: "◆ Current",
       },
     ]);
     expect(state?.footer).toBe("↑↓ navigate   ENTER select   CTRL+C exit");

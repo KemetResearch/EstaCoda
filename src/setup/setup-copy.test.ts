@@ -810,13 +810,13 @@ describe("setup copy", () => {
     })).toContain(isolateLtr("BROWSERBASE_PROJECT_ID"));
     expect(resolveSetupCopy("ar", "setupEditor.prompt.browser.chromeFlags")).toContain(`خيارات ${isolateLtr("Chrome")} المتقدمة`);
     expect(resolveSetupCopy("ar", "setupEditor.prompt.browser.chromeFlags")).not.toContain("أعلام Chrome");
-    expect(resolveSetupCopy("ar", "setupEditor.prompt.vision.summary")).toContain(isolateLtr("image.generate"));
     expect(resolveSetupCopy("ar", "setupEditor.prompt.vision.provider.fal.description")).toContain(isolateLtr("fal.ai"));
-    expect(resolveSetupCopy("ar", "setupEditor.prompt.vision.provider.fal.description")).toContain(isolateLtr("FAL_KEY"));
     expect(resolveSetupCopy("ar", "setupEditor.prompt.vision.provider.byteplus.description")).toContain(isolateLtr("BytePlus"));
     expect(resolveSetupCopy("ar", "setupEditor.prompt.vision.provider.byteplus.description")).toContain(isolateLtr("Seedream"));
     expect(resolveSetupCopy("ar", "setupEditor.prompt.vision.provider.byteplus.description")).toContain(isolateLtr("Ark API"));
-    expect(resolveSetupCopy("ar", "setupEditor.prompt.vision.model.body")).toContain(isolateLtr("image.generate"));
+    expect(formatSetupCopy("ar", "setupEditor.prompt.vision.model.body", {
+      provider: setupTechnicalToken("ar", "fal.ai"),
+    })).toContain(isolateLtr("fal.ai"));
     expect(resolveSetupCopy("ar", "setupEditor.prompt.vision.model.seedream5.description")).toContain(isolateLtr("ModelArk"));
     expect(formatSetupCopy("ar", "setupEditor.prompt.vision.secretValue", {
       envVar: setupTechnicalToken("ar", "BYTEPLUS_ARK_API_KEY"),

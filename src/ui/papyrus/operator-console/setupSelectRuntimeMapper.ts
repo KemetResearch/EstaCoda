@@ -40,20 +40,24 @@ export function mapSetupSelectToSetupPanelState(
     description: bodyDescription(input.body),
     ...(input.statusLines === undefined ? {} : { statusLines: input.statusLines }),
     locale: input.locale,
-    rows: input.options.map((option, index) => mapOptionToRow(option, index)),
+    rows: input.options.map((option, index) => mapOptionToRow(option, index, input.locale)),
     selectedRowId: optionId(input.options[selectedIndex], selectedIndex),
     footer: defaultFooter(),
   };
 }
 
-function mapOptionToRow(option: SetupSelectRuntimeOption, index: number): SetupPanelState["rows"][number] {
+function mapOptionToRow(
+  option: SetupSelectRuntimeOption,
+  index: number,
+  locale: OperatorConsoleLocale | undefined
+): SetupPanelState["rows"][number] {
   const cells = option.cells ?? {};
   return {
     id: optionId(option, index),
     provider: firstNonEmpty(cells.provider, cells.name, option.label),
     model: firstNonEmpty(cells.model, cells.route, cells.value),
     status: firstNonEmpty(cells.status, cells.state, option.description, cells.details),
-    notes: firstNonEmpty(cells.notes, cells.description, badgesText(option), option.current === true ? "current" : ""),
+    notes: firstNonEmpty(cells.notes, cells.description, badgesText(option), option.current === true ? currentMarker(locale) : ""),
     ...(option.group === undefined ? {} : { group: option.group }),
   };
 }
@@ -86,6 +90,10 @@ function optionId(option: SetupSelectRuntimeOption | undefined, index: number): 
 
 function badgesText(option: SetupSelectRuntimeOption): string {
   return option.badges?.join(", ") ?? "";
+}
+
+function currentMarker(locale: OperatorConsoleLocale | undefined): string {
+  return locale === "ar" ? "◆ الحالي" : "◆ Current";
 }
 
 function bodyDescription(body: string | undefined): string | undefined {

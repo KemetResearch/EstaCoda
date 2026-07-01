@@ -1653,59 +1653,67 @@ export async function promptVisionCapability(
   const currentVisionRoute = current.provider === undefined && current.model === undefined
     ? undefined
     : setupRouteStatusText(locale, current.provider, current.model);
-  const providerResult = await promptSetupChoiceMaybeBack<ImageGenerationProvider>(prompt, {
-    title: setupCopyText(locale, "setupModules.vision.title"),
-    message: `${setupCopyText(locale, "setupEditor.prompt.vision.summary")}\n${setupCopyText(locale, "setupEditor.prompt.vision.provider")}\n`,
-    columns: setupChoiceColumns(locale),
-    tableDirection: setupChoiceTableDirection(locale),
-    tableWidth: setupChoiceTableWidth(locale),
-    tableMaxWidth: setupChoiceTableMaxWidth(locale),
-    tableAlign: setupChoiceTableAlign(locale),
-    showColumnHeaders: false,
-    statusLines: setupCurrentStatusLines(locale, currentVisionRoute),
-    showCurrentBadge: currentVisionRoute === undefined ? undefined : false,
-    choices: imageProviders.map((candidate) => ({
-      id: candidate,
-      label: setupCopyText(locale, imageProviderLabelKey(candidate)),
-      description: setupCopyText(locale, imageProviderDescriptionKey(candidate)),
-      current: current.provider === candidate,
-      value: candidate,
-    })),
-    defaultValue: defaultProvider,
-  }, options);
-  if (isSetupChoiceBackResult(providerResult)) {
-    return providerResult;
-  }
-  const provider = setupChoiceSelectedValue(providerResult);
-  const providerCurrent = current.provider === provider;
-  const modelResult = await promptSetupChoiceMaybeBack<string>(prompt, {
-    title: setupCopyText(locale, "setupEditor.prompt.vision.model.title"),
-    message: `${setupCopyText(locale, "setupEditor.prompt.vision.model.body")}\n`,
-    columns: setupChoiceColumns(locale),
-    tableDirection: setupChoiceTableDirection(locale),
-    tableWidth: setupChoiceTableWidth(locale),
-    tableMaxWidth: setupChoiceTableMaxWidth(locale),
-    tableAlign: setupChoiceTableAlign(locale),
-    showColumnHeaders: false,
-    choices: imageModelChoices(locale, provider, providerCurrent ? current.model : undefined),
-    defaultValue: resolveImageModel(provider, providerCurrent ? current.model : undefined) ?? defaultImageModel(provider),
-  }, options);
-  if (isSetupChoiceBackResult(modelResult)) {
-    return modelResult;
-  }
-  const model = setupChoiceSelectedValue(modelResult);
-  const apiKeyEnv = providerCurrent && current.apiKeyEnv !== undefined
-    ? current.apiKeyEnv
-    : defaultImageApiKeyEnv(provider);
-  const baseUrl = (providerCurrent ? current.baseUrl : undefined) ?? defaultImageBaseUrl(provider);
+  let defaultProviderSelection = defaultProvider;
+  while (true) {
+    const providerResult = await promptSetupChoiceMaybeBack<ImageGenerationProvider>(prompt, {
+      title: setupCopyText(locale, "setupModules.vision.title"),
+      message: `${setupCopyText(locale, "setupEditor.prompt.vision.summary")}\n`,
+      columns: setupChoiceColumns(locale),
+      tableDirection: setupChoiceTableDirection(locale),
+      tableWidth: setupChoiceTableWidth(locale),
+      tableMaxWidth: setupChoiceTableMaxWidth(locale),
+      tableAlign: setupChoiceTableAlign(locale),
+      showColumnHeaders: false,
+      statusLines: setupCurrentStatusLines(locale, currentVisionRoute),
+      showCurrentBadge: currentVisionRoute === undefined ? undefined : false,
+      choices: imageProviders.map((candidate) => ({
+        id: candidate,
+        label: setupCopyText(locale, imageProviderLabelKey(candidate)),
+        description: setupCopyText(locale, imageProviderDescriptionKey(candidate)),
+        current: current.provider === candidate,
+        value: candidate,
+      })),
+      defaultValue: defaultProviderSelection,
+    }, options);
+    if (isSetupChoiceBackResult(providerResult)) {
+      return providerResult;
+    }
+    const provider = setupChoiceSelectedValue(providerResult);
+    defaultProviderSelection = provider;
+    const providerCurrent = current.provider === provider;
+    const modelResult = await promptSetupChoiceMaybeBack<string>(prompt, {
+      title: setupCopyText(locale, "setupEditor.prompt.vision.model.title"),
+      message: `${formatSetupCopy(locale, "setupEditor.prompt.vision.model.body", {
+        provider: setupCopyText(locale, imageProviderLabelKey(provider)),
+      })}\n`,
+      columns: setupChoiceColumns(locale),
+      tableDirection: setupChoiceTableDirection(locale),
+      tableWidth: setupChoiceTableWidth(locale),
+      tableMaxWidth: setupChoiceTableMaxWidth(locale),
+      tableAlign: setupChoiceTableAlign(locale),
+      showColumnHeaders: false,
+      statusLines: setupCurrentStatusLines(locale, currentVisionRoute),
+      showCurrentBadge: currentVisionRoute === undefined ? undefined : false,
+      choices: imageModelChoices(locale, provider, providerCurrent ? current.model : undefined),
+      defaultValue: resolveImageModel(provider, providerCurrent ? current.model : undefined) ?? defaultImageModel(provider),
+    }, options);
+    if (isSetupChoiceBackResult(modelResult)) {
+      continue;
+    }
+    const model = setupChoiceSelectedValue(modelResult);
+    const apiKeyEnv = providerCurrent && current.apiKeyEnv !== undefined
+      ? current.apiKeyEnv
+      : defaultImageApiKeyEnv(provider);
+    const baseUrl = (providerCurrent ? current.baseUrl : undefined) ?? defaultImageBaseUrl(provider);
 
-  return {
-    provider,
-    model,
-    apiKeyEnv,
-    baseUrl,
-    useGateway: current.useGateway ?? false,
-  };
+    return {
+      provider,
+      model,
+      apiKeyEnv,
+      baseUrl,
+      useGateway: current.useGateway ?? false,
+    };
+  }
 }
 
 function imageModelChoices(locale: SetupCopyLocale, provider: ImageGenerationProvider, currentModel: string | undefined): readonly SetupChoice<string>[] {

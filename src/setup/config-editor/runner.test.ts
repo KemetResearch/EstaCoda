@@ -739,12 +739,16 @@ describe("runConfigEditor", () => {
     );
     expect(webSearchInput?.options.find((option) => option.id === "web-search-none")?.group).toBeUndefined();
     expect(browserModeInput?.options.find((option) => option.id === "browser-disabled")?.group).toBeUndefined();
+    expect(imageProviderInput?.body).toBe("Pick the provider to use for image generation and image editing, when supported. This is separate from the primary chat model.");
+    expect(imageProviderInput?.options.find((option) => option.id === "fal")?.label).toBe("fal.ai");
     expect(imageProviderInput?.options.find((option) => option.id === "fal")?.description).toBe(
-      "Hosted fal.ai image generation and editing models. Good default if you already use FAL_KEY."
+      "Access a variety of image generation and editing models through fal.ai."
     );
+    expect(imageProviderInput?.options.find((option) => option.id === "byteplus")?.label).toBe("BytePlus / ModelArk");
     expect(imageProviderInput?.options.find((option) => option.id === "byteplus")?.description).toBe(
-      "BytePlus Seedream image generation. Requires an Ark API key and model access enabled in ModelArk."
+      "Use BytePlus Seedream image models. Requires an Ark API key."
     );
+    expect(imageModelInput?.body).toBe("Choose the fal.ai image model for generation and editing, when supported.");
     expect(imageModelInput?.options.find((option) => option.id === "image-model-fal-ai/flux-2/klein/9b")?.description).toBe(
       "Fast default FAL model with crisp text rendering."
     );
@@ -1606,6 +1610,40 @@ describe("runConfigEditor", () => {
     await expect(readFile(profileConfigPath(tempDir), "utf8")).resolves.toBe(before);
     expect(imageProviderInput?.options.find((option) => option.label === "Back")?.group).toBe("navigation");
     expect(selectInputs.map((input) => input.title)).toEqual([
+      "Vision and Image Generation",
+      "Setup editor",
+    ]);
+  });
+
+  it("returns from image generation model Back to provider selection", async () => {
+    await writeUserConfig(tempDir, localReadyConfig());
+    await trustWorkspace(tempDir, workspaceRoot);
+    const before = await readFile(profileConfigPath(tempDir), "utf8");
+    const selectInputs: SelectPromptInput<unknown>[] = [];
+    const prompt = fakePrompt({ values: ["fal", "Back", "Back", "exit"] });
+    const baseSelect = prompt.select!;
+    prompt.select = async (input) => {
+      selectInputs.push(input as SelectPromptInput<unknown>);
+      return baseSelect(input);
+    };
+    const apply = vi.fn();
+
+    const result = await runConfigEditor({
+      homeDir: tempDir,
+      workspaceRoot,
+      prompt,
+      defaultActionId: "configure-image-generation",
+      applyExecutor: { apply },
+    });
+
+    expect(result.completed).toBe(true);
+    expect(result.selectedActionId).toBe("exit");
+    expect(result.reviewManifest).toBeUndefined();
+    expect(apply).not.toHaveBeenCalled();
+    await expect(readFile(profileConfigPath(tempDir), "utf8")).resolves.toBe(before);
+    expect(selectInputs.map((input) => input.title)).toEqual([
+      "Vision and Image Generation",
+      "Image model",
       "Vision and Image Generation",
       "Setup editor",
     ]);
@@ -3700,7 +3738,7 @@ describe("runConfigEditor", () => {
     });
 
     expect(imageResult.completed).toBe(true);
-    expect(imageOptionLabels[0]).toEqual(["FAL", "BytePlus ModelArk / Seedream", "Back"]);
+    expect(imageOptionLabels[0]).toEqual(["fal.ai", "BytePlus / ModelArk", "Back"]);
     expect(imageOptionLabels.some((labels) => labels.includes("Configure"))).toBe(false);
     expect(imageResult.reviewManifest).toBeUndefined();
   });
