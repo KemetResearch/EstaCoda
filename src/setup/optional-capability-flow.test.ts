@@ -25,12 +25,12 @@ describe("optional Search capability flow", () => {
 
   afterEach(async () => {
     vi.restoreAllMocks();
-	    delete process.env.BRAVE_SEARCH_API_KEY;
-	    delete process.env.OPENAI_API_KEY;
-	    delete process.env.BYTEPLUS_ARK_API_KEY;
-	    delete process.env.ARK_API_KEY;
-	    await rm(tempDir, { recursive: true, force: true });
-	  });
+    delete process.env.BRAVE_SEARCH_API_KEY;
+    delete process.env.OPENAI_API_KEY;
+    delete process.env.BYTEPLUS_ARK_API_KEY;
+    delete process.env.ARK_API_KEY;
+    await rm(tempDir, { recursive: true, force: true });
+  });
 
   it("maps configure-web-search to the web-search optional module", () => {
     expect(optionalCapabilityModuleForAction("configure-web-search")).toBe(webSearchSetupModule);
@@ -186,7 +186,7 @@ describe("optional Search capability flow", () => {
     const seenQuestions: { question: string; secret: boolean }[] = [];
 
     const collected = await collectOptionalCapabilityContext(options({
-      values: ["byteplus", "", ""],
+      values: ["byteplus", "seedream-5-0-260128"],
       secret: "byteplus-secret",
       seenQuestions,
     }), baseContext(), visionSetupModule);
@@ -209,7 +209,7 @@ describe("optional Search capability flow", () => {
       expect(JSON.stringify(collected.context)).not.toContain("byteplus-secret");
     }
     expect(seenQuestions).toContainEqual({
-      question: "Enter image generation provider API key for BYTEPLUS_ARK_API_KEY: ",
+      question: "Enter image generation API key. It will be saved as BYTEPLUS_ARK_API_KEY after review: ",
       secret: true,
     });
   });
@@ -218,7 +218,7 @@ describe("optional Search capability flow", () => {
     process.env.ARK_API_KEY = "existing-byteplus-secret";
 
     const collected = await collectOptionalCapabilityContext(options({
-      values: ["byteplus", "", "", "existing"],
+      values: ["byteplus", "seedream-5-0-260128", "existing"],
       secret: "should-not-be-read",
     }), baseContext(), visionSetupModule);
 

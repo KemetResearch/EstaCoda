@@ -1,7 +1,7 @@
 import type { Prompt } from "../../cli/prompt-contract.js";
 import { promptForApiKeyInput } from "../../cli/secret-prompt.js";
 import type { BrowserBackendKind, BrowserCloudProviderKind } from "../../contracts/browser.js";
-import { defaultImageApiKeyEnv, defaultImageBaseUrl, defaultImageModel } from "../../contracts/image-generation.js";
+import { defaultImageApiKeyEnv, defaultImageBaseUrl, defaultImageModel, IMAGE_MODEL_OPTIONS, resolveImageModel } from "../../contracts/image-generation.js";
 import type { AuxiliaryModelTask } from "../../contracts/provider.js";
 import type { SecurityApprovalMode } from "../../contracts/security.js";
 import type { PromptCardStatusLine } from "../../contracts/view-model.js";
@@ -1666,7 +1666,8 @@ export async function promptVisionCapability(
     showCurrentBadge: currentVisionRoute === undefined ? undefined : false,
     choices: imageProviders.map((candidate) => ({
       id: candidate,
-      label: candidate,
+      label: setupCopyText(locale, imageProviderLabelKey(candidate)),
+      description: setupCopyText(locale, imageProviderDescriptionKey(candidate)),
       current: current.provider === candidate,
       value: candidate,
     })),
@@ -1677,16 +1678,25 @@ export async function promptVisionCapability(
   }
   const provider = setupChoiceSelectedValue(providerResult);
   const providerCurrent = current.provider === provider;
-  const model = await promptSetupStringWithDefault(
-    prompt,
-    setupPromptLabel(locale, setupCopyText(locale, "setupEditor.prompt.vision.model")),
-    (providerCurrent ? current.model : undefined) ?? defaultImageModel(provider)
-  );
-  const apiKeyEnv = await promptSetupStringWithDefault(
-    prompt,
-    setupPromptLabel(locale, setupCopyText(locale, "setupEditor.prompt.vision.apiKeyEnv")),
-    (providerCurrent ? current.apiKeyEnv : undefined) ?? defaultImageApiKeyEnv(provider)
-  );
+  const modelResult = await promptSetupChoiceMaybeBack<string>(prompt, {
+    title: setupCopyText(locale, "setupEditor.prompt.vision.model.title"),
+    message: `${setupCopyText(locale, "setupEditor.prompt.vision.model.body")}\n`,
+    columns: setupChoiceColumns(locale),
+    tableDirection: setupChoiceTableDirection(locale),
+    tableWidth: setupChoiceTableWidth(locale),
+    tableMaxWidth: setupChoiceTableMaxWidth(locale),
+    tableAlign: setupChoiceTableAlign(locale),
+    showColumnHeaders: false,
+    choices: imageModelChoices(locale, provider, providerCurrent ? current.model : undefined),
+    defaultValue: resolveImageModel(provider, providerCurrent ? current.model : undefined) ?? defaultImageModel(provider),
+  }, options);
+  if (isSetupChoiceBackResult(modelResult)) {
+    return modelResult;
+  }
+  const model = setupChoiceSelectedValue(modelResult);
+  const apiKeyEnv = providerCurrent && current.apiKeyEnv !== undefined
+    ? current.apiKeyEnv
+    : defaultImageApiKeyEnv(provider);
   const baseUrl = (providerCurrent ? current.baseUrl : undefined) ?? defaultImageBaseUrl(provider);
 
   return {
@@ -1696,6 +1706,57 @@ export async function promptVisionCapability(
     baseUrl,
     useGateway: current.useGateway ?? false,
   };
+}
+
+function imageModelChoices(locale: SetupCopyLocale, provider: ImageGenerationProvider, currentModel: string | undefined): readonly SetupChoice<string>[] {
+  const resolvedCurrent = resolveImageModel(provider, currentModel);
+  const choices: SetupChoice<string>[] = IMAGE_MODEL_OPTIONS[provider].map((model) => ({
+    id: `image-model-${model.id}`,
+    label: model.label,
+    description: setupCopyText(locale, imageModelDescriptionKey(model.id)),
+    technical: true,
+    badges: model.id === defaultImageModel(provider) ? [setupCopyText(locale, "setupEditor.prompt.vision.model.badge.default")] : undefined,
+    current: resolvedCurrent === model.id,
+    value: model.id,
+  }));
+  if (currentModel !== undefined && currentModel.trim().length > 0 && !choices.some((choice) => choice.value === resolvedCurrent)) {
+    choices.push({
+      id: `image-model-current-${currentModel}`,
+      label: currentModel,
+      description: setupCopyText(locale, "setupEditor.prompt.vision.model.currentCustom.description"),
+      technical: true,
+      current: true,
+      value: currentModel,
+    });
+  }
+  return choices;
+}
+
+function imageModelDescriptionKey(modelId: string): SetupCopyKey {
+  switch (modelId) {
+    case "seedream-5-0-260128":
+      return "setupEditor.prompt.vision.model.seedream5.description";
+    case "seedream-5-0-lite-260128":
+      return "setupEditor.prompt.vision.model.seedream5Lite.description";
+    case "seedream-4-5-251128":
+      return "setupEditor.prompt.vision.model.seedream45.description";
+    case "seedream-4-0-250828":
+      return "setupEditor.prompt.vision.model.seedream40.description";
+    default:
+      return "setupEditor.prompt.vision.model.falFlux.description";
+  }
+}
+
+function imageProviderLabelKey(provider: ImageGenerationProvider): SetupCopyKey {
+  return provider === "byteplus"
+    ? "setupEditor.prompt.vision.provider.byteplus"
+    : "setupEditor.prompt.vision.provider.fal";
+}
+
+function imageProviderDescriptionKey(provider: ImageGenerationProvider): SetupCopyKey {
+  return provider === "byteplus"
+    ? "setupEditor.prompt.vision.provider.byteplus.description"
+    : "setupEditor.prompt.vision.provider.fal.description";
 }
 
 export function promptBrowserCapability(

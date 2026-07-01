@@ -434,8 +434,21 @@ const SETUP_EDITOR_KEYS = [
   "setupEditor.prompt.voice.sttSecretValue",
   "setupEditor.prompt.vision.summary",
   "setupEditor.prompt.vision.provider",
-  "setupEditor.prompt.vision.model",
+  "setupEditor.prompt.vision.provider.fal",
+  "setupEditor.prompt.vision.provider.fal.description",
+  "setupEditor.prompt.vision.provider.byteplus",
+  "setupEditor.prompt.vision.provider.byteplus.description",
+  "setupEditor.prompt.vision.model.title",
+  "setupEditor.prompt.vision.model.body",
+  "setupEditor.prompt.vision.model.badge.default",
+  "setupEditor.prompt.vision.model.falFlux.description",
+  "setupEditor.prompt.vision.model.seedream5.description",
+  "setupEditor.prompt.vision.model.seedream5Lite.description",
+  "setupEditor.prompt.vision.model.seedream45.description",
+  "setupEditor.prompt.vision.model.seedream40.description",
+  "setupEditor.prompt.vision.model.currentCustom.description",
   "setupEditor.prompt.vision.apiKeyEnv",
+  "setupEditor.prompt.vision.secretValue",
   "setupEditor.prompt.vision.useGateway",
   "setupEditor.prompt.webSearch.provider.title",
   "setupEditor.prompt.webSearch.provider.body",
@@ -797,6 +810,17 @@ describe("setup copy", () => {
     })).toContain(isolateLtr("BROWSERBASE_PROJECT_ID"));
     expect(resolveSetupCopy("ar", "setupEditor.prompt.browser.chromeFlags")).toContain(`خيارات ${isolateLtr("Chrome")} المتقدمة`);
     expect(resolveSetupCopy("ar", "setupEditor.prompt.browser.chromeFlags")).not.toContain("أعلام Chrome");
+    expect(resolveSetupCopy("ar", "setupEditor.prompt.vision.summary")).toContain(isolateLtr("image.generate"));
+    expect(resolveSetupCopy("ar", "setupEditor.prompt.vision.provider.fal.description")).toContain(isolateLtr("fal.ai"));
+    expect(resolveSetupCopy("ar", "setupEditor.prompt.vision.provider.fal.description")).toContain(isolateLtr("FAL_KEY"));
+    expect(resolveSetupCopy("ar", "setupEditor.prompt.vision.provider.byteplus.description")).toContain(isolateLtr("BytePlus"));
+    expect(resolveSetupCopy("ar", "setupEditor.prompt.vision.provider.byteplus.description")).toContain(isolateLtr("Seedream"));
+    expect(resolveSetupCopy("ar", "setupEditor.prompt.vision.provider.byteplus.description")).toContain(isolateLtr("Ark API"));
+    expect(resolveSetupCopy("ar", "setupEditor.prompt.vision.model.body")).toContain(isolateLtr("image.generate"));
+    expect(resolveSetupCopy("ar", "setupEditor.prompt.vision.model.seedream5.description")).toContain(isolateLtr("ModelArk"));
+    expect(formatSetupCopy("ar", "setupEditor.prompt.vision.secretValue", {
+      envVar: setupTechnicalToken("ar", "BYTEPLUS_ARK_API_KEY"),
+    })).toContain(isolateLtr("BYTEPLUS_ARK_API_KEY"));
     expect(resolveSetupCopy("ar", "setupEditor.prompt.vision.useGateway")).toContain(isolateLtr("image gateway"));
     expect(rawSetupCopy("en", "setupEditor.prompt.voice.mode.body")).toBe("Choose a voice capability to configure:");
     expect(rawSetupCopy("en", "setupEditor.prompt.voice.mode.stt")).toBe("Speech to Text (STT)");

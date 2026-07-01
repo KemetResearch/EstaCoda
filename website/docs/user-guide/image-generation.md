@@ -19,6 +19,13 @@ It is not a built-in model capability. You need a provider account, an API key, 
 
 FAL is the default provider. BytePlus model access is version-specific; the model must be activated in your Ark Console account before use. EstaCoda also recognizes an existing BytePlus `ARK_API_KEY` credential during reviewed setup, matching BytePlus examples.
 
+BytePlus model choices shown by setup are:
+
+- `seedream-5-0-260128` (`seedream-5`)
+- `seedream-5-0-lite-260128` (`seedream-5-lite`)
+- `seedream-4-5-251128` (`seedream-4.5`)
+- `seedream-4-0-250828` (`seedream-4`)
+
 ## Setup
 
 Configure the provider in the selected profile:

@@ -627,8 +627,7 @@ describe("runConfigEditor", () => {
         "openai",
         "local",
         "fal",
-        "",
-        "",
+        "fal-ai/flux-2/klein/9b",
         "disabled",
         "unchanged",
         "skip",
@@ -696,6 +695,7 @@ describe("runConfigEditor", () => {
       "Voice",
       "Voice",
       "Vision and Image Generation",
+      "Image model",
       "Browser configuration",
       "Voice",
       "WhatsApp beta",
@@ -722,6 +722,12 @@ describe("runConfigEditor", () => {
     const browserModeInput = selectInputs.find((input) =>
       input.options.some((option) => option.id === "browser-disabled")
     );
+    const imageProviderInput = selectInputs.find((input) =>
+      input.options.some((option) => option.id === "byteplus")
+    );
+    const imageModelInput = selectInputs.find((input) =>
+      input.options.some((option) => option.id === "image-model-fal-ai/flux-2/klein/9b")
+    );
     const optionalActionInput = selectInputs.find((input) =>
       input.options.some((option) => option.id === "voice-enable")
     );
@@ -733,6 +739,15 @@ describe("runConfigEditor", () => {
     );
     expect(webSearchInput?.options.find((option) => option.id === "web-search-none")?.group).toBeUndefined();
     expect(browserModeInput?.options.find((option) => option.id === "browser-disabled")?.group).toBeUndefined();
+    expect(imageProviderInput?.options.find((option) => option.id === "fal")?.description).toBe(
+      "Hosted fal.ai image models. Good default if you already use FAL_KEY."
+    );
+    expect(imageProviderInput?.options.find((option) => option.id === "byteplus")?.description).toBe(
+      "BytePlus Seedream image generation. Requires an Ark API key and model access enabled in ModelArk."
+    );
+    expect(imageModelInput?.options.find((option) => option.id === "image-model-fal-ai/flux-2/klein/9b")?.description).toBe(
+      "FAL default text-to-image model."
+    );
     expect(optionalActionInput?.options.find((option) => option.id === "voice-enable")?.group).toBeUndefined();
     expect(optionalActionInput?.options.find((option) => option.id === "voice-unchanged")?.group).toBe("navigation");
     expect(optionalActionInput?.options.find((option) => option.id === "voice-skip")?.group).toBe("navigation");
@@ -1566,7 +1581,7 @@ describe("runConfigEditor", () => {
     await trustWorkspace(tempDir, workspaceRoot);
     const before = await readFile(profileConfigPath(tempDir), "utf8");
     const selectInputs: SelectPromptInput<unknown>[] = [];
-    const prompt = fakePrompt({ values: ["Configure", "Back", "exit"] });
+    const prompt = fakePrompt({ values: ["Back", "exit"] });
     const baseSelect = prompt.select!;
     prompt.select = async (input) => {
       selectInputs.push(input as SelectPromptInput<unknown>);
@@ -1591,7 +1606,6 @@ describe("runConfigEditor", () => {
     await expect(readFile(profileConfigPath(tempDir), "utf8")).resolves.toBe(before);
     expect(imageProviderInput?.options.find((option) => option.label === "Back")?.group).toBe("navigation");
     expect(selectInputs.map((input) => input.title)).toEqual([
-      "Vision and image generation",
       "Vision and Image Generation",
       "Setup editor",
     ]);
@@ -3642,7 +3656,6 @@ describe("runConfigEditor", () => {
     const actions = [
       { actionId: "configure-channels" as const, values: ["telegram", "unchanged"] },
       { actionId: "configure-voice" as const, values: ["stt", "unchanged"] },
-      { actionId: "configure-image-generation" as const, values: ["unchanged"] },
       { actionId: "configure-web-search" as const, values: ["unchanged"] },
       { actionId: "configure-browser" as const, values: ["unchanged"] },
     ];
@@ -3670,6 +3683,26 @@ describe("runConfigEditor", () => {
       expect(defaultLabels.at(-1)).toBe("Configure");
       expect(result.reviewManifest).toBeUndefined();
     }
+
+    const imageOptionLabels: string[][] = [];
+    const imagePrompt = fakePrompt({ values: ["Back", "exit"] });
+    const baseImageSelect = imagePrompt.select!;
+    imagePrompt.select = async (input) => {
+      imageOptionLabels.push(input.options.map((option) => option.label));
+      return baseImageSelect(input);
+    };
+
+    const imageResult = await runConfigEditor({
+      homeDir: tempDir,
+      workspaceRoot,
+      prompt: imagePrompt,
+      defaultActionId: "configure-image-generation",
+    });
+
+    expect(imageResult.completed).toBe(true);
+    expect(imageOptionLabels[0]).toEqual(["FAL", "BytePlus ModelArk / Seedream", "Back"]);
+    expect(imageOptionLabels.some((labels) => labels.includes("Configure"))).toBe(false);
+    expect(imageResult.reviewManifest).toBeUndefined();
   });
 
   it("lets incomplete Telegram optional capability setup skip instead of drafting blockers", async () => {
@@ -4806,11 +4839,9 @@ describe("runConfigEditor", () => {
       homeDir: tempDir,
       workspaceRoot,
       prompt: fakePrompt({
-	        values: [
-	          "enable",
+        values: [
           "fal",
-          "fal-ai/imagen4/preview",
-          "FAL_KEY",
+          "fal-ai/flux-2/klein/9b",
         ],
         secret: "sk-image-secret",
       }),
@@ -4834,10 +4865,11 @@ describe("runConfigEditor", () => {
     expect(result.reviewManifest?.sections["enabled-optional-capabilities"].map((line) => line.sourceDraftIds[0])).toEqual([
       "setup-module.vision.capability",
     ]);
-	    expect(config.imageGen?.provider).toBe("fal");
-	    expect(config.imageGen?.fal?.apiKeyEnv).toBe("FAL_KEY");
-	    expect(rawConfig).not.toContain("sk-image-secret");
-	    expect(config.channels).toBeUndefined();
+    expect(config.imageGen?.provider).toBe("fal");
+    expect(config.imageGen?.model).toBe("fal-ai/flux-2/klein/9b");
+    expect(config.imageGen?.fal?.apiKeyEnv).toBe("FAL_KEY");
+    expect(rawConfig).not.toContain("sk-image-secret");
+    expect(config.channels).toBeUndefined();
     expect(config.tts).toBeUndefined();
     expect(config.stt).toBeUndefined();
     expect(config.browser).toBeUndefined();

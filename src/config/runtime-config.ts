@@ -1951,7 +1951,9 @@ function normalizeTtsConfig(value: EstaCodaConfig["tts"]): LoadedRuntimeConfig["
 
 function normalizeImageGenerationConfig(value: EstaCodaConfig["imageGen"]): LoadedRuntimeConfig["imageGen"] {
   const provider = value?.provider === "byteplus" ? "byteplus" : "fal";
-  const model = value?.model ?? value?.[provider]?.model ?? defaultImageModel(provider);
+  const configuredModel = value?.model ?? value?.[provider]?.model;
+  const model = resolveImageModel(provider, configuredModel) ?? defaultImageModel(provider);
+  const topLevelApiKeyEnv = value?.apiKeyEnv ?? value?.api_key_env;
   const baseUrl = value?.baseUrl
     ?? value?.base_url
     ?? value?.[provider]?.baseUrl
@@ -1962,16 +1964,16 @@ function normalizeImageGenerationConfig(value: EstaCodaConfig["imageGen"]): Load
     provider,
     model,
     useGateway: value?.useGateway ?? value?.use_gateway ?? false,
-    apiKeyEnv: value?.apiKeyEnv ?? value?.api_key_env ?? defaultImageApiKeyEnv(provider),
+    apiKeyEnv: topLevelApiKeyEnv ?? defaultImageApiKeyEnv(provider),
     baseUrl,
     fal: {
       model: value?.fal?.model ?? (provider === "fal" ? model : defaultImageModel("fal")),
-      apiKeyEnv: value?.fal?.apiKeyEnv ?? value?.fal?.api_key_env ?? defaultImageApiKeyEnv("fal"),
+      apiKeyEnv: value?.fal?.apiKeyEnv ?? value?.fal?.api_key_env ?? (provider === "fal" ? topLevelApiKeyEnv : undefined) ?? defaultImageApiKeyEnv("fal"),
       baseUrl: value?.fal?.baseUrl ?? value?.fal?.base_url ?? defaultImageBaseUrl("fal")
     },
     byteplus: {
       model: value?.byteplus?.model ?? (provider === "byteplus" ? model : defaultImageModel("byteplus")),
-      apiKeyEnv: value?.byteplus?.apiKeyEnv ?? value?.byteplus?.api_key_env ?? defaultImageApiKeyEnv("byteplus"),
+      apiKeyEnv: value?.byteplus?.apiKeyEnv ?? value?.byteplus?.api_key_env ?? (provider === "byteplus" ? topLevelApiKeyEnv : undefined) ?? defaultImageApiKeyEnv("byteplus"),
       baseUrl: value?.byteplus?.baseUrl ?? value?.byteplus?.base_url ?? defaultImageBaseUrl("byteplus")
     }
   };
@@ -2806,7 +2808,7 @@ export async function setupImageGenerationConfig(options: {
     process.env[secret.key] = options.input.apiKey;
     secretPath = secret.path;
   }
-  const requestedModel = options.input.model ?? resolveImageModel(provider, options.input.modelVersion);
+  const requestedModel = resolveImageModel(provider, options.input.model) ?? resolveImageModel(provider, options.input.modelVersion);
   const model = requestedModel ?? (providerExplicit ? defaultImageModel(provider) : previous[provider]?.model ?? previous.model ?? defaultImageModel(provider));
   const baseUrl = options.input.baseUrl ?? previous[provider]?.baseUrl;
   const config = patchConfig(existing.config, {

@@ -17,7 +17,14 @@ sidebar_position: 13
 | FAL | `fal-ai/flux-2/klein/9b` | `FAL_KEY` | `https://fal.run` |
 | BytePlus / Seedream | `seedream-5-0-260128` | `BYTEPLUS_ARK_API_KEY` | `https://ark.ap-southeast.bytepluses.com/api/v3` |
 
-FAL هو المزود الافتراضي. الوصول إلى نماذج BytePlus يعتمد على الإصدار؛ يجب تفعيل النموذج في حساب Ark Console قبل الاستخدام.
+FAL هو المزود الافتراضي. الوصول إلى نماذج BytePlus يعتمد على الإصدار؛ يجب تفعيل النموذج في حساب Ark Console قبل الاستخدام. يتعرّف إعداد EstaCoda المراجع أيضًا على متغير `ARK_API_KEY` الموجود مسبقًا عند إعداد BytePlus.
+
+خيارات نماذج BytePlus التي يعرضها الإعداد هي:
+
+- `seedream-5-0-260128` (`seedream-5`)
+- `seedream-5-0-lite-260128` (`seedream-5-lite`)
+- `seedream-4-5-251128` (`seedream-4.5`)
+- `seedream-4-0-250828` (`seedream-4`)
 
 ## الإعداد
 
@@ -26,7 +33,7 @@ FAL هو المزود الافتراضي. الوصول إلى نماذج BytePlu
 ```bash
 estacoda image setup --provider fal --model fal-ai/flux-2/klein/9b --api-key-env FAL_KEY
 estacoda image setup --provider byteplus --model-version seedream-5 --api-key-env BYTEPLUS_ARK_API_KEY
-estacoda image setup --provider fal --api-key <key>
+estacoda image setup --provider byteplus --api-key <key>
 ```
 
 يكتب الإعداد إعدادات المزود في `~/.estacoda/profiles/<id>/config.json` تحت مفتاح `imageGen`. إذا مررت بـ `--api-key`، يخزن الأمر السر في ملف `.env` الخاص بالملف الشخصي ويُشير إليه باسم متغير البيئة.
@@ -77,8 +84,8 @@ estacoda image models --provider byteplus
 ```
 
 - `provider`: `fal` أو `byteplus`.
-- `model`: معرف نموذج المزود الدقيق أو اسم مستعار يُحل وقت التشغيل.
-- `useGateway`: ما إذا كان التوجيه عبر وسيط البوابة. في v0.1.0 يبقى `false` للاستدعاءات المباشرة.
+- `model`: معرف نموذج المزود الدقيق أو اسم مستعار يُحل أثناء الإعداد ووقت تشغيل الأداة.
+- `useGateway`: حقل إعداد قديم. توليد الصور يستخدم حاليًا استدعاءات مباشرة للمزود.
 - كتل المزود (`fal`، `byteplus`) يمكن أن تُجاوز `model` و `apiKeyEnv` و `baseUrl`.
 
 ## سلوك الأداة

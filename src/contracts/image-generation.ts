@@ -29,6 +29,12 @@ export const IMAGE_MODEL_OPTIONS: Record<ImageGenerationProvider, readonly Image
       description: "Current BytePlus ModelArk Seedream default for text-to-image generation."
     },
     {
+      id: "seedream-5-0-lite-260128",
+      label: "Seedream 5.0 Lite",
+      aliases: ["seedream-5-lite", "seedream-5.0-lite", "seedream5-lite", "5-lite"],
+      description: "BytePlus ModelArk Seedream 5.0 Lite option documented for image generation."
+    },
+    {
       id: "seedream-4-5-251128",
       label: "Seedream 4.5",
       aliases: ["seedream-4.5", "seedream-45", "4.5"],

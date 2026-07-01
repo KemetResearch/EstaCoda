@@ -2804,6 +2804,33 @@ describe("loadRuntimeConfig media boundary", () => {
     });
   });
 
+  it("normalizes BytePlus image generation aliases and default credential env refs", async () => {
+    const workspace = await mkdtemp(join(tmpdir(), "estacoda-config-test-"));
+    await mkdir(dirname(profileConfigPath(workspace)), { recursive: true });
+    await writeFile(profileConfigPath(workspace), JSON.stringify({
+      model: { provider: "openai", id: "gpt-4o" },
+      imageGen: {
+        enabled: true,
+        provider: "byteplus",
+        model: "seedream-5-lite"
+      }
+    }));
+
+    const loaded = await loadRuntimeConfig({
+      workspaceRoot: workspace,
+      homeDir: workspace
+    });
+
+    expect(loaded.imageGen.provider).toBe("byteplus");
+    expect(loaded.imageGen.model).toBe("seedream-5-0-lite-260128");
+    expect(loaded.imageGen.apiKeyEnv).toBe("BYTEPLUS_ARK_API_KEY");
+    expect(loaded.imageGen.byteplus?.model).toBe("seedream-5-0-lite-260128");
+    expect(loaded.imageGen.byteplus?.apiKeyEnv).toBe("BYTEPLUS_ARK_API_KEY");
+    expect(loaded.imageGen.fal?.apiKeyEnv).toBe("FAL_KEY");
+
+    await rm(workspace, { recursive: true, force: true });
+  });
+
   it("defaults response progress visibility to hidden", async () => {
     const workspace = await mkdtemp(join(tmpdir(), "estacoda-config-test-"));
     await mkdir(dirname(profileConfigPath(workspace)), { recursive: true });
