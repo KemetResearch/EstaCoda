@@ -3,6 +3,10 @@ import type { CliCommandResult, CliOptions } from "../cli/cli.js";
 import { loadRuntimeConfig } from "../config/runtime-config.js";
 import { resolveHomeDir } from "../config/home-dir.js";
 import { resolveStateHome } from "../config/state-home.js";
+import { resolveTokens } from "../theme/token-resolver.js";
+import { detectTerminalCapabilities } from "../ui/terminal-capabilities.js";
+import { createOperatorConsoleStyle } from "../ui/papyrus/operator-console/operatorConsoleStyle.js";
+import type { OperatorConsoleStyle } from "../ui/papyrus/operator-console/operatorConsoleStyle.js";
 import { defaultProfileId, readActiveProfile, resolveProfileStateHome } from "../config/profile-home.js";
 import { collectSetupEntryState, type SetupEntryState } from "../setup/setup-entry-state.js";
 import {
@@ -207,7 +211,7 @@ export async function runDoctor(options: CliOptions, args: string[] = []): Promi
       liveToolDiagnostic?.status !== "blocked"
       ? 0
       : 1,
-    output: hasFlag(args, "--json") ? renderDoctorJsonReport(report) : renderDoctorReport(report)
+    output: hasFlag(args, "--json") ? renderDoctorJsonReport(report) : renderDoctorReport(report, { style: doctorConsoleStyle() })
   };
 }
 
@@ -703,6 +707,14 @@ function errorMessage(error: unknown): string {
 
 function hasFlag(args: string[], ...flags: string[]): boolean {
   return args.some((arg) => flags.includes(arg));
+}
+
+function doctorConsoleStyle(): OperatorConsoleStyle {
+  const capabilities = detectTerminalCapabilities();
+  return createOperatorConsoleStyle({
+    tokens: resolveTokens("standard", "dark", "kemetBlue"),
+    capabilities
+  });
 }
 
 async function pathExists(path: string): Promise<boolean> {

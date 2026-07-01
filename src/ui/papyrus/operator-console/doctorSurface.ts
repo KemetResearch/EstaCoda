@@ -6,6 +6,11 @@ import {
   truncateVisible,
   wrapText
 } from "../../renderers/layout.js";
+import {
+  styleBold,
+  styleColor,
+  type OperatorConsoleStyle
+} from "./operatorConsoleStyle.js";
 import type {
   DoctorAction,
   DoctorCheck,
@@ -17,6 +22,7 @@ import type {
 
 export type DoctorSurfaceRenderOptions = {
   readonly width?: number;
+  readonly style?: OperatorConsoleStyle;
 };
 
 const DEFAULT_WIDTH = 72;
@@ -31,22 +37,22 @@ export function renderDoctorSurface(
   const contentWidth = Math.max(1, width - 4);
   const copy = doctorSurfaceCopy(report.locale);
   const rows: string[] = [
-    ...renderHeader(report, width, contentWidth, copy),
+    ...renderHeader(report, width, contentWidth, copy, options.style),
     "",
-    sectionHeading(copy.checks),
+    sectionHeading(copy.checks, options.style),
     "",
-    ...renderChecks(report, contentWidth),
+    ...renderChecks(report, contentWidth, options.style),
     "",
-    ...renderProviderRoutesSection(report.providerRoutes, report.locale, contentWidth, copy),
-    ...renderVerdict(report, width, contentWidth, copy),
+    ...renderProviderRoutesSection(report.providerRoutes, report.locale, contentWidth, copy, options.style),
+    ...renderVerdict(report, width, contentWidth, copy, options.style),
     "",
-    sectionHeading(copy.actions),
+    sectionHeading(copy.actions, options.style),
     "",
-    ...renderActions(report.actions, report.locale, contentWidth, copy),
+    ...renderActions(report.actions, report.locale, contentWidth, copy, options.style),
   ];
 
   if (report.notes.length > 0) {
-    rows.push("", sectionHeading(copy.notes), "", ...report.notes.map((note) => `  ${copy.noteMarker} ${localizeDynamicText(note, report.locale)}`));
+    rows.push("", sectionHeading(copy.notes, options.style), "", ...report.notes.map((note) => `  ${copy.noteMarker} ${localizeDynamicText(note, report.locale)}`));
   }
 
   return rows.join("\n");
@@ -56,13 +62,14 @@ function renderProviderRoutesSection(
   routes: readonly DoctorProviderRoute[],
   locale: DoctorLocale,
   contentWidth: number,
-  copy: DoctorSurfaceCopy
+  copy: DoctorSurfaceCopy,
+  style: OperatorConsoleStyle | undefined
 ): readonly string[] {
   if (routes.length === 0) return [];
   return [
-    sectionHeading(copy.providerRoutes),
+    sectionHeading(copy.providerRoutes, style),
     "",
-    ...renderProviderRoutes(routes, locale, contentWidth),
+    ...renderProviderRoutes(routes, locale, contentWidth, style),
     ""
   ];
 }
@@ -71,7 +78,8 @@ function renderHeader(
   report: DoctorReport,
   width: number,
   contentWidth: number,
-  copy: DoctorSurfaceCopy
+  copy: DoctorSurfaceCopy,
+  style: OperatorConsoleStyle | undefined
 ): readonly string[] {
   const rows = [
     copy.subtitle,
@@ -80,22 +88,23 @@ function renderHeader(
     pairLine(copy.home, technical(report.home, report.locale), report.locale),
     pairLine(copy.model, technical(report.model, report.locale), report.locale),
   ];
-  return frameRows(copy.title, rows, width, contentWidth);
+  return frameRows(copy.title, rows, width, contentWidth, style, "ok");
 }
 
 function renderVerdict(
   report: DoctorReport,
   width: number,
   contentWidth: number,
-  copy: DoctorSurfaceCopy
+  copy: DoctorSurfaceCopy,
+  style: OperatorConsoleStyle | undefined
 ): readonly string[] {
   return frameRows(copy.verdict, [
     report.verdict.title,
     copy.counts(report.verdict)
-  ], width, contentWidth);
+  ], width, contentWidth, style, "brand");
 }
 
-function renderChecks(report: DoctorReport, contentWidth: number): readonly string[] {
+function renderChecks(report: DoctorReport, contentWidth: number, style: OperatorConsoleStyle | undefined): readonly string[] {
   const checks = report.sections.flatMap((section) => section.checks);
   const labelWidth = Math.min(
     24,
@@ -103,7 +112,7 @@ function renderChecks(report: DoctorReport, contentWidth: number): readonly stri
   );
   const summaryWidth = Math.max(8, contentWidth - labelWidth - 7);
   return checks.map((check) => {
-    const icon = severityIcon(check.severity);
+    const icon = severityIcon(check.severity, style);
     const label = report.locale === "ar"
       ? padVisibleStart(check.label, labelWidth)
       : padVisibleEnd(check.label, labelWidth);
@@ -116,7 +125,8 @@ function renderActions(
   actions: readonly DoctorAction[],
   locale: DoctorLocale,
   contentWidth: number,
-  copy: DoctorSurfaceCopy
+  copy: DoctorSurfaceCopy,
+  style: OperatorConsoleStyle | undefined
 ): readonly string[] {
   if (actions.length === 0) {
     return [`  ${copy.noteMarker} ${copy.noActions}`];
@@ -124,7 +134,7 @@ function renderActions(
 
   const rows: string[] = [];
   for (const action of actions) {
-    rows.push(`  ${severityIcon(action.severity)} ${localizeDynamicText(action.title, locale)}`);
+    rows.push(`  ${severityIcon(action.severity, style)} ${localizeDynamicText(action.title, locale)}`);
     for (const detail of action.detailLines ?? []) {
       for (const line of wrapText(localizeDynamicText(detail, locale), Math.max(1, contentWidth - 4))) {
         rows.push(`    ${line}`);
@@ -142,7 +152,8 @@ function renderActions(
 function renderProviderRoutes(
   routes: readonly DoctorProviderRoute[],
   locale: DoctorLocale,
-  contentWidth: number
+  contentWidth: number,
+  style: OperatorConsoleStyle | undefined
 ): readonly string[] {
   const labelWidth = Math.min(18, Math.max(8, ...routes.map((route) => visibleLengthEstimate(route.label))));
   const rows: string[] = [];
@@ -152,7 +163,7 @@ function renderProviderRoutes(
       : padVisibleEnd(route.label, labelWidth);
     const hasConcreteRoute = route.provider !== undefined && route.model !== undefined;
     const model = hasConcreteRoute ? `${route.provider}/${route.model}` : route.summary;
-    const prefix = `  ${routeStatusIcon(route.status)} ${labelText}  `;
+    const prefix = `  ${routeStatusIcon(route.status, style)} ${labelText}  `;
     const modelText = localizeDynamicText(model, locale);
     const summary = hasConcreteRoute ? localizeDynamicText(route.summary, locale) : "";
     const fullLine = `${prefix}${modelText}${summary.length === 0 ? "" : `  ${summary}`}`;
@@ -180,9 +191,11 @@ function frameRows(
   title: string,
   rows: readonly string[],
   width: number,
-  contentWidth: number
+  contentWidth: number,
+  style: OperatorConsoleStyle | undefined,
+  titleTone: "brand" | "accent" | "ok" | "none" = "none"
 ): readonly string[] {
-  const top = renderTopBorder(title, width);
+  const top = renderTopBorder(title, width, style, titleTone);
   const body = rows.map((row) => renderFrameRow(row, contentWidth));
   return [
     top,
@@ -191,8 +204,14 @@ function frameRows(
   ];
 }
 
-function renderTopBorder(title: string, width: number): string {
-  const label = ` ${title} `;
+function renderTopBorder(
+  title: string,
+  width: number,
+  style: OperatorConsoleStyle | undefined,
+  titleTone: "brand" | "accent" | "ok" | "none"
+): string {
+  const styledTitle = styleFrameTitle(title, style, titleTone);
+  const label = ` ${styledTitle} `;
   const remaining = Math.max(0, width - 2 - visibleLengthEstimate(label));
   return `╭─${label}${"─".repeat(Math.max(0, remaining - 1))}╮`;
 }
@@ -212,29 +231,29 @@ function pairLine(label: string, value: string, locale: DoctorLocale): string {
   return `${padVisibleEnd(`${label}:`, 12)} ${value}`;
 }
 
-function sectionHeading(label: string): string {
-  return `◇ ${label}`;
+function sectionHeading(label: string, style: OperatorConsoleStyle | undefined): string {
+  return styleColor(style, styleBold(style, `◇ ${label}`), style?.tokens.contract.palette.accent ?? "");
 }
 
-function severityIcon(severity: DoctorCheckSeverity | DoctorAction["severity"]): string {
+function severityIcon(severity: DoctorCheckSeverity | DoctorAction["severity"], style: OperatorConsoleStyle | undefined): string {
   switch (severity) {
     case "healthy":
-      return "✓";
+      return styleColor(style, "✓", style?.tokens.contract.severity.ok ?? "");
     case "warning":
-      return "▲";
+      return styleColor(style, "▲", style?.tokens.contract.palette.caution ?? "");
     case "blocked":
-      return "✕";
+      return styleColor(style, "✕", style?.tokens.contract.severity.error ?? "");
   }
 }
 
-function routeStatusIcon(status: DoctorProviderRoute["status"]): string {
+function routeStatusIcon(status: DoctorProviderRoute["status"], style: OperatorConsoleStyle | undefined): string {
   switch (status) {
     case "ready":
-      return "✓";
+      return styleColor(style, "✓", style?.tokens.contract.severity.ok ?? "");
     case "warning":
-      return "▲";
+      return styleColor(style, "▲", style?.tokens.contract.palette.caution ?? "");
     case "blocked":
-      return "✕";
+      return styleColor(style, "✕", style?.tokens.contract.severity.error ?? "");
     case "disabled":
       return "•";
   }
@@ -259,6 +278,20 @@ function visibleLengthEstimate(value: string): number {
   return measureVisibleWidth(value);
 }
 
+function styleFrameTitle(
+  title: string,
+  style: OperatorConsoleStyle | undefined,
+  tone: "brand" | "accent" | "ok" | "none"
+): string {
+  if (tone === "none") return title;
+  const color = tone === "brand"
+    ? style?.tokens.contract.palette.brand
+    : tone === "ok"
+      ? style?.tokens.contract.severity.ok
+      : style?.tokens.contract.palette.accent;
+  return styleColor(style, styleBold(style, title), color ?? "");
+}
+
 type DoctorSurfaceCopy = {
   readonly title: string;
   readonly subtitle: string;
@@ -280,7 +313,7 @@ type DoctorSurfaceCopy = {
 function doctorSurfaceCopy(locale: DoctorLocale): DoctorSurfaceCopy {
   if (locale === "ar") {
     return {
-      title: `${isolateLtr("𓂀 EstaCoda")} طبيب`,
+      title: `${isolateLtr("𓂀  EstaCoda")} طبيب`,
       subtitle: "فحص صحة النظام",
       profile: "الملف الشخصي",
       workspace: "مساحة العمل",
@@ -288,7 +321,7 @@ function doctorSurfaceCopy(locale: DoctorLocale): DoctorSurfaceCopy {
       model: "النموذج",
       checks: "الفحوصات",
       providerRoutes: "مسارات المزوّد",
-      verdict: "النتيجة",
+      verdict: `${isolateLtr("𓂀")}  النتيجة`,
       actions: "الإجراءات",
       notes: "ملاحظات",
       noteMarker: "•",
@@ -299,7 +332,7 @@ function doctorSurfaceCopy(locale: DoctorLocale): DoctorSurfaceCopy {
   }
 
   return {
-    title: "𓂀 EstaCoda Doctor",
+    title: "𓂀  EstaCoda Doctor",
     subtitle: "System health inspection",
     profile: "Profile",
     workspace: "Workspace",
@@ -307,7 +340,7 @@ function doctorSurfaceCopy(locale: DoctorLocale): DoctorSurfaceCopy {
     model: "Model",
     checks: "Checks",
     providerRoutes: "Provider Routes",
-    verdict: "Verdict",
+    verdict: "𓂀  Verdict",
     actions: "Actions",
     notes: "Notes",
     noteMarker: "•",

@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
+import { resolveTokens } from "../theme/token-resolver.js";
 import { LRI, PDI } from "../ui/bidi.js";
+import { createOperatorConsoleStyle } from "../ui/papyrus/operator-console/operatorConsoleStyle.js";
+import { stripAnsi } from "../ui/papyrus/screen/stringWidth.js";
 import { renderDoctorJsonReport, renderDoctorReport } from "./cli-renderer.js";
 import type { DoctorReport } from "./types.js";
 
@@ -24,7 +27,7 @@ describe("renderDoctorReport", () => {
       ]
     }));
 
-    expect(output).toContain("𓂀 EstaCoda Doctor");
+    expect(output).toContain("𓂀  EstaCoda Doctor");
     expect(output).toContain("System health inspection");
     expect(output).toContain("◇ Checks");
     expect(output).toContain("▲ Providers");
@@ -32,6 +35,44 @@ describe("renderDoctorReport", () => {
     expect(output).toContain("0 blocked · 1 warnings · 2 healthy");
     expect(output).toContain("OpenRouter API key is missing");
     expect(output).toContain("Fix: estacoda model setup");
+  });
+
+  it("uses Papyrus color tokens for doctor landmarks and status icons", () => {
+    const tokens = resolveTokens("standard", "dark", "kemetBlue");
+    const style = createOperatorConsoleStyle({
+      tokens,
+      capabilities: { supportsColor: true, supportsTrueColor: true }
+    });
+    const output = renderDoctorReport(baseReport({
+      actions: [
+        {
+          id: "blocked-config",
+          severity: "blocked",
+          title: "Config syntax error: Unexpected token"
+        }
+      ],
+      providerRoutes: [
+        {
+          id: "primary:primary",
+          kind: "primary",
+          label: "primary",
+          provider: "openrouter",
+          model: "anthropic/claude-sonnet",
+          status: "ready",
+          summary: "ready",
+          details: []
+        }
+      ]
+    }), { style });
+
+    expect(stripAnsi(output)).toContain("𓂀  EstaCoda Doctor");
+    expect(stripAnsi(output)).toContain("𓂀  Verdict");
+    expect(output).toContain(`${ansiFg(tokens.contract.severity.ok)}\x1b[1m𓂀  EstaCoda Doctor\x1b[0m\x1b[0m`);
+    expect(output).toContain(`${ansiFg(tokens.contract.palette.brand)}\x1b[1m𓂀  Verdict\x1b[0m\x1b[0m`);
+    expect(output).toContain(`${ansiFg(tokens.contract.palette.accent)}\x1b[1m◇ Checks\x1b[0m\x1b[0m`);
+    expect(output).toContain(`${ansiFg(tokens.contract.severity.ok)}✓\x1b[0m`);
+    expect(output).toContain(`${ansiFg(tokens.contract.palette.caution)}▲\x1b[0m`);
+    expect(output).toContain(`${ansiFg(tokens.contract.severity.error)}✕\x1b[0m`);
   });
 
   it("renders provider route rows when present", () => {
@@ -195,4 +236,13 @@ function baseReport(overrides: Partial<DoctorReport> = {}): DoctorReport {
     actions: overrides.actions ?? [],
     notes: overrides.notes ?? []
   };
+}
+
+function ansiFg(hex: string): string {
+  const clean = hex.replace("#", "");
+  const value = Number.parseInt(clean, 16);
+  const r = (value >> 16) & 255;
+  const g = (value >> 8) & 255;
+  const b = value & 255;
+  return `\x1b[38;2;${r};${g};${b}m`;
 }
