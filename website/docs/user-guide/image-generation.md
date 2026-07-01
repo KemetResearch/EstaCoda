@@ -146,19 +146,19 @@ For BytePlus, the tool sends the documented `image` request field with one HTTPS
 
 For FAL, the tool is enabled only when the selected catalog entry has an `editEndpoint`. It calls that endpoint with the documented `image_urls` field and any cataloged defaults supported by that edit endpoint.
 
-OpenAI image editing is not enabled in this release.
+For OpenAI, the tool calls `/v1/images/edits` with multipart `image[]` file parts. Safe HTTPS source images are downloaded by EstaCoda and uploaded to OpenAI. Local image artifacts are accepted only when they are image artifacts stored in the selected profile image cache.
 
 Parameters:
 
 | Parameter | Type | Required | Notes |
 |-----------|------|----------|-------|
 | `prompt` | `string` | yes | The edit instruction. |
-| `sourceImages` | `string[]` | yes, unless `sourceImage` is set | HTTPS image URLs, `artifact://` references, or artifact ids for prior generated images that include `sourceUrl` metadata. |
+| `sourceImages` | `string[]` | yes, unless `sourceImage` is set | HTTPS image URLs, `artifact://` references, or artifact ids. FAL and BytePlus require source URLs; OpenAI can also use local image-cache artifacts. |
 | `sourceImage` | `string` | yes, unless `sourceImages` is set | Convenience single-image input. |
 | `aspectRatio` | `string` | no | `square`, `landscape`, or `portrait`. Defaults to square. |
 | `model` | `string` | no | Overrides the configured provider model for this request. |
 
-Local image paths are not uploaded by this tool. Use an HTTPS image URL or a prior generated artifact that still has provider `sourceUrl` metadata.
+Arbitrary local image paths are not uploaded by this tool. Use an HTTPS image URL or a prior generated artifact. For FAL and BytePlus, that artifact must still have provider `sourceUrl` metadata. For OpenAI, image artifacts in the selected profile image cache can be uploaded directly.
 
 Result:
 
@@ -175,9 +175,9 @@ Result:
 | Unsupported provider | The configured provider is not implemented for image generation. | Select `fal`, `byteplus`, or `openai`. |
 | Remote provider error | HTTP 4xx/5xx, auth failure, or model not activated. | Check provider status, credentials, and model activation. |
 | Generated URL download failed | Provider returned a URL that could not be fetched. | Retry the request; transient network issues are possible. |
-| Local source image rejected by `image.edit` | Editing currently accepts safe HTTPS source URLs or artifacts with provider source URLs. | Use an HTTPS image URL or a prior generated artifact with `sourceUrl` metadata. |
+| Local source image rejected by `image.edit` | Editing accepts safe HTTPS source URLs. FAL and BytePlus require provider source URLs; OpenAI accepts selected-profile image-cache artifacts. | Use an HTTPS image URL or a compatible prior generated artifact. |
 | FAL model does not support `image.edit` | The selected cataloged FAL model has no edit endpoint. | Choose an edit-capable FAL model with `estacoda image models --provider fal`. |
-| OpenAI image editing is not enabled | OpenAI is configured for generation only in this release. | Use `image.generate`, or choose an edit-capable FAL or BytePlus model. |
+| OpenAI source image too large or unsupported | OpenAI edit sources must be PNG, JPEG, or WebP images of 50 MB or less. | Use a supported source image format and size. |
 | Invalid output path | Cache directory missing or unwritable. | EstaCoda creates the directory recursively; check filesystem permissions. |
 | Safety / provider refusal | Provider rejected the prompt for policy reasons. | Rephrase the prompt or check provider content policies. |
 | BytePlus `ModelNotOpen` | The Seedream model is not activated for your account. | Activate it in the Ark Console, or choose another model with `estacoda image models --provider byteplus`. |

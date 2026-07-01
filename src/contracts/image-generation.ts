@@ -31,6 +31,8 @@ export type ImageModelOption = {
     quality: OpenAIImageQuality;
     sizes: Record<ImageAspectKey, string>;
     supports: readonly string[];
+    editSupports?: readonly string[];
+    maxReferenceImages?: number;
   };
 };
 
@@ -294,7 +296,9 @@ export const IMAGE_MODEL_OPTIONS: Record<ImageGenerationProvider, readonly Image
         apiModel: "gpt-image-2",
         quality: "low",
         sizes: { landscape: "1536x1024", square: "1024x1024", portrait: "1024x1536" },
-        supports: ["prompt", "size", "n", "quality"]
+        supports: ["prompt", "size", "n", "quality"],
+        editSupports: ["prompt", "image[]", "size", "n", "quality"],
+        maxReferenceImages: 16
       }
     },
     {
@@ -306,7 +310,9 @@ export const IMAGE_MODEL_OPTIONS: Record<ImageGenerationProvider, readonly Image
         apiModel: "gpt-image-2",
         quality: "medium",
         sizes: { landscape: "1536x1024", square: "1024x1024", portrait: "1024x1536" },
-        supports: ["prompt", "size", "n", "quality"]
+        supports: ["prompt", "size", "n", "quality"],
+        editSupports: ["prompt", "image[]", "size", "n", "quality"],
+        maxReferenceImages: 16
       }
     },
     {
@@ -318,7 +324,9 @@ export const IMAGE_MODEL_OPTIONS: Record<ImageGenerationProvider, readonly Image
         apiModel: "gpt-image-2",
         quality: "high",
         sizes: { landscape: "1536x1024", square: "1024x1024", portrait: "1024x1536" },
-        supports: ["prompt", "size", "n", "quality"]
+        supports: ["prompt", "size", "n", "quality"],
+        editSupports: ["prompt", "image[]", "size", "n", "quality"],
+        maxReferenceImages: 16
       }
     }
   ]

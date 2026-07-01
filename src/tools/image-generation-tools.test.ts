@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { ArtifactStore } from "../artifacts/artifact-store.js";
@@ -55,7 +55,7 @@ describe("image generation tools", () => {
       authorization: "Key fal-secret",
       "content-type": "application/json"
     });
-    expect(JSON.parse(requests[0]?.init?.body ?? "{}")).toEqual({
+    expect(jsonBody(requests[0]?.init)).toEqual({
       prompt: "draw clean neon wayfinding",
       image_size: "landscape_16_9",
       num_inference_steps: 50,
@@ -92,7 +92,7 @@ describe("image generation tools", () => {
 
     expect(result.ok).toBe(true);
     expect(requests[0]?.url).toBe("https://fal.run/fal-ai/krea/v2/large/text-to-image");
-    expect(JSON.parse(requests[0]?.init?.body ?? "{}")).toEqual({
+    expect(jsonBody(requests[0]?.init)).toEqual({
       prompt: "paint a cinematic product scene",
       aspect_ratio: "9:16",
       creativity: "medium"
@@ -122,7 +122,7 @@ describe("image generation tools", () => {
 
     expect(result.ok).toBe(true);
     expect(requests[0]?.url).toBe("https://fal.run/fal-ai/gpt-image-1.5");
-    expect(JSON.parse(requests[0]?.init?.body ?? "{}")).toEqual({
+    expect(jsonBody(requests[0]?.init)).toEqual({
       prompt: "make an editorial poster",
       image_size: "1024x1024",
       quality: "medium",
@@ -188,7 +188,7 @@ describe("image generation tools", () => {
       authorization: "Key fal-secret",
       "content-type": "application/json"
     });
-    expect(JSON.parse(requests[0]?.init?.body ?? "{}")).toEqual({
+    expect(jsonBody(requests[0]?.init)).toEqual({
       prompt: "add realistic flames above the cup",
       image_urls: ["https://images.example/cup.png"],
       num_inference_steps: 50,
@@ -255,7 +255,7 @@ describe("image generation tools", () => {
       authorization: "Bearer byteplus-secret",
       "content-type": "application/json"
     });
-    expect(JSON.parse(requests[0]?.init?.body ?? "{}")).toEqual({
+    expect(jsonBody(requests[0]?.init)).toEqual({
       model: "seedream-5-0-260128",
       prompt: "draw a brass astrolabe",
       size: "2560x1440",
@@ -324,7 +324,7 @@ describe("image generation tools", () => {
       authorization: "Bearer byteplus-secret",
       "content-type": "application/json"
     });
-    expect(JSON.parse(requests[0]?.init?.body ?? "{}")).toEqual({
+    expect(jsonBody(requests[0]?.init)).toEqual({
       model: "seedream-5-0-260128",
       prompt: "change the dress material to clear water",
       image: "https://images.example/source.png",
@@ -371,7 +371,7 @@ describe("image generation tools", () => {
 
     expect(result.ok).toBe(true);
     expect(requests).toHaveLength(1);
-    expect(JSON.parse(requests[0]?.init?.body ?? "{}")).toMatchObject({
+    expect(jsonBody(requests[0]?.init)).toMatchObject({
       image: "https://images.example/generated-source.png",
       sequential_image_generation: "disabled"
     });
@@ -463,7 +463,7 @@ describe("image generation tools", () => {
       authorization: "Bearer openai-secret",
       "content-type": "application/json"
     });
-    expect(JSON.parse(requests[0]?.init?.body ?? "{}")).toEqual({
+    expect(jsonBody(requests[0]?.init)).toEqual({
       model: "gpt-image-2",
       prompt: "draw a crisp product label",
       size: "1536x1024",
@@ -473,17 +473,145 @@ describe("image generation tools", () => {
     await expect(readFile(join(tempDir, "openai-generated.png"))).resolves.toEqual(imageBytes);
   });
 
-  it("reports OpenAI image editing as not enabled without calling the provider", async () => {
-    const requests: string[] = [];
+  it("sends OpenAI edit multipart payloads with downloaded HTTPS source images", async () => {
+    const sourceBytes = Buffer.from("source-png");
+    const editedBytes = Buffer.from("openai-edited-png");
+    const requests: Array<{ url: string; init?: Parameters<ImageGenerationFetchLike>[1] }> = [];
+    const fetcher: ImageGenerationFetchLike = async (url, init) => {
+      requests.push({ url, init });
+      if (url === "https://images.example/source.png") {
+        return binaryResponse(sourceBytes, "image/png");
+      }
+      return jsonResponse({
+        data: [{ b64_json: editedBytes.toString("base64") }]
+      });
+    };
+
     const tool = createImageGenerationTools({
       imageCacheRoot: tempDir,
       artifactStore: new ArtifactStore({ id: () => "artifact-openai-edit" }),
+      imageGen: openAIImageGen(),
+      fetch: fetcher,
+      id: () => "openai-edit"
+    }).find((candidate) => candidate.name === "image.edit")!;
+
+    const result = await tool.run({
+      prompt: "change the background to polished marble",
+      sourceImages: ["https://images.example/source.png"],
+      aspectRatio: "portrait",
+      model: "low"
+    });
+
+    expect(result.ok).toBe(true);
+    expect(result.content).toContain("Model: gpt-image-2-low");
+    expect(requests).toHaveLength(2);
+    expect(requests[0]?.url).toBe("https://images.example/source.png");
+    expect(requests[1]?.url).toBe("https://api.openai.com/v1/images/edits");
+    expect(requests[1]?.init?.headers).toEqual({
+      authorization: "Bearer openai-secret"
+    });
+    const form = requests[1]?.init?.body;
+    expect(form).toBeInstanceOf(FormData);
+    expect((form as FormData).get("model")).toBe("gpt-image-2");
+    expect((form as FormData).get("prompt")).toBe("change the background to polished marble");
+    expect((form as FormData).get("size")).toBe("1024x1536");
+    expect((form as FormData).get("n")).toBe("1");
+    expect((form as FormData).get("quality")).toBe("low");
+    const imageParts = (form as FormData).getAll("image[]");
+    expect(imageParts).toHaveLength(1);
+    expect(Buffer.from(await (imageParts[0] as Blob).arrayBuffer())).toEqual(sourceBytes);
+    await expect(readFile(join(tempDir, "openai-edit.png"))).resolves.toEqual(editedBytes);
+  });
+
+  it("sends OpenAI edit multipart payloads from local image artifacts in the image cache", async () => {
+    const sourceBytes = Buffer.from("cached-source-png");
+    const editedBytes = Buffer.from("cached-edited-png");
+    const sourcePath = join(tempDir, "source.png");
+    await writeFile(sourcePath, sourceBytes);
+    const ids = ["source-artifact", "edited-artifact"];
+    const artifactStore = new ArtifactStore({ id: () => ids.shift() ?? "artifact" });
+    artifactStore.record({
+      path: sourcePath,
+      kind: "image",
+      bytes: sourceBytes.byteLength,
+      mimeType: "image/png"
+    });
+    const requests: Array<{ url: string; init?: Parameters<ImageGenerationFetchLike>[1] }> = [];
+    const fetcher: ImageGenerationFetchLike = async (url, init) => {
+      requests.push({ url, init });
+      return jsonResponse({
+        data: [{ b64_json: editedBytes.toString("base64") }]
+      });
+    };
+
+    const tool = createImageGenerationTools({
+      imageCacheRoot: tempDir,
+      artifactStore,
+      imageGen: openAIImageGen(),
+      fetch: fetcher,
+      id: () => "openai-cached-edit"
+    }).find((candidate) => candidate.name === "image.edit")!;
+
+    const result = await tool.run({
+      prompt: "add a tasteful gold border",
+      sourceImages: ["artifact://source-artifact"]
+    });
+
+    expect(result.ok).toBe(true);
+    expect(requests).toHaveLength(1);
+    expect(requests[0]?.url).toBe("https://api.openai.com/v1/images/edits");
+    const form = requests[0]?.init?.body as FormData;
+    const imageParts = form.getAll("image[]");
+    expect(imageParts).toHaveLength(1);
+    expect(Buffer.from(await (imageParts[0] as Blob).arrayBuffer())).toEqual(sourceBytes);
+    await expect(readFile(join(tempDir, "openai-cached-edit.png"))).resolves.toEqual(editedBytes);
+  });
+
+  it("rejects OpenAI local image artifacts outside the image cache before calling the provider", async () => {
+    const sourceBytes = Buffer.from("outside-cache-png");
+    const imageCacheRoot = join(tempDir, "cache");
+    const sourcePath = join(tempDir, "outside-cache.png");
+    await writeFile(sourcePath, sourceBytes);
+    const artifactStore = new ArtifactStore({ id: () => "outside-source" });
+    artifactStore.record({
+      path: sourcePath,
+      kind: "image",
+      bytes: sourceBytes.byteLength,
+      mimeType: "image/png"
+    });
+    const requests: string[] = [];
+    const tool = createImageGenerationTools({
+      imageCacheRoot,
+      artifactStore,
+      imageGen: openAIImageGen(),
+      fetch: async (url) => {
+        requests.push(url);
+        return jsonResponse({ data: [] });
+      }
+    }).find((candidate) => candidate.name === "image.edit")!;
+
+    const result = await tool.run({
+      prompt: "add a tasteful gold border",
+      sourceImages: ["artifact://outside-source"]
+    });
+
+    expect(result.ok).toBe(false);
+    expect(result.content).toContain("selected profile image cache");
+    expect(requests).toEqual([]);
+  });
+
+  it("reports setup-needed metadata for OpenAI image edits with the edit resume intent", async () => {
+    delete process.env.OPENAI_API_KEY;
+    const requests: string[] = [];
+    const tool = createImageGenerationTools({
+      imageCacheRoot: tempDir,
+      artifactStore: new ArtifactStore({ id: () => "artifact-openai-missing-key" }),
       imageGen: openAIImageGen(),
       fetch: async (url) => {
         requests.push(url);
         return jsonResponse({ data: [] });
       },
-      id: () => "openai-edit"
+      id: () => "openai-missing-key"
     }).find((candidate) => candidate.name === "image.edit")!;
 
     const result = await tool.run({
@@ -492,7 +620,12 @@ describe("image generation tools", () => {
     });
 
     expect(result.ok).toBe(false);
-    expect(result.content).toContain("OpenAI image editing is not enabled yet");
+    expect(result.metadata).toMatchObject({
+      kind: "setup_needed",
+      capability: "image_generation",
+      resumeIntent: "image.edit",
+      requiredSecret: "OPENAI_API_KEY"
+    });
     expect(requests).toEqual([]);
   });
 });
@@ -550,7 +683,29 @@ function jsonResponse(value: unknown): Awaited<ReturnType<ImageGenerationFetchLi
     status: 200,
     statusText: "OK",
     headers: { get: () => "image/png" },
-    arrayBuffer: async () => bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength),
+    arrayBuffer: async () => bufferToArrayBuffer(bytes),
     text: async () => raw
   };
+}
+
+function binaryResponse(bytes: Buffer, contentType: string): Awaited<ReturnType<ImageGenerationFetchLike>> {
+  return {
+    ok: true,
+    status: 200,
+    statusText: "OK",
+    headers: { get: (name) => name.toLowerCase() === "content-type" ? contentType : null },
+    arrayBuffer: async () => bufferToArrayBuffer(bytes),
+    text: async () => bytes.toString("utf8")
+  };
+}
+
+function jsonBody(init: Parameters<ImageGenerationFetchLike>[1] | undefined): unknown {
+  if (typeof init?.body !== "string") {
+    throw new TypeError("Expected JSON request body.");
+  }
+  return JSON.parse(init.body);
+}
+
+function bufferToArrayBuffer(bytes: Buffer): ArrayBuffer {
+  return bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer;
 }

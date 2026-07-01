@@ -1,5 +1,5 @@
-import { mkdir, stat, writeFile } from "node:fs/promises";
-import { extname, join } from "node:path";
+import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
+import { extname, isAbsolute, join, relative, resolve } from "node:path";
 import { randomUUID } from "node:crypto";
 import type { ArtifactStore } from "../artifacts/artifact-store.js";
 import {
@@ -18,7 +18,7 @@ import type { RegisteredTool, SessionToolProvider } from "../contracts/tool.js";
 export type ImageGenerationFetchLike = (url: string, init?: {
   method?: string;
   headers?: Record<string, string>;
-  body?: string;
+  body?: string | FormData;
   signal?: AbortSignal;
 }) => Promise<{
   ok: boolean;
@@ -38,6 +38,15 @@ export type ImageGenerationToolOptions = {
 };
 
 type ImageAspect = "square" | "landscape" | "portrait";
+type ResolvedSourceImage = {
+  reference: string;
+  url?: string;
+  localPath?: string;
+  mimeType?: string;
+};
+
+const OPENAI_IMAGE_EDIT_MAX_SOURCE_IMAGES = 16;
+const OPENAI_IMAGE_EDIT_MAX_SOURCE_BYTES = 50 * 1024 * 1024;
 
 export function createImageGenerationTools(options: ImageGenerationToolOptions): readonly RegisteredTool[] {
   const imageGen = options.imageGen ?? defaultImageGen();
@@ -145,14 +154,17 @@ export function createImageGenerationTools(options: ImageGenerationToolOptions):
         return { ok: false, content: "image.edit aspectRatio must be square, landscape, or portrait." };
       }
 
-      const sourceImages = resolveSourceImages(input, options.artifactStore);
+      const sourceImages = resolveSourceImages(input, options.artifactStore, {
+        provider: imageGen.provider,
+        imageCacheRoot: options.imageCacheRoot
+      });
       if (!sourceImages.ok) {
         return sourceImages;
       }
 
       const result = await editImage({
         prompt,
-        sourceImages: sourceImages.urls,
+        sourceImages: sourceImages.sources,
         aspectRatio,
         model: input.model,
         imageGen,
@@ -164,12 +176,12 @@ export function createImageGenerationTools(options: ImageGenerationToolOptions):
       }
 
       const artifact = await storeImageArtifact(options, result, {
-        summary: truncateSummary(`Image edited from ${sourceImages.urls.length} source image(s): ${prompt}`),
+        summary: truncateSummary(`Image edited from ${sourceImages.sources.length} source image(s): ${prompt}`),
         metadata: {
           provider: imageGen.provider,
           model: result.model,
           aspectRatio: result.aspectRatio,
-          sourceImages: sourceImages.urls,
+          sourceImages: sourceImages.sources.map((source) => source.url ?? source.reference),
           sourceUrl: result.sourceUrl
         }
       });
@@ -181,7 +193,7 @@ export function createImageGenerationTools(options: ImageGenerationToolOptions):
           `Provider: ${imageGen.provider}`,
           `Model: ${result.model}`,
           `Aspect ratio: ${result.aspectRatio}`,
-          `Source images: ${sourceImages.urls.length}`,
+          `Source images: ${sourceImages.sources.length}`,
           result.sourceUrl === undefined ? undefined : `Source URL: ${result.sourceUrl}`,
           `Artifact: ${artifact.id}`
         ].filter((line) => line !== undefined).join("\n"),
@@ -271,7 +283,7 @@ async function generateImage(input: {
 
 async function editImage(input: {
   prompt: string;
-  sourceImages: string[];
+  sourceImages: ResolvedSourceImage[];
   aspectRatio: ImageAspect;
   model?: string;
   imageGen: LoadedRuntimeConfig["imageGen"];
@@ -283,33 +295,33 @@ async function editImage(input: {
 > {
   const provider = input.imageGen.provider;
   const fetcher = input.fetch ?? globalImageFetch;
-  if (provider === "openai") {
-    const model = resolveImageModel("openai", input.model ?? input.imageGen.openai?.model ?? input.imageGen.model)
-      ?? defaultImageModel("openai");
-    return {
-      ok: false,
-      content: "OpenAI image editing is not enabled yet. Use image.generate, or choose an edit-capable fal.ai or BytePlus model.",
-      metadata: { provider: "openai", model, reason: "unsupported-edit-provider" }
-    };
-  }
   const generated = provider === "byteplus"
     ? await submitBytePlusRequest({
       prompt: input.prompt,
-      sourceImages: input.sourceImages,
+      sourceImages: input.sourceImages.map((source) => source.url!),
       resumeIntent: "image.edit",
       aspectRatio: input.aspectRatio,
       model: input.model,
       imageGen: input.imageGen,
       signal: input.signal
     }, fetcher)
-    : await submitFalEditRequest({
-      prompt: input.prompt,
-      sourceImages: input.sourceImages,
-      aspectRatio: input.aspectRatio,
-      model: input.model,
-      imageGen: input.imageGen,
-      signal: input.signal
-    }, fetcher);
+    : provider === "openai"
+      ? await submitOpenAIEditRequest({
+        prompt: input.prompt,
+        sourceImages: input.sourceImages,
+        aspectRatio: input.aspectRatio,
+        model: input.model,
+        imageGen: input.imageGen,
+        signal: input.signal
+      }, fetcher)
+      : await submitFalEditRequest({
+        prompt: input.prompt,
+        sourceImages: input.sourceImages.map((source) => source.url!),
+        aspectRatio: input.aspectRatio,
+        model: input.model,
+        imageGen: input.imageGen,
+        signal: input.signal
+      }, fetcher);
   if (!generated.ok) {
     return generated;
   }
@@ -546,6 +558,68 @@ async function submitOpenAIRequest(
   return parseImageResponse(response, "openai", model);
 }
 
+async function submitOpenAIEditRequest(
+  input: {
+    prompt: string;
+    sourceImages: ResolvedSourceImage[];
+    aspectRatio: ImageAspect;
+    model?: string;
+    imageGen: LoadedRuntimeConfig["imageGen"];
+    signal?: AbortSignal;
+  },
+  fetcher: ImageGenerationFetchLike
+): Promise<GeneratedImageReference | { ok: false; content: string; metadata?: Record<string, unknown> }> {
+  const model = resolveImageModel("openai", input.model ?? input.imageGen.openai?.model ?? input.imageGen.model)
+    ?? defaultImageModel("openai");
+  const option = imageModelOption("openai", model);
+  const metadata = option?.openai;
+  const maxReferenceImages = metadata?.maxReferenceImages ?? OPENAI_IMAGE_EDIT_MAX_SOURCE_IMAGES;
+  if (input.sourceImages.length > maxReferenceImages) {
+    return {
+      ok: false,
+      content: `OpenAI image editing supports at most ${maxReferenceImages} source image(s).`,
+      metadata: { provider: "openai", model, maxReferenceImages }
+    };
+  }
+
+  const apiKeyEnv = input.imageGen.openai?.apiKeyEnv ?? input.imageGen.apiKeyEnv ?? defaultImageApiKeyEnv("openai");
+  const apiKey = process.env[apiKeyEnv];
+  if (apiKey === undefined || apiKey.length === 0) {
+    return imageSetupNeeded({
+      provider: "openai",
+      model,
+      requiredSecret: apiKeyEnv,
+      resumeIntent: "image.edit"
+    });
+  }
+
+  const parts = await openAIImageSourceParts(input.sourceImages, fetcher, input.signal);
+  if (!parts.ok) {
+    return parts;
+  }
+
+  const form = new FormData();
+  form.append("model", metadata?.apiModel ?? "gpt-image-2");
+  form.append("prompt", input.prompt);
+  form.append("size", metadata?.sizes[input.aspectRatio] ?? openAIImageSize(input.aspectRatio));
+  form.append("n", "1");
+  form.append("quality", metadata?.quality ?? "medium");
+  for (const [index, source] of parts.sources.entries()) {
+    form.append("image[]", new Blob([bufferToArrayBuffer(source.bytes)], { type: source.mimeType }), source.fileName ?? `source-${index + 1}.${extensionForMime(source.mimeType)}`);
+  }
+
+  const baseUrl = (input.imageGen.openai?.baseUrl ?? input.imageGen.baseUrl ?? defaultImageBaseUrl("openai")).replace(/\/$/, "");
+  const response = await fetcher(`${baseUrl}/images/edits`, {
+    method: "POST",
+    headers: {
+      authorization: `Bearer ${apiKey}`
+    },
+    body: form,
+    signal: input.signal
+  });
+  return parseImageResponse(response, "openai", model);
+}
+
 async function fetchWithTransientRetry(
   fetcher: ImageGenerationFetchLike,
   url: string,
@@ -728,6 +802,127 @@ function openAIImageSize(aspectRatio: ImageAspect): string {
   return "1024x1024";
 }
 
+async function openAIImageSourceParts(
+  sources: readonly ResolvedSourceImage[],
+  fetcher: ImageGenerationFetchLike,
+  signal?: AbortSignal
+): Promise<
+  | { ok: true; sources: Array<{ bytes: Buffer; mimeType: string; fileName?: string }> }
+  | { ok: false; content: string; metadata?: Record<string, unknown> }
+> {
+  const parts: Array<{ bytes: Buffer; mimeType: string; fileName?: string }> = [];
+  for (const [index, source] of sources.entries()) {
+    const part = source.localPath !== undefined
+      ? await openAILocalImageSourcePart(source)
+      : await openAIRemoteImageSourcePart(source, fetcher, signal);
+    if (!part.ok) return part;
+    parts.push({
+      bytes: part.bytes,
+      mimeType: part.mimeType,
+      fileName: part.fileName ?? `source-${index + 1}.${extensionForMime(part.mimeType)}`
+    });
+  }
+  return { ok: true, sources: parts };
+}
+
+async function openAILocalImageSourcePart(
+  source: ResolvedSourceImage
+): Promise<
+  | { ok: true; bytes: Buffer; mimeType: string; fileName?: string }
+  | { ok: false; content: string; metadata?: Record<string, unknown> }
+> {
+  const localPath = source.localPath;
+  if (localPath === undefined) {
+    return { ok: false, content: "OpenAI image editing requires an HTTPS source image or local image artifact.", metadata: { reason: "missing-source" } };
+  }
+  const fileStat = await stat(localPath).catch(() => undefined);
+  if (fileStat === undefined || !fileStat.isFile()) {
+    return {
+      ok: false,
+      content: `OpenAI image editing could not read source artifact ${source.reference}.`,
+      metadata: { source: source.reference, reason: "source-artifact-unreadable" }
+    };
+  }
+  if (fileStat.size > OPENAI_IMAGE_EDIT_MAX_SOURCE_BYTES) {
+    return openAIImageSourceTooLarge(source.reference, fileStat.size);
+  }
+  const bytes = await readFile(localPath);
+  const mimeType = normalizeOpenAIImageInputMime(source.mimeType ?? mimeFromImageDownload(localPath, undefined));
+  if (mimeType === undefined) {
+    return openAIUnsupportedImageSource(source.reference, source.mimeType);
+  }
+  return {
+    ok: true,
+    bytes,
+    mimeType,
+    fileName: `source-${safeId(source.reference)}.${extensionForMime(mimeType)}`
+  };
+}
+
+async function openAIRemoteImageSourcePart(
+  source: ResolvedSourceImage,
+  fetcher: ImageGenerationFetchLike,
+  signal?: AbortSignal
+): Promise<
+  | { ok: true; bytes: Buffer; mimeType: string; fileName?: string }
+  | { ok: false; content: string; metadata?: Record<string, unknown> }
+> {
+  const url = source.url;
+  if (url === undefined) {
+    return { ok: false, content: "OpenAI image editing requires an HTTPS source image or local image artifact.", metadata: { source: source.reference } };
+  }
+  const response = await fetcher(url, { signal });
+  if (!response.ok) {
+    return {
+      ok: false,
+      content: `OpenAI image editing could not download source image ${url}: ${response.status} ${response.statusText}`,
+      metadata: { source: source.reference, status: response.status }
+    };
+  }
+  const bytes = Buffer.from(await response.arrayBuffer());
+  if (bytes.byteLength > OPENAI_IMAGE_EDIT_MAX_SOURCE_BYTES) {
+    return openAIImageSourceTooLarge(url, bytes.byteLength);
+  }
+  const mimeType = normalizeOpenAIImageInputMime(mimeFromImageDownload(url, response.headers?.get("content-type") ?? undefined));
+  if (mimeType === undefined) {
+    return openAIUnsupportedImageSource(url, response.headers?.get("content-type") ?? undefined);
+  }
+  return {
+    ok: true,
+    bytes,
+    mimeType,
+    fileName: `source-${safeId(new URL(url).pathname || "image")}.${extensionForMime(mimeType)}`
+  };
+}
+
+function normalizeOpenAIImageInputMime(value: string | undefined): string | undefined {
+  const normalized = value?.split(";")[0]?.trim().toLowerCase();
+  if (normalized === "image/png" || normalized === "image/jpeg" || normalized === "image/webp") {
+    return normalized;
+  }
+  return undefined;
+}
+
+function openAIUnsupportedImageSource(source: string, mimeType: string | undefined): { ok: false; content: string; metadata: Record<string, unknown> } {
+  return {
+    ok: false,
+    content: "OpenAI image editing supports PNG, JPEG, or WebP source images.",
+    metadata: { source, mimeType, reason: "unsupported-source-mime" }
+  };
+}
+
+function openAIImageSourceTooLarge(source: string, bytes: number): { ok: false; content: string; metadata: Record<string, unknown> } {
+  return {
+    ok: false,
+    content: "OpenAI image editing source images must be 50 MB or smaller.",
+    metadata: { source, bytes, maxBytes: OPENAI_IMAGE_EDIT_MAX_SOURCE_BYTES, reason: "source-too-large" }
+  };
+}
+
+function bufferToArrayBuffer(bytes: Buffer): ArrayBuffer {
+  return bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer;
+}
+
 function imageGenerationFailureMessage(
   status: number,
   statusText: string,
@@ -827,8 +1022,12 @@ async function storeImageArtifact(
 
 function resolveSourceImages(
   input: { sourceImages?: string[]; sourceImage?: string },
-  artifactStore: ArtifactStore
-): { ok: true; urls: string[] } | { ok: false; content: string; metadata?: Record<string, unknown> } {
+  artifactStore: ArtifactStore,
+  options: {
+    provider: LoadedRuntimeConfig["imageGen"]["provider"];
+    imageCacheRoot: string;
+  }
+): { ok: true; sources: ResolvedSourceImage[] } | { ok: false; content: string; metadata?: Record<string, unknown> } {
   const requested = [
     ...(Array.isArray(input.sourceImages) ? input.sourceImages : []),
     input.sourceImage
@@ -841,37 +1040,64 @@ function resolveSourceImages(
     };
   }
 
-  const urls: string[] = [];
+  const sources: ResolvedSourceImage[] = [];
   for (const source of requested) {
-    const resolved = resolveSourceImage(source.trim(), artifactStore);
+    const resolved = resolveSourceImage(source.trim(), artifactStore, options);
     if (!resolved.ok) return resolved;
-    urls.push(resolved.url);
+    sources.push(resolved.source);
   }
 
-  return { ok: true, urls };
+  return { ok: true, sources };
 }
 
 function resolveSourceImage(
   source: string,
-  artifactStore: ArtifactStore
-): { ok: true; url: string } | { ok: false; content: string; metadata?: Record<string, unknown> } {
+  artifactStore: ArtifactStore,
+  options: {
+    provider: LoadedRuntimeConfig["imageGen"]["provider"];
+    imageCacheRoot: string;
+  }
+): { ok: true; source: ResolvedSourceImage } | { ok: false; content: string; metadata?: Record<string, unknown> } {
   if (isSafeRemoteImageUrl(source)) {
-    return { ok: true, url: source };
+    return { ok: true, source: { reference: source, url: source } };
   }
 
   const artifactId = source.startsWith("artifact://") ? source.slice("artifact://".length) : source;
   const artifact = artifactStore.list().find((candidate) => candidate.id === artifactId || candidate.path === source);
   const sourceUrl = typeof artifact?.metadata?.sourceUrl === "string" ? artifact.metadata.sourceUrl : undefined;
   if (sourceUrl !== undefined && isSafeRemoteImageUrl(sourceUrl)) {
-    return { ok: true, url: sourceUrl };
+    return {
+      ok: true,
+      source: {
+        reference: source.startsWith("artifact://") ? source : `artifact://${artifact?.id ?? artifactId}`,
+        url: sourceUrl,
+        localPath: localImageArtifactPath(artifact, options.imageCacheRoot),
+        mimeType: artifact?.mimeType
+      }
+    };
+  }
+
+  const localPath = options.provider === "openai" ? localImageArtifactPath(artifact, options.imageCacheRoot) : undefined;
+  if (localPath !== undefined) {
+    return {
+      ok: true,
+      source: {
+        reference: source.startsWith("artifact://") ? source : `artifact://${artifact?.id ?? artifactId}`,
+        localPath,
+        mimeType: artifact?.mimeType
+      }
+    };
   }
 
   if (artifact !== undefined) {
+    const openAIHint = options.provider === "openai"
+      ? " OpenAI can use local image artifacts only when they were created in the selected profile image cache."
+      : "";
     return {
       ok: false,
       content: [
         `image.edit cannot send artifact ${artifact.id} to the image provider because it does not have a safe HTTPS source URL.`,
-        "Use an image URL, or first generate/select an image artifact that includes provider sourceUrl metadata."
+        `Use an image URL, or first generate/select an image artifact that includes provider sourceUrl metadata.${openAIHint}`
       ].join("\n"),
       metadata: { artifactId: artifact.id }
     };
@@ -882,6 +1108,20 @@ function resolveSourceImage(
     content: "image.edit source images must be safe HTTPS URLs, artifact:// references, or artifact ids with source URL metadata.",
     metadata: { reason: "invalid-source-image" }
   };
+}
+
+function localImageArtifactPath(
+  artifact: ReturnType<ArtifactStore["list"]>[number] | undefined,
+  imageCacheRoot: string
+): string | undefined {
+  if (artifact?.kind !== "image" || artifact.localPath === undefined) return undefined;
+  const candidate = resolve(artifact.localPath);
+  const root = resolve(imageCacheRoot);
+  const rel = relative(root, candidate);
+  if (rel === "" || (!rel.startsWith("..") && !isAbsolute(rel))) {
+    return candidate;
+  }
+  return undefined;
 }
 
 function isSafeRemoteImageUrl(value: string): boolean {
