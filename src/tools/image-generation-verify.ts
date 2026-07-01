@@ -84,8 +84,7 @@ export async function verifyImageGeneration(options: {
 async function verifyFal(imageGen: LoadedRuntimeConfig["imageGen"], fetcher: ImageGenerationFetchLike): Promise<{ ok: boolean; message: string }> {
   const apiKeyEnv = imageGen.fal?.apiKeyEnv ?? defaultImageApiKeyEnv("fal");
   const apiKey = process.env[apiKeyEnv] ?? "";
-  const baseUrl = (imageGen.fal?.baseUrl ?? imageGen.baseUrl ?? defaultImageBaseUrl("fal")).replace(/\/$/, "");
-  const response = await fetcher(`${baseUrl}/${imageGen.model}`, {
+  const response = await fetcher("https://api.fal.ai/v1/models?limit=1", {
     method: "GET",
     headers: {
       authorization: `Key ${apiKey}`

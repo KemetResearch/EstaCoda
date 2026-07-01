@@ -83,7 +83,7 @@ Profile root: `~/.estacoda/profiles/<id>/`
 | `logs/` | Profile logs | Gateway, runtime |
 | `channel-media/` | Channel attachment downloads | Gateway adapters |
 | `audio-cache/` | Audio cache | Voice tools |
-| `image-cache/` | Generated image cache | `image.generate` |
+| `image-cache/` | Generated and edited image cache | `image.generate`, `image.edit` |
 | `temp/` | Temporary files | Various operations |
 | `temp/delegation/` | Bounded delegation timeout/stale-heartbeat diagnostics when enabled | Delegation runtime |
 | `temp/audio/` | CLI recordings, auto-TTS temps, Telegram conversion, Discord receive audio | Voice operations |

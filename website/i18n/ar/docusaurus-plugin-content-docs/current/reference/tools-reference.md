@@ -253,7 +253,7 @@ sidebar_position: 6
 | `image.edit` | `external-side-effect` | كتابة ملفات الصور |
 | `vision.analyze` | `safe` | لا شيء |
 
-**التوفر:** `image.generate` يتطلب مزود توليد صور مُهيّأ ومفتاح API. `image.edit` يتطلب حاليًا توليد الصور عبر BytePlus وصور مصدرية بعناوين HTTPS آمنة أو artifacts تحتوي على عناوين مصدر من المزود. `vision.analyze` يتطلب مسار نموذج يدعم الرؤية.
+**التوفر:** `image.generate` يتطلب مزود توليد صور مُهيّأ ومفتاح API. `image.edit` يتطلب مزود صور مُهيّأ ونموذجًا محددًا يدعم التعديل وصورًا مصدرية بعناوين HTTPS آمنة أو artifacts تحتوي على عناوين مصدر من المزود. `vision.analyze` يتطلب مسار نموذج يدعم الرؤية.
 
 ### أدوات الصوت
 

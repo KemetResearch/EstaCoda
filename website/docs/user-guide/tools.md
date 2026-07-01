@@ -39,7 +39,7 @@ Built-in tools ship with EstaCoda and are always registered. Availability depend
 | `web.extract` | `read-only-network` | Extracts content from URLs |
 | `web.crawl` | `read-only-network` | Crawls web pages |
 | `browser.*` | `external-side-effect` | Requires browser backend config |
-| `image.generate` | `external-side-effect` | Requires image provider credentials |
+| `image.generate` / `image.edit` | `external-side-effect` | Requires image provider credentials; editing also requires an edit-capable selected model |
 | `voice.speak` | `external-side-effect` | Requires configured TTS; credentials depend on provider |
 | `voice.transcribe` | `safe` | Requires STT provider or local model |
 | `execute_code` | `caution` | Executes code in a sandbox |

@@ -6,7 +6,7 @@ sidebar_position: 13
 
 # توليد الصور
 
-توليد الصور هو سير عمل أداة مدعوم من المزود. يستدعي العميل `image.generate` مع مطالبة نصية؛ يُرجع المزود المُعد رابط صورة؛ تقوم EstaCoda بتنزيل الصورة وتخزينها مؤقتًا وتسجيلها كـ artifact محلي. عند إعداد BytePlus، يستطيع العميل أيضًا استدعاء `image.edit` لتعديل صور مصدرية أو دمجها بتعليمات نصية.
+توليد الصور هو سير عمل أداة مدعوم من المزود. يستدعي العميل `image.generate` مع مطالبة نصية؛ يُرجع المزود المُعد رابط صورة؛ تقوم EstaCoda بتنزيل الصورة وتخزينها مؤقتًا وتسجيلها كـ artifact محلي. عندما يكون للنموذج المحدد نقطة نهاية للتعديل، يستطيع العميل أيضًا استدعاء `image.edit` لتعديل صور مصدرية أو دمجها بتعليمات نصية.
 
 هو ليس إمكانية نموذج مدمجة. تحتاج إلى حساب مزود، ومفتاح API، وملف شخصي مُعد لاستخدامه.
 
@@ -18,6 +18,20 @@ sidebar_position: 13
 | BytePlus / Seedream | `seedream-5-0-260128` | `BYTEPLUS_ARK_API_KEY` | `https://ark.ap-southeast.bytepluses.com/api/v3` |
 
 FAL هو المزود الافتراضي. الوصول إلى نماذج BytePlus يعتمد على الإصدار؛ يجب تفعيل النموذج في حساب Ark Console قبل الاستخدام. يتعرّف إعداد EstaCoda المراجع أيضًا على متغير `ARK_API_KEY` الموجود مسبقًا عند إعداد BytePlus.
+
+خيارات نماذج FAL التي يعرضها الإعداد هي:
+
+- `fal-ai/flux-2/klein/9b` (`flux-2`)
+- `fal-ai/flux-2-pro` (`flux-2-pro`)
+- `fal-ai/z-image/turbo` (`z-image`)
+- `fal-ai/nano-banana-pro` (`nano-banana-pro`)
+- `fal-ai/gpt-image-1.5` (`gpt-image-1.5`)
+- `fal-ai/gpt-image-2` (`gpt-image-2`)
+- `fal-ai/ideogram/v3` (`ideogram-v3`)
+- `fal-ai/recraft/v4/pro/text-to-image` (`recraft-v4-pro`)
+- `fal-ai/qwen-image` (`qwen-image`)
+- `fal-ai/krea/v2/medium/text-to-image` (`krea-2-medium`)
+- `fal-ai/krea/v2/large/text-to-image` (`krea-2-large`)
 
 خيارات نماذج BytePlus التي يعرضها الإعداد هي:
 
@@ -109,11 +123,17 @@ estacoda image models --provider byteplus
 | `landscape` | `landscape_16_9` | `2560x1440` |
 | `portrait` | `portrait_16_9` | `1440x2560` |
 
+تستخدم طلبات FAL شكل الحمولة المحدد في الكتالوج للنموذج المختار. بعض نماذج FAL تستخدم `image_size`، وبعضها يستخدم `aspect_ratio`، ويستخدم GPT Image 1.5 أبعادًا حرفية. ترشح EstaCoda حقول حمولة FAL وفق كتالوج النموذج حتى لا تُرسل مفاتيح غير مدعومة.
+
 تستخدم طلبات BytePlus نقطة نهاية ModelArk المتوافقة مع OpenAI مع `response_format: "url"` و `output_format: "png"` و `watermark: false`. وتستطيع EstaCoda أيضًا قراءة استجابات BytePlus بصيغة `b64_json` إذا أرجعها المزود أو إعداد مستقبلي.
 
-### تعديل الصور عبر BytePlus
+### تعديل الصور
 
-تستخدم `image.edit` إعداد BytePlus نفسه، ومفتاح API نفسه، والنموذج نفسه، ونقطة نهاية ModelArk نفسها التي تستخدمها `image.generate`؛ لا توجد خطوة إعداد منفصلة للتعديل. ترسل الأداة حقل طلب BytePlus الموثق `image` مع عنوان HTTPS واحد لصورة مصدرية أو مصفوفة عناوين HTTPS لصور مصدرية، وتضبط `sequential_image_generation: "disabled"` للحصول على نتيجة معدلة واحدة.
+تستخدم `image.edit` إعداد المزود نفسه، ومفتاح API نفسه، والنموذج نفسه، وعائلة نقاط النهاية نفسها التي تستخدمها `image.generate`؛ لا توجد خطوة إعداد منفصلة للتعديل.
+
+في BytePlus، ترسل الأداة حقل الطلب الموثق `image` مع عنوان HTTPS واحد لصورة مصدرية أو مصفوفة عناوين HTTPS لصور مصدرية، وتضبط `sequential_image_generation: "disabled"` للحصول على نتيجة معدلة واحدة.
+
+في FAL، لا تُفعّل الأداة إلا إذا كان إدخال الكتالوج للنموذج المحدد يحتوي على `editEndpoint`. تستدعي الأداة نقطة النهاية هذه باستخدام الحقل الموثق `image_urls` وأي قيم افتراضية موثقة يدعمها مسار التعديل.
 
 المعاملات:
 
@@ -142,7 +162,8 @@ estacoda image models --provider byteplus
 | مزود غير مدعوم | فقط `fal` و `byteplus` مُنفذان. | اختر مزودًا مدعومًا. |
 | خطأ من المزود البعيد | HTTP 4xx/5xx، فشل مصادقة، أو نموذج غير مُفعّل. | تحقق من حالة المزود، والبيانات الاعتماد، وتفعيل النموذج. |
 | فشل تنزيل عنوان URL المُنشأ | أرجع المزود عنوان URL لا يمكن جلبه. | أعد طلب الطلب؛ قد تحدث مشكلات شبكة عابرة. |
-| رفض مسار صورة محلية في `image.edit` | تعديل BytePlus يقبل حاليًا عناوين HTTPS آمنة أو artifacts تحتوي على عناوين مصدر من المزود. | استخدم عنوان صورة HTTPS أو artifact أُنشئ سابقًا ويحتوي على بيانات `sourceUrl`. |
+| رفض مسار صورة محلية في `image.edit` | التعديل يقبل حاليًا عناوين HTTPS آمنة أو artifacts تحتوي على عناوين مصدر من المزود. | استخدم عنوان صورة HTTPS أو artifact أُنشئ سابقًا ويحتوي على بيانات `sourceUrl`. |
+| نموذج FAL لا يدعم `image.edit` | نموذج FAL المحدد في الكتالوج لا يملك نقطة نهاية للتعديل. | اختر نموذج FAL يدعم التعديل باستخدام `estacoda image models --provider fal`. |
 | مسار إخراج غير صالح | مجلد ذاكرة التخزين المؤقت مفقود أو غير قابل للكتابة. | تنشئ EstaCoda المجلد بشكل متكرر؛ تحقق من أذونات نظام الملفات. |
 | رفض المزود / السلامة | رفض المزود المطالبة لأسباب سياسية. | أعد صياغة المطالبة أو تحقق من سياسات المحتوى للمزود. |
 | BytePlus `ModelNotOpen` | نموذج Seedream غير مُفعّل لحسابك. | فعّله في Ark Console، أو اختر نموذجًا آخر باستخدام `estacoda image models --provider byteplus`. |

@@ -683,7 +683,7 @@ export function createConfigTools(options: ConfigToolsOptions): RegisteredTool[]
         properties: {
           provider: { type: "string", enum: ["fal", "byteplus"] },
           model: { type: "string" },
-          modelVersion: { type: "string", description: "Friendly model alias such as seedream-5, seedream-4.5, or seedream-4." },
+          modelVersion: { type: "string", description: "Friendly model alias such as flux-2, flux-2-pro, seedream-5, seedream-4.5, or seedream-4." },
           apiKeyEnv: { type: "string" },
           apiKey: { type: "string" },
           baseUrl: { type: "string" },

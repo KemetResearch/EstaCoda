@@ -12,7 +12,7 @@ import {
 } from "../browser/url-safety.js";
 import { setupNeeded } from "../capabilities/capability-setup.js";
 import type { LoadedRuntimeConfig } from "../config/runtime-config.js";
-import { defaultImageApiKeyEnv, defaultImageBaseUrl, defaultImageModel, resolveImageModel } from "../contracts/image-generation.js";
+import { defaultImageApiKeyEnv, defaultImageBaseUrl, defaultImageModel, imageModelOption, resolveImageModel, type FalPayloadValue, type ImageModelOption } from "../contracts/image-generation.js";
 import type { RegisteredTool, SessionToolProvider } from "../contracts/tool.js";
 
 export type ImageGenerationFetchLike = (url: string, init?: {
@@ -110,7 +110,7 @@ export function createImageGenerationTools(options: ImageGenerationToolOptions):
     }
   }, {
     name: "image.edit",
-    description: "Edit or blend one or more source images with BytePlus Seedream using a text instruction.",
+    description: "Edit or blend one or more source images with the configured image provider using a text instruction.",
     inputSchema: {
       type: "object",
       properties: {
@@ -239,7 +239,7 @@ async function generateImage(input: {
       mimeType: generated.mimeType,
       model: generated.model,
       aspectRatio: input.aspectRatio,
-      seed: provider === "byteplus" ? undefined : input.seed
+      seed: provider === "byteplus" ? undefined : generated.seed ?? input.seed
     };
   }
 
@@ -262,7 +262,7 @@ async function generateImage(input: {
     mimeType: mimeFromImageDownload(generated.url, imageBytes.headers?.get("content-type") ?? undefined),
     model: generated.model,
     aspectRatio: input.aspectRatio,
-    seed: provider === "byteplus" ? undefined : input.seed,
+    seed: provider === "byteplus" ? undefined : generated.seed ?? input.seed,
     sourceUrl: generated.url
   };
 }
@@ -279,23 +279,26 @@ async function editImage(input: {
   | { ok: true; bytes: Buffer; mimeType: string; model: string; aspectRatio: ImageAspect; sourceUrl?: string }
   | { ok: false; content: string; metadata?: Record<string, unknown> }
 > {
-  if (input.imageGen.provider !== "byteplus") {
-    return {
-      ok: false,
-      content: "image.edit currently supports BytePlus image generation only. Configure BytePlus with estacoda image setup --provider byteplus, then retry."
-    };
-  }
-
+  const provider = input.imageGen.provider;
   const fetcher = input.fetch ?? globalImageFetch;
-  const generated = await submitBytePlusRequest({
-    prompt: input.prompt,
-    sourceImages: input.sourceImages,
-    resumeIntent: "image.edit",
-    aspectRatio: input.aspectRatio,
-    model: input.model,
-    imageGen: input.imageGen,
-    signal: input.signal
-  }, fetcher);
+  const generated = provider === "byteplus"
+    ? await submitBytePlusRequest({
+      prompt: input.prompt,
+      sourceImages: input.sourceImages,
+      resumeIntent: "image.edit",
+      aspectRatio: input.aspectRatio,
+      model: input.model,
+      imageGen: input.imageGen,
+      signal: input.signal
+    }, fetcher)
+    : await submitFalEditRequest({
+      prompt: input.prompt,
+      sourceImages: input.sourceImages,
+      aspectRatio: input.aspectRatio,
+      model: input.model,
+      imageGen: input.imageGen,
+      signal: input.signal
+    }, fetcher);
   if (!generated.ok) {
     return generated;
   }
@@ -316,7 +319,7 @@ async function editImage(input: {
       ok: false,
       content: `Edited image URL could not be downloaded: ${imageBytes.status} ${imageBytes.statusText}`,
       metadata: {
-        provider: "byteplus",
+        provider,
         model: generated.model,
         url: generated.url
       }
@@ -344,8 +347,10 @@ async function submitFalRequest(
   },
   fetcher: ImageGenerationFetchLike
 ): Promise<GeneratedImageReference | { ok: false; content: string; metadata?: Record<string, unknown> }> {
-  const model = input.model ?? input.imageGen.fal?.model ?? input.imageGen.model;
-  const apiKeyEnv = input.imageGen.fal?.apiKeyEnv ?? input.imageGen.apiKeyEnv ?? "FAL_KEY";
+  const model = resolveImageModel("fal", input.model ?? input.imageGen.fal?.model ?? input.imageGen.model)
+    ?? defaultImageModel("fal");
+  const option = imageModelOption("fal", model);
+  const apiKeyEnv = input.imageGen.fal?.apiKeyEnv ?? input.imageGen.apiKeyEnv ?? defaultImageApiKeyEnv("fal");
   const apiKey = process.env[apiKeyEnv];
   if (apiKey === undefined || apiKey.length === 0) {
     return imageSetupNeeded({
@@ -355,21 +360,83 @@ async function submitFalRequest(
     });
   }
 
-  const baseUrl = (input.imageGen.fal?.baseUrl ?? input.imageGen.baseUrl ?? "https://fal.run").replace(/\/$/, "");
+  const baseUrl = (input.imageGen.fal?.baseUrl ?? input.imageGen.baseUrl ?? defaultImageBaseUrl("fal")).replace(/\/$/, "");
   const response = await fetcher(`${baseUrl}/${model}`, {
     method: "POST",
     headers: {
       authorization: `Key ${apiKey}`,
       "content-type": "application/json"
     },
-    body: JSON.stringify({
+    body: JSON.stringify(buildFalGenerationPayload({
       prompt: input.prompt,
-      image_size: falImageSize(input.aspectRatio),
-      seed: input.seed
-    }),
+      aspectRatio: input.aspectRatio,
+      seed: input.seed,
+      option
+    })),
     signal: input.signal
   });
   return parseImageResponse(response, "fal", model);
+}
+
+async function submitFalEditRequest(
+  input: {
+    prompt: string;
+    sourceImages: string[];
+    aspectRatio: ImageAspect;
+    model?: string;
+    imageGen: LoadedRuntimeConfig["imageGen"];
+    signal?: AbortSignal;
+  },
+  fetcher: ImageGenerationFetchLike
+): Promise<GeneratedImageReference | { ok: false; content: string; metadata?: Record<string, unknown> }> {
+  const model = resolveImageModel("fal", input.model ?? input.imageGen.fal?.model ?? input.imageGen.model)
+    ?? defaultImageModel("fal");
+  const option = imageModelOption("fal", model);
+  const editEndpoint = option?.fal?.editEndpoint;
+  if (editEndpoint === undefined) {
+    return {
+      ok: false,
+      content: `FAL model ${model} does not have a cataloged image editing endpoint. Choose an edit-capable FAL model with estacoda image models --provider fal.`,
+      metadata: { provider: "fal", model, reason: "unsupported-edit-model" }
+    };
+  }
+
+  const maxReferenceImages = option?.fal?.maxReferenceImages;
+  if (maxReferenceImages !== undefined && input.sourceImages.length > maxReferenceImages) {
+    return {
+      ok: false,
+      content: `FAL model ${model} supports at most ${maxReferenceImages} source image(s) for editing.`,
+      metadata: { provider: "fal", model, maxReferenceImages }
+    };
+  }
+
+  const apiKeyEnv = input.imageGen.fal?.apiKeyEnv ?? input.imageGen.apiKeyEnv ?? defaultImageApiKeyEnv("fal");
+  const apiKey = process.env[apiKeyEnv];
+  if (apiKey === undefined || apiKey.length === 0) {
+    return imageSetupNeeded({
+      provider: "fal",
+      model,
+      requiredSecret: apiKeyEnv,
+      resumeIntent: "image.edit"
+    });
+  }
+
+  const baseUrl = (input.imageGen.fal?.baseUrl ?? input.imageGen.baseUrl ?? defaultImageBaseUrl("fal")).replace(/\/$/, "");
+  const response = await fetchWithTransientRetry(fetcher, `${baseUrl}/${editEndpoint}`, {
+    method: "POST",
+    headers: {
+      authorization: `Key ${apiKey}`,
+      "content-type": "application/json"
+    },
+    body: JSON.stringify(buildFalEditPayload({
+      prompt: input.prompt,
+      sourceImages: input.sourceImages,
+      aspectRatio: input.aspectRatio,
+      option
+    })),
+    signal: input.signal
+  });
+  return parseImageResponse(response, "fal", editEndpoint);
 }
 
 async function submitBytePlusRequest(
@@ -458,8 +525,8 @@ async function sleep(ms: number, signal?: AbortSignal): Promise<void> {
 }
 
 type GeneratedImageReference =
-  | { ok: true; url: string; model: string }
-  | { ok: true; bytes: Buffer; mimeType: string; model: string };
+  | { ok: true; url: string; model: string; seed?: number }
+  | { ok: true; bytes: Buffer; mimeType: string; model: string; seed?: number };
 
 async function parseImageResponse(
   response: Awaited<ReturnType<ImageGenerationFetchLike>>,
@@ -478,7 +545,11 @@ async function parseImageResponse(
   const parsed = tryJson(raw);
   const url = firstImageUrl(parsed);
   if (url !== undefined) {
-    return { ok: true, url, model };
+    const dataUriImage = imageDataUriBytes(url);
+    if (dataUriImage !== undefined) {
+      return { ok: true, bytes: dataUriImage.bytes, mimeType: dataUriImage.mimeType, model, seed: imageResponseSeed(parsed) };
+    }
+    return { ok: true, url, model, seed: imageResponseSeed(parsed) };
   }
   const b64Json = firstImageB64Json(parsed);
   if (b64Json === undefined) {
@@ -489,7 +560,7 @@ async function parseImageResponse(
     };
   }
 
-  return { ok: true, bytes: Buffer.from(b64Json, "base64"), mimeType: "image/png", model };
+  return { ok: true, bytes: Buffer.from(b64Json, "base64"), mimeType: "image/png", model, seed: imageResponseSeed(parsed) };
 }
 
 async function globalImageFetch(url: string, init?: Parameters<ImageGenerationFetchLike>[1]): ReturnType<ImageGenerationFetchLike> {
@@ -520,10 +591,74 @@ function firstImageB64Json(value: any): string | undefined {
   return undefined;
 }
 
-function falImageSize(aspectRatio: ImageAspect): string {
+function imageDataUriBytes(value: string): { bytes: Buffer; mimeType: string } | undefined {
+  const match = /^data:(image\/[a-zA-Z0-9.+-]+);base64,([a-zA-Z0-9+/=]+)$/u.exec(value);
+  if (match === null) return undefined;
+  return {
+    mimeType: match[1]!,
+    bytes: Buffer.from(match[2]!, "base64")
+  };
+}
+
+function imageResponseSeed(value: any): number | undefined {
+  return typeof value?.seed === "number" ? value.seed : undefined;
+}
+
+function buildFalGenerationPayload(input: {
+  prompt: string;
+  aspectRatio: ImageAspect;
+  seed?: number;
+  option?: ImageModelOption;
+}): Record<string, FalPayloadValue> {
+  const metadata = input.option?.fal;
+  const payload: Record<string, FalPayloadValue> = {
+    prompt: input.prompt,
+    ...(metadata?.defaults ?? {}),
+    ...falSizeField(input.aspectRatio, input.option)
+  };
+  if (input.seed !== undefined) {
+    payload.seed = input.seed;
+  }
+  return filterFalPayload(payload, metadata?.supports);
+}
+
+function buildFalEditPayload(input: {
+  prompt: string;
+  sourceImages: string[];
+  aspectRatio: ImageAspect;
+  option: ImageModelOption | undefined;
+}): Record<string, FalPayloadValue | string[]> {
+  const metadata = input.option?.fal;
+  const payload: Record<string, FalPayloadValue | string[]> = {
+    prompt: input.prompt,
+    ...(metadata?.defaults ?? {}),
+    image_urls: input.sourceImages,
+    ...falSizeField(input.aspectRatio, input.option)
+  };
+  return filterFalPayload(payload, metadata?.editSupports);
+}
+
+function falSizeField(aspectRatio: ImageAspect, option: ImageModelOption | undefined): Record<string, string> {
+  const metadata = option?.fal;
+  const size = metadata?.sizes[aspectRatio] ?? fallbackFalImageSize(aspectRatio);
+  return metadata?.sizeStyle === "aspect_ratio"
+    ? { aspect_ratio: size }
+    : { image_size: size };
+}
+
+function fallbackFalImageSize(aspectRatio: ImageAspect): string {
   if (aspectRatio === "landscape") return "landscape_16_9";
   if (aspectRatio === "portrait") return "portrait_16_9";
   return "square_hd";
+}
+
+function filterFalPayload<T extends Record<string, FalPayloadValue | string[]>>(
+  payload: T,
+  supports: readonly string[] | undefined
+): T {
+  if (supports === undefined) return payload;
+  const allowed = new Set(supports);
+  return Object.fromEntries(Object.entries(payload).filter(([key]) => allowed.has(key))) as T;
 }
 
 function bytePlusSize(aspectRatio: ImageAspect): string {
@@ -674,7 +809,7 @@ function resolveSourceImage(
     return {
       ok: false,
       content: [
-        `image.edit cannot send artifact ${artifact.id} to BytePlus because it does not have a safe HTTPS source URL.`,
+        `image.edit cannot send artifact ${artifact.id} to the image provider because it does not have a safe HTTPS source URL.`,
         "Use an image URL, or first generate/select an image artifact that includes provider sourceUrl metadata."
       ].join("\n"),
       metadata: { artifactId: artifact.id }

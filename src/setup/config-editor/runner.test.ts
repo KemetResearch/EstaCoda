@@ -740,13 +740,13 @@ describe("runConfigEditor", () => {
     expect(webSearchInput?.options.find((option) => option.id === "web-search-none")?.group).toBeUndefined();
     expect(browserModeInput?.options.find((option) => option.id === "browser-disabled")?.group).toBeUndefined();
     expect(imageProviderInput?.options.find((option) => option.id === "fal")?.description).toBe(
-      "Hosted fal.ai image models. Good default if you already use FAL_KEY."
+      "Hosted fal.ai image generation and editing models. Good default if you already use FAL_KEY."
     );
     expect(imageProviderInput?.options.find((option) => option.id === "byteplus")?.description).toBe(
       "BytePlus Seedream image generation. Requires an Ark API key and model access enabled in ModelArk."
     );
     expect(imageModelInput?.options.find((option) => option.id === "image-model-fal-ai/flux-2/klein/9b")?.description).toBe(
-      "FAL default text-to-image model."
+      "Fast default FAL model with crisp text rendering."
     );
     expect(optionalActionInput?.options.find((option) => option.id === "voice-enable")?.group).toBeUndefined();
     expect(optionalActionInput?.options.find((option) => option.id === "voice-unchanged")?.group).toBe("navigation");

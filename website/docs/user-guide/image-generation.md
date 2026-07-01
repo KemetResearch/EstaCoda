@@ -6,7 +6,7 @@ sidebar_position: 13
 
 # Image Generation
 
-Image generation is a provider-backed tool workflow. The agent calls `image.generate` with a text prompt; the configured provider returns an image URL; EstaCoda downloads, caches, and records the result as a local artifact. When BytePlus is configured, the agent can also call `image.edit` to edit or blend source images with a text instruction.
+Image generation is a provider-backed tool workflow. The agent calls `image.generate` with a text prompt; the configured provider returns an image URL; EstaCoda downloads, caches, and records the result as a local artifact. When the selected model has an editing endpoint, the agent can also call `image.edit` to edit or blend source images with a text instruction.
 
 It is not a built-in model capability. You need a provider account, an API key, and a selected profile configured to use it.
 
@@ -18,6 +18,20 @@ It is not a built-in model capability. You need a provider account, an API key, 
 | BytePlus / Seedream | `seedream-5-0-260128` | `BYTEPLUS_ARK_API_KEY` | `https://ark.ap-southeast.bytepluses.com/api/v3` |
 
 FAL is the default provider. BytePlus model access is version-specific; the model must be activated in your Ark Console account before use. EstaCoda also recognizes an existing BytePlus `ARK_API_KEY` credential during reviewed setup, matching BytePlus examples.
+
+FAL model choices shown by setup are:
+
+- `fal-ai/flux-2/klein/9b` (`flux-2`)
+- `fal-ai/flux-2-pro` (`flux-2-pro`)
+- `fal-ai/z-image/turbo` (`z-image`)
+- `fal-ai/nano-banana-pro` (`nano-banana-pro`)
+- `fal-ai/gpt-image-1.5` (`gpt-image-1.5`)
+- `fal-ai/gpt-image-2` (`gpt-image-2`)
+- `fal-ai/ideogram/v3` (`ideogram-v3`)
+- `fal-ai/recraft/v4/pro/text-to-image` (`recraft-v4-pro`)
+- `fal-ai/qwen-image` (`qwen-image`)
+- `fal-ai/krea/v2/medium/text-to-image` (`krea-2-medium`)
+- `fal-ai/krea/v2/large/text-to-image` (`krea-2-large`)
 
 BytePlus model choices shown by setup are:
 
@@ -109,11 +123,17 @@ Aspect ratio mapping:
 | `landscape` | `landscape_16_9` | `2560x1440` |
 | `portrait` | `portrait_16_9` | `1440x2560` |
 
+FAL requests use the cataloged payload shape for the selected model. Some FAL models use `image_size`, some use `aspect_ratio`, and GPT Image 1.5 uses literal dimensions. EstaCoda filters outgoing FAL payload fields against the catalog so models do not receive unsupported keys.
+
 BytePlus requests use ModelArk's OpenAI-compatible endpoint with `response_format: "url"`, `output_format: "png"`, and `watermark: false`. EstaCoda can also consume BytePlus `b64_json` responses if a provider or future configuration returns them.
 
-### BytePlus image editing
+### Image editing
 
-`image.edit` uses the same BytePlus configuration, API key, model, and ModelArk endpoint as `image.generate`; there is no separate editing setup step. The tool sends the documented BytePlus `image` request field with one HTTPS source image URL or an array of HTTPS source image URLs, and sets `sequential_image_generation: "disabled"` for a single edited result.
+`image.edit` uses the same provider configuration, API key, model, and endpoint family as `image.generate`; there is no separate editing setup step.
+
+For BytePlus, the tool sends the documented `image` request field with one HTTPS source image URL or an array of HTTPS source image URLs, and sets `sequential_image_generation: "disabled"` for a single edited result.
+
+For FAL, the tool is enabled only when the selected catalog entry has an `editEndpoint`. It calls that endpoint with the documented `image_urls` field and any cataloged defaults supported by that edit endpoint.
 
 Parameters:
 
@@ -142,7 +162,8 @@ Result:
 | Unsupported provider | Only `fal` and `byteplus` are implemented. | Select a supported provider. |
 | Remote provider error | HTTP 4xx/5xx, auth failure, or model not activated. | Check provider status, credentials, and model activation. |
 | Generated URL download failed | Provider returned a URL that could not be fetched. | Retry the request; transient network issues are possible. |
-| Local source image rejected by `image.edit` | BytePlus editing currently accepts safe HTTPS source URLs or artifacts with provider source URLs. | Use an HTTPS image URL or a prior generated artifact with `sourceUrl` metadata. |
+| Local source image rejected by `image.edit` | Editing currently accepts safe HTTPS source URLs or artifacts with provider source URLs. | Use an HTTPS image URL or a prior generated artifact with `sourceUrl` metadata. |
+| FAL model does not support `image.edit` | The selected cataloged FAL model has no edit endpoint. | Choose an edit-capable FAL model with `estacoda image models --provider fal`. |
 | Invalid output path | Cache directory missing or unwritable. | EstaCoda creates the directory recursively; check filesystem permissions. |
 | Safety / provider refusal | Provider rejected the prompt for policy reasons. | Rephrase the prompt or check provider content policies. |
 | BytePlus `ModelNotOpen` | The Seedream model is not activated for your account. | Activate it in the Ark Console, or choose another model with `estacoda image models --provider byteplus`. |

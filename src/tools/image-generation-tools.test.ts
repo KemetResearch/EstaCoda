@@ -12,11 +12,214 @@ describe("image generation tools", () => {
   beforeEach(async () => {
     tempDir = await mkdtemp(join(tmpdir(), "estacoda-image-generation-"));
     process.env.BYTEPLUS_ARK_API_KEY = "byteplus-secret";
+    process.env.FAL_KEY = "fal-secret";
   });
 
   afterEach(async () => {
     delete process.env.BYTEPLUS_ARK_API_KEY;
+    delete process.env.FAL_KEY;
     await rm(tempDir, { recursive: true, force: true });
+  });
+
+  it("builds FAL generation payloads from the catalog and resolves aliases", async () => {
+    const requests: Array<{ url: string; init?: Parameters<ImageGenerationFetchLike>[1] }> = [];
+    const fetcher: ImageGenerationFetchLike = async (url, init) => {
+      requests.push({ url, init });
+      return jsonResponse({
+        images: [{ url: "https://images.example/fal-generated.png" }],
+        seed: 777
+      });
+    };
+
+    const tool = createImageGenerationTools({
+      imageCacheRoot: tempDir,
+      artifactStore: new ArtifactStore({ id: () => "artifact-fal" }),
+      imageGen: falImageGen(),
+      fetch: fetcher,
+      id: () => "fal-generated"
+    })[0]!;
+
+    const result = await tool.run({
+      prompt: "draw clean neon wayfinding",
+      aspectRatio: "landscape",
+      model: "flux-2-pro",
+      seed: 12345
+    });
+
+    expect(result.ok).toBe(true);
+    expect(result.content).toContain("Seed: 777");
+    expect(requests[0]?.url).toBe("https://fal.run/fal-ai/flux-2-pro");
+    expect(requests[0]?.init?.headers).toMatchObject({
+      authorization: "Key fal-secret",
+      "content-type": "application/json"
+    });
+    expect(JSON.parse(requests[0]?.init?.body ?? "{}")).toEqual({
+      prompt: "draw clean neon wayfinding",
+      image_size: "landscape_16_9",
+      num_inference_steps: 50,
+      guidance_scale: 4.5,
+      num_images: 1,
+      output_format: "png",
+      enable_safety_checker: false,
+      safety_tolerance: "5",
+      sync_mode: true,
+      seed: 12345
+    });
+  });
+
+  it("builds FAL aspect-ratio model payloads from the catalog", async () => {
+    const requests: Array<{ url: string; init?: Parameters<ImageGenerationFetchLike>[1] }> = [];
+    const fetcher: ImageGenerationFetchLike = async (url, init) => {
+      requests.push({ url, init });
+      return jsonResponse({ images: [{ url: "https://images.example/krea.png" }] });
+    };
+
+    const tool = createImageGenerationTools({
+      imageCacheRoot: tempDir,
+      artifactStore: new ArtifactStore({ id: () => "artifact-krea" }),
+      imageGen: falImageGen(),
+      fetch: fetcher,
+      id: () => "krea"
+    })[0]!;
+
+    const result = await tool.run({
+      prompt: "paint a cinematic product scene",
+      aspectRatio: "portrait",
+      model: "krea-2-large"
+    });
+
+    expect(result.ok).toBe(true);
+    expect(requests[0]?.url).toBe("https://fal.run/fal-ai/krea/v2/large/text-to-image");
+    expect(JSON.parse(requests[0]?.init?.body ?? "{}")).toEqual({
+      prompt: "paint a cinematic product scene",
+      aspect_ratio: "9:16",
+      creativity: "medium"
+    });
+  });
+
+  it("builds FAL literal-size model payloads from the catalog", async () => {
+    const requests: Array<{ url: string; init?: Parameters<ImageGenerationFetchLike>[1] }> = [];
+    const fetcher: ImageGenerationFetchLike = async (url, init) => {
+      requests.push({ url, init });
+      return jsonResponse({ images: [{ url: "https://images.example/gpt.png" }] });
+    };
+
+    const tool = createImageGenerationTools({
+      imageCacheRoot: tempDir,
+      artifactStore: new ArtifactStore({ id: () => "artifact-gpt" }),
+      imageGen: falImageGen(),
+      fetch: fetcher,
+      id: () => "gpt"
+    })[0]!;
+
+    const result = await tool.run({
+      prompt: "make an editorial poster",
+      aspectRatio: "square",
+      model: "gpt-image-1.5"
+    });
+
+    expect(result.ok).toBe(true);
+    expect(requests[0]?.url).toBe("https://fal.run/fal-ai/gpt-image-1.5");
+    expect(JSON.parse(requests[0]?.init?.body ?? "{}")).toEqual({
+      prompt: "make an editorial poster",
+      image_size: "1024x1024",
+      quality: "medium",
+      num_images: 1,
+      output_format: "png"
+    });
+  });
+
+  it("stores FAL sync-mode data URI images without a second download", async () => {
+    const imageBytes = Buffer.from("fal-sync-png");
+    const requests: string[] = [];
+    const fetcher: ImageGenerationFetchLike = async (url) => {
+      requests.push(url);
+      return jsonResponse({
+        images: [{ url: `data:image/png;base64,${imageBytes.toString("base64")}` }]
+      });
+    };
+
+    const tool = createImageGenerationTools({
+      imageCacheRoot: tempDir,
+      artifactStore: new ArtifactStore({ id: () => "artifact-fal-sync" }),
+      imageGen: falImageGen("fal-ai/flux-2-pro"),
+      fetch: fetcher,
+      id: () => "fal-sync"
+    })[0]!;
+
+    const result = await tool.run({
+      prompt: "draw an illuminated sign",
+      model: "flux-2-pro"
+    });
+
+    expect(result.ok).toBe(true);
+    expect(requests).toEqual(["https://fal.run/fal-ai/flux-2-pro"]);
+    await expect(readFile(join(tempDir, "fal-sync.png"))).resolves.toEqual(imageBytes);
+  });
+
+  it("sends FAL edit payloads to cataloged edit endpoints", async () => {
+    const requests: Array<{ url: string; init?: Parameters<ImageGenerationFetchLike>[1] }> = [];
+    const fetcher: ImageGenerationFetchLike = async (url, init) => {
+      requests.push({ url, init });
+      return jsonResponse({
+        images: [{ url: "https://images.example/fal-edited.png" }]
+      });
+    };
+
+    const tool = createImageGenerationTools({
+      imageCacheRoot: tempDir,
+      artifactStore: new ArtifactStore({ id: () => "artifact-fal-edit" }),
+      imageGen: falImageGen("fal-ai/flux-2-pro"),
+      fetch: fetcher,
+      id: () => "fal-edit"
+    }).find((candidate) => candidate.name === "image.edit")!;
+
+    const result = await tool.run({
+      prompt: "add realistic flames above the cup",
+      sourceImages: ["https://images.example/cup.png"]
+    });
+
+    expect(result.ok).toBe(true);
+    expect(requests).toHaveLength(2);
+    expect(requests[0]?.url).toBe("https://fal.run/fal-ai/flux-2-pro/edit");
+    expect(requests[0]?.init?.headers).toMatchObject({
+      authorization: "Key fal-secret",
+      "content-type": "application/json"
+    });
+    expect(JSON.parse(requests[0]?.init?.body ?? "{}")).toEqual({
+      prompt: "add realistic flames above the cup",
+      image_urls: ["https://images.example/cup.png"],
+      num_inference_steps: 50,
+      guidance_scale: 4.5,
+      num_images: 1,
+      output_format: "png",
+      enable_safety_checker: false,
+      safety_tolerance: "5",
+      sync_mode: true
+    });
+  });
+
+  it("rejects FAL image edits for models without a cataloged edit endpoint", async () => {
+    const requests: string[] = [];
+    const tool = createImageGenerationTools({
+      imageCacheRoot: tempDir,
+      artifactStore: new ArtifactStore({ id: () => "artifact-fal-no-edit" }),
+      imageGen: falImageGen("fal-ai/z-image/turbo"),
+      fetch: async (url) => {
+        requests.push(url);
+        return jsonResponse({ images: [{ url: "https://images.example/edit.png" }] });
+      },
+      id: () => "fal-no-edit"
+    }).find((candidate) => candidate.name === "image.edit")!;
+
+    const result = await tool.run({
+      prompt: "change the background",
+      sourceImages: ["https://images.example/source.png"]
+    });
+
+    expect(result.ok).toBe(false);
+    expect(result.content).toContain("does not have a cataloged image editing endpoint");
+    expect(requests).toEqual([]);
   });
 
   it("sends documented BytePlus payload fields and resolves friendly model aliases", async () => {
@@ -236,6 +439,21 @@ function bytePlusImageGen(): LoadedRuntimeConfig["imageGen"] {
       model: "seedream-5-0-260128",
       apiKeyEnv: "BYTEPLUS_ARK_API_KEY",
       baseUrl: "https://ark.ap-southeast.bytepluses.com/api/v3"
+    }
+  };
+}
+
+function falImageGen(model = "fal-ai/flux-2/klein/9b"): LoadedRuntimeConfig["imageGen"] {
+  return {
+    provider: "fal",
+    model,
+    useGateway: false,
+    apiKeyEnv: "FAL_KEY",
+    baseUrl: "https://fal.run",
+    fal: {
+      model,
+      apiKeyEnv: "FAL_KEY",
+      baseUrl: "https://fal.run"
     }
   };
 }

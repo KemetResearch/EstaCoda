@@ -63,8 +63,7 @@ import { verifyImageGeneration, type ImageGenerationVerification } from "../tool
 import {
   defaultImageApiKeyEnv,
   defaultImageModel,
-  IMAGE_MODEL_OPTIONS,
-  resolveImageModel
+  IMAGE_MODEL_OPTIONS
 } from "../contracts/image-generation.js";
 import type { ModelProfile, ResolvedAuxiliaryRoute, ProviderId } from "../contracts/provider.js";
 import { resolveAllAuxiliaryRoutes } from "../providers/auxiliary-model-resolver.js";
@@ -2398,6 +2397,7 @@ async function image(options: CliOptions, args: string[]): Promise<CliCommandRes
       output: [
         "EstaCoda image generation",
         "  estacoda image status",
+        "  estacoda image models --provider fal",
         "  estacoda image models --provider byteplus",
         "  estacoda image verify",
         "  estacoda image setup --provider fal --model fal-ai/flux-2/klein/9b --api-key-env FAL_KEY",
@@ -2469,7 +2469,7 @@ async function image(options: CliOptions, args: string[]): Promise<CliCommandRes
         renderImageStatus(loaded),
         `Config: ${result.path}`,
         secretPath === undefined ? undefined : `Secret store: ${secretPath}`,
-        "Next: ask EstaCoda to generate an image; the agent will use image.generate and return the artifact."
+        "Next: ask EstaCoda to generate or edit an image; the agent will use image.generate or image.edit and return the artifact."
       ].filter((line) => line !== undefined).join("\n")
     };
   }
@@ -2513,9 +2513,12 @@ function renderImageModels(provider?: ImageGenerationProvider): string {
       lines.push(`  ${option.id}${defaultMarker}`);
       lines.push(`    ${option.label}: ${option.description}`);
       lines.push(`    aliases: ${option.aliases.join(", ")}`);
+      if (option.fal?.editEndpoint !== undefined) {
+        lines.push(`    edit: ${option.fal.editEndpoint}`);
+      }
     }
   }
-  lines.push("", "Use --model for an exact provider model id, or --model-version for an alias such as seedream-5.");
+  lines.push("", "Use --model for an exact provider model id, or --model-version for an alias such as flux-2 or seedream-5.");
   return lines.join("\n");
 }
 
@@ -2532,7 +2535,7 @@ function renderImageStatus(config: Awaited<ReturnType<typeof loadRuntimeConfig>>
     `Gateway: ${config.imageGen.useGateway ? "yes" : "no"}`,
     `API key: ${key}`,
     "Cache: selected profile image-cache/",
-    "Agent tool: image.generate",
+    "Agent tools: image.generate, image.edit",
     "Telegram delivery: generated images upload as photos when available."
   ].filter((line) => line !== undefined).join("\n");
 }
@@ -3785,10 +3788,7 @@ function parseImageArgs(args: string[]): ImageGenerationSetupInput {
       parsed.model = next;
       index += 1;
     } else if (arg === "--model-version") {
-      const provider = parsed.provider ?? "byteplus";
-      parsed.provider = provider;
       parsed.modelVersion = next;
-      parsed.model = resolveImageModel(provider, next);
       index += 1;
     } else if (arg === "--api-key-env") {
       parsed.apiKeyEnv = next;

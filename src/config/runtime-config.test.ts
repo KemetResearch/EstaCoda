@@ -14,6 +14,7 @@ import {
   addWhatsAppAllowedUser,
   setupProviderConfig,
   setupAuxiliaryModelConfig,
+  setupImageGenerationConfig,
   setupWebConfig,
   setupVoiceConfig
 } from "./runtime-config.js";
@@ -2827,6 +2828,42 @@ describe("loadRuntimeConfig media boundary", () => {
     expect(loaded.imageGen.byteplus?.model).toBe("seedream-5-0-lite-260128");
     expect(loaded.imageGen.byteplus?.apiKeyEnv).toBe("BYTEPLUS_ARK_API_KEY");
     expect(loaded.imageGen.fal?.apiKeyEnv).toBe("FAL_KEY");
+
+    await rm(workspace, { recursive: true, force: true });
+  });
+
+  it("resolves image model-version aliases only for the selected provider", async () => {
+    const workspace = await mkdtemp(join(tmpdir(), "estacoda-config-test-"));
+    await mkdir(dirname(profileConfigPath(workspace)), { recursive: true });
+    await writeFile(profileConfigPath(workspace), JSON.stringify({
+      model: { provider: "openai", id: "gpt-4o" }
+    }));
+
+    await setupImageGenerationConfig({
+      workspaceRoot: workspace,
+      homeDir: workspace,
+      input: {
+        provider: "fal",
+        modelVersion: "flux-2-pro",
+        apiKeyEnv: "FAL_KEY"
+      }
+    });
+
+    const loaded = await loadRuntimeConfig({
+      workspaceRoot: workspace,
+      homeDir: workspace
+    });
+
+    expect(loaded.imageGen.model).toBe("fal-ai/flux-2-pro");
+    await expect(setupImageGenerationConfig({
+      workspaceRoot: workspace,
+      homeDir: workspace,
+      input: {
+        provider: "fal",
+        modelVersion: "seedream-5",
+        apiKeyEnv: "FAL_KEY"
+      }
+    })).rejects.toThrow("Unknown image model alias seedream-5 for provider fal");
 
     await rm(workspace, { recursive: true, force: true });
   });

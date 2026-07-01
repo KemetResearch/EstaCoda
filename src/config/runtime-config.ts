@@ -39,6 +39,7 @@ import {
   defaultImageApiKeyEnv,
   defaultImageBaseUrl,
   defaultImageModel,
+  imageModelOption,
   resolveImageModel
 } from "../contracts/image-generation.js";
 import type { ModelsDevRegistryOptions } from "../model-catalog/models-dev-registry.js";
@@ -2808,7 +2809,7 @@ export async function setupImageGenerationConfig(options: {
     process.env[secret.key] = options.input.apiKey;
     secretPath = secret.path;
   }
-  const requestedModel = resolveImageModel(provider, options.input.model) ?? resolveImageModel(provider, options.input.modelVersion);
+  const requestedModel = resolveImageSetupModel(provider, options.input);
   const model = requestedModel ?? (providerExplicit ? defaultImageModel(provider) : previous[provider]?.model ?? previous.model ?? defaultImageModel(provider));
   const baseUrl = options.input.baseUrl ?? previous[provider]?.baseUrl;
   const config = patchConfig(existing.config, {
@@ -2833,6 +2834,20 @@ export async function setupImageGenerationConfig(options: {
     config,
     secretPath
   };
+}
+
+function resolveImageSetupModel(provider: ImageGenerationProvider, input: ImageGenerationSetupInput): string | undefined {
+  if (input.model !== undefined) {
+    return resolveImageModel(provider, input.model);
+  }
+  if (input.modelVersion === undefined) {
+    return undefined;
+  }
+  const option = imageModelOption(provider, input.modelVersion);
+  if (option === undefined) {
+    throw new Error(`Unknown image model alias ${input.modelVersion} for provider ${provider}`);
+  }
+  return option.id;
 }
 
 export async function setupMcpConfig(options: {

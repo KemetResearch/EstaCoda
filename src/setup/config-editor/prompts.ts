@@ -1734,6 +1734,28 @@ function imageModelChoices(locale: SetupCopyLocale, provider: ImageGenerationPro
 
 function imageModelDescriptionKey(modelId: string): SetupCopyKey {
   switch (modelId) {
+    case "fal-ai/flux-2/klein/9b":
+      return "setupEditor.prompt.vision.model.falFlux2Klein.description";
+    case "fal-ai/flux-2-pro":
+      return "setupEditor.prompt.vision.model.falFlux2Pro.description";
+    case "fal-ai/z-image/turbo":
+      return "setupEditor.prompt.vision.model.falZImageTurbo.description";
+    case "fal-ai/nano-banana-pro":
+      return "setupEditor.prompt.vision.model.falNanoBananaPro.description";
+    case "fal-ai/gpt-image-1.5":
+      return "setupEditor.prompt.vision.model.falGptImage15.description";
+    case "fal-ai/gpt-image-2":
+      return "setupEditor.prompt.vision.model.falGptImage2.description";
+    case "fal-ai/ideogram/v3":
+      return "setupEditor.prompt.vision.model.falIdeogramV3.description";
+    case "fal-ai/recraft/v4/pro/text-to-image":
+      return "setupEditor.prompt.vision.model.falRecraftV4Pro.description";
+    case "fal-ai/qwen-image":
+      return "setupEditor.prompt.vision.model.falQwenImage.description";
+    case "fal-ai/krea/v2/medium/text-to-image":
+      return "setupEditor.prompt.vision.model.falKrea2Medium.description";
+    case "fal-ai/krea/v2/large/text-to-image":
+      return "setupEditor.prompt.vision.model.falKrea2Large.description";
     case "seedream-5-0-260128":
       return "setupEditor.prompt.vision.model.seedream5.description";
     case "seedream-5-0-lite-260128":
