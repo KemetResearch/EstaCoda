@@ -12,6 +12,11 @@ import {
 import type { ProviderDiagnostic, ProviderLiveDiagnostic } from "../config/provider-diagnostics.js";
 import { isBackupReady } from "../lifecycle/state-preservation.js";
 import { PackRegistry } from "../packs/pack-registry.js";
+import { diagnoseConfigHygiene, type ConfigHygieneDiagnostic } from "./checks/config-hygiene.js";
+import {
+  diagnoseDirectoryStructure,
+  type DirectoryStructureDiagnostic
+} from "./checks/directory-structure.js";
 import { collectMissingProfileEnv } from "./checks/env-coverage.js";
 import { diagnoseLiveToolCall } from "./checks/live-tool.js";
 import { renderDoctorReport } from "./cli-renderer.js";
@@ -34,12 +39,14 @@ export async function runDoctor(options: CliOptions, args: string[] = []): Promi
   const selectedProfilePaths = resolveProfileStateHome({ homeDir: options.homeDir, profileId: selectedProfile });
   const activeProfilePaths = resolveProfileStateHome({ homeDir: options.homeDir, profileId: activeProfileId });
   const stateHome = resolveStateHome({ homeDir: options.homeDir });
+  const directoryDiagnostic = await diagnoseDirectoryStructure({ homeDir: options.homeDir, profileId: selectedProfile });
 
   try {
     config = await loadRuntimeConfig(options);
   } catch (error) {
     configSyntaxError = error instanceof Error ? error.message : String(error);
   }
+  const configHygiene = await diagnoseConfigHygiene(selectedProfilePaths.configPath);
 
   const providerDiagnostic = config === undefined
     ? setupState.setupVerification.providerDiagnostic
@@ -62,9 +69,6 @@ export async function runDoctor(options: CliOptions, args: string[] = []): Promi
   if (activeProfileMissing) {
     warnings.push(`Active profile is missing: ${activeProfileId}`);
   }
-  if (selectedProfileConfigMissing) {
-    warnings.push(`Selected profile config is missing: ${selectedProfilePaths.configPath}`);
-  }
   if (!trustStoreOk) {
     warnings.push(`Global trust store is not valid JSON: ${stateHome.trustJsonPath}`);
   }
@@ -78,9 +82,12 @@ export async function runDoctor(options: CliOptions, args: string[] = []): Promi
     warnings.push(...setupState.blockers);
   }
 
+  warnings.push(...directoryDiagnostic.warnings);
+  warnings.push(...configHygiene.warnings);
   warnings.push(...providerDiagnostic.warnings);
   warnings.push(...(liveProviderDiagnostic?.warnings ?? []));
   warnings.push(...(liveToolDiagnostic?.warnings ?? []));
+  notes.push(...directoryDiagnostic.notes);
 
   if (configSyntaxError !== undefined) {
     warnings.push(`Config syntax error: ${configSyntaxError}`);
@@ -134,6 +141,8 @@ export async function runDoctor(options: CliOptions, args: string[] = []): Promi
     liveProviderDiagnostic,
     liveToolDiagnostic,
     configSyntaxError,
+    configHygiene,
+    directoryDiagnostic,
     activeProfileMissing,
     selectedProfileConfigMissing,
     trustStoreOk,
@@ -171,6 +180,8 @@ type BuildDoctorReportInput = {
   readonly liveProviderDiagnostic?: ProviderLiveDiagnostic;
   readonly liveToolDiagnostic?: LiveToolDiagnostic;
   readonly configSyntaxError?: string;
+  readonly configHygiene: ConfigHygieneDiagnostic;
+  readonly directoryDiagnostic: DirectoryStructureDiagnostic;
   readonly activeProfileMissing: boolean;
   readonly selectedProfileConfigMissing: boolean;
   readonly trustStoreOk: boolean;
@@ -192,6 +203,12 @@ function buildDoctorReport(input: BuildDoctorReportInput): DoctorReport {
       label(input.locale, "installation"),
       input.backupReady ? "healthy" : "warning",
       input.backupReady ? undefined : input.backupReason
+    ),
+    check(
+      "state",
+      label(input.locale, "state"),
+      stateSeverity(input),
+      stateSummary(input)
     ),
     check(
       "configuration",
@@ -272,7 +289,12 @@ function check(
 
 function configSeverity(input: BuildDoctorReportInput): DoctorCheckSeverity {
   if (input.configSyntaxError !== undefined) return "blocked";
-  if (input.activeProfileMissing || input.selectedProfileConfigMissing || input.missingProfileEnv.length > 0) return "warning";
+  if (
+    input.activeProfileMissing ||
+    input.selectedProfileConfigMissing ||
+    input.missingProfileEnv.length > 0 ||
+    input.configHygiene.warnings.length > 0
+  ) return "warning";
   return "healthy";
 }
 
@@ -280,7 +302,20 @@ function configSummary(input: BuildDoctorReportInput): string | undefined {
   if (input.configSyntaxError !== undefined) return `Config syntax error: ${input.configSyntaxError}`;
   if (input.selectedProfileConfigMissing) return "selected profile config missing";
   if (input.activeProfileMissing) return "active profile missing";
+  if (input.configHygiene.staleRootKeys.length > 0) return "stale config keys";
+  if (input.configHygiene.circularFallbacks.length > 0) return "circular fallback route";
+  if (input.configHygiene.missingSections.length > 0) return "missing recommended sections";
   if (input.missingProfileEnv.length > 0) return "missing env values";
+  return undefined;
+}
+
+function stateSeverity(input: BuildDoctorReportInput): DoctorCheckSeverity {
+  return input.directoryDiagnostic.warnings.length > 0 ? "warning" : "healthy";
+}
+
+function stateSummary(input: BuildDoctorReportInput): string | undefined {
+  if (input.directoryDiagnostic.privateFileModeIssues.length > 0) return "private files are too permissive";
+  if (input.directoryDiagnostic.missingProfilePaths.length > 0) return "profile state incomplete";
   return undefined;
 }
 
@@ -374,6 +409,11 @@ function localizeWarningTitle(warning: string, locale: DoctorLocale): string {
   if (/Selected profile .env is missing required values/iu.test(warning)) return "ملف أسرار الملف الشخصي تنقصه قيم مطلوبة";
   if (/Active profile is missing/iu.test(warning)) return "الملف الشخصي النشط غير موجود";
   if (/Selected profile config is missing/iu.test(warning)) return "إعدادات الملف الشخصي المحدد غير موجودة";
+  if (/Selected profile .* is missing or invalid/iu.test(warning)) return "حالة الملف الشخصي غير مكتملة";
+  if (/Selected profile .* is not private/iu.test(warning)) return "ملف خاص في الملف الشخصي أذوناته واسعة";
+  if (/Profile config has stale root keys/iu.test(warning)) return "إعدادات الملف الشخصي تحتوي مفاتيح قديمة";
+  if (/Profile config is missing recommended sections/iu.test(warning)) return "إعدادات الملف الشخصي تنقصها أقسام موصى بها";
+  if (/Profile config fallback repeats/iu.test(warning)) return "مسار احتياطي يكرر النموذج الأساسي";
   if (/Global trust store is not valid JSON/iu.test(warning)) return "ملف الثقة العام ليس JSON صالحًا";
   if (/State backup not ready/iu.test(warning)) return "نسخ الحالة الاحتياطي غير جاهز";
   if (/Configured model context window is below 64K tokens/iu.test(warning)) return "نافذة سياق النموذج أقل من 64K رمز";
@@ -387,6 +427,7 @@ function label(locale: DoctorLocale, key: DoctorLabelKey): string {
 type DoctorLabelKey =
   | "runtime"
   | "installation"
+  | "state"
   | "configuration"
   | "providers"
   | "models"
@@ -401,6 +442,7 @@ type DoctorLabelKey =
 const DOCTOR_LABELS: Record<DoctorLabelKey, Record<DoctorLocale, string>> = {
   runtime: { en: "Runtime", ar: "وقت التشغيل" },
   installation: { en: "Installation", ar: "التثبيت" },
+  state: { en: "State", ar: "الحالة" },
   configuration: { en: "Configuration", ar: "الإعدادات" },
   providers: { en: "Providers", ar: "المزوّدون" },
   models: { en: "Models", ar: "النماذج" },
