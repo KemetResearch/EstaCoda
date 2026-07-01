@@ -49,8 +49,15 @@ type ProviderPromptAction =
 
 type ModelPromptAction =
   | { readonly kind: "model"; readonly model: ModelCandidate }
+  | { readonly kind: "next-page" }
+  | { readonly kind: "previous-page" }
   | { readonly kind: "back" }
   | { readonly kind: "cancel" };
+
+type ModelPromptResultAction = Exclude<
+  ModelPromptAction,
+  { readonly kind: "next-page" } | { readonly kind: "previous-page" }
+>;
 
 type OpenAiCodexPromptAction =
   | { readonly kind: "openai" }
@@ -59,6 +66,7 @@ type OpenAiCodexPromptAction =
   | { readonly kind: "cancel" };
 
 const PROMPT_HINT = "↑↓ navigate   ENTER select";
+const OPENROUTER_MODEL_PAGE_SIZE = 25;
 
 export async function selectProviderModelRoute(
   options: SelectProviderModelRouteOptions
@@ -196,43 +204,165 @@ async function promptModel(
   options: SelectProviderModelRouteOptions,
   provider: ProviderCandidate,
   candidates: readonly ModelCandidate[]
-): Promise<ModelPromptAction> {
-  const currentModelVisible =
+): Promise<ModelPromptResultAction> {
+  const currentModelInProviderList =
     provider.id === options.currentProviderId &&
     options.currentModelId !== undefined &&
     candidates.some((candidate) => candidate.id === options.currentModelId);
-  const currentModelIndex = currentModelVisible
+  const currentModelIndex = currentModelInProviderList
     ? candidates.findIndex((candidate) => candidate.id === options.currentModelId)
     : -1;
-  const promptOptions: Array<SelectPromptInput<ModelPromptAction>["options"][number]> = [
-    ...candidates.map((candidate) => ({
-      id: candidate.id,
-      label: candidate.id,
-      value: { kind: "model" as const, model: candidate },
-      cells: {
-        name: candidate.id,
-        details: modelCandidateDescription(options.locale, candidate),
-      },
-      current: provider.id === options.currentProviderId && candidate.id === options.currentModelId,
-    })),
-    ...navigationOptions<ModelPromptAction>(options),
-  ];
+  const paginate = shouldPaginateModels(options, provider, candidates);
+  const totalPages = paginate ? Math.ceil(candidates.length / OPENROUTER_MODEL_PAGE_SIZE) : 1;
+  let pageIndex = paginate && currentModelIndex >= 0
+    ? Math.floor(currentModelIndex / OPENROUTER_MODEL_PAGE_SIZE)
+    : 0;
 
-  return selectStructuredOption(options.prompt, {
-    title: modelTitle(options.locale, options.mode),
-    body: `${modelBody(options.locale, options.mode).replace("{providerId}", provider.id)}\n`,
-    statusLines: currentRouteStatusLines(options.locale, options.currentProviderId, options.currentModelId),
-    technicalLines: currentModelNotShownLines(options.locale, provider.id, options.currentProviderId, options.currentModelId, currentModelVisible),
-    columns: promptColumns(options.locale),
-    options: promptOptions,
-    defaultIndex: currentModelIndex >= 0 ? currentModelIndex : 0,
-    fallbackPrompt: "Choose: ",
-    surface: "promptCard",
-    hint: PROMPT_HINT,
-    showCurrentBadge: false,
-    locale: options.locale,
-    direction: options.locale === "ar" ? "rtl" : "ltr",
-  });
+  while (true) {
+    const pageStart = paginate ? pageIndex * OPENROUTER_MODEL_PAGE_SIZE : 0;
+    const pageEnd = paginate ? Math.min(pageStart + OPENROUTER_MODEL_PAGE_SIZE, candidates.length) : candidates.length;
+    const visibleCandidates = candidates.slice(pageStart, pageEnd);
+    const currentModelPageIndex = currentModelIndex >= pageStart && currentModelIndex < pageEnd
+      ? currentModelIndex - pageStart
+      : -1;
+    const promptOptions: Array<SelectPromptInput<ModelPromptAction>["options"][number]> = [
+      ...visibleCandidates.map((candidate) => ({
+        id: candidate.id,
+        label: candidate.id,
+        value: { kind: "model" as const, model: candidate },
+        cells: {
+          name: candidate.id,
+          details: modelCandidateDescription(options.locale, candidate),
+        },
+        current: provider.id === options.currentProviderId && candidate.id === options.currentModelId,
+      })),
+      ...modelPageNavigationOptions(options.locale, pageIndex, totalPages),
+      ...navigationOptions<ModelPromptAction>(options),
+    ];
+
+    const modelAction = await selectStructuredOption(options.prompt, {
+      title: modelTitle(options.locale, options.mode),
+      body: `${modelBody(options.locale, options.mode).replace("{providerId}", provider.id)}\n`,
+      statusLines: currentRouteStatusLines(options.locale, options.currentProviderId, options.currentModelId),
+      technicalLines: modelTechnicalLines(options.locale, provider, options, candidates, pageStart, pageEnd, currentModelInProviderList, paginate),
+      columns: promptColumns(options.locale),
+      options: promptOptions,
+      defaultIndex: currentModelPageIndex >= 0 ? currentModelPageIndex : 0,
+      fallbackPrompt: "Choose: ",
+      surface: "promptCard",
+      hint: PROMPT_HINT,
+      showCurrentBadge: false,
+      locale: options.locale,
+      direction: options.locale === "ar" ? "rtl" : "ltr",
+    });
+
+    if (modelAction.kind === "next-page") {
+      pageIndex = Math.min(pageIndex + 1, totalPages - 1);
+      continue;
+    }
+    if (modelAction.kind === "previous-page") {
+      pageIndex = Math.max(pageIndex - 1, 0);
+      continue;
+    }
+    return modelAction;
+  }
+}
+
+function shouldPaginateModels(
+  options: SelectProviderModelRouteOptions,
+  provider: ProviderCandidate,
+  candidates: readonly ModelCandidate[]
+): boolean {
+  return provider.id === "openrouter" &&
+    (options.mode === "primary" || options.mode === "fallback" || options.mode === "auxiliary") &&
+    candidates.length > OPENROUTER_MODEL_PAGE_SIZE;
+}
+
+function modelPageNavigationOptions(
+  locale: SetupCopyLocale,
+  pageIndex: number,
+  totalPages: number
+): Array<SelectPromptInput<ModelPromptAction>["options"][number]> {
+  if (totalPages <= 1) {
+    return [];
+  }
+
+  const rows: Array<SelectPromptInput<ModelPromptAction>["options"][number]> = [];
+  if (pageIndex > 0) {
+    rows.push({
+      id: "previous-page",
+      label: previousPageLabel(locale),
+      value: { kind: "previous-page" },
+      group: "navigation",
+      cells: {
+        name: previousPageLabel(locale),
+        details: pageNavigationDetails(locale, pageIndex, totalPages),
+      },
+    });
+  }
+  if (pageIndex < totalPages - 1) {
+    rows.push({
+      id: "next-page",
+      label: nextPageLabel(locale),
+      value: { kind: "next-page" },
+      group: "navigation",
+      cells: {
+        name: nextPageLabel(locale),
+        details: pageNavigationDetails(locale, pageIndex + 2, totalPages),
+      },
+    });
+  }
+  return rows;
+}
+
+function modelTechnicalLines(
+  locale: SetupCopyLocale,
+  provider: ProviderCandidate,
+  options: SelectProviderModelRouteOptions,
+  candidates: readonly ModelCandidate[],
+  pageStart: number,
+  pageEnd: number,
+  currentModelInProviderList: boolean,
+  paginate: boolean
+): readonly string[] | undefined {
+  const lines = [
+    ...(currentModelNotShownLines(locale, provider.id, options.currentProviderId, options.currentModelId, currentModelInProviderList) ?? []),
+  ];
+  if (paginate) {
+    lines.push(modelPageStatus(locale, pageStart, pageEnd, candidates.length));
+  }
+  return lines.length > 0 ? lines : undefined;
+}
+
+function modelPageStatus(
+  locale: SetupCopyLocale,
+  pageStart: number,
+  pageEnd: number,
+  totalModels: number
+): string {
+  if (locale === "ar") {
+    return `النماذج ${isolateLtr(String(pageStart + 1))}-${isolateLtr(String(pageEnd))} من ${isolateLtr(String(totalModels))}.`;
+  }
+  return `Models ${pageStart + 1}-${pageEnd} of ${totalModels}.`;
+}
+
+function pageNavigationDetails(
+  locale: SetupCopyLocale,
+  pageNumber: number,
+  totalPages: number
+): string {
+  if (locale === "ar") {
+    return `اعرض الصفحة ${isolateLtr(String(pageNumber))} من ${isolateLtr(String(totalPages))}.`;
+  }
+  return `Show page ${pageNumber} of ${totalPages}.`;
+}
+
+function previousPageLabel(locale: SetupCopyLocale): string {
+  return locale === "ar" ? "السابق" : "Previous";
+}
+
+function nextPageLabel(locale: SetupCopyLocale): string {
+  return locale === "ar" ? "التالي" : "Next";
 }
 
 async function promptOpenAiCodexChoice(

@@ -428,6 +428,115 @@ describe("selectProviderModelRoute", () => {
     expect(modelPrompt.options[0]?.group).toBeUndefined();
   });
 
+  it("paginates OpenRouter model choices for setup editor route modes", async () => {
+    for (const mode of ["primary", "fallback", "auxiliary"] as const) {
+      const openRouterModels = Array.from({ length: 30 }, (_, index) =>
+        modelCandidate("openrouter", `openrouter-model-${String(index + 1).padStart(2, "0")}`));
+      const flow = fakeFlow({
+        providers: [providerCandidate("openrouter", "OpenRouter", openRouterModels.length)],
+        models: { openrouter: openRouterModels },
+      });
+      const prompt = fakePrompt(["openrouter", "next-page", "openrouter-model-26"]);
+
+      const result = await selectProviderModelRoute({
+        prompt,
+        flowEngine: flow.engine,
+        locale: "en",
+        mode,
+        allowBack: true,
+        allowCancel: true,
+      });
+
+      expect(result).toEqual({
+        kind: "selected",
+        selection: selectionResult("openrouter", "openrouter-model-26"),
+      });
+      expect(prompt.calls).toHaveLength(3);
+      expect(prompt.calls[1]?.options.map((option) => option.id)).toEqual([
+        ...openRouterModels.slice(0, 25).map((model) => model.id),
+        "next-page",
+        "back",
+        "cancel",
+      ]);
+      expect(prompt.calls[1]?.options.map((option) => option.id)).not.toContain("openrouter-model-26");
+      expect(prompt.calls[1]?.technicalLines).toEqual(["Models 1-25 of 30."]);
+      expect(prompt.calls[2]?.options.map((option) => option.id)).toEqual([
+        ...openRouterModels.slice(25).map((model) => model.id),
+        "previous-page",
+        "back",
+        "cancel",
+      ]);
+      expect(prompt.calls[2]?.technicalLines).toEqual(["Models 26-30 of 30."]);
+      expect(flow.resolved).toEqual([{ providerId: "openrouter", modelId: "openrouter-model-26" }]);
+    }
+  });
+
+  it("starts OpenRouter pagination on the page that contains the current model", async () => {
+    const openRouterModels = Array.from({ length: 30 }, (_, index) =>
+      modelCandidate("openrouter", `openrouter-model-${String(index + 1).padStart(2, "0")}`));
+    const flow = fakeFlow({
+      providers: [providerCandidate("openrouter", "OpenRouter", openRouterModels.length)],
+      models: { openrouter: openRouterModels },
+    });
+    const prompt = fakePrompt(["openrouter", "openrouter-model-30"]);
+
+    await selectProviderModelRoute({
+      prompt,
+      flowEngine: flow.engine,
+      locale: "en",
+      mode: "primary",
+      allowBack: true,
+      allowCancel: true,
+      currentProviderId: "openrouter",
+      currentModelId: "openrouter-model-30",
+    });
+
+    expect(prompt.calls[1]?.defaultIndex).toBe(4);
+    expect(prompt.calls[1]?.options.map((option) => option.id)).toEqual([
+      ...openRouterModels.slice(25).map((model) => model.id),
+      "previous-page",
+      "back",
+      "cancel",
+    ]);
+    expect(prompt.calls[1]?.options[4]).toMatchObject({
+      id: "openrouter-model-30",
+      current: true,
+    });
+    expect(prompt.calls[1]?.technicalLines).toEqual(["Models 26-30 of 30."]);
+  });
+
+  it("leaves long non-OpenRouter model lists unpaginated", async () => {
+    const openAiModels = Array.from({ length: 30 }, (_, index) =>
+      modelCandidate("openai", `openai-model-${String(index + 1).padStart(2, "0")}`));
+    const flow = fakeFlow({
+      providers: [providerCandidate("openai", "OpenAI", openAiModels.length)],
+      models: { openai: openAiModels },
+    });
+    const prompt = fakePrompt(["openai", "openai-model-30"]);
+
+    const result = await selectProviderModelRoute({
+      prompt,
+      flowEngine: flow.engine,
+      locale: "en",
+      mode: "primary",
+      allowBack: true,
+      allowCancel: true,
+    });
+
+    expect(result).toEqual({
+      kind: "selected",
+      selection: selectionResult("openai", "openai-model-30"),
+    });
+    expect(prompt.calls).toHaveLength(2);
+    expect(prompt.calls[1]?.options.map((option) => option.id)).toEqual([
+      ...openAiModels.map((model) => model.id),
+      "back",
+      "cancel",
+    ]);
+    expect(prompt.calls[1]?.options.map((option) => option.id)).not.toContain("next-page");
+    expect(prompt.calls[1]?.technicalLines).toBeUndefined();
+  });
+
   it("does not mark Back or Cancel rows as current", async () => {
     const flow = fakeFlow();
     const prompt = fakePrompt();
