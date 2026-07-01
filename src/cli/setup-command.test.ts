@@ -186,7 +186,7 @@ describe("cli setup command", () => {
 
     expect(result.handled).toBe(true);
     expect(result.exitCode).toBe(1);
-    expect(result.output).toContain("Review cancelled");
+    expect(result.output).toContain("Setup cancelled. No settings were written, no credentials were saved, and this workspace was not trusted.");
     await expect(readFile(profileConfigPath(tempDir), "utf8")).resolves.toContain("\"provider\": \"unconfigured\"");
     expect(await new WorkspaceTrustStore({
       path: join(tempDir, ".estacoda", "trust.json"),
@@ -364,7 +364,7 @@ describe("cli setup command", () => {
     expect(result.handled).toBe(true);
     expect(trusted).toBe(true);
     expect(result.output).toContain("Verification passed. Setup is ready.");
-    expect(result.output).not.toContain("Review cancelled");
+    expect(result.output).not.toContain("Setup cancelled");
     expect(result.output).not.toContain("Available actions:");
     expect(result.output).not.toContain("Sections:");
     expect(result.output).not.toContain("Workspace is not trusted.\n- Warning: Workspace is not trusted.");

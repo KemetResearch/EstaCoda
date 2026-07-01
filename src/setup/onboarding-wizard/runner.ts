@@ -65,6 +65,7 @@ import {
   promptSetupStringWithDefault,
   renderSetupApplyEndState,
   renderSetupApplyPlanningResult,
+  setupOutputLine,
   setupNavigationChoice,
   setupProviderCredentialQuestion,
   setupPromptContext,
@@ -675,7 +676,7 @@ export async function runFirstRunSetup(
       })
     : undefined;
   const renderedApplyOutput = applyEndState === undefined
-    ? renderSetupApplyPlanningResult(applyPlanningResult, language)
+    ? renderOnboardingApplyPlanningResult(applyPlanningResult, language)
     : renderOnboardingApplyEndState(applyEndState, language);
   const completed = applyEndState === undefined
     ? applyPlanningResult.kind === "apply-plan-ready"
@@ -768,9 +769,22 @@ function renderOnboardingApplyEndState(
   endState: SetupApplyEndState,
   locale: SetupCopyLocale
 ): string {
+  if (endState.kind === "cancelled") {
+    return setupOutputLine(locale, setupCopyText(locale, "onboarding.apply.cancelled"));
+  }
   const base = renderSetupApplyEndState(endState, locale);
   const warningOutput = renderOnboardingOptionalCapabilityWarnings(endState, locale);
   return [base, warningOutput].filter((line): line is string => line !== undefined).join("\n");
+}
+
+function renderOnboardingApplyPlanningResult(
+  result: SetupApplyPlanningResult,
+  locale: SetupCopyLocale
+): string {
+  if (result.kind === "cancelled") {
+    return setupOutputLine(locale, setupCopyText(locale, "onboarding.apply.cancelled"));
+  }
+  return renderSetupApplyPlanningResult(result, locale);
 }
 
 function renderOnboardingOptionalCapabilityWarnings(
@@ -966,19 +980,19 @@ async function promptOnboardingSummaryAction(
       {
         id: "confirm",
         label: setupCopyText(locale, "onboarding.summary.confirmAction"),
-        description: setupCopyText(locale, "setupApply.review.approved"),
+        description: setupCopyText(locale, "onboarding.summary.confirmAction.description"),
         value: "confirm" as const,
       },
       setupNavigationChoice({
         id: "back",
         label: locale === "ar" ? "رجوع" : "Back",
-        description: setupCopyText(locale, "onboarding.providers.navigation.back.description"),
+        description: setupCopyText(locale, "onboarding.summary.backAction.description"),
         value: "back" as const,
       }),
       setupNavigationChoice({
         id: "cancel",
         label: setupCopyText(locale, "onboarding.summary.cancelAction"),
-        description: setupCopyText(locale, "setupApply.review.cancelled"),
+        description: setupCopyText(locale, "onboarding.summary.cancelAction.description"),
         value: "cancel" as const,
       }),
     ],

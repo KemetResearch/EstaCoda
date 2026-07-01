@@ -88,7 +88,11 @@ const FIRST_RUN_KEYS = [
   "onboarding.summary.confirmTitle",
   "onboarding.summary.confirmMessage",
   "onboarding.summary.confirmAction",
+  "onboarding.summary.confirmAction.description",
+  "onboarding.summary.backAction.description",
   "onboarding.summary.cancelAction",
+  "onboarding.summary.cancelAction.description",
+  "onboarding.apply.cancelled",
   "onboarding.summary.labels.workspace",
   "onboarding.summary.labels.language",
   "onboarding.summary.labels.interfaceStyle",
@@ -614,7 +618,6 @@ const REVIEW_MANIFEST_KEYS = [
 ] as const;
 
 const APPLY_HANDOFF_KEYS = [
-  "setupApply.review.approved",
   "setupApply.review.cancelled",
   "setupApply.review.blocked",
   "setupApply.plan.ready",
@@ -1031,9 +1034,18 @@ describe("setup copy", () => {
 
   it("falls back to English for intentionally unsupported locales", () => {
     expect(resolveSetupCopy("fr", "setupApply.review.cancelled")).toBe(
-      "Review cancelled. No apply plan, config write, or trust grant will be created."
+      "Setup cancelled. No settings were written and no credentials were saved."
     );
     expect(resolveSetupCopy("en", "setupApply.review.cancelled")).toBe(resolveSetupCopy("fr", "setupApply.review.cancelled"));
+    expect(rawSetupCopy("ar", "setupApply.review.cancelled")).toBe(
+      "تم إلغاء الإعداد. لم تُكتب أي إعدادات، ولم تُحفظ أي بيانات اعتماد."
+    );
+    expect(resolveSetupCopy("fr", "onboarding.apply.cancelled")).toBe(
+      "Setup cancelled. No settings were written, no credentials were saved, and this workspace was not trusted."
+    );
+    expect(rawSetupCopy("ar", "onboarding.apply.cancelled")).toBe(
+      "تم إلغاء الإعداد. لم تُكتب أي إعدادات، ولم تُحفظ أي بيانات اعتماد، ولم تُمنح الثقة لمساحة العمل هذه."
+    );
   });
 
   it("contains the first-run, editor, and module copy keys", () => {
