@@ -21,6 +21,8 @@ import { collectMissingProfileEnv } from "./checks/env-coverage.js";
 import { diagnoseLiveToolCall } from "./checks/live-tool.js";
 import { diagnoseSQLiteHealth, type SQLiteHealthDiagnostic } from "./checks/sqlite-health.js";
 import { renderDoctorReport } from "./cli-renderer.js";
+import { runDoctorFix } from "./fix-engine.js";
+import { renderDoctorFixReport } from "./fix-renderer.js";
 import type {
   DoctorAction,
   DoctorCheck,
@@ -32,6 +34,19 @@ import type {
 } from "./types.js";
 
 export async function runDoctor(options: CliOptions, args: string[] = []): Promise<CliCommandResult> {
+  if (hasFlag(args, "--fix")) {
+    const fixResult = await runDoctorFix({
+      homeDir: options.homeDir,
+      profileId: options.profileId,
+      locale: await detectDoctorLocale(options)
+    });
+    return {
+      handled: true,
+      exitCode: 0,
+      output: renderDoctorFixReport(fixResult)
+    };
+  }
+
   const activeProfile = readActiveProfileForDoctor({ homeDir: options.homeDir });
   const activeProfileId = activeProfile.profileId;
   const selectedProfile = options.profileId ?? activeProfileId;
@@ -608,5 +623,14 @@ async function trustStoreHealthy(path: string): Promise<boolean> {
       return true;
     }
     return false;
+  }
+}
+
+async function detectDoctorLocale(options: CliOptions): Promise<DoctorLocale> {
+  try {
+    const config = await loadRuntimeConfig(options);
+    return config.ui.language === "ar" ? "ar" : "en";
+  } catch {
+    return "en";
   }
 }

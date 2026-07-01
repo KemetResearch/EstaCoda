@@ -7,7 +7,7 @@ import { runCliCommand } from "./cli.js";
 import type { Prompt } from "./prompt-contract.js";
 import type { SelectPromptInput } from "./interactive-select.js";
 import { WorkspaceTrustStore } from "../security/workspace-trust-store.js";
-import { resolveProfileStateHome } from "../config/profile-home.js";
+import { resolveGlobalStateHome, resolveProfileStateHome } from "../config/profile-home.js";
 import { runInitCommand } from "./init-command.js";
 
 async function makeTempDir(): Promise<string> {
@@ -452,6 +452,129 @@ describe("cli setup command", () => {
     expect(result.handled).toBe(true);
     await expect(stat(join(tempDir, ".estacoda", ".verify"))).rejects.toThrow();
     await expect(stat(join(tempDir, ".estacoda", ".backups"))).rejects.toThrow();
+  });
+
+  it("doctor --fix creates only safe local state skeleton repairs", async () => {
+    const workspaceRoot = join(tempDir, "workspace");
+    const globalPaths = resolveGlobalStateHome({ homeDir: tempDir });
+    const profilePaths = resolveProfileStateHome({ homeDir: tempDir, profileId: "default" });
+
+    const result = await runCliCommand({
+      argv: ["doctor", "--fix"],
+      workspaceRoot,
+      homeDir: tempDir,
+      interactive: false,
+    });
+
+    expect(result.handled).toBe(true);
+    expect(result.exitCode).toBe(0);
+    expect(result.output).toContain("EstaCoda Doctor Fix");
+    expect(result.output).toContain("Applied safe repairs");
+    expect(result.output).toContain("◇ Fixed");
+    expect(result.output).toContain("◇ Not Changed");
+    expect(result.output).toContain("Workspace trust requires explicit user approval");
+    expect(result.output).toContain("Provider credentials were not created");
+    expect(result.output).toContain("Config migrations were not applied");
+    await expect(stat(globalPaths.sharedMemoryPath)).resolves.toMatchObject({ });
+    await expect(stat(globalPaths.packsPath)).resolves.toMatchObject({ });
+    await expect(stat(profilePaths.userMdPath)).resolves.toMatchObject({ });
+    await expect(stat(profilePaths.soulMdPath)).resolves.toMatchObject({ });
+    await expect(stat(profilePaths.memoryMdPath)).resolves.toMatchObject({ });
+    await expect(stat(profilePaths.envPath)).resolves.toMatchObject({ });
+    await expect(stat(profilePaths.authJsonPath)).resolves.toMatchObject({ });
+    await expect(stat(globalPaths.trustJsonPath)).rejects.toThrow();
+    await expect(stat(globalPaths.workspaceApprovalsPath)).rejects.toThrow();
+    await expect(stat(globalPaths.sessionsSqlitePath)).rejects.toThrow();
+    expect(await readFile(profilePaths.envPath, "utf8")).toBe("");
+    expect(await readFile(profilePaths.authJsonPath, "utf8")).toBe("{}\n");
+  });
+
+  it("doctor --fix repairs private auth file modes without creating credentials", async () => {
+    const workspaceRoot = join(tempDir, "workspace");
+    const profilePaths = resolveProfileStateHome({ homeDir: tempDir, profileId: "default" });
+    await mkdir(dirname(profilePaths.envPath), { recursive: true });
+    await writeFile(profilePaths.envPath, "", "utf8");
+    await writeFile(profilePaths.authJsonPath, "{}\n", "utf8");
+    await chmod(profilePaths.envPath, 0o644);
+    await chmod(profilePaths.authJsonPath, 0o644);
+
+    const result = await runCliCommand({
+      argv: ["doctor", "--fix"],
+      workspaceRoot,
+      homeDir: tempDir,
+      interactive: false,
+    });
+
+    expect(result.handled).toBe(true);
+    expect(result.output).toContain("mode to 0600");
+    expect((await stat(profilePaths.envPath)).mode & 0o777).toBe(0o600);
+    expect((await stat(profilePaths.authJsonPath)).mode & 0o777).toBe(0o600);
+    expect(await readFile(profilePaths.envPath, "utf8")).toBe("");
+    expect(await readFile(profilePaths.authJsonPath, "utf8")).toBe("{}\n");
+  });
+
+  it("doctor --fix does not overwrite malformed config", async () => {
+    const workspaceRoot = join(tempDir, "workspace");
+    const configPath = profileConfigPath(tempDir);
+    await mkdir(dirname(configPath), { recursive: true });
+    await writeFile(configPath, "{not-json", "utf8");
+
+    const result = await runCliCommand({
+      argv: ["doctor", "--fix"],
+      workspaceRoot,
+      homeDir: tempDir,
+      interactive: false,
+    });
+
+    expect(result.handled).toBe(true);
+    expect(result.exitCode).toBe(0);
+    expect(await readFile(configPath, "utf8")).toBe("{not-json");
+    expect(result.output).toContain("Config migrations were not applied");
+  });
+
+  it("doctor --fix is idempotent after safe repairs are applied", async () => {
+    const workspaceRoot = join(tempDir, "workspace");
+    await runCliCommand({
+      argv: ["doctor", "--fix"],
+      workspaceRoot,
+      homeDir: tempDir,
+      interactive: false,
+    });
+
+    const second = await runCliCommand({
+      argv: ["doctor", "--fix"],
+      workspaceRoot,
+      homeDir: tempDir,
+      interactive: false,
+    });
+
+    expect(second.handled).toBe(true);
+    expect(second.exitCode).toBe(0);
+    expect(second.output).toContain("No safe repairs needed");
+    expect(second.output).toContain("No safe repairs were needed");
+    expect(second.output).not.toContain("✓ Created");
+    expect(second.output).not.toContain("mode to 0600");
+  });
+
+  it("doctor --fix reports the default skeleton created for a non-default selected profile", async () => {
+    const workspaceRoot = join(tempDir, "workspace");
+    const researchPaths = resolveProfileStateHome({ homeDir: tempDir, profileId: "research" });
+    const defaultPaths = resolveProfileStateHome({ homeDir: tempDir, profileId: "default" });
+
+    const result = await runCliCommand({
+      argv: ["doctor", "--fix"],
+      workspaceRoot,
+      homeDir: tempDir,
+      profileId: "research",
+      interactive: false,
+    });
+
+    expect(result.handled).toBe(true);
+    expect(result.exitCode).toBe(0);
+    expect(result.output).toContain("~/.estacoda/profiles/research/");
+    expect(result.output).toContain("~/.estacoda/profiles/default/");
+    await expect(stat(researchPaths.userMdPath)).resolves.toMatchObject({ });
+    await expect(stat(defaultPaths.userMdPath)).resolves.toMatchObject({ });
   });
 
   it("keeps live CLI entrypoints free of the legacy interactive onboarding runner", async () => {
