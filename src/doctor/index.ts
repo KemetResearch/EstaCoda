@@ -19,6 +19,7 @@ import {
 } from "./checks/directory-structure.js";
 import { collectMissingProfileEnv } from "./checks/env-coverage.js";
 import { diagnoseLiveToolCall } from "./checks/live-tool.js";
+import { diagnoseSQLiteHealth, type SQLiteHealthDiagnostic } from "./checks/sqlite-health.js";
 import { renderDoctorReport } from "./cli-renderer.js";
 import type {
   DoctorAction,
@@ -43,6 +44,7 @@ export async function runDoctor(options: CliOptions, args: string[] = []): Promi
   const activeProfilePaths = resolveProfileStateHome({ homeDir: options.homeDir, profileId: activeProfileId });
   const stateHome = resolveStateHome({ homeDir: options.homeDir });
   const directoryDiagnostic = await diagnoseDirectoryStructure({ homeDir: options.homeDir, profileId: selectedProfile });
+  const sqliteHealth = await diagnoseSQLiteHealth({ homeDir: options.homeDir });
 
   try {
     config = await loadRuntimeConfig(effectiveOptions);
@@ -88,11 +90,13 @@ export async function runDoctor(options: CliOptions, args: string[] = []): Promi
   }
 
   warnings.push(...directoryDiagnostic.warnings);
+  warnings.push(...sqliteHealth.warnings);
   warnings.push(...configHygiene.warnings);
   warnings.push(...providerDiagnostic.warnings);
   warnings.push(...(liveProviderDiagnostic?.warnings ?? []));
   warnings.push(...(liveToolDiagnostic?.warnings ?? []));
   notes.push(...directoryDiagnostic.notes);
+  notes.push(...sqliteHealth.notes);
 
   if (configSyntaxError !== undefined) {
     warnings.push(`Config syntax error: ${configSyntaxError}`);
@@ -148,6 +152,7 @@ export async function runDoctor(options: CliOptions, args: string[] = []): Promi
     configSyntaxError,
     configHygiene,
     directoryDiagnostic,
+    sqliteHealth,
     activeProfileMissing,
     selectedProfileConfigMissing,
     trustStoreOk,
@@ -187,6 +192,7 @@ type BuildDoctorReportInput = {
   readonly configSyntaxError?: string;
   readonly configHygiene: ConfigHygieneDiagnostic;
   readonly directoryDiagnostic: DirectoryStructureDiagnostic;
+  readonly sqliteHealth: SQLiteHealthDiagnostic;
   readonly activeProfileMissing: boolean;
   readonly selectedProfileConfigMissing: boolean;
   readonly trustStoreOk: boolean;
@@ -235,6 +241,12 @@ function buildDoctorReport(input: BuildDoctorReportInput): DoctorReport {
     ),
     check("capabilities", label(input.locale, "capabilities"), "healthy", input.browserBackend),
     check("memory", label(input.locale, "memory"), "healthy"),
+    check(
+      "sessions",
+      label(input.locale, "sessions"),
+      sqliteSeverity(input.sqliteHealth),
+      sqliteSummary(input.sqliteHealth, input.locale)
+    ),
     check(
       "skills",
       label(input.locale, "skills"),
@@ -324,6 +336,25 @@ function stateSummary(input: BuildDoctorReportInput): string | undefined {
   return undefined;
 }
 
+function sqliteSeverity(diagnostic: SQLiteHealthDiagnostic): DoctorCheckSeverity {
+  if (diagnostic.status === "blocked") return "blocked";
+  if (diagnostic.status === "warning") return "warning";
+  return "healthy";
+}
+
+function sqliteSummary(diagnostic: SQLiteHealthDiagnostic, locale: DoctorLocale): string {
+  if (diagnostic.status === "not-initialized") {
+    return locale === "ar" ? "غير مهيأ" : "not initialized";
+  }
+  if (diagnostic.status === "blocked") {
+    if (!diagnostic.schemaValid) return locale === "ar" ? "المخطط غير صالح" : "schema invalid";
+    if (!diagnostic.ftsHealthy) return locale === "ar" ? "فهرس FTS غير متاح" : "FTS unavailable";
+  }
+  if (!diagnostic.schemaValid) return locale === "ar" ? "انحراف في المخطط" : "schema drift";
+  const count = diagnostic.sessionsCount ?? 0;
+  return locale === "ar" ? `${count} جلسات` : `${count} sessions`;
+}
+
 function providerSeverity(diagnostic: ProviderDiagnostic): DoctorCheckSeverity {
   if (diagnostic.status === "blocked") return "blocked";
   if (diagnostic.status === "warning") return "warning";
@@ -388,7 +419,7 @@ function warningAction(warning: string, index: number, locale: DoctorLocale): Do
 }
 
 function warningSeverity(warning: string): DoctorAction["severity"] {
-  return /Config syntax error|Provider setup is incomplete|not writable|blocked/iu.test(warning)
+  return /Config syntax error|Provider setup is incomplete|not writable|blocked|SQLite session DB (?:could not be opened|schema is missing required|FTS index is unavailable|path is not a file)/iu.test(warning)
     ? "blocked"
     : "warning";
 }
@@ -416,6 +447,14 @@ function localizeWarningTitle(warning: string, locale: DoctorLocale): string {
   if (/Selected profile config is missing/iu.test(warning)) return "إعدادات الملف الشخصي المحدد غير موجودة";
   if (/Selected profile .* is missing or invalid/iu.test(warning)) return "حالة الملف الشخصي غير مكتملة";
   if (/Selected profile .* is not private/iu.test(warning)) return "ملف خاص في الملف الشخصي أذوناته واسعة";
+  if (/SQLite session DB schema is missing required tables/iu.test(warning)) return "قاعدة بيانات الجلسات تنقصها جداول مطلوبة";
+  if (/SQLite session DB schema is missing auxiliary tables/iu.test(warning)) return "قاعدة بيانات الجلسات تنقصها جداول إضافية";
+  if (/SQLite session DB schema is missing required columns/iu.test(warning)) return "قاعدة بيانات الجلسات تنقصها أعمدة مطلوبة";
+  if (/SQLite session DB schema is missing auxiliary columns/iu.test(warning)) return "قاعدة بيانات الجلسات تنقصها أعمدة إضافية";
+  if (/SQLite session DB FTS index is unavailable/iu.test(warning)) return "فهرس بحث قاعدة بيانات الجلسات غير متاح";
+  if (/SQLite session DB WAL is large/iu.test(warning)) return "ملف WAL لقاعدة بيانات الجلسات كبير";
+  if (/SQLite session DB could not be opened/iu.test(warning)) return "تعذر فتح قاعدة بيانات الجلسات";
+  if (/SQLite session DB path is not a file/iu.test(warning)) return "مسار قاعدة بيانات الجلسات ليس ملفًا";
   if (/Profile config has stale root keys/iu.test(warning)) return "إعدادات الملف الشخصي تحتوي مفاتيح قديمة";
   if (/Profile config is missing recommended sections/iu.test(warning)) return "إعدادات الملف الشخصي تنقصها أقسام موصى بها";
   if (/Profile config fallback repeats/iu.test(warning)) return "مسار احتياطي يكرر النموذج الأساسي";
@@ -438,6 +477,7 @@ type DoctorLabelKey =
   | "models"
   | "capabilities"
   | "memory"
+  | "sessions"
   | "skills"
   | "security"
   | "liveProvider"
@@ -453,6 +493,7 @@ const DOCTOR_LABELS: Record<DoctorLabelKey, Record<DoctorLocale, string>> = {
   models: { en: "Models", ar: "النماذج" },
   capabilities: { en: "Capabilities", ar: "القدرات" },
   memory: { en: "Memory", ar: "الذاكرة" },
+  sessions: { en: "Sessions", ar: "الجلسات" },
   skills: { en: "Skills", ar: "المهارات" },
   security: { en: "Security", ar: "الأمان" },
   liveProvider: { en: "Live provider", ar: "المزوّد الحي" },
