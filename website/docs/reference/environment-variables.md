@@ -66,6 +66,8 @@ Managed local STT defaults to `~/.estacoda/cache/huggingface` for faster-whisper
 |----------|----------|
 | `FAL_KEY` | FAL |
 | `BYTEPLUS_ARK_API_KEY` | BytePlus / Seedream |
+| `ARK_API_KEY` | BytePlus / Seedream examples; reused by reviewed setup when already present |
+| `OPENAI_API_KEY` | OpenAI / GPT Image |
 
 ## Browser provider keys
 

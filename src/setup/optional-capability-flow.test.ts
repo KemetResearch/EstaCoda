@@ -11,7 +11,7 @@ import {
   optionalPromptId,
   setupModuleContextFromConfig,
 } from "./optional-capability-flow.js";
-import { browserSetupModule, voiceSetupModule, webSearchSetupModule, type SetupModuleContext } from "./setup-modules.js";
+import { browserSetupModule, visionSetupModule, voiceSetupModule, webSearchSetupModule, type SetupModuleContext } from "./setup-modules.js";
 
 describe("optional Search capability flow", () => {
   let tempDir: string;
@@ -27,6 +27,9 @@ describe("optional Search capability flow", () => {
     vi.restoreAllMocks();
     delete process.env.BRAVE_SEARCH_API_KEY;
     delete process.env.OPENAI_API_KEY;
+    delete process.env.CUSTOM_OPENAI_KEY;
+    delete process.env.BYTEPLUS_ARK_API_KEY;
+    delete process.env.ARK_API_KEY;
     await rm(tempDir, { recursive: true, force: true });
   });
 
@@ -177,6 +180,92 @@ describe("optional Search capability flow", () => {
         ddgsCapabilityStatus: "ready",
         ddgsSetupConfirmed: false,
       });
+    }
+  });
+
+  it("collects a reviewed deferred BytePlus image generation secret", async () => {
+    const seenQuestions: { question: string; secret: boolean }[] = [];
+
+    const collected = await collectOptionalCapabilityContext(options({
+      values: ["byteplus", "seedream-5-0-260128"],
+      secret: "byteplus-secret",
+      seenQuestions,
+    }), baseContext(), visionSetupModule);
+
+    expect(collected.kind).toBe("configured");
+    if (collected.kind === "configured") {
+      expect(collected.context.vision).toMatchObject({
+        provider: "byteplus",
+        model: "seedream-5-0-260128",
+        apiKeyEnv: "BYTEPLUS_ARK_API_KEY",
+        baseUrl: "https://ark.ap-southeast.bytepluses.com/api/v3",
+        credentialSurface: "image-generation",
+        credentialEnvVars: ["BYTEPLUS_ARK_API_KEY"],
+        credentialReady: true,
+        credentialValuesIncluded: false,
+      });
+      expect(collected.pendingCredentialWrites).toEqual([
+        { envVarName: "BYTEPLUS_ARK_API_KEY", value: "byteplus-secret" },
+      ]);
+      expect(JSON.stringify(collected.context)).not.toContain("byteplus-secret");
+    }
+    expect(seenQuestions).toContainEqual({
+      question: "Enter image generation API key. It will be saved as BYTEPLUS_ARK_API_KEY after review: ",
+      secret: true,
+    });
+  });
+
+  it("reuses an existing ARK_API_KEY for BytePlus image generation", async () => {
+    process.env.ARK_API_KEY = "existing-byteplus-secret";
+
+    const collected = await collectOptionalCapabilityContext(options({
+      values: ["byteplus", "seedream-5-0-260128", "existing"],
+      secret: "should-not-be-read",
+    }), baseContext(), visionSetupModule);
+
+    expect(collected.kind).toBe("configured");
+    if (collected.kind === "configured") {
+      expect(collected.context.vision).toMatchObject({
+        provider: "byteplus",
+        model: "seedream-5-0-260128",
+        apiKeyEnv: "ARK_API_KEY",
+        credentialSurface: "image-generation",
+        credentialEnvVars: ["ARK_API_KEY"],
+        credentialReady: true,
+      });
+      expect(collected.pendingCredentialWrites).toEqual([]);
+      expect(JSON.stringify(collected)).not.toContain("existing-byteplus-secret");
+      expect(JSON.stringify(collected)).not.toContain("should-not-be-read");
+    }
+  });
+
+  it("reuses an existing primary OpenAI credential env for OpenAI image generation", async () => {
+    process.env.CUSTOM_OPENAI_KEY = "existing-openai-secret";
+
+    const collected = await collectOptionalCapabilityContext(options({
+      values: ["openai", "gpt-image-2-medium", "existing"],
+      secret: "should-not-be-read",
+    }), baseContext({
+      provider: {
+        id: "openai",
+        model: "gpt-5",
+        credentialEnv: "CUSTOM_OPENAI_KEY",
+      },
+    }), visionSetupModule);
+
+    expect(collected.kind).toBe("configured");
+    if (collected.kind === "configured") {
+      expect(collected.context.vision).toMatchObject({
+        provider: "openai",
+        model: "gpt-image-2-medium",
+        apiKeyEnv: "CUSTOM_OPENAI_KEY",
+        credentialSurface: "image-generation",
+        credentialEnvVars: ["CUSTOM_OPENAI_KEY"],
+        credentialReady: true,
+      });
+      expect(collected.pendingCredentialWrites).toEqual([]);
+      expect(JSON.stringify(collected)).not.toContain("existing-openai-secret");
+      expect(JSON.stringify(collected)).not.toContain("should-not-be-read");
     }
   });
 

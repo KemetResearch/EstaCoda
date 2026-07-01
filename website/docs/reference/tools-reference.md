@@ -250,9 +250,10 @@ Image generation and vision analysis.
 | Tool | Risk | State touched |
 |------|------|---------------|
 | `image.generate` | `external-side-effect` | Writes image files |
+| `image.edit` | `external-side-effect` | Writes image files |
 | `vision.analyze` | `safe` | None |
 
-**Availability:** `image.generate` requires a configured image generation provider and API key. `vision.analyze` requires a vision-capable model route.
+**Availability:** `image.generate` requires a configured image generation provider and API key. `image.edit` requires a configured image provider, an edit-capable selected model, and safe HTTPS source images or artifacts with provider source URLs. `vision.analyze` requires a vision-capable model route.
 
 ### Voice tools
 

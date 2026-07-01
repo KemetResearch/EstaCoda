@@ -939,6 +939,9 @@ describe("ModelSelectionCatalog provider listing", () => {
 
     const local = providers.find((p) => p.id === "local");
     expect(local!.uxKind).toBe("local");
+
+    const openrouter = providers.find((p) => p.id === "openrouter");
+    expect(openrouter!.uxKind).toBe("aggregator");
   }));
 });
 

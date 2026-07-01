@@ -6,7 +6,7 @@ sidebar_position: 13
 
 # توليد الصور
 
-توليد الصور هو سير عمل أداة مدعوم من المزود. يستدعي العميل `image.generate` مع مطالبة نصية؛ يُرجع المزود المُعد رابط صورة؛ تقوم EstaCoda بتنزيل الصورة وتخزينها مؤقتًا وتسجيلها كـ artifact محلي.
+توليد الصور هو سير عمل أداة مدعوم من المزود. يستدعي العميل `image.generate` مع مطالبة نصية؛ يُرجع المزود المُعد رابط صورة؛ تقوم EstaCoda بتنزيل الصورة وتخزينها مؤقتًا وتسجيلها كـ artifact محلي. عندما يكون للنموذج المحدد نقطة نهاية للتعديل، يستطيع العميل أيضًا استدعاء `image.edit` لتعديل صور مصدرية أو دمجها بتعليمات نصية.
 
 هو ليس إمكانية نموذج مدمجة. تحتاج إلى حساب مزود، ومفتاح API، وملف شخصي مُعد لاستخدامه.
 
@@ -16,8 +16,36 @@ sidebar_position: 13
 |--------|-------------------|------------------------|-------------------|
 | FAL | `fal-ai/flux-2/klein/9b` | `FAL_KEY` | `https://fal.run` |
 | BytePlus / Seedream | `seedream-5-0-260128` | `BYTEPLUS_ARK_API_KEY` | `https://ark.ap-southeast.bytepluses.com/api/v3` |
+| OpenAI | `gpt-image-2-medium` | `OPENAI_API_KEY` | `https://api.openai.com/v1` |
 
-FAL هو المزود الافتراضي. الوصول إلى نماذج BytePlus يعتمد على الإصدار؛ يجب تفعيل النموذج في حساب Ark Console قبل الاستخدام.
+FAL هو المزود الافتراضي. الوصول إلى نماذج BytePlus يعتمد على الإصدار؛ يجب تفعيل النموذج في حساب Ark Console قبل الاستخدام. يتعرّف إعداد EstaCoda المراجع أيضًا على متغير `ARK_API_KEY` الموجود مسبقًا عند إعداد BytePlus. يستطيع إعداد OpenAI لتوليد الصور إعادة استخدام مرجع متغير بيئة OpenAI موجود في الملف الشخصي المحدد، بما في ذلك مرجع مفتاح مسار النموذج الأساسي.
+
+خيارات نماذج FAL التي يعرضها الإعداد هي:
+
+- `fal-ai/flux-2/klein/9b` (`flux-2`)
+- `fal-ai/flux-2-pro` (`flux-2-pro`)
+- `fal-ai/z-image/turbo` (`z-image`)
+- `fal-ai/nano-banana-pro` (`nano-banana-pro`)
+- `fal-ai/gpt-image-1.5` (`gpt-image-1.5`)
+- `fal-ai/gpt-image-2` (`gpt-image-2`)
+- `fal-ai/ideogram/v3` (`ideogram-v3`)
+- `fal-ai/recraft/v4/pro/text-to-image` (`recraft-v4-pro`)
+- `fal-ai/qwen-image` (`qwen-image`)
+- `fal-ai/krea/v2/medium/text-to-image` (`krea-2-medium`)
+- `fal-ai/krea/v2/large/text-to-image` (`krea-2-large`)
+
+خيارات نماذج BytePlus التي يعرضها الإعداد هي:
+
+- `seedream-5-0-260128` (`seedream-5`)
+- `seedream-5-0-lite-260128` (`seedream-5-lite`)
+- `seedream-4-5-251128` (`seedream-4.5`)
+- `seedream-4-0-250828` (`seedream-4`)
+
+خيارات نماذج OpenAI التي يعرضها الإعداد هي طبقات جودة افتراضية لـ GPT Image 2:
+
+- `gpt-image-2-low`
+- `gpt-image-2-medium` (`gpt-image-2`)
+- `gpt-image-2-high`
 
 ## الإعداد
 
@@ -26,7 +54,8 @@ FAL هو المزود الافتراضي. الوصول إلى نماذج BytePlu
 ```bash
 estacoda image setup --provider fal --model fal-ai/flux-2/klein/9b --api-key-env FAL_KEY
 estacoda image setup --provider byteplus --model-version seedream-5 --api-key-env BYTEPLUS_ARK_API_KEY
-estacoda image setup --provider fal --api-key <key>
+estacoda image setup --provider openai --model-version gpt-image-2-medium --api-key-env OPENAI_API_KEY
+estacoda image setup --provider byteplus --api-key <key>
 ```
 
 يكتب الإعداد إعدادات المزود في `~/.estacoda/profiles/<id>/config.json` تحت مفتاح `imageGen`. إذا مررت بـ `--api-key`، يخزن الأمر السر في ملف `.env` الخاص بالملف الشخصي ويُشير إليه باسم متغير البيئة.
@@ -49,6 +78,7 @@ estacoda image verify --skip-provider-check
 ```bash
 estacoda image models --provider fal
 estacoda image models --provider byteplus
+estacoda image models --provider openai
 ```
 
 ## ملف الإعدادات
@@ -76,10 +106,10 @@ estacoda image models --provider byteplus
 }
 ```
 
-- `provider`: `fal` أو `byteplus`.
-- `model`: معرف نموذج المزود الدقيق أو اسم مستعار يُحل وقت التشغيل.
-- `useGateway`: ما إذا كان التوجيه عبر وسيط البوابة. في v0.1.0 يبقى `false` للاستدعاءات المباشرة.
-- كتل المزود (`fal`، `byteplus`) يمكن أن تُجاوز `model` و `apiKeyEnv` و `baseUrl`.
+- `provider`: `fal` أو `byteplus` أو `openai`.
+- `model`: معرف نموذج المزود الدقيق أو اسم مستعار يُحل أثناء الإعداد ووقت تشغيل الأداة.
+- `useGateway`: حقل إعداد قديم. توليد الصور يستخدم حاليًا استدعاءات مباشرة للمزود.
+- كتل المزود (`fal`، `byteplus`، `openai`) يمكن أن تُجاوز `model` و `apiKeyEnv` و `baseUrl`.
 
 ## سلوك الأداة
 
@@ -92,15 +122,43 @@ estacoda image models --provider byteplus
 | `prompt` | `string` | نعم | المطالبة النصية. |
 | `aspectRatio` | `string` | لا | `square`، `landscape`، أو `portrait`. الافتراضي square. |
 | `model` | `string` | لا | يُجاوز النموذج المُعد لهذا الطلب. |
-| `seed` | `number` | لا | بذرة اختيارية لإعادة الإنتاج. |
+| `seed` | `number` | لا | بذرة اختيارية لطلبات FAL. طلبات BytePlus وOpenAI تحذف هذا الحقل. |
 
 تعيين نسبة العرض إلى الارتفاع:
 
-| النسبة | FAL | BytePlus |
-|--------|-----|----------|
-| `square` | `square_hd` | `1920x1920` |
-| `landscape` | `landscape_16_9` | `2560x1440` |
-| `portrait` | `portrait_16_9` | `1440x2560` |
+| النسبة | FAL | BytePlus | OpenAI |
+|--------|-----|----------|--------|
+| `square` | `square_hd` | `1920x1920` | `1024x1024` |
+| `landscape` | `landscape_16_9` | `2560x1440` | `1536x1024` |
+| `portrait` | `portrait_16_9` | `1440x2560` | `1024x1536` |
+
+تستخدم طلبات FAL شكل الحمولة المحدد في الكتالوج للنموذج المختار. بعض نماذج FAL تستخدم `image_size`، وبعضها يستخدم `aspect_ratio`، ويستخدم GPT Image 1.5 أبعادًا حرفية. ترشح EstaCoda حقول حمولة FAL وفق كتالوج النموذج حتى لا تُرسل مفاتيح غير مدعومة.
+
+تستخدم طلبات BytePlus نقطة نهاية ModelArk المتوافقة مع OpenAI مع `response_format: "url"` و `output_format: "png"` و `watermark: false`. وتستطيع EstaCoda أيضًا قراءة استجابات BytePlus بصيغة `b64_json` إذا أرجعها المزود أو إعداد مستقبلي.
+
+تستخدم طلبات OpenAI نقطة `/v1/images/generations` مع نموذج API الفعلي `gpt-image-2`. يحدد نموذج EstaCoda المحدد قيمة `quality` في OpenAI: `low` أو `medium` أو `high`.
+
+### تعديل الصور
+
+تستخدم `image.edit` إعداد المزود نفسه، ومفتاح API نفسه، والنموذج نفسه، وعائلة نقاط النهاية نفسها التي تستخدمها `image.generate`؛ لا توجد خطوة إعداد منفصلة للتعديل.
+
+في BytePlus، ترسل الأداة حقل الطلب الموثق `image` مع عنوان HTTPS واحد لصورة مصدرية أو مصفوفة عناوين HTTPS لصور مصدرية، وتضبط `sequential_image_generation: "disabled"` للحصول على نتيجة معدلة واحدة.
+
+في FAL، لا تُفعّل الأداة إلا إذا كان إدخال الكتالوج للنموذج المحدد يحتوي على `editEndpoint`. تستدعي الأداة نقطة النهاية هذه باستخدام الحقل الموثق `image_urls` وأي قيم افتراضية موثقة يدعمها مسار التعديل.
+
+في OpenAI، تستدعي الأداة `/v1/images/edits` مع أجزاء ملفات multipart باسم `image[]`. تُنزّل EstaCoda عناوين HTTPS الآمنة ثم ترفعها إلى OpenAI. وتُقبل artifacts الصور المحلية فقط عندما تكون artifacts صور محفوظة في ذاكرة الصور المؤقتة للملف الشخصي المحدد.
+
+المعاملات:
+
+| المعامل | النوع | مطلوب | ملاحظات |
+|---------|-------|-------|---------|
+| `prompt` | `string` | نعم | تعليمات التعديل. |
+| `sourceImages` | `string[]` | نعم، إلا إذا استُخدم `sourceImage` | عناوين HTTPS للصور، أو مراجع `artifact://`، أو معرفات artifacts. يتطلب FAL وBytePlus عناوين مصدر؛ ويمكن لـ OpenAI استخدام artifacts صور محلية من ذاكرة الصور المؤقتة. |
+| `sourceImage` | `string` | نعم، إلا إذا استُخدم `sourceImages` | إدخال مختصر لصورة واحدة. |
+| `aspectRatio` | `string` | لا | `square`، `landscape`، أو `portrait`. الافتراضي square. |
+| `model` | `string` | لا | يُجاوز نموذج المزود المُعد لهذا الطلب. |
+
+لا ترفع هذه الأداة مسارات صور محلية عشوائية. استخدم عنوان صورة HTTPS أو artifact أُنشئ سابقًا. بالنسبة إلى FAL وBytePlus، يجب أن يحتوي ذلك الـ artifact على بيانات `sourceUrl` من المزود. بالنسبة إلى OpenAI، يمكن رفع artifacts الصور الموجودة في ذاكرة الصور المؤقتة للملف الشخصي المحدد مباشرة.
 
 النتيجة:
 
@@ -114,9 +172,12 @@ estacoda image models --provider byteplus
 | العرض | السبب المحتمل | الاستعادة |
 |-------|---------------|-----------|
 | مفتاح المزود مفقود | متغير البيئة المُشار إليه في `apiKeyEnv` غير موجود. | أضف المفتاح إلى `.env` الخاص بالملف الشخصي وأعد المحاولة. |
-| مزود غير مدعوم | فقط `fal` و `byteplus` مُنفذان. | اختر مزودًا مدعومًا. |
+| مزود غير مدعوم | المزود المُعد غير مُنفذ لتوليد الصور. | اختر `fal` أو `byteplus` أو `openai`. |
 | خطأ من المزود البعيد | HTTP 4xx/5xx، فشل مصادقة، أو نموذج غير مُفعّل. | تحقق من حالة المزود، والبيانات الاعتماد، وتفعيل النموذج. |
 | فشل تنزيل عنوان URL المُنشأ | أرجع المزود عنوان URL لا يمكن جلبه. | أعد طلب الطلب؛ قد تحدث مشكلات شبكة عابرة. |
+| رفض مسار صورة محلية في `image.edit` | يقبل التعديل عناوين HTTPS آمنة. يتطلب FAL وBytePlus عناوين مصدر من المزود؛ ويقبل OpenAI artifacts الصور من ذاكرة الصور المؤقتة للملف الشخصي المحدد. | استخدم عنوان صورة HTTPS أو artifact سابقًا متوافقًا. |
+| نموذج FAL لا يدعم `image.edit` | نموذج FAL المحدد في الكتالوج لا يملك نقطة نهاية للتعديل. | اختر نموذج FAL يدعم التعديل باستخدام `estacoda image models --provider fal`. |
+| صورة مصدر OpenAI كبيرة جدًا أو غير مدعومة | يجب أن تكون مصادر تعديل OpenAI بصيغة PNG أو JPEG أو WebP وبحجم 50 MB أو أقل. | استخدم صيغة وحجمًا مدعومين لصورة المصدر. |
 | مسار إخراج غير صالح | مجلد ذاكرة التخزين المؤقت مفقود أو غير قابل للكتابة. | تنشئ EstaCoda المجلد بشكل متكرر؛ تحقق من أذونات نظام الملفات. |
 | رفض المزود / السلامة | رفض المزود المطالبة لأسباب سياسية. | أعد صياغة المطالبة أو تحقق من سياسات المحتوى للمزود. |
 | BytePlus `ModelNotOpen` | نموذج Seedream غير مُفعّل لحسابك. | فعّله في Ark Console، أو اختر نموذجًا آخر باستخدام `estacoda image models --provider byteplus`. |

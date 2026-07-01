@@ -39,7 +39,7 @@ sidebar_position: 5
 | `web.extract` | `read-only-network` | يستخرج المحتوى من عناوين URL |
 | `web.crawl` | `read-only-network` | يزحف إلى صفحات الويب |
 | `browser.*` | `external-side-effect` | يتطلب إعداد متصفح backend |
-| `image.generate` | `external-side-effect` | يتطلب بيانات اعتماد مزود الصور |
+| `image.generate` / `image.edit` | `external-side-effect` | يتطلب بيانات اعتماد مزود الصور؛ ويتطلب التعديل نموذجًا محددًا يدعم التعديل |
 | `voice.speak` | `external-side-effect` | يتطلب TTS مُعدًا؛ بيانات الاعتماد تعتمد على المزود |
 | `voice.transcribe` | `safe` | يتطلب مزود STT أو نموذج محلي |
 | `execute_code` | `caution` | ينفذ التعليمات البرمجية في sandbox |

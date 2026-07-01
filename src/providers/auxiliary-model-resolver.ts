@@ -72,9 +72,10 @@ export function resolveAuxiliaryModelRoute(
       };
     }
 
-    const profile = inferModelProfile({ provider: "openai-compatible", model: slot.id });
+    const effectiveProvider = customRouteProvider(slot);
+    const profile = inferModelProfile({ provider: effectiveProvider, model: slot.id });
     const route: ResolvedModelRoute = {
-      provider: "openai-compatible",
+      provider: effectiveProvider,
       id: slot.id,
       profile,
       baseUrl: slot.baseUrl,
@@ -88,7 +89,7 @@ export function resolveAuxiliaryModelRoute(
       source: "custom",
       fallbackToMain: slot.fallbackToMain ?? false,
       ...executionFields,
-      diagnostics: [`Custom OpenAI-compatible route at ${slot.baseUrl}`]
+      diagnostics: [customRouteDiagnostic(effectiveProvider, slot.baseUrl)]
     };
   }
 
@@ -210,6 +211,20 @@ export function resolveAuxiliaryModelRoute(
     ...executionFields,
     diagnostics: [`Auto-selected ${chosen.primary.provider}/${chosen.primary.id}`]
   };
+}
+
+function customRouteProvider(slot: AuxiliaryModelSlotConfig): ProviderId {
+  if (slot.provider !== undefined && slot.provider !== "auto" && slot.provider !== "main") {
+    return slot.provider;
+  }
+  return "openai-compatible";
+}
+
+function customRouteDiagnostic(provider: ProviderId, baseUrl: string): string {
+  if (provider === "openai-compatible") {
+    return `Custom OpenAI-compatible route at ${baseUrl}`;
+  }
+  return `Custom route for ${provider} at ${baseUrl}`;
 }
 
 function resolvedExecutionFields(slot: AuxiliaryModelSlotConfig): Pick<ResolvedAuxiliaryRoute, "timeoutMs" | "maxConcurrency"> {

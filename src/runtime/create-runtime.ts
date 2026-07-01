@@ -1371,7 +1371,8 @@ export function createDefaultProviderRegistry(selectedModel: ModelProfile): Prov
             baseUrl: metadata.defaultBaseUrl,
             apiKey: provider === "local"
               ? { kind: "none" }
-              : { kind: "env", name: getDefaultApiKeyEnv(provider) }
+              : { kind: "env", name: getDefaultApiKeyEnv(provider) },
+            headers: metadata.defaultHeaders
           },
           models
         }));
@@ -1384,7 +1385,8 @@ export function createDefaultProviderRegistry(selectedModel: ModelProfile): Prov
           baseUrl: metadata.defaultBaseUrl,
           apiKey: provider === "local"
             ? { kind: "none" }
-            : { kind: "env", name: getDefaultApiKeyEnv(provider) }
+            : { kind: "env", name: getDefaultApiKeyEnv(provider) },
+          headers: metadata.defaultHeaders
         },
         models
       }));

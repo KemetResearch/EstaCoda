@@ -83,7 +83,7 @@ sidebar_position: 7
 | `logs/` | سجلات الملف الشخصي | البوابة، التشغيل |
 | `channel-media/` | تنزيلات مرفقات القنوات | محولات البوابة |
 | `audio-cache/` | ذاكرة التخزين المؤقت للصوت | أدوات الصوت |
-| `image-cache/` | ذاكرة التخزين المؤقت للصور المُنشأة | `image.generate` |
+| `image-cache/` | ذاكرة التخزين المؤقت للصور المُنشأة والمعدّلة | `image.generate`, `image.edit` |
 | `temp/` | الملفات المؤقتة | عمليات متنوعة |
 | `temp/delegation/` | تشخيصات timeout/stale-heartbeat محدودة للتفويض عند تفعيلها | Runtime التفويض |
 | `temp/audio/` | تسجيلات CLI، ملفات auto-TTS المؤقتة، تحويل Telegram، استقبال Discord | عمليات الصوت |

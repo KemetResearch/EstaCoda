@@ -244,9 +244,7 @@ function containsArabicScript(value: string): boolean {
 }
 
 function choiceMenuDetail(row: SetupPanelState["rows"][number]): string {
-  if (row.notes.length === 0 || row.notes === row.status) return row.status;
-  if (row.status.length === 0) return row.notes;
-  return `${row.status} · ${row.notes}`;
+  return joinDetailParts(row.status, row.notes);
 }
 
 function choiceMenuRenderedRowCount(state: SetupPanelState, contentWidth: number): number {
@@ -273,9 +271,23 @@ function arabicRowDetail(
   layout: SetupPanelState["layout"]
 ): string {
   if (layout === "choiceMenu") return choiceMenuDetail(row);
-  return [row.model, row.status, row.notes]
-    .filter((value) => value.trim().length > 0)
-    .join(" · ");
+  return joinDetailParts(row.model, row.status, row.notes);
+}
+
+function joinDetailParts(...parts: readonly string[]): string {
+  const values = parts.filter((value) => value.trim().length > 0);
+  const currentIndex = values.findIndex((value) => isCurrentMarkerNote(value));
+  if (currentIndex < 0) {
+    return values.join(" · ");
+  }
+  const current = values[currentIndex]!;
+  const before = values.slice(0, currentIndex).join(" · ");
+  const after = values.slice(currentIndex + 1).join(" · ");
+  return [before, current, after].filter((value) => value.length > 0).join(" ");
+}
+
+function isCurrentMarkerNote(value: string): boolean {
+  return value.trimStart().startsWith("◆");
 }
 
 function renderWideTableRows(
@@ -329,7 +341,7 @@ function renderNarrowTableRows(
     return [
       renderSelectedContentRow(`${marker}${row.provider}`, selected, style, contentWidth, width),
       renderSelectedContentRow(`  ${row.model}`, selected, style, contentWidth, width),
-      renderSelectedContentRow(`  ${row.status} · ${row.notes}`, selected, style, contentWidth, width),
+      renderSelectedContentRow(`  ${joinDetailParts(row.status, row.notes)}`, selected, style, contentWidth, width),
       renderContentRow("", contentWidth, width),
     ];
   }).slice(0, Math.max(0, state.rows.length * 4 - 1));

@@ -103,7 +103,8 @@ sidebar_position: 5
 | المزوّد | النضج | ملاحظات |
 |---|---|---|
 | **FAL** | `live-proven` | مزوّد الإنتاج الافتراضي. يتطلب `FAL_KEY`. |
-| **BytePlus / Seedream** | `live-proven` | يتطلب `BYTEPLUS_API_KEY`. |
+| **BytePlus / Seedream** | `live-proven` | يتطلب `BYTEPLUS_ARK_API_KEY`؛ ويمكن للإعداد المراجع إعادة استخدام `ARK_API_KEY` الموجود. |
+| **OpenAI / GPT Image** | `live-proven` | يتطلب `OPENAI_API_KEY`؛ ويمكن للإعداد المراجع إعادة استخدام متغير بيئة بيانات اعتماد OpenAI موجود في الملف الشخصي المحدد. |
 
 ---
 

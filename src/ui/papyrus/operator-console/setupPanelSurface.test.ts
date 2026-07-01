@@ -42,6 +42,29 @@ describe("Papyrus operator console setup panel surface", () => {
     expect(output.every((line) => stringWidth(line) <= 44)).toBe(true);
   });
 
+  it("renders current marker without a separator before it", () => {
+    const output = renderSetupPanelSurface({
+      kind: "table",
+      layout: "choiceMenu",
+      title: "Image model",
+      description: "Choose the fal.ai image model for generation and editing, when supported.",
+      rows: [
+        {
+          id: "gpt-image-2",
+          provider: "GPT Image 2",
+          model: "",
+          status: "Advanced GPT image model with strong text rendering and photorealism.",
+          notes: "◆ Current",
+        },
+      ],
+      selectedRowId: "gpt-image-2",
+    }, { width: 120 });
+    const text = output.join("\n");
+
+    expect(text).toContain("photorealism. ◆ Current");
+    expect(text).not.toContain("photorealism. · ◆ Current");
+  });
+
   it("renders intentional multiline setup descriptions", () => {
     const output = renderSetupPanelSurface({
       kind: "table",

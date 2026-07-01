@@ -627,9 +627,7 @@ describe("runConfigEditor", () => {
         "openai",
         "local",
         "fal",
-        "",
-        "",
-        false,
+        "fal-ai/flux-2/klein/9b",
         "disabled",
         "unchanged",
         "skip",
@@ -697,6 +695,7 @@ describe("runConfigEditor", () => {
       "Voice",
       "Voice",
       "Vision and Image Generation",
+      "Image model",
       "Browser configuration",
       "Voice",
       "WhatsApp beta",
@@ -723,6 +722,12 @@ describe("runConfigEditor", () => {
     const browserModeInput = selectInputs.find((input) =>
       input.options.some((option) => option.id === "browser-disabled")
     );
+    const imageProviderInput = selectInputs.find((input) =>
+      input.options.some((option) => option.id === "byteplus")
+    );
+    const imageModelInput = selectInputs.find((input) =>
+      input.options.some((option) => option.id === "image-model-fal-ai/flux-2/klein/9b")
+    );
     const optionalActionInput = selectInputs.find((input) =>
       input.options.some((option) => option.id === "voice-enable")
     );
@@ -734,19 +739,32 @@ describe("runConfigEditor", () => {
     );
     expect(webSearchInput?.options.find((option) => option.id === "web-search-none")?.group).toBeUndefined();
     expect(browserModeInput?.options.find((option) => option.id === "browser-disabled")?.group).toBeUndefined();
+    expect(imageProviderInput?.body).toBe("Pick the provider to use for image generation and image editing, when supported. This is separate from the primary chat model.");
+    expect(imageProviderInput?.options.find((option) => option.id === "fal")?.label).toBe("fal.ai");
+    expect(imageProviderInput?.options.find((option) => option.id === "fal")?.description).toBe(
+      "Access a variety of image generation and editing models through fal.ai."
+    );
+    expect(imageProviderInput?.options.find((option) => option.id === "byteplus")?.label).toBe("BytePlus / ModelArk");
+    expect(imageProviderInput?.options.find((option) => option.id === "byteplus")?.description).toBe(
+      "Use BytePlus Seedream image models. Requires an Ark API key."
+    );
+    expect(imageProviderInput?.options.find((option) => option.id === "openai")?.label).toBe("OpenAI");
+    expect(imageProviderInput?.options.find((option) => option.id === "openai")?.description).toBe(
+      "Use OpenAI GPT Image models. Requires an OpenAI API key."
+    );
+    expect(imageModelInput?.body).toBe("Choose the fal.ai image model for generation and editing, when supported.");
+    expect(imageModelInput?.options.find((option) => option.id === "image-model-fal-ai/flux-2/klein/9b")?.description).toBe(
+      "Fast default FAL model with crisp text rendering."
+    );
     expect(optionalActionInput?.options.find((option) => option.id === "voice-enable")?.group).toBeUndefined();
     expect(optionalActionInput?.options.find((option) => option.id === "voice-unchanged")?.group).toBe("navigation");
     expect(optionalActionInput?.options.find((option) => option.id === "voice-skip")?.group).toBe("navigation");
     expect(incompleteChannelInput?.options.every((option) => option.group === "navigation")).toBe(true);
     expect(incompleteTelegramInput?.options.every((option) => option.group === "navigation")).toBe(true);
-    expect(selectInputs.find((input) =>
+    expect(selectInputs.some((input) =>
       input.title === "Image generation" &&
-      input.options.some((option) => option.id === "gateway-no")
-    )?.columns).toBeUndefined();
-    expect(selectInputs.find((input) =>
-      input.title === "Image generation" &&
-      input.options.some((option) => option.id === "gateway-no")
-    )?.options.find((option) => option.id === "gateway-no")?.group).toBeUndefined();
+      input.options.some((option) => option.id === "gateway-no" || option.id === "gateway-yes")
+    )).toBe(false);
   });
 
   it("keeps language and confirmation setup prompts stacked", async () => {
@@ -767,7 +785,6 @@ describe("runConfigEditor", () => {
         "fal",
         "",
         "",
-        true,
       ],
     });
     const selectInputs: SelectPromptInput<unknown>[] = [];
@@ -802,7 +819,7 @@ describe("runConfigEditor", () => {
     expect(ddgs).toEqual({ provider: "ddgs", ddgsSetupConfirmed: false });
     expect(browser.backend).toBe("local-cdp");
     expect(browser.autoLaunch).toBe(false);
-    expect(vision.useGateway).toBe(true);
+    expect(vision.useGateway).toBe(false);
 
     const languageInput = selectInputs.find((input) => input.title === "Setup language");
     expect(languageInput?.columns).toBeUndefined();
@@ -824,19 +841,15 @@ describe("runConfigEditor", () => {
     expect(selectInputs.find((input) => input.title === "Setup next action")?.columns).toBeUndefined();
     expect(selectInputs.find((input) => input.title === "DDGS setup")?.columns).toBeUndefined();
     expect(selectInputs.find((input) => input.title === "Local supervised browser")?.columns).toBeUndefined();
-    expect(selectInputs.find((input) =>
+    expect(selectInputs.some((input) =>
       input.title === "Image generation" &&
-      input.options.some((option) => option.id === "gateway-yes")
-    )?.columns).toBeUndefined();
+      input.options.some((option) => option.id === "gateway-no" || option.id === "gateway-yes")
+    )).toBe(false);
     expect(languageInput?.statusLines).toBeUndefined();
     const trustInput = selectInputs.find((input) => input.title === "Workspace trust");
     const reviewInput = selectInputs.find((input) => input.title === "Finalize configuration");
     const postApplyInput = selectInputs.find((input) => input.title === "Setup next action");
     const autoLaunchInput = selectInputs.find((input) => input.title === "Local supervised browser");
-    const gatewayInput = selectInputs.find((input) =>
-      input.title === "Image generation" &&
-      input.options.some((option) => option.id === "gateway-yes")
-    );
     expect(trustInput?.options.find((option) => option.id === "trust")?.group).toBeUndefined();
     expect(trustInput?.options.find((option) => option.id === "cancel")?.group).toBe("navigation");
     expect(reviewInput?.options.find((option) => option.id === "approve")?.group).toBeUndefined();
@@ -846,8 +859,6 @@ describe("runConfigEditor", () => {
     ]);
     expect(postApplyInput?.options.find((option) => option.id === "exit")?.group).toBe("navigation");
     expect(autoLaunchInput?.options.find((option) => option.id === "browser-auto-launch-no")?.group).toBeUndefined();
-    expect(gatewayInput?.options.find((option) => option.id === "gateway-no")?.group).toBeUndefined();
-    expect(gatewayInput?.options.find((option) => option.id === "gateway-yes")?.group).toBeUndefined();
   });
 
   it("shows current language and Back in the setup editor language selector without adding columns", async () => {
@@ -1578,7 +1589,7 @@ describe("runConfigEditor", () => {
     await trustWorkspace(tempDir, workspaceRoot);
     const before = await readFile(profileConfigPath(tempDir), "utf8");
     const selectInputs: SelectPromptInput<unknown>[] = [];
-    const prompt = fakePrompt({ values: ["Configure", "Back", "exit"] });
+    const prompt = fakePrompt({ values: ["Back", "exit"] });
     const baseSelect = prompt.select!;
     prompt.select = async (input) => {
       selectInputs.push(input as SelectPromptInput<unknown>);
@@ -1603,7 +1614,40 @@ describe("runConfigEditor", () => {
     await expect(readFile(profileConfigPath(tempDir), "utf8")).resolves.toBe(before);
     expect(imageProviderInput?.options.find((option) => option.label === "Back")?.group).toBe("navigation");
     expect(selectInputs.map((input) => input.title)).toEqual([
-      "Vision and image generation",
+      "Vision and Image Generation",
+      "Setup editor",
+    ]);
+  });
+
+  it("returns from image generation model Back to provider selection", async () => {
+    await writeUserConfig(tempDir, localReadyConfig());
+    await trustWorkspace(tempDir, workspaceRoot);
+    const before = await readFile(profileConfigPath(tempDir), "utf8");
+    const selectInputs: SelectPromptInput<unknown>[] = [];
+    const prompt = fakePrompt({ values: ["fal", "Back", "Back", "exit"] });
+    const baseSelect = prompt.select!;
+    prompt.select = async (input) => {
+      selectInputs.push(input as SelectPromptInput<unknown>);
+      return baseSelect(input);
+    };
+    const apply = vi.fn();
+
+    const result = await runConfigEditor({
+      homeDir: tempDir,
+      workspaceRoot,
+      prompt,
+      defaultActionId: "configure-image-generation",
+      applyExecutor: { apply },
+    });
+
+    expect(result.completed).toBe(true);
+    expect(result.selectedActionId).toBe("exit");
+    expect(result.reviewManifest).toBeUndefined();
+    expect(apply).not.toHaveBeenCalled();
+    await expect(readFile(profileConfigPath(tempDir), "utf8")).resolves.toBe(before);
+    expect(selectInputs.map((input) => input.title)).toEqual([
+      "Vision and Image Generation",
+      "Image model",
       "Vision and Image Generation",
       "Setup editor",
     ]);
@@ -3654,7 +3698,6 @@ describe("runConfigEditor", () => {
     const actions = [
       { actionId: "configure-channels" as const, values: ["telegram", "unchanged"] },
       { actionId: "configure-voice" as const, values: ["stt", "unchanged"] },
-      { actionId: "configure-image-generation" as const, values: ["unchanged"] },
       { actionId: "configure-web-search" as const, values: ["unchanged"] },
       { actionId: "configure-browser" as const, values: ["unchanged"] },
     ];
@@ -3682,6 +3725,26 @@ describe("runConfigEditor", () => {
       expect(defaultLabels.at(-1)).toBe("Configure");
       expect(result.reviewManifest).toBeUndefined();
     }
+
+    const imageOptionLabels: string[][] = [];
+    const imagePrompt = fakePrompt({ values: ["Back", "exit"] });
+    const baseImageSelect = imagePrompt.select!;
+    imagePrompt.select = async (input) => {
+      imageOptionLabels.push(input.options.map((option) => option.label));
+      return baseImageSelect(input);
+    };
+
+    const imageResult = await runConfigEditor({
+      homeDir: tempDir,
+      workspaceRoot,
+      prompt: imagePrompt,
+      defaultActionId: "configure-image-generation",
+    });
+
+    expect(imageResult.completed).toBe(true);
+    expect(imageOptionLabels[0]).toEqual(["fal.ai", "BytePlus / ModelArk", "OpenAI", "Back"]);
+    expect(imageOptionLabels.some((labels) => labels.includes("Configure"))).toBe(false);
+    expect(imageResult.reviewManifest).toBeUndefined();
   });
 
   it("lets incomplete Telegram optional capability setup skip instead of drafting blockers", async () => {
@@ -4819,13 +4882,10 @@ describe("runConfigEditor", () => {
       workspaceRoot,
       prompt: fakePrompt({
         values: [
-          "enable",
           "fal",
-          "fal-ai/imagen4/preview",
-          "FAL_KEY",
-          false,
-          true,
+          "fal-ai/flux-2/klein/9b",
         ],
+        secret: "sk-image-secret",
       }),
       defaultActionId: "configure-image-generation",
       applyExecutor: createReviewedSetupApplyExecutor({
@@ -4848,7 +4908,9 @@ describe("runConfigEditor", () => {
       "setup-module.vision.capability",
     ]);
     expect(config.imageGen?.provider).toBe("fal");
+    expect(config.imageGen?.model).toBe("fal-ai/flux-2/klein/9b");
     expect(config.imageGen?.fal?.apiKeyEnv).toBe("FAL_KEY");
+    expect(rawConfig).not.toContain("sk-image-secret");
     expect(config.channels).toBeUndefined();
     expect(config.tts).toBeUndefined();
     expect(config.stt).toBeUndefined();

@@ -12,6 +12,7 @@ import { defaultProfileId, readActiveProfile, resolveGlobalStateHome, resolvePro
 import { DDGS_CAPABILITY_ID, EDGE_TTS_CAPABILITY_ID } from "../python-env/capability-registry.js";
 import { checkManagedPythonCapabilityStatus } from "../python-env/capability-manager.js";
 import type { Prompt } from "../cli/prompt-contract.js";
+import { defaultImageApiKeyEnv } from "../contracts/image-generation.js";
 import type { SecurityApprovalMode } from "../contracts/security.js";
 import type { SkillAutonomy } from "../skills/skill-learning.js";
 import type { SetupCopyLocale } from "./setup-copy.js";
@@ -66,6 +67,12 @@ type VoiceCredentialSelection =
       readonly kind: "stub";
       readonly blocker: string;
     };
+
+type ImageCredentialSelection = {
+  readonly apiKeyEnv: string;
+  readonly pendingCredentialWrites: readonly SetupDeferredSecretWrite[];
+  readonly credentialReady: boolean;
+};
 
 export type OptionalCapabilityModule =
   | typeof telegramSetupModule
@@ -454,12 +461,25 @@ export async function collectOptionalCapabilityContext(
       if (isOptionalCapabilityBack(values)) {
         return values;
       }
+      const credential = await collectImageApiKeyCredential(options, {
+        baseContext,
+        provider: values.provider,
+        apiKeyEnv: values.apiKeyEnv,
+      });
       return {
         kind: "configured",
         context: {
           ...baseContext,
-          vision: values,
+          vision: {
+            ...values,
+            apiKeyEnv: credential.apiKeyEnv,
+            credentialSurface: "image-generation" as const,
+            credentialEnvVars: [credential.apiKeyEnv],
+            credentialReady: credential.credentialReady,
+            credentialValuesIncluded: false,
+          },
         },
+        pendingCredentialWrites: credential.pendingCredentialWrites,
       };
     }
     case "web-search": {
@@ -778,6 +798,56 @@ async function collectVoiceApiKeyCredential(
   };
 }
 
+async function collectImageApiKeyCredential(
+  options: OptionalCapabilityContextOptions & {
+    readonly prompt: Prompt;
+    readonly locale: SetupCopyLocale;
+  },
+  input: {
+    readonly baseContext: SetupModuleContext;
+    readonly provider: ImageGenerationProvider;
+    readonly apiKeyEnv: string;
+  }
+): Promise<ImageCredentialSelection> {
+  const profileId = options.profileId ?? readActiveProfile({ homeDir: options.homeDir }).profileId ?? defaultProfileId();
+  const candidates = imageCredentialEnvCandidates({
+    baseContext: input.baseContext,
+    provider: input.provider,
+    currentApiKeyEnv: input.apiKeyEnv,
+  });
+  const existingEnvVar = await firstExistingEnvCredentialSource({
+    homeDir: options.homeDir,
+    profileId,
+    envVarNames: candidates,
+  });
+  let apiKeyEnv = existingEnvVar ?? candidates[0]!;
+  let reusedExistingCredential = existingEnvVar !== undefined;
+  const pendingCredentialWrites: SetupDeferredSecretWrite[] = [];
+
+  if (existingEnvVar !== undefined) {
+    const reuseChoice = await promptCredentialReuseChoice(options.prompt, options.locale);
+    if (reuseChoice === "new") {
+      reusedExistingCredential = false;
+      apiKeyEnv = candidates[0]!;
+      const entered = await options.prompt(imageCredentialQuestion(options.locale, apiKeyEnv), { secret: true });
+      if (entered.trim().length > 0) {
+        pendingCredentialWrites.push({ envVarName: apiKeyEnv, value: entered });
+      }
+    }
+  } else {
+    const entered = await options.prompt(imageCredentialQuestion(options.locale, apiKeyEnv), { secret: true });
+    if (entered.trim().length > 0) {
+      pendingCredentialWrites.push({ envVarName: apiKeyEnv, value: entered });
+    }
+  }
+
+  return {
+    apiKeyEnv,
+    pendingCredentialWrites,
+    credentialReady: reusedExistingCredential || pendingCredentialWrites.length > 0,
+  };
+}
+
 function voiceCredentialEnvCandidates(input: {
   readonly baseContext: SetupModuleContext;
   readonly mode: "stt" | "tts";
@@ -788,6 +858,21 @@ function voiceCredentialEnvCandidates(input: {
     input.currentApiKeyEnv,
     input.mode === "stt" ? defaultSttApiKeyEnv(input.provider as SttProvider) : defaultTtsApiKeyEnv(input.provider as TtsProvider),
     ...providerCredentialEnvCandidates(input.baseContext, input.provider),
+  ].filter((value): value is string => typeof value === "string" && value.trim().length > 0);
+  return [...new Set(candidates)];
+}
+
+function imageCredentialEnvCandidates(input: {
+  readonly baseContext: SetupModuleContext;
+  readonly provider: ImageGenerationProvider;
+  readonly currentApiKeyEnv?: string;
+}): readonly string[] {
+  const candidates = [
+    input.currentApiKeyEnv,
+    input.baseContext.vision?.apiKeyEnv,
+    defaultImageApiKeyEnv(input.provider),
+    ...(input.provider === "openai" ? providerCredentialEnvCandidates(input.baseContext, "openai") : []),
+    input.provider === "byteplus" ? "ARK_API_KEY" : undefined,
   ].filter((value): value is string => typeof value === "string" && value.trim().length > 0);
   return [...new Set(candidates)];
 }
@@ -932,6 +1017,12 @@ function voiceCredentialQuestion(locale: SetupCopyLocale, mode: "stt" | "tts", e
   return setupOutputLine(locale, `${formatSetupCopy(locale, mode === "stt"
     ? "setupEditor.prompt.voice.sttSecretValue"
     : "setupEditor.prompt.voice.ttsSecretValue", {
+    envVar: setupTechnicalToken(locale, envVarName),
+  })} `);
+}
+
+function imageCredentialQuestion(locale: SetupCopyLocale, envVarName: string): string {
+  return setupOutputLine(locale, `${formatSetupCopy(locale, "setupEditor.prompt.vision.secretValue", {
     envVar: setupTechnicalToken(locale, envVarName),
   })} `);
 }
@@ -1090,6 +1181,7 @@ function visionContext(config: EstaCodaConfig): SetupModuleContext["vision"] {
     provider,
     model: stringValue(imageGen.model ?? providerConfig?.model),
     apiKeyEnv: stringValue(imageGen.apiKeyEnv ?? imageGen.api_key_env ?? providerConfig?.apiKeyEnv ?? providerConfig?.api_key_env),
+    baseUrl: stringValue(imageGen.baseUrl ?? imageGen.base_url ?? providerConfig?.baseUrl ?? providerConfig?.base_url),
     useGateway: booleanValue(imageGen.useGateway ?? imageGen.use_gateway),
   };
 }
@@ -1115,7 +1207,7 @@ function sttProviderValue(value: unknown): SttProvider | undefined {
 }
 
 function imageProviderValue(value: unknown): ImageGenerationProvider | undefined {
-  return value === "fal" || value === "byteplus" ? value : undefined;
+  return value === "fal" || value === "byteplus" || value === "openai" ? value : undefined;
 }
 
 function browserBackendValue(value: unknown): BrowserBackendKind | undefined {

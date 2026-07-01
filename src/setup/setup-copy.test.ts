@@ -88,7 +88,11 @@ const FIRST_RUN_KEYS = [
   "onboarding.summary.confirmTitle",
   "onboarding.summary.confirmMessage",
   "onboarding.summary.confirmAction",
+  "onboarding.summary.confirmAction.description",
+  "onboarding.summary.backAction.description",
   "onboarding.summary.cancelAction",
+  "onboarding.summary.cancelAction.description",
+  "onboarding.apply.cancelled",
   "onboarding.summary.labels.workspace",
   "onboarding.summary.labels.language",
   "onboarding.summary.labels.interfaceStyle",
@@ -434,8 +438,26 @@ const SETUP_EDITOR_KEYS = [
   "setupEditor.prompt.voice.sttSecretValue",
   "setupEditor.prompt.vision.summary",
   "setupEditor.prompt.vision.provider",
-  "setupEditor.prompt.vision.model",
+  "setupEditor.prompt.vision.provider.fal",
+  "setupEditor.prompt.vision.provider.fal.description",
+  "setupEditor.prompt.vision.provider.byteplus",
+  "setupEditor.prompt.vision.provider.byteplus.description",
+  "setupEditor.prompt.vision.provider.openai",
+  "setupEditor.prompt.vision.provider.openai.description",
+  "setupEditor.prompt.vision.model.title",
+  "setupEditor.prompt.vision.model.body",
+  "setupEditor.prompt.vision.model.badge.default",
+  "setupEditor.prompt.vision.model.falFlux.description",
+  "setupEditor.prompt.vision.model.seedream5.description",
+  "setupEditor.prompt.vision.model.seedream5Lite.description",
+  "setupEditor.prompt.vision.model.seedream45.description",
+  "setupEditor.prompt.vision.model.seedream40.description",
+  "setupEditor.prompt.vision.model.openaiGptImage2Low.description",
+  "setupEditor.prompt.vision.model.openaiGptImage2Medium.description",
+  "setupEditor.prompt.vision.model.openaiGptImage2High.description",
+  "setupEditor.prompt.vision.model.currentCustom.description",
   "setupEditor.prompt.vision.apiKeyEnv",
+  "setupEditor.prompt.vision.secretValue",
   "setupEditor.prompt.vision.useGateway",
   "setupEditor.prompt.webSearch.provider.title",
   "setupEditor.prompt.webSearch.provider.body",
@@ -596,7 +618,6 @@ const REVIEW_MANIFEST_KEYS = [
 ] as const;
 
 const APPLY_HANDOFF_KEYS = [
-  "setupApply.review.approved",
   "setupApply.review.cancelled",
   "setupApply.review.blocked",
   "setupApply.plan.ready",
@@ -797,6 +818,21 @@ describe("setup copy", () => {
     })).toContain(isolateLtr("BROWSERBASE_PROJECT_ID"));
     expect(resolveSetupCopy("ar", "setupEditor.prompt.browser.chromeFlags")).toContain(`خيارات ${isolateLtr("Chrome")} المتقدمة`);
     expect(resolveSetupCopy("ar", "setupEditor.prompt.browser.chromeFlags")).not.toContain("أعلام Chrome");
+    expect(resolveSetupCopy("ar", "setupEditor.prompt.vision.provider.fal.description")).toContain(isolateLtr("fal.ai"));
+    expect(resolveSetupCopy("ar", "setupEditor.prompt.vision.provider.byteplus.description")).toContain(isolateLtr("BytePlus"));
+    expect(resolveSetupCopy("ar", "setupEditor.prompt.vision.provider.byteplus.description")).toContain(isolateLtr("Seedream"));
+    expect(resolveSetupCopy("ar", "setupEditor.prompt.vision.provider.byteplus.description")).toContain(isolateLtr("Ark API"));
+    expect(resolveSetupCopy("ar", "setupEditor.prompt.vision.provider.openai.description")).toContain(isolateLtr("OpenAI"));
+    expect(resolveSetupCopy("ar", "setupEditor.prompt.vision.provider.openai.description")).toContain(isolateLtr("GPT"));
+    expect(resolveSetupCopy("ar", "setupEditor.prompt.vision.provider.openai.description")).toContain(isolateLtr("API"));
+    expect(formatSetupCopy("ar", "setupEditor.prompt.vision.model.body", {
+      provider: setupTechnicalToken("ar", "fal.ai"),
+    })).toContain(isolateLtr("fal.ai"));
+    expect(resolveSetupCopy("ar", "setupEditor.prompt.vision.model.seedream5.description")).toContain(isolateLtr("ModelArk"));
+    expect(resolveSetupCopy("ar", "setupEditor.prompt.vision.model.openaiGptImage2Medium.description")).toContain(isolateLtr("GPT Image 2"));
+    expect(formatSetupCopy("ar", "setupEditor.prompt.vision.secretValue", {
+      envVar: setupTechnicalToken("ar", "BYTEPLUS_ARK_API_KEY"),
+    })).toContain(isolateLtr("BYTEPLUS_ARK_API_KEY"));
     expect(resolveSetupCopy("ar", "setupEditor.prompt.vision.useGateway")).toContain(isolateLtr("image gateway"));
     expect(rawSetupCopy("en", "setupEditor.prompt.voice.mode.body")).toBe("Choose a voice capability to configure:");
     expect(rawSetupCopy("en", "setupEditor.prompt.voice.mode.stt")).toBe("Speech to Text (STT)");
@@ -998,9 +1034,18 @@ describe("setup copy", () => {
 
   it("falls back to English for intentionally unsupported locales", () => {
     expect(resolveSetupCopy("fr", "setupApply.review.cancelled")).toBe(
-      "Review cancelled. No apply plan, config write, or trust grant will be created."
+      "Setup cancelled. No settings were written and no credentials were saved."
     );
     expect(resolveSetupCopy("en", "setupApply.review.cancelled")).toBe(resolveSetupCopy("fr", "setupApply.review.cancelled"));
+    expect(rawSetupCopy("ar", "setupApply.review.cancelled")).toBe(
+      "تم إلغاء الإعداد. لم تُكتب أي إعدادات، ولم تُحفظ أي بيانات اعتماد."
+    );
+    expect(resolveSetupCopy("fr", "onboarding.apply.cancelled")).toBe(
+      "Setup cancelled. No settings were written, no credentials were saved, and this workspace was not trusted."
+    );
+    expect(rawSetupCopy("ar", "onboarding.apply.cancelled")).toBe(
+      "تم إلغاء الإعداد. لم تُكتب أي إعدادات، ولم تُحفظ أي بيانات اعتماد، ولم تُمنح الثقة لمساحة العمل هذه."
+    );
   });
 
   it("contains the first-run, editor, and module copy keys", () => {

@@ -14,6 +14,7 @@ import {
   addWhatsAppAllowedUser,
   setupProviderConfig,
   setupAuxiliaryModelConfig,
+  setupImageGenerationConfig,
   setupWebConfig,
   setupVoiceConfig
 } from "./runtime-config.js";
@@ -2804,6 +2805,98 @@ describe("loadRuntimeConfig media boundary", () => {
     });
   });
 
+  it("normalizes BytePlus image generation aliases and default credential env refs", async () => {
+    const workspace = await mkdtemp(join(tmpdir(), "estacoda-config-test-"));
+    await mkdir(dirname(profileConfigPath(workspace)), { recursive: true });
+    await writeFile(profileConfigPath(workspace), JSON.stringify({
+      model: { provider: "openai", id: "gpt-4o" },
+      imageGen: {
+        enabled: true,
+        provider: "byteplus",
+        model: "seedream-5-lite"
+      }
+    }));
+
+    const loaded = await loadRuntimeConfig({
+      workspaceRoot: workspace,
+      homeDir: workspace
+    });
+
+    expect(loaded.imageGen.provider).toBe("byteplus");
+    expect(loaded.imageGen.model).toBe("seedream-5-0-lite-260128");
+    expect(loaded.imageGen.apiKeyEnv).toBe("BYTEPLUS_ARK_API_KEY");
+    expect(loaded.imageGen.byteplus?.model).toBe("seedream-5-0-lite-260128");
+    expect(loaded.imageGen.byteplus?.apiKeyEnv).toBe("BYTEPLUS_ARK_API_KEY");
+    expect(loaded.imageGen.fal?.apiKeyEnv).toBe("FAL_KEY");
+
+    await rm(workspace, { recursive: true, force: true });
+  });
+
+  it("normalizes OpenAI image generation virtual model aliases and default credential env refs", async () => {
+    const workspace = await mkdtemp(join(tmpdir(), "estacoda-config-test-"));
+    await mkdir(dirname(profileConfigPath(workspace)), { recursive: true });
+    await writeFile(profileConfigPath(workspace), JSON.stringify({
+      model: { provider: "openai", id: "gpt-4o" },
+      imageGen: {
+        enabled: true,
+        provider: "openai",
+        model: "gpt-image-2"
+      }
+    }));
+
+    const loaded = await loadRuntimeConfig({
+      workspaceRoot: workspace,
+      homeDir: workspace
+    });
+
+    expect(loaded.imageGen.provider).toBe("openai");
+    expect(loaded.imageGen.model).toBe("gpt-image-2-medium");
+    expect(loaded.imageGen.apiKeyEnv).toBe("OPENAI_API_KEY");
+    expect(loaded.imageGen.openai?.model).toBe("gpt-image-2-medium");
+    expect(loaded.imageGen.openai?.apiKeyEnv).toBe("OPENAI_API_KEY");
+    expect(loaded.imageGen.openai?.baseUrl).toBe("https://api.openai.com/v1");
+    expect(loaded.imageGen.byteplus?.apiKeyEnv).toBe("BYTEPLUS_ARK_API_KEY");
+    expect(loaded.imageGen.fal?.apiKeyEnv).toBe("FAL_KEY");
+
+    await rm(workspace, { recursive: true, force: true });
+  });
+
+  it("resolves image model-version aliases only for the selected provider", async () => {
+    const workspace = await mkdtemp(join(tmpdir(), "estacoda-config-test-"));
+    await mkdir(dirname(profileConfigPath(workspace)), { recursive: true });
+    await writeFile(profileConfigPath(workspace), JSON.stringify({
+      model: { provider: "openai", id: "gpt-4o" }
+    }));
+
+    await setupImageGenerationConfig({
+      workspaceRoot: workspace,
+      homeDir: workspace,
+      input: {
+        provider: "fal",
+        modelVersion: "flux-2-pro",
+        apiKeyEnv: "FAL_KEY"
+      }
+    });
+
+    const loaded = await loadRuntimeConfig({
+      workspaceRoot: workspace,
+      homeDir: workspace
+    });
+
+    expect(loaded.imageGen.model).toBe("fal-ai/flux-2-pro");
+    await expect(setupImageGenerationConfig({
+      workspaceRoot: workspace,
+      homeDir: workspace,
+      input: {
+        provider: "fal",
+        modelVersion: "seedream-5",
+        apiKeyEnv: "FAL_KEY"
+      }
+    })).rejects.toThrow("Unknown image model alias seedream-5 for provider fal");
+
+    await rm(workspace, { recursive: true, force: true });
+  });
+
   it("defaults response progress visibility to hidden", async () => {
     const workspace = await mkdtemp(join(tmpdir(), "estacoda-config-test-"));
     await mkdir(dirname(profileConfigPath(workspace)), { recursive: true });
@@ -2984,6 +3077,70 @@ describe("buildProviderRegistry custom provider baseUrl behavior", () => {
     expect(adapter).toBeDefined();
     expect(adapter?.endpoint?.baseUrl).toBe("https://api.moonshot.ai/v1");
     await rm(workspace, { recursive: true, force: true });
+  });
+
+  it("known OpenRouter provider applies metadata attribution headers", async () => {
+    const workspace = await mkdtemp(join(tmpdir(), "estacoda-config-test-"));
+    try {
+      await mkdir(dirname(profileConfigPath(workspace)), { recursive: true });
+      await writeFile(profileConfigPath(workspace), JSON.stringify({
+        model: { provider: "openrouter", id: "openrouter/auto" },
+        providers: {
+          openrouter: {
+            kind: "openai-compatible",
+            models: ["openrouter/auto"]
+          }
+        }
+      }));
+
+      const loaded = await loadRuntimeConfig({
+        workspaceRoot: workspace,
+        homeDir: workspace
+      });
+
+      const adapter = loaded.providerRegistry.get("openrouter");
+      expect(adapter).toBeDefined();
+      expect(adapter?.endpoint?.headers).toMatchObject({
+        "HTTP-Referer": "https://estacoda.kemetresearch.com",
+        "X-Title": "EstaCoda"
+      });
+    } finally {
+      await rm(workspace, { recursive: true, force: true });
+    }
+  });
+
+  it("known OpenRouter provider lets configured headers override metadata defaults", async () => {
+    const workspace = await mkdtemp(join(tmpdir(), "estacoda-config-test-"));
+    try {
+      await mkdir(dirname(profileConfigPath(workspace)), { recursive: true });
+      await writeFile(profileConfigPath(workspace), JSON.stringify({
+        model: { provider: "openrouter", id: "openrouter/auto" },
+        providers: {
+          openrouter: {
+            kind: "openai-compatible",
+            headers: {
+              "HTTP-Referer": "https://workspace.example.com",
+              "X-Custom": "value"
+            },
+            models: ["openrouter/auto"]
+          }
+        }
+      }));
+
+      const loaded = await loadRuntimeConfig({
+        workspaceRoot: workspace,
+        homeDir: workspace
+      });
+
+      const adapter = loaded.providerRegistry.get("openrouter");
+      expect(adapter?.endpoint?.headers).toEqual({
+        "HTTP-Referer": "https://workspace.example.com",
+        "X-Title": "EstaCoda",
+        "X-Custom": "value"
+      });
+    } finally {
+      await rm(workspace, { recursive: true, force: true });
+    }
   });
 
   it("loadRuntimeConfig primary route for custom provider without baseUrl has baseUrl === undefined", async () => {

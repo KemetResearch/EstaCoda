@@ -21,7 +21,8 @@ export type ProviderModelRoutePromptMode =
   | "primary"
   | "fallback"
   | "auxiliary"
-  | "onboarding";
+  | "onboarding"
+  | "session";
 
 export type SelectProviderModelRouteOptions = {
   readonly prompt: Prompt;
@@ -49,8 +50,15 @@ type ProviderPromptAction =
 
 type ModelPromptAction =
   | { readonly kind: "model"; readonly model: ModelCandidate }
+  | { readonly kind: "next-page" }
+  | { readonly kind: "previous-page" }
   | { readonly kind: "back" }
   | { readonly kind: "cancel" };
+
+type ModelPromptResultAction = Exclude<
+  ModelPromptAction,
+  { readonly kind: "next-page" } | { readonly kind: "previous-page" }
+>;
 
 type OpenAiCodexPromptAction =
   | { readonly kind: "openai" }
@@ -59,6 +67,8 @@ type OpenAiCodexPromptAction =
   | { readonly kind: "cancel" };
 
 const PROMPT_HINT = "↑↓ navigate   ENTER select";
+const ARABIC_MODEL_PAGE_SIZE = 15;
+const ENGLISH_OPENROUTER_MODEL_PAGE_SIZE = 25;
 
 export async function selectProviderModelRoute(
   options: SelectProviderModelRouteOptions
@@ -66,7 +76,7 @@ export async function selectProviderModelRoute(
   const allProviders = await options.flowEngine.listProviderCandidates();
   const providers = providerPromptCandidates(options, allProviders);
   if (providers.length === 0) {
-    return { kind: "diagnostic", output: "No setup-visible provider candidates are available." };
+    return { kind: "diagnostic", output: noProviderCandidatesMessage(options.locale, options.mode) };
   }
 
   while (true) {
@@ -95,7 +105,7 @@ export async function selectProviderModelRoute(
 
     const models = await options.flowEngine.listModelCandidates(provider.id);
     if (models.length === 0) {
-      return { kind: "diagnostic", output: `No setup-visible models are available for ${provider.displayName}.` };
+      return { kind: "diagnostic", output: noModelCandidatesMessage(options.locale, options.mode, provider.displayName) };
     }
 
     if (shouldDeferModelSelectionToEndpointFlow(options, provider)) {
@@ -196,43 +206,178 @@ async function promptModel(
   options: SelectProviderModelRouteOptions,
   provider: ProviderCandidate,
   candidates: readonly ModelCandidate[]
-): Promise<ModelPromptAction> {
-  const currentModelVisible =
+): Promise<ModelPromptResultAction> {
+  const currentModelInProviderList =
     provider.id === options.currentProviderId &&
     options.currentModelId !== undefined &&
     candidates.some((candidate) => candidate.id === options.currentModelId);
-  const currentModelIndex = currentModelVisible
+  const currentModelIndex = currentModelInProviderList
     ? candidates.findIndex((candidate) => candidate.id === options.currentModelId)
     : -1;
-  const promptOptions: Array<SelectPromptInput<ModelPromptAction>["options"][number]> = [
-    ...candidates.map((candidate) => ({
-      id: candidate.id,
-      label: candidate.id,
-      value: { kind: "model" as const, model: candidate },
-      cells: {
-        name: candidate.id,
-        details: modelCandidateDescription(options.locale, candidate),
-      },
-      current: provider.id === options.currentProviderId && candidate.id === options.currentModelId,
-    })),
-    ...navigationOptions<ModelPromptAction>(options),
-  ];
+  const pageSize = modelPageSize(options, provider, candidates);
+  const totalPages = pageSize !== undefined ? Math.ceil(candidates.length / pageSize) : 1;
+  let pageIndex = pageSize !== undefined && currentModelIndex >= 0
+    ? Math.floor(currentModelIndex / pageSize)
+    : 0;
 
-  return selectStructuredOption(options.prompt, {
-    title: modelTitle(options.locale, options.mode),
-    body: `${modelBody(options.locale, options.mode).replace("{providerId}", provider.id)}\n`,
-    statusLines: currentRouteStatusLines(options.locale, options.currentProviderId, options.currentModelId),
-    technicalLines: currentModelNotShownLines(options.locale, provider.id, options.currentProviderId, options.currentModelId, currentModelVisible),
-    columns: promptColumns(options.locale),
-    options: promptOptions,
-    defaultIndex: currentModelIndex >= 0 ? currentModelIndex : 0,
-    fallbackPrompt: "Choose: ",
-    surface: "promptCard",
-    hint: PROMPT_HINT,
-    showCurrentBadge: false,
-    locale: options.locale,
-    direction: options.locale === "ar" ? "rtl" : "ltr",
-  });
+  while (true) {
+    const pageStart = pageSize !== undefined ? pageIndex * pageSize : 0;
+    const pageEnd = pageSize !== undefined ? Math.min(pageStart + pageSize, candidates.length) : candidates.length;
+    const visibleCandidates = candidates.slice(pageStart, pageEnd);
+    const currentModelPageIndex = currentModelIndex >= pageStart && currentModelIndex < pageEnd
+      ? currentModelIndex - pageStart
+      : -1;
+    const promptOptions: Array<SelectPromptInput<ModelPromptAction>["options"][number]> = [
+      ...visibleCandidates.map((candidate) => ({
+        id: candidate.id,
+        label: candidate.id,
+        value: { kind: "model" as const, model: candidate },
+        cells: {
+          name: candidate.id,
+          details: modelCandidateDescription(options.locale, candidate),
+        },
+        current: provider.id === options.currentProviderId && candidate.id === options.currentModelId,
+      })),
+      ...modelPageNavigationOptions(options.locale, pageIndex, totalPages),
+      ...navigationOptions<ModelPromptAction>(options),
+    ];
+
+    const modelAction = await selectStructuredOption(options.prompt, {
+      title: modelTitle(options.locale, options.mode),
+      body: `${modelBody(options.locale, options.mode).replace("{providerId}", provider.id)}\n`,
+      statusLines: currentRouteStatusLines(options.locale, options.currentProviderId, options.currentModelId),
+      technicalLines: modelTechnicalLines(options.locale, provider, options, candidates, pageStart, pageEnd, currentModelInProviderList, pageSize !== undefined),
+      columns: promptColumns(options.locale),
+      options: promptOptions,
+      defaultIndex: currentModelPageIndex >= 0 ? currentModelPageIndex : 0,
+      fallbackPrompt: "Choose: ",
+      surface: "promptCard",
+      hint: PROMPT_HINT,
+      showCurrentBadge: false,
+      locale: options.locale,
+      direction: options.locale === "ar" ? "rtl" : "ltr",
+    });
+
+    if (modelAction.kind === "next-page") {
+      pageIndex = Math.min(pageIndex + 1, totalPages - 1);
+      continue;
+    }
+    if (modelAction.kind === "previous-page") {
+      pageIndex = Math.max(pageIndex - 1, 0);
+      continue;
+    }
+    return modelAction;
+  }
+}
+
+function modelPageSize(
+  options: SelectProviderModelRouteOptions,
+  provider: ProviderCandidate,
+  candidates: readonly ModelCandidate[]
+): number | undefined {
+  if (options.locale === "ar" && candidates.length > ARABIC_MODEL_PAGE_SIZE) {
+    return ARABIC_MODEL_PAGE_SIZE;
+  }
+
+  if (provider.id === "openrouter" &&
+    (
+      options.mode === "primary" ||
+      options.mode === "fallback" ||
+      options.mode === "auxiliary" ||
+      options.mode === "onboarding"
+    ) &&
+    candidates.length > ENGLISH_OPENROUTER_MODEL_PAGE_SIZE) {
+    return ENGLISH_OPENROUTER_MODEL_PAGE_SIZE;
+  }
+
+  return undefined;
+}
+
+function modelPageNavigationOptions(
+  locale: SetupCopyLocale,
+  pageIndex: number,
+  totalPages: number
+): Array<SelectPromptInput<ModelPromptAction>["options"][number]> {
+  if (totalPages <= 1) {
+    return [];
+  }
+
+  const rows: Array<SelectPromptInput<ModelPromptAction>["options"][number]> = [];
+  if (pageIndex > 0) {
+    rows.push({
+      id: "previous-page",
+      label: previousPageLabel(locale),
+      value: { kind: "previous-page" },
+      group: "navigation",
+      cells: {
+        name: previousPageLabel(locale),
+        details: pageNavigationDetails(locale, pageIndex, totalPages),
+      },
+    });
+  }
+  if (pageIndex < totalPages - 1) {
+    rows.push({
+      id: "next-page",
+      label: nextPageLabel(locale),
+      value: { kind: "next-page" },
+      group: "navigation",
+      cells: {
+        name: nextPageLabel(locale),
+        details: pageNavigationDetails(locale, pageIndex + 2, totalPages),
+      },
+    });
+  }
+  return rows;
+}
+
+function modelTechnicalLines(
+  locale: SetupCopyLocale,
+  provider: ProviderCandidate,
+  options: SelectProviderModelRouteOptions,
+  candidates: readonly ModelCandidate[],
+  pageStart: number,
+  pageEnd: number,
+  currentModelInProviderList: boolean,
+  paginate: boolean
+): readonly string[] | undefined {
+  const lines = [
+    ...(currentModelNotShownLines(locale, provider.id, options.currentProviderId, options.currentModelId, currentModelInProviderList) ?? []),
+  ];
+  if (paginate) {
+    lines.push(modelPageStatus(locale, pageStart, pageEnd, candidates.length));
+  }
+  return lines.length > 0 ? lines : undefined;
+}
+
+function modelPageStatus(
+  locale: SetupCopyLocale,
+  pageStart: number,
+  pageEnd: number,
+  totalModels: number
+): string {
+  if (locale === "ar") {
+    return `النماذج ${isolateLtr(String(pageStart + 1))}-${isolateLtr(String(pageEnd))} من ${isolateLtr(String(totalModels))}.`;
+  }
+  return `Models ${pageStart + 1}-${pageEnd} of ${totalModels}.`;
+}
+
+function pageNavigationDetails(
+  locale: SetupCopyLocale,
+  pageNumber: number,
+  totalPages: number
+): string {
+  if (locale === "ar") {
+    return `اعرض الصفحة ${isolateLtr(String(pageNumber))} من ${isolateLtr(String(totalPages))}.`;
+  }
+  return `Show page ${pageNumber} of ${totalPages}.`;
+}
+
+function previousPageLabel(locale: SetupCopyLocale): string {
+  return locale === "ar" ? "السابق" : "Previous";
+}
+
+function nextPageLabel(locale: SetupCopyLocale): string {
+  return locale === "ar" ? "التالي" : "Next";
 }
 
 async function promptOpenAiCodexChoice(
@@ -316,7 +461,7 @@ function navigationOptions<T extends { readonly kind: string }>(
       group: "navigation",
       cells: {
         name: setupCopyText(options.locale, "onboarding.review.cancelAction"),
-        details: cancelDetails(options.locale),
+        details: cancelDetails(options.locale, options.mode),
       },
     });
   }
@@ -505,24 +650,28 @@ function formatRoute(providerId: string, modelId: string): string {
 function providerTitle(locale: SetupCopyLocale, mode: ProviderModelRoutePromptMode): string {
   if (mode === "fallback") return locale === "ar" ? "المزوّد الاحتياطي" : "Fallback provider";
   if (mode === "auxiliary") return locale === "ar" ? "المزوّد المساعد" : "Auxiliary provider";
+  if (mode === "session") return locale === "ar" ? "مزوّد الجلسة" : "Session provider";
   return setupCopyText(locale, "onboarding.providers.primary.title");
 }
 
 function providerBody(locale: SetupCopyLocale, mode: ProviderModelRoutePromptMode): string {
   if (mode === "fallback") return locale === "ar" ? "اختر مزوّدًا احتياطيًا." : "Choose a fallback provider.";
   if (mode === "auxiliary") return locale === "ar" ? "اختر مزوّدًا مساعدًا." : "Choose an auxiliary provider.";
+  if (mode === "session") return locale === "ar" ? "اختر المزوّد الذي سيُستخدم لهذه الجلسة فقط." : "Choose the provider to use for this session only.";
   return setupCopyText(locale, "onboarding.providers.primary");
 }
 
 function modelTitle(locale: SetupCopyLocale, mode: ProviderModelRoutePromptMode): string {
   if (mode === "fallback") return locale === "ar" ? "النموذج الاحتياطي" : "Fallback model";
   if (mode === "auxiliary") return locale === "ar" ? "النموذج المساعد" : "Auxiliary model";
+  if (mode === "session") return locale === "ar" ? "نموذج الجلسة" : "Session model";
   return setupCopyText(locale, "onboarding.providers.primaryModel.title");
 }
 
 function modelBody(locale: SetupCopyLocale, mode: ProviderModelRoutePromptMode): string {
   if (mode === "fallback") return locale === "ar" ? "اختر النموذج الاحتياطي للمزوّد {providerId}." : "Choose the fallback model for {providerId}.";
   if (mode === "auxiliary") return locale === "ar" ? "اختر النموذج المساعد للمزوّد {providerId}." : "Choose the auxiliary model for {providerId}.";
+  if (mode === "session") return locale === "ar" ? "اختر النموذج الذي سيُستخدم لهذه الجلسة فقط من {providerId}." : "Choose the model to use for this session only from {providerId}.";
   return setupCopyText(locale, "onboarding.providers.primaryModel");
 }
 
@@ -534,6 +683,31 @@ function backDetails(locale: SetupCopyLocale): string {
   return setupCopyText(locale, "onboarding.providers.navigation.back.description");
 }
 
-function cancelDetails(locale: SetupCopyLocale): string {
+function cancelDetails(locale: SetupCopyLocale, mode: ProviderModelRoutePromptMode): string {
+  if (mode === "session") {
+    return locale === "ar" ? "احتفظ بنموذج الجلسة الحالي." : "Keep the current session model.";
+  }
   return locale === "ar" ? "اخرج بدون تغيير الإعداد." : "Exit without changing setup.";
+}
+
+function noProviderCandidatesMessage(locale: SetupCopyLocale, mode: ProviderModelRoutePromptMode): string {
+  if (mode === "session") {
+    return locale === "ar"
+      ? `لا توجد مزوّدات نماذج مهيأة وقابلة للتشغيل. شغّل ${isolateLtr("estacoda model setup")} من الطرفية.`
+      : "No configured runnable model providers are ready. Run estacoda model setup from a terminal.";
+  }
+  return "No setup-visible provider candidates are available.";
+}
+
+function noModelCandidatesMessage(
+  locale: SetupCopyLocale,
+  mode: ProviderModelRoutePromptMode,
+  providerName: string
+): string {
+  if (mode === "session") {
+    return locale === "ar"
+      ? `لا توجد نماذج قابلة للتشغيل مهيأة لـ ${isolateLtr(providerName)}. شغّل ${isolateLtr("estacoda model setup")} من الطرفية.`
+      : `No runnable models are configured for ${providerName}. Run estacoda model setup from a terminal.`;
+  }
+  return `No setup-visible models are available for ${providerName}.`;
 }

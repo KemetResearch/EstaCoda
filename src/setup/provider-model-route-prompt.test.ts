@@ -85,6 +85,50 @@ describe("selectProviderModelRoute", () => {
     expect(flow.resolved).toHaveLength(0);
   });
 
+  it("uses session-specific copy for session model switching", async () => {
+    const flow = fakeFlow();
+    const prompt = fakePrompt(["cancel"]);
+
+    const result = await selectProviderModelRoute({
+      prompt,
+      flowEngine: flow.engine,
+      locale: "en",
+      mode: "session",
+      allowCancel: true,
+    });
+
+    expect(result).toEqual({ kind: "cancel" });
+    expect(prompt.calls[0]).toMatchObject({
+      title: "Session provider",
+      body: "Choose the provider to use for this session only.\n",
+    });
+    expect(prompt.calls[0]?.options.find((option) => option.id === "cancel")).toMatchObject({
+      cells: {
+        name: "Cancel",
+        details: "Keep the current session model.",
+      },
+    });
+  });
+
+  it("returns session-specific diagnostics when no ready providers are available", async () => {
+    const flow = fakeFlow({ providers: [] });
+    const prompt = fakePrompt();
+
+    const result = await selectProviderModelRoute({
+      prompt,
+      flowEngine: flow.engine,
+      locale: "en",
+      mode: "session",
+    });
+
+    expect(result).toEqual({
+      kind: "diagnostic",
+      output: "No configured runnable model providers are ready. Run estacoda model setup from a terminal.",
+    });
+    expect(prompt.calls).toHaveLength(0);
+    expect(flow.resolved).toHaveLength(0);
+  });
+
   it("returns diagnostic when selected provider has no models", async () => {
     const flow = fakeFlow({ models: { openai: [] } });
     const prompt = fakePrompt();
@@ -426,6 +470,184 @@ describe("selectProviderModelRoute", () => {
     });
     expect(providerPrompt.options[0]?.group).toBeUndefined();
     expect(modelPrompt.options[0]?.group).toBeUndefined();
+  });
+
+  it("paginates OpenRouter model choices for setup editor and onboarding route modes", async () => {
+    for (const mode of ["primary", "fallback", "auxiliary", "onboarding"] as const) {
+      const openRouterModels = Array.from({ length: 30 }, (_, index) =>
+        modelCandidate("openrouter", `openrouter-model-${String(index + 1).padStart(2, "0")}`));
+      const flow = fakeFlow({
+        providers: [providerCandidate("openrouter", "OpenRouter", openRouterModels.length)],
+        models: { openrouter: openRouterModels },
+      });
+      const prompt = fakePrompt(["openrouter", "next-page", "openrouter-model-26"]);
+
+      const result = await selectProviderModelRoute({
+        prompt,
+        flowEngine: flow.engine,
+        locale: "en",
+        mode,
+        allowBack: true,
+        allowCancel: true,
+      });
+
+      expect(result).toEqual({
+        kind: "selected",
+        selection: selectionResult("openrouter", "openrouter-model-26"),
+      });
+      expect(prompt.calls).toHaveLength(3);
+      expect(prompt.calls[1]?.options.map((option) => option.id)).toEqual([
+        ...openRouterModels.slice(0, 25).map((model) => model.id),
+        "next-page",
+        "back",
+        "cancel",
+      ]);
+      expect(prompt.calls[1]?.options.map((option) => option.id)).not.toContain("openrouter-model-26");
+      expect(prompt.calls[1]?.technicalLines).toEqual(["Models 1-25 of 30."]);
+      expect(prompt.calls[2]?.options.map((option) => option.id)).toEqual([
+        ...openRouterModels.slice(25).map((model) => model.id),
+        "previous-page",
+        "back",
+        "cancel",
+      ]);
+      expect(prompt.calls[2]?.technicalLines).toEqual(["Models 26-30 of 30."]);
+      expect(flow.resolved).toEqual([{ providerId: "openrouter", modelId: "openrouter-model-26" }]);
+    }
+  });
+
+  it("starts OpenRouter pagination on the page that contains the current model", async () => {
+    const openRouterModels = Array.from({ length: 30 }, (_, index) =>
+      modelCandidate("openrouter", `openrouter-model-${String(index + 1).padStart(2, "0")}`));
+    const flow = fakeFlow({
+      providers: [providerCandidate("openrouter", "OpenRouter", openRouterModels.length)],
+      models: { openrouter: openRouterModels },
+    });
+    const prompt = fakePrompt(["openrouter", "openrouter-model-30"]);
+
+    await selectProviderModelRoute({
+      prompt,
+      flowEngine: flow.engine,
+      locale: "en",
+      mode: "primary",
+      allowBack: true,
+      allowCancel: true,
+      currentProviderId: "openrouter",
+      currentModelId: "openrouter-model-30",
+    });
+
+    expect(prompt.calls[1]?.defaultIndex).toBe(4);
+    expect(prompt.calls[1]?.options.map((option) => option.id)).toEqual([
+      ...openRouterModels.slice(25).map((model) => model.id),
+      "previous-page",
+      "back",
+      "cancel",
+    ]);
+    expect(prompt.calls[1]?.options[4]).toMatchObject({
+      id: "openrouter-model-30",
+      current: true,
+    });
+    expect(prompt.calls[1]?.technicalLines).toEqual(["Models 26-30 of 30."]);
+  });
+
+  it("paginates long Arabic model lists at 15 rows across providers and session mode", async () => {
+    for (const scenario of [
+      {
+        providerId: "openai" as ProviderId,
+        displayName: "OpenAI",
+        mode: "primary" as const,
+        navigationRows: ["next-page", "back", "cancel"],
+        secondPageNavigationRows: ["previous-page", "back", "cancel"],
+        allowBack: true,
+      },
+      {
+        providerId: "openrouter" as ProviderId,
+        displayName: "OpenRouter",
+        mode: "session" as const,
+        navigationRows: ["next-page", "cancel"],
+        secondPageNavigationRows: ["previous-page", "cancel"],
+        allowBack: false,
+      },
+    ]) {
+      const models = Array.from({ length: 20 }, (_, index) =>
+        modelCandidate(scenario.providerId, `${scenario.providerId}-model-${String(index + 1).padStart(2, "0")}`));
+      const flow = fakeFlow({
+        providers: [providerCandidate(scenario.providerId, scenario.displayName, models.length)],
+        models: { [scenario.providerId]: models },
+      });
+      const prompt = fakePrompt([
+        scenario.providerId,
+        "next-page",
+        `${scenario.providerId}-model-16`,
+      ]);
+
+      const result = await selectProviderModelRoute({
+        prompt,
+        flowEngine: flow.engine,
+        locale: "ar",
+        mode: scenario.mode,
+        allowBack: scenario.allowBack,
+        allowCancel: true,
+      });
+
+      expect(result).toEqual({
+        kind: "selected",
+        selection: selectionResult(scenario.providerId, `${scenario.providerId}-model-16`),
+      });
+      expect(prompt.calls).toHaveLength(3);
+      expect(prompt.calls[1]?.options.map((option) => option.id)).toEqual([
+        ...models.slice(0, 15).map((model) => model.id),
+        ...scenario.navigationRows,
+      ]);
+      expect(prompt.calls[1]?.options.find((option) => option.id === "next-page")).toMatchObject({
+        cells: {
+          name: "التالي",
+          details: "اعرض الصفحة \u20662\u2069 من \u20662\u2069.",
+        },
+      });
+      expect(prompt.calls[1]?.technicalLines).toEqual([
+        "النماذج \u20661\u2069-\u206615\u2069 من \u206620\u2069.",
+      ]);
+      expect(prompt.calls[2]?.options.map((option) => option.id)).toEqual([
+        ...models.slice(15).map((model) => model.id),
+        ...scenario.secondPageNavigationRows,
+      ]);
+      expect(prompt.calls[2]?.technicalLines).toEqual([
+        "النماذج \u206616\u2069-\u206620\u2069 من \u206620\u2069.",
+      ]);
+      expect(flow.resolved).toEqual([{ providerId: scenario.providerId, modelId: `${scenario.providerId}-model-16` }]);
+    }
+  });
+
+  it("leaves long non-OpenRouter model lists unpaginated", async () => {
+    const openAiModels = Array.from({ length: 30 }, (_, index) =>
+      modelCandidate("openai", `openai-model-${String(index + 1).padStart(2, "0")}`));
+    const flow = fakeFlow({
+      providers: [providerCandidate("openai", "OpenAI", openAiModels.length)],
+      models: { openai: openAiModels },
+    });
+    const prompt = fakePrompt(["openai", "openai-model-30"]);
+
+    const result = await selectProviderModelRoute({
+      prompt,
+      flowEngine: flow.engine,
+      locale: "en",
+      mode: "primary",
+      allowBack: true,
+      allowCancel: true,
+    });
+
+    expect(result).toEqual({
+      kind: "selected",
+      selection: selectionResult("openai", "openai-model-30"),
+    });
+    expect(prompt.calls).toHaveLength(2);
+    expect(prompt.calls[1]?.options.map((option) => option.id)).toEqual([
+      ...openAiModels.map((model) => model.id),
+      "back",
+      "cancel",
+    ]);
+    expect(prompt.calls[1]?.options.map((option) => option.id)).not.toContain("next-page");
+    expect(prompt.calls[1]?.technicalLines).toBeUndefined();
   });
 
   it("does not mark Back or Cancel rows as current", async () => {

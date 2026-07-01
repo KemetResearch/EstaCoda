@@ -6,7 +6,7 @@ import type { ImageGenerationFetchLike } from "./image-generation-tools.js";
 
 export type ImageGenerationVerification = {
   ok: boolean;
-  provider: "fal" | "byteplus";
+  provider: ImageGenerationProvider;
   model: string;
   apiKeyEnv: string;
   apiKeyPresent: boolean;
@@ -27,9 +27,7 @@ export async function verifyImageGeneration(options: {
 }): Promise<ImageGenerationVerification> {
   const provider = options.imageGen.provider;
   const model = options.imageGen.model;
-  const apiKeyEnv = provider === "byteplus"
-    ? options.imageGen.byteplus?.apiKeyEnv ?? defaultImageApiKeyEnv("byteplus")
-    : options.imageGen.fal?.apiKeyEnv ?? defaultImageApiKeyEnv("fal");
+  const apiKeyEnv = imageProviderApiKeyEnv(options.imageGen, provider);
   const apiKeyPresent = (process.env[apiKeyEnv] ?? "").length > 0;
   const homeDir = resolveHomeDir(options.homeDir);
   const profileId = readActiveProfile({ homeDir }).profileId ?? defaultProfileId();
@@ -67,7 +65,9 @@ export async function verifyImageGeneration(options: {
   const fetcher = options.fetch ?? globalImageVerifyFetch;
   const result = await (provider === "byteplus"
     ? verifyBytePlus(options.imageGen, fetcher)
-    : verifyFal(options.imageGen, fetcher));
+    : provider === "openai"
+      ? verifyOpenAI(options.imageGen, fetcher)
+      : verifyFal(options.imageGen, fetcher));
   return {
     ok: result.ok,
     provider,
@@ -81,11 +81,16 @@ export async function verifyImageGeneration(options: {
   };
 }
 
+function imageProviderApiKeyEnv(imageGen: LoadedRuntimeConfig["imageGen"], provider: ImageGenerationProvider): string {
+  if (provider === "byteplus") return imageGen.byteplus?.apiKeyEnv ?? defaultImageApiKeyEnv("byteplus");
+  if (provider === "openai") return imageGen.openai?.apiKeyEnv ?? defaultImageApiKeyEnv("openai");
+  return imageGen.fal?.apiKeyEnv ?? defaultImageApiKeyEnv("fal");
+}
+
 async function verifyFal(imageGen: LoadedRuntimeConfig["imageGen"], fetcher: ImageGenerationFetchLike): Promise<{ ok: boolean; message: string }> {
   const apiKeyEnv = imageGen.fal?.apiKeyEnv ?? defaultImageApiKeyEnv("fal");
   const apiKey = process.env[apiKeyEnv] ?? "";
-  const baseUrl = (imageGen.fal?.baseUrl ?? imageGen.baseUrl ?? defaultImageBaseUrl("fal")).replace(/\/$/, "");
-  const response = await fetcher(`${baseUrl}/${imageGen.model}`, {
+  const response = await fetcher("https://api.fal.ai/v1/models?limit=1", {
     method: "GET",
     headers: {
       authorization: `Key ${apiKey}`
@@ -100,6 +105,20 @@ async function verifyBytePlus(imageGen: LoadedRuntimeConfig["imageGen"], fetcher
   const apiKey = process.env[apiKeyEnv] ?? "";
   const baseUrl = (imageGen.byteplus?.baseUrl ?? imageGen.baseUrl ?? defaultImageBaseUrl("byteplus")).replace(/\/$/, "");
   const response = await fetcher(`${baseUrl}/models`, {
+    method: "GET",
+    headers: {
+      authorization: `Bearer ${apiKey}`
+    }
+  });
+
+  return interpretSafeProviderProbe(response);
+}
+
+async function verifyOpenAI(imageGen: LoadedRuntimeConfig["imageGen"], fetcher: ImageGenerationFetchLike): Promise<{ ok: boolean; message: string }> {
+  const apiKeyEnv = imageGen.openai?.apiKeyEnv ?? defaultImageApiKeyEnv("openai");
+  const apiKey = process.env[apiKeyEnv] ?? "";
+  const baseUrl = (imageGen.openai?.baseUrl ?? imageGen.baseUrl ?? defaultImageBaseUrl("openai")).replace(/\/$/, "");
+  const response = await fetcher(`${baseUrl}/models/gpt-image-2`, {
     method: "GET",
     headers: {
       authorization: `Bearer ${apiKey}`
@@ -139,6 +158,12 @@ function interpretSafeProviderProbe(response: Awaited<ReturnType<ImageGeneration
     return {
       ok: false,
       message: `Provider endpoint is not reachable: ${response.status} ${response.statusText}`
+    };
+  }
+  if (response.status === 404) {
+    return {
+      ok: false,
+      message: `Provider capability check endpoint was not found: ${response.status} ${response.statusText}`
     };
   }
   return {

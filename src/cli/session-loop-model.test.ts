@@ -16,6 +16,7 @@ import type { Prompt } from "./prompt-contract.js";
 import type { SelectPromptInput } from "./interactive-select.js";
 import type { TerminalCapabilities } from "../contracts/ui.js";
 import type { SkillDefinition } from "../contracts/skill.js";
+import { CODEX_OAUTH_AUTH_METHOD } from "../providers/oauth/codex-setup.js";
 
 function fakeRuntime(modelInfo: {
   provider: string;
@@ -67,10 +68,26 @@ function ttyCapabilities(): TerminalCapabilities {
   };
 }
 
-async function writeProfileConfig(homeDir: string, config: unknown): Promise<void> {
-  const configPath = resolveProfileStateHome({ homeDir, profileId: "default" }).configPath;
+async function writeProfileConfig(homeDir: string, config: unknown, profileId = "default"): Promise<void> {
+  const configPath = resolveProfileStateHome({ homeDir, profileId }).configPath;
   mkdirSync(dirname(configPath), { recursive: true });
   writeFileSync(configPath, JSON.stringify(config, null, 2), "utf8");
+}
+
+function writeCodexAuth(homeDir: string, profileId: string): void {
+  const authPath = resolveProfileStateHome({ homeDir, profileId }).authJsonPath;
+  mkdirSync(dirname(authPath), { recursive: true });
+  writeFileSync(authPath, JSON.stringify({
+    version: 1,
+    providers: {
+      codex: {
+        authMethod: CODEX_OAUTH_AUTH_METHOD,
+        accessToken: "eyJfake.codex.profile-token",
+        expiresAt: new Date(Date.now() + 3600_000).toISOString(),
+        source: "estacoda"
+      }
+    }
+  }, null, 2), "utf8");
 }
 
 describe("session-loop /model", () => {
@@ -270,9 +287,10 @@ describe("session-loop /model", () => {
     const prompt = (async () => "") as Prompt;
     prompt.select = async <T>(input: SelectPromptInput<T>): Promise<T> => {
       selectInputs.push(input as SelectPromptInput<unknown>);
-      const value = selections[selectionIndex] as T;
+      const id = selections[selectionIndex];
       selectionIndex++;
-      return value;
+      const selected = input.options.find((option) => option.id === id);
+      return (selected ?? input.options[input.defaultIndex ?? 0] ?? input.options[0])!.value;
     };
 
     const result = await handleSlashCommand({
@@ -294,25 +312,25 @@ describe("session-loop /model", () => {
     expect(selectInputs).toMatchObject([
       {
         surface: "promptCard",
-        title: "Select provider",
-        body: "Select the provider to use for this session only.",
+        title: "Session provider",
+        body: "Choose the provider to use for this session only.\n",
         columns: [
           { key: "name", header: "Name" },
           { key: "details", header: "Details" },
         ],
-        hint: "↑↓ navigate   ENTER select   CTRL+C exit",
-        showColumnHeaders: false,
+        hint: "↑↓ navigate   ENTER select",
+        showCurrentBadge: false,
       },
       {
         surface: "promptCard",
-        title: "Select model",
-        body: "Select the model to use for this session only.",
+        title: "Session model",
+        body: "Choose the model to use for this session only from local.\n",
         columns: [
           { key: "name", header: "Name" },
           { key: "details", header: "Details" },
         ],
-        hint: "↑↓ navigate   ENTER select   CTRL+C exit",
-        showColumnHeaders: false,
+        hint: "↑↓ navigate   ENTER select",
+        showCurrentBadge: false,
       }
     ]);
     expect(selectInputs[0]?.options).toMatchObject([
@@ -320,7 +338,7 @@ describe("session-loop /model", () => {
         id: "local",
         cells: {
           name: "Local / Custom",
-          details: "http://localhost:11434/v1",
+          details: "OpenAI-compatible local or custom endpoint. API key optional.",
         },
         current: true,
       },
@@ -329,21 +347,21 @@ describe("session-loop /model", () => {
         group: "navigation",
         cells: {
           name: "Cancel",
-          details: "Keep the current session model",
+          details: "Keep the current session model.",
         },
       },
     ]);
     expect(selectInputs[1]?.options.find((option) => option.id === "qwen2.5:3b")).toMatchObject({
       cells: {
         name: "qwen2.5:3b",
-        details: "tools · 128000 tokens",
+        details: "128K context | Tools",
       },
       current: true,
     });
     expect(selectInputs[1]?.options.find((option) => option.id === "phi4:latest")).toMatchObject({
       cells: {
         name: "phi4:latest",
-        details: "128000 tokens",
+        details: "128K context | Model is not a primary chat model",
       },
       current: false,
     });
@@ -351,12 +369,101 @@ describe("session-loop /model", () => {
       group: "navigation",
       cells: {
         name: "Cancel",
-        details: "Keep the current session model",
+        details: "Keep the current session model.",
       },
     });
     const override = await sessionDb.getSessionModelOverride("test-session");
     expect(override?.route.provider).toBe("local");
     expect(override?.route.id).toBe("phi4:latest");
+  });
+
+  it("/model picker shows nested Codex choice when Codex OAuth is ready in the active profile", async () => {
+    process.env.OPENAI_API_KEY = "sk-test";
+    const profileId = "research";
+    await writeProfileConfig(tempHome, {
+      providers: {
+        openai: {
+          kind: "openai-compatible",
+          models: ["gpt-4o"],
+          enableNetwork: true
+        },
+        codex: {
+          baseUrl: "https://chatgpt.com/backend-api/codex",
+          apiMode: "openai_responses",
+          authMethod: CODEX_OAUTH_AUTH_METHOD,
+          models: ["gpt-5.5"],
+          enableNetwork: true
+        }
+      },
+      model: { provider: "openai", id: "gpt-4o" }
+    }, profileId);
+    writeCodexAuth(tempHome, profileId);
+
+    const sessionDb = new InMemorySessionDB();
+    await sessionDb.createSession({ id: "test-session", profileId });
+    const runtime = fakeRuntime({
+      provider: "openai",
+      model: "gpt-4o",
+      contextWindowTokens: 128000,
+      supportsTools: true,
+      supportsVision: true,
+      supportsStructuredOutput: true
+    }, sessionDb);
+    const refreshed = fakeRuntime({
+      provider: "codex",
+      model: "gpt-5.5",
+      contextWindowTokens: 128000,
+      supportsTools: true,
+      supportsVision: true,
+      supportsStructuredOutput: true
+    }, sessionDb);
+    const selectInputs: Array<SelectPromptInput<unknown>> = [];
+    const selections = ["openai", "codex-oauth"];
+    let selectionIndex = 0;
+    const prompt = (async () => "") as Prompt;
+    prompt.select = async <T>(input: SelectPromptInput<T>): Promise<T> => {
+      selectInputs.push(input as SelectPromptInput<unknown>);
+      const id = selections[selectionIndex];
+      selectionIndex++;
+      const selected = input.options.find((option) => option.id === id);
+      return (selected ?? input.options[input.defaultIndex ?? 0] ?? input.options[0])!.value;
+    };
+
+    const result = await handleSlashCommand({
+      text: "/model",
+      runtime,
+      output,
+      renderer: { render: renderPlain },
+      prompt,
+      modelSwitchContext: async () => {
+        const loaded = await loadRuntimeConfig({ workspaceRoot: tempHome, homeDir: tempHome, profileId });
+        return {
+          config: loaded.config,
+          providerRegistry: loaded.providerRegistry,
+          homeDir: tempHome,
+          profileId
+        };
+      },
+      switchRuntime: async () => refreshed as any,
+      workspaceRoot: tempHome,
+      homeDir: tempHome
+    });
+
+    expect(result).not.toBe(false);
+    expect(selectInputs.map((input) => input.title)).toEqual([
+      "Session provider",
+      "OpenAI setup"
+    ]);
+    expect(selectInputs[0]?.options.map((option) => option.id)).toContain("openai");
+    expect(selectInputs[0]?.options.map((option) => option.id)).not.toContain("codex");
+    expect(selectInputs[1]?.options.map((option) => option.id)).toEqual([
+      "openai-api-key",
+      "codex-oauth",
+      "cancel"
+    ]);
+    const override = await sessionDb.getSessionModelOverride("test-session");
+    expect(override?.route.provider).toBe("codex");
+    expect(override?.route.id).toBe("gpt-5.5");
   });
 
   it("/model set stores a session-scoped override and refreshes the runtime", async () => {

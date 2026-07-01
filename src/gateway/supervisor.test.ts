@@ -1047,7 +1047,7 @@ describe("runGatewaySupervisor", () => {
       fallbackToMain: true,
       timeoutMs: 1234,
       route: {
-        provider: "openai-compatible",
+        provider: "custom-corp",
         id: "assessor-model",
         baseUrl: "https://custom.example/v1",
         apiKeyEnv: "CUSTOM_API_KEY"

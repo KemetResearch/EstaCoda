@@ -1556,6 +1556,46 @@ describe("runFirstRunSetup", () => {
     expect(onboardingSelects["Primary model"]?.options.map((option) => option.id)).not.toEqual(expect.arrayContaining(["cancel"]));
   });
 
+  it("uses OpenRouter model pagination in the onboarding provider/model picker", async () => {
+    const models = Array.from({ length: 30 }, (_, index) =>
+      modelStatusCandidate("openrouter" as ProviderId, `openrouter-model-${String(index + 1).padStart(2, "0")}`));
+    const onboardingSelects: Record<string, SelectPromptInput<unknown>> = {};
+    const onboardingSelectTitles: string[] = [];
+    const customFlow: FlowEngine = {
+      ...flowEngine({ credentialAction: "reuse" }),
+      listProviderCandidates: async () => [{
+        id: "openrouter" as ProviderId,
+        displayName: "OpenRouter",
+        catalogOnly: false,
+        configurable: true,
+        runnable: true,
+        modelsCount: models.length,
+        credentialReady: true,
+      }],
+      listModelCandidates: async () => models,
+    };
+
+    const result = await runFirstRunSetup({
+      homeDir: tempDir,
+      workspaceRoot,
+      prompt: fakePrompt({
+        "Primary provider": "OpenRouter",
+        "Primary model": ["Next", "openrouter-model-26"],
+      }, {}, {}, [], onboardingSelects, onboardingSelectTitles),
+      flowEngine: customFlow,
+    });
+
+    expect(result.selections.primaryProvider).toBe("openrouter");
+    expect(result.selections.primaryModel).toBe("openrouter-model-26");
+    expect(onboardingSelectTitles.filter((title) => title === "Primary model")).toHaveLength(2);
+    expect(onboardingSelects["Primary model"]?.technicalLines).toEqual(["Models 26-30 of 30."]);
+    expect(onboardingSelects["Primary model"]?.options.map((option) => option.id)).toEqual([
+      ...models.slice(25).map((model) => model.id),
+      "previous-page",
+      "back",
+    ]);
+  });
+
   it("keeps model Back inside the provider/model picker", async () => {
     const result = await runFirstRunSetup({
       homeDir: tempDir,
@@ -1716,7 +1756,7 @@ describe("runFirstRunSetup", () => {
     expect(result.exitCode).toBe(1);
     expect(result.selections.reviewAccepted).toBe(false);
     expect(result.applyPlanningResult.kind).toBe("cancelled");
-    expect(result.output).toContain("cancelled");
+    expect(result.output).toContain("Setup cancelled. No settings were written, no credentials were saved, and this workspace was not trusted.");
   });
 
   it("does not write a collected API key when review is cancelled", async () => {
@@ -2685,17 +2725,23 @@ describe("runFirstRunSetup", () => {
   it("normal onboarding confirms the user-facing summary instead of the technical manifest", async () => {
     const output: string[] = [];
     const seenOptions: Record<string, readonly string[]> = {};
+    const seenDescriptions: Record<string, readonly (string | undefined)[]> = {};
 
     const result = await runFirstRunSetup({
       homeDir: tempDir,
       workspaceRoot,
-      prompt: fakePrompt({}, seenOptions),
+      prompt: fakePrompt({}, seenOptions, seenDescriptions),
       flowEngine: flowEngine(),
       output: { write: (value) => output.push(value) },
     });
 
     expect(result.completed).toBe(true);
     expect(seenOptions["Configuration summary"]).toEqual(["Confirm", "Back", "Cancel"]);
+    expect(seenDescriptions["Configuration summary"]).toEqual([
+      "Write the selected configuration to EstaCoda.",
+      "Go back and edit your setup choices.",
+      "Exit onboarding. EstaCoda will not write settings, save credentials, or trust this workspace.",
+    ]);
     expect(seenOptions[resolveSetupCopy("en", "onboarding.review")]).toBeUndefined();
 
     const rendered = output.join("");
@@ -2780,11 +2826,12 @@ describe("runFirstRunSetup", () => {
   it("renders Arabic summary confirmation without the technical review manifest", async () => {
     const output: string[] = [];
     const seenOptions: Record<string, readonly string[]> = {};
+    const seenDescriptions: Record<string, readonly (string | undefined)[]> = {};
 
     const result = await runFirstRunSetup({
       homeDir: tempDir,
       workspaceRoot,
-      prompt: fakePrompt({ "Setup language": "العربية" }, seenOptions),
+      prompt: fakePrompt({ "Setup language": "العربية" }, seenOptions, seenDescriptions),
       flowEngine: flowEngine(),
       output: { write: (value) => output.push(value) },
     });
@@ -2804,6 +2851,11 @@ describe("runFirstRunSetup", () => {
       resolveSetupCopy("ar", "onboarding.summary.confirmAction"),
       "رجوع",
       resolveSetupCopy("ar", "onboarding.summary.cancelAction"),
+    ]);
+    expect(seenDescriptions[resolveSetupCopy("ar", "onboarding.summary.confirmTitle")]).toEqual([
+      resolveSetupCopy("ar", "onboarding.summary.confirmAction.description"),
+      resolveSetupCopy("ar", "onboarding.summary.backAction.description"),
+      resolveSetupCopy("ar", "onboarding.summary.cancelAction.description"),
     ]);
     expect(seenOptions[resolveSetupCopy("ar", "onboarding.workspace.trust.title")]).toContain("رجوع");
     expect(rendered).toContain("ملخص الإعداد");

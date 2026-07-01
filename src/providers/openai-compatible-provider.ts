@@ -213,7 +213,6 @@ export function buildOpenAICompatibleRequest(endpoint: ProviderEndpoint, request
     headers: {
       "content-type": "application/json",
       ...(apiKey === undefined ? {} : { authorization: `Bearer ${apiKey}` }),
-      ...providerHeaders(provider),
       ...(endpoint.headers ?? {})
     },
     body: compactObject({
@@ -1089,17 +1088,6 @@ function normalizeTemperature(temperature: number | undefined, provider: Provide
   }
 
   return clamp(temperature, 0, 2);
-}
-
-function providerHeaders(provider: ProviderId): Record<string, string> {
-  if (provider === "openrouter") {
-    return {
-      "HTTP-Referer": "https://kemetresearch.com",
-      "X-Title": "EstaCoda"
-    };
-  }
-
-  return {};
 }
 
 function modelLikelySupportsLocalTools(model: string): boolean {

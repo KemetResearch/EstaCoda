@@ -39,6 +39,7 @@ import {
   defaultImageApiKeyEnv,
   defaultImageBaseUrl,
   defaultImageModel,
+  imageModelOption,
   resolveImageModel
 } from "../contracts/image-generation.js";
 import type { ModelsDevRegistryOptions } from "../model-catalog/models-dev-registry.js";
@@ -69,7 +70,7 @@ export type WhatsAppDmPolicy = "disabled" | "allowlist" | "pairing" | "open";
 export type WhatsAppGroupPolicy = "disabled" | "allowlist" | "open";
 export type TtsProvider = "edge" | "elevenlabs" | "openai" | "minimax" | "mistral" | "gemini" | "xai" | "neutts" | "kittentts";
 export type SttProvider = "local" | "groq" | "openai" | "mistral" | "xai";
-export type ImageGenerationProvider = "fal" | "byteplus";
+export type ImageGenerationProvider = "fal" | "byteplus" | "openai";
 export type BrowserEngineKind = "cdp" | "agent-browser" | "auto";
 export type BrowserCloudSpendApproval = "pending" | boolean;
 export type BrowserSnapshotSummarizeMode = "auto" | boolean;
@@ -284,6 +285,13 @@ export type ImageGenerationConfig = {
     base_url?: string;
   };
   byteplus?: {
+    model?: string;
+    apiKeyEnv?: string;
+    api_key_env?: string;
+    baseUrl?: string;
+    base_url?: string;
+  };
+  openai?: {
     model?: string;
     apiKeyEnv?: string;
     api_key_env?: string;
@@ -1950,8 +1958,10 @@ function normalizeTtsConfig(value: EstaCodaConfig["tts"]): LoadedRuntimeConfig["
 }
 
 function normalizeImageGenerationConfig(value: EstaCodaConfig["imageGen"]): LoadedRuntimeConfig["imageGen"] {
-  const provider = value?.provider === "byteplus" ? "byteplus" : "fal";
-  const model = value?.model ?? value?.[provider]?.model ?? defaultImageModel(provider);
+  const provider = isImageGenerationProvider(value?.provider) ? value.provider : "fal";
+  const configuredModel = value?.model ?? value?.[provider]?.model;
+  const model = resolveImageModel(provider, configuredModel) ?? defaultImageModel(provider);
+  const topLevelApiKeyEnv = value?.apiKeyEnv ?? value?.api_key_env;
   const baseUrl = value?.baseUrl
     ?? value?.base_url
     ?? value?.[provider]?.baseUrl
@@ -1962,19 +1972,28 @@ function normalizeImageGenerationConfig(value: EstaCodaConfig["imageGen"]): Load
     provider,
     model,
     useGateway: value?.useGateway ?? value?.use_gateway ?? false,
-    apiKeyEnv: value?.apiKeyEnv ?? value?.api_key_env ?? defaultImageApiKeyEnv(provider),
+    apiKeyEnv: topLevelApiKeyEnv ?? defaultImageApiKeyEnv(provider),
     baseUrl,
     fal: {
       model: value?.fal?.model ?? (provider === "fal" ? model : defaultImageModel("fal")),
-      apiKeyEnv: value?.fal?.apiKeyEnv ?? value?.fal?.api_key_env ?? defaultImageApiKeyEnv("fal"),
+      apiKeyEnv: value?.fal?.apiKeyEnv ?? value?.fal?.api_key_env ?? (provider === "fal" ? topLevelApiKeyEnv : undefined) ?? defaultImageApiKeyEnv("fal"),
       baseUrl: value?.fal?.baseUrl ?? value?.fal?.base_url ?? defaultImageBaseUrl("fal")
     },
     byteplus: {
       model: value?.byteplus?.model ?? (provider === "byteplus" ? model : defaultImageModel("byteplus")),
-      apiKeyEnv: value?.byteplus?.apiKeyEnv ?? value?.byteplus?.api_key_env ?? defaultImageApiKeyEnv("byteplus"),
+      apiKeyEnv: value?.byteplus?.apiKeyEnv ?? value?.byteplus?.api_key_env ?? (provider === "byteplus" ? topLevelApiKeyEnv : undefined) ?? defaultImageApiKeyEnv("byteplus"),
       baseUrl: value?.byteplus?.baseUrl ?? value?.byteplus?.base_url ?? defaultImageBaseUrl("byteplus")
+    },
+    openai: {
+      model: value?.openai?.model ?? (provider === "openai" ? model : defaultImageModel("openai")),
+      apiKeyEnv: value?.openai?.apiKeyEnv ?? value?.openai?.api_key_env ?? (provider === "openai" ? topLevelApiKeyEnv : undefined) ?? defaultImageApiKeyEnv("openai"),
+      baseUrl: value?.openai?.baseUrl ?? value?.openai?.base_url ?? defaultImageBaseUrl("openai")
     }
   };
+}
+
+function isImageGenerationProvider(value: unknown): value is ImageGenerationProvider {
+  return value === "fal" || value === "byteplus" || value === "openai";
 }
 
 function mergeImageGenerationConfig(left: EstaCodaConfig["imageGen"], right: EstaCodaConfig["imageGen"]): EstaCodaConfig["imageGen"] {
@@ -1985,7 +2004,8 @@ function mergeImageGenerationConfig(left: EstaCodaConfig["imageGen"], right: Est
     ...(left ?? {}),
     ...(right ?? {}),
     fal: { ...(left?.fal ?? {}), ...(right?.fal ?? {}) },
-    byteplus: { ...(left?.byteplus ?? {}), ...(right?.byteplus ?? {}) }
+    byteplus: { ...(left?.byteplus ?? {}), ...(right?.byteplus ?? {}) },
+    openai: { ...(left?.openai ?? {}), ...(right?.openai ?? {}) }
   };
 }
 
@@ -2214,7 +2234,7 @@ export function buildProviderRegistry(config: EstaCodaConfig, options: {
             apiKey: providerConfig.apiKeyEnv === undefined
               ? { kind: "none" }
               : { kind: "env", name: providerConfig.apiKeyEnv },
-            headers: providerConfig.headers
+            headers: mergeProviderEndpointHeaders(metadata.defaultHeaders, providerConfig.headers)
           } satisfies ProviderEndpoint,
           models: enrichModelProfiles({
             provider: providerId,
@@ -2234,7 +2254,7 @@ export function buildProviderRegistry(config: EstaCodaConfig, options: {
           apiKey: providerConfig.apiKeyEnv === undefined
             ? { kind: "none" }
             : { kind: "env", name: providerConfig.apiKeyEnv },
-          headers: providerConfig.headers
+          headers: mergeProviderEndpointHeaders(metadata.defaultHeaders, providerConfig.headers)
         } satisfies ProviderEndpoint,
         models: enrichModelProfiles({
           provider: providerId,
@@ -2271,6 +2291,19 @@ export function buildProviderRegistry(config: EstaCodaConfig, options: {
   }
 
   return registry;
+}
+
+function mergeProviderEndpointHeaders(
+  defaultHeaders: Record<string, string> | undefined,
+  configuredHeaders: Record<string, string> | undefined
+): Record<string, string> | undefined {
+  if (defaultHeaders === undefined && configuredHeaders === undefined) {
+    return undefined;
+  }
+  return {
+    ...(defaultHeaders ?? {}),
+    ...(configuredHeaders ?? {})
+  };
 }
 
 export async function saveRuntimeConfig(path: string, config: EstaCodaConfig): Promise<void> {
@@ -2793,7 +2826,7 @@ export async function setupImageGenerationConfig(options: {
     process.env[secret.key] = options.input.apiKey;
     secretPath = secret.path;
   }
-  const requestedModel = options.input.model ?? resolveImageModel(provider, options.input.modelVersion);
+  const requestedModel = resolveImageSetupModel(provider, options.input);
   const model = requestedModel ?? (providerExplicit ? defaultImageModel(provider) : previous[provider]?.model ?? previous.model ?? defaultImageModel(provider));
   const baseUrl = options.input.baseUrl ?? previous[provider]?.baseUrl;
   const config = patchConfig(existing.config, {
@@ -2818,6 +2851,20 @@ export async function setupImageGenerationConfig(options: {
     config,
     secretPath
   };
+}
+
+function resolveImageSetupModel(provider: ImageGenerationProvider, input: ImageGenerationSetupInput): string | undefined {
+  if (input.model !== undefined) {
+    return resolveImageModel(provider, input.model);
+  }
+  if (input.modelVersion === undefined) {
+    return undefined;
+  }
+  const option = imageModelOption(provider, input.modelVersion);
+  if (option === undefined) {
+    throw new Error(`Unknown image model alias ${input.modelVersion} for provider ${provider}`);
+  }
+  return option.id;
 }
 
 export async function setupMcpConfig(options: {
@@ -3451,8 +3498,8 @@ function validateVoiceSetupInput(input: VoiceSetupInput): void {
 }
 
 function validateImageGenerationSetupInput(input: ImageGenerationSetupInput): void {
-  if (input.provider !== undefined && input.provider !== "fal" && input.provider !== "byteplus") {
-    throw new Error("Expected image provider fal or byteplus");
+  if (input.provider !== undefined && input.provider !== "fal" && input.provider !== "byteplus" && input.provider !== "openai") {
+    throw new Error("Expected image provider fal, byteplus, or openai");
   }
   if (input.model !== undefined) {
     requireNonEmpty(input.model, "model");

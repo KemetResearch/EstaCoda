@@ -117,8 +117,14 @@ export type SetupModuleContext = SetupDraftBundleOptions & {
     readonly provider?: ImageGenerationProvider;
     readonly model?: string;
     readonly apiKeyEnv?: string;
+    readonly baseUrl?: string;
     readonly apiKey?: string;
     readonly useGateway?: boolean;
+    readonly credentialSurface?: "image-generation";
+    readonly credentialEnvVars?: readonly string[];
+    readonly credentialReady?: boolean;
+    readonly credentialValuesIncluded?: boolean;
+    readonly credentialBlockers?: readonly string[];
   };
   readonly web?: {
     readonly searchBackend?: string;
@@ -492,9 +498,33 @@ export const visionSetupModule: SetupModule = optionalCapabilityModule({
     provider: context.vision?.provider,
     model: context.vision?.model,
     apiKeyEnv: context.vision?.apiKeyEnv,
+    baseUrl: context.vision?.baseUrl,
     useGateway: context.vision?.useGateway,
+    credentialSurface: context.vision?.credentialSurface,
+    envVars: context.vision?.credentialEnvVars,
+    credentialReady: context.vision?.credentialReady,
+    credentialValuesIncluded: context.vision?.credentialValuesIncluded,
     secretValuesIncluded: false,
   }),
+  blockers: (context) => [
+    ...(context.vision?.credentialReady === false && (context.vision.credentialEnvVars?.length ?? 0) > 0
+      ? [`Image generation requires ${context.vision.credentialEnvVars?.join(", ")} from the environment, profile secret store, or reviewed setup entry.`]
+      : []),
+    ...(context.vision?.credentialBlockers ?? []),
+  ],
+  extraDrafts: (context) => context.vision?.credentialSurface === "image-generation" &&
+    context.vision.credentialReady === true &&
+    (context.vision.credentialEnvVars?.length ?? 0) > 0
+    ? [
+        credentialDraft({
+          id: "setup-module.vision.image-generation-credential",
+          moduleId: "vision",
+          envVars: context.vision.credentialEnvVars ?? [],
+          credentialSurface: "image-generation",
+          configPath: context.configPath,
+        }),
+      ]
+    : [],
 });
 
 export const webSearchSetupModule: SetupModule = optionalCapabilityModule({
@@ -845,7 +875,7 @@ function credentialDraft(input: {
   readonly envVars: readonly string[];
   readonly configPath?: string;
   readonly blockers?: readonly string[];
-  readonly credentialSurface?: "browserbase" | "web-search-brave" | "voice-tts" | "voice-stt";
+  readonly credentialSurface?: "browserbase" | "web-search-brave" | "voice-tts" | "voice-stt" | "image-generation";
 }): SetupDraft {
   return {
     id: input.id,
@@ -855,7 +885,8 @@ function credentialDraft(input: {
     target: input.credentialSurface === "browserbase" ||
       input.credentialSurface === "web-search-brave" ||
       input.credentialSurface === "voice-tts" ||
-      input.credentialSurface === "voice-stt"
+      input.credentialSurface === "voice-stt" ||
+      input.credentialSurface === "image-generation"
       ? { kind: "diagnostic-only" }
       : configTarget(["providers.*.apiKeyEnv"], input.configPath),
     review: review("setupModules.credentials.draft", {

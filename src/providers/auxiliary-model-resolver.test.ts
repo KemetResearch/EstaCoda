@@ -66,10 +66,32 @@ describe("resolveAuxiliaryModelRoute", () => {
     });
     expect(result.source).toBe("custom");
     expect(result.route?.provider).toBe("openai-compatible");
+    expect(result.route?.profile.provider).toBe("openai-compatible");
     expect(result.route?.id).toBe("qwen2.5:3b");
     expect(result.route?.baseUrl).toBe("http://localhost:11434/v1");
     expect(result.route?.apiKeyEnv).toBe("LOCAL_API_KEY");
     expect(result.fallbackToMain).toBe(false);
+    expect(result.diagnostics).toContain("Custom OpenAI-compatible route at http://localhost:11434/v1");
+  });
+
+  it("preserves an explicit provider when a custom baseUrl is set", () => {
+    const result = resolveAuxiliaryModelRoute("compression", {
+      provider: "deepseek",
+      id: "deepseek-v4-pro",
+      baseUrl: "https://api.deepseek.com/v1",
+      apiKeyEnv: "DEEPSEEK_API_KEY",
+    }, {
+      mainRoute: fakeMainRoute(),
+      providerRegistry: fakeRegistry(),
+    });
+
+    expect(result.source).toBe("custom");
+    expect(result.route?.provider).toBe("deepseek");
+    expect(result.route?.profile.provider).toBe("deepseek");
+    expect(result.route?.id).toBe("deepseek-v4-pro");
+    expect(result.route?.baseUrl).toBe("https://api.deepseek.com/v1");
+    expect(result.route?.apiKeyEnv).toBe("DEEPSEEK_API_KEY");
+    expect(result.diagnostics).toContain("Custom route for deepseek at https://api.deepseek.com/v1");
   });
 
   it("returns unavailable when baseUrl is set but id is missing", () => {

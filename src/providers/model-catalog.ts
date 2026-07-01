@@ -121,7 +121,8 @@ export function inferProviderFromModel(modelId: string): ProviderId {
   if (normalized.startsWith("moonshot/") || normalized.startsWith("moonshotai/") || normalized.startsWith("moonshot-ai/") || normalized.startsWith("kimi-")) return "kimi";
   if (normalized.startsWith("nous/") || normalized.includes("hermes")) return "nous";
   if (normalized.startsWith("ollama/") || normalized.startsWith("llama.cpp/") || normalized.startsWith("local/")) return "local";
-  if (normalized.includes("/")) return "openrouter";
+  if (normalized.startsWith("openrouter/")) return "openrouter";
+  if (isKnownOpenRouterFallbackModel(normalized)) return "openrouter";
 
   return "openai-compatible";
 }
@@ -221,11 +222,17 @@ function inferContextWindow(modelId: string): number {
   if (normalized.includes("1m") || normalized.includes("gpt-4.1") || normalized.includes("gemini")) return 1048576;
   if (normalized.includes("kimi")) return 262144;
   if (normalized.includes("claude")) return 200000;
-  if (normalized.includes("gpt-4o") || normalized.includes("openrouter")) return 128000;
+  if (normalized.includes("gpt-4o")) return 128000;
   if (normalized.includes("deepseek")) return 64000;
   if (normalized.includes("llama") || normalized.includes("ollama")) return 8192;
 
   return 128000;
+}
+
+function isKnownOpenRouterFallbackModel(normalizedModelId: string): boolean {
+  return fallbackKnownModelProfiles.some((candidate) =>
+    candidate.provider === "openrouter" && candidate.id.toLowerCase() === normalizedModelId
+  );
 }
 
 function inferTools(modelId: string, provider: ProviderId): boolean {

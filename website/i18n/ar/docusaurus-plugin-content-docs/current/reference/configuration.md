@@ -334,7 +334,7 @@ Browserbase مُنفّذ عبر خلفية المتصفح، ويتطلب `BROWSE
 }
 ```
 
-المزودون المدعومون: `fal`، `byteplus`.
+المزودون المدعومون: `fal`، `byteplus`، `openai`.
 
 ### tts
 

@@ -827,6 +827,7 @@ async function applyVisionCapability(
       provider: imageProviderValue(operation.review.values.provider ?? operation.review.values.providerId),
       model: stringValue(operation.review.values.model ?? operation.review.values.modelId),
       apiKeyEnv: stringValue(operation.review.values.apiKeyEnv ?? operation.review.values.envVar),
+      baseUrl: stringValue(operation.review.values.baseUrl),
       useGateway: booleanValue(operation.review.values.useGateway),
     },
   });
@@ -985,6 +986,9 @@ function ensureCredentialReferenceCanApply(
     return;
   }
   if (operation.review.values.credentialSurface === "voice-tts" || operation.review.values.credentialSurface === "voice-stt") {
+    return;
+  }
+  if (operation.review.values.credentialSurface === "image-generation") {
     return;
   }
   if (context.provider === undefined || context.model === undefined) {

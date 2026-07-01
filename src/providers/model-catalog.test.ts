@@ -3,9 +3,9 @@ import {
   buildProfileResolutionContext,
   resolveModelProfile,
   fallbackKnownModelProfiles,
-  type ProfileResolutionContext
+  inferModelProfile,
+  inferProviderFromModel
 } from "./model-catalog.js";
-import type { ModelProfile, ProviderId } from "../contracts/provider.js";
 import type { ModelsDevSnapshot } from "../model-catalog/models-dev-registry.js";
 
 function makeSnapshot(models: Array<{ id: string; providerId: string; contextWindow: number; status?: string }>): ModelsDevSnapshot {
@@ -115,5 +115,49 @@ describe("resolveModelProfile", () => {
     const ctx = buildProfileResolutionContext(snapshot);
     const result = resolveModelProfile("openai", "gpt-4o", ctx);
     expect(result.profile.id).toBe("gpt-4o");
+  });
+});
+
+describe("inferProviderFromModel", () => {
+  it("keeps known OpenRouter fallback model IDs on OpenRouter", () => {
+    expect(inferProviderFromModel("openrouter/auto")).toBe("openrouter");
+    expect(inferProviderFromModel("qwen/qwen3.6-plus")).toBe("openrouter");
+  });
+
+  it("does not infer OpenRouter for arbitrary slash model IDs", () => {
+    for (const modelId of [
+      "huggingface/mistral-large",
+      "togetherai/llama-3.3-70b",
+      "fireworks/qwen2.5-coder",
+      "perplexity/sonar"
+    ]) {
+      expect(inferProviderFromModel(modelId)).toBe("openai-compatible");
+    }
+  });
+
+  it("keeps explicit native provider prefixes native", () => {
+    expect(inferProviderFromModel("openai/gpt-4o")).toBe("openai");
+    expect(inferProviderFromModel("anthropic/claude-sonnet-4.5")).toBe("anthropic");
+    expect(inferProviderFromModel("google/gemini-2.5-pro")).toBe("google");
+    expect(inferProviderFromModel("deepseek/deepseek-chat")).toBe("deepseek");
+  });
+});
+
+describe("inferModelProfile", () => {
+  it("profiles arbitrary slash model IDs as OpenAI-compatible instead of OpenRouter", () => {
+    const profile = inferModelProfile({ model: "huggingface/mistral-large" });
+
+    expect(profile.provider).toBe("openai-compatible");
+    expect(profile.id).toBe("huggingface/mistral-large");
+    expect(profile.status).toBe("unknown");
+  });
+
+  it("infers context from upstream family names instead of OpenRouter catch-all text", () => {
+    const profile = inferModelProfile({
+      provider: "openrouter",
+      model: "openrouter/meta-llama/llama-3.1-70b"
+    });
+
+    expect(profile.contextWindowTokens).toBe(8192);
   });
 });

@@ -1,6 +1,7 @@
 import type { Prompt } from "../../cli/prompt-contract.js";
 import { promptForApiKeyInput } from "../../cli/secret-prompt.js";
 import type { BrowserBackendKind, BrowserCloudProviderKind } from "../../contracts/browser.js";
+import { defaultImageApiKeyEnv, defaultImageBaseUrl, defaultImageModel, IMAGE_MODEL_OPTIONS, resolveImageModel } from "../../contracts/image-generation.js";
 import type { AuxiliaryModelTask } from "../../contracts/provider.js";
 import type { SecurityApprovalMode } from "../../contracts/security.js";
 import type { PromptCardStatusLine } from "../../contracts/view-model.js";
@@ -104,6 +105,7 @@ export type VisionCapabilityResult = {
   readonly provider: ImageGenerationProvider;
   readonly model: string;
   readonly apiKeyEnv: string;
+  readonly baseUrl: string;
   readonly useGateway: boolean;
 };
 
@@ -1617,6 +1619,7 @@ export function promptVisionCapability(
     readonly provider?: ImageGenerationProvider;
     readonly model?: string;
     readonly apiKeyEnv?: string;
+    readonly baseUrl?: string;
     readonly useGateway?: boolean;
   },
   locale: SetupCopyLocale,
@@ -1628,6 +1631,7 @@ export function promptVisionCapability(
     readonly provider?: ImageGenerationProvider;
     readonly model?: string;
     readonly apiKeyEnv?: string;
+    readonly baseUrl?: string;
     readonly useGateway?: boolean;
   },
   locale?: SetupCopyLocale,
@@ -1639,6 +1643,7 @@ export async function promptVisionCapability(
     readonly provider?: ImageGenerationProvider;
     readonly model?: string;
     readonly apiKeyEnv?: string;
+    readonly baseUrl?: string;
     readonly useGateway?: boolean;
   },
   locale: SetupCopyLocale = "en",
@@ -1648,55 +1653,146 @@ export async function promptVisionCapability(
   const currentVisionRoute = current.provider === undefined && current.model === undefined
     ? undefined
     : setupRouteStatusText(locale, current.provider, current.model);
-  const providerResult = await promptSetupChoiceMaybeBack<ImageGenerationProvider>(prompt, {
-    title: setupCopyText(locale, "setupModules.vision.title"),
-    message: `${setupCopyText(locale, "setupEditor.prompt.vision.summary")}\n${setupCopyText(locale, "setupEditor.prompt.vision.provider")}\n`,
-    columns: setupChoiceColumns(locale),
-    tableDirection: setupChoiceTableDirection(locale),
-    tableWidth: setupChoiceTableWidth(locale),
-    tableMaxWidth: setupChoiceTableMaxWidth(locale),
-    tableAlign: setupChoiceTableAlign(locale),
-    showColumnHeaders: false,
-    statusLines: setupCurrentStatusLines(locale, currentVisionRoute),
-    showCurrentBadge: currentVisionRoute === undefined ? undefined : false,
-    choices: imageProviders.map((candidate) => ({
-      id: candidate,
-      label: candidate,
-      current: current.provider === candidate,
-      value: candidate,
-    })),
-    defaultValue: defaultProvider,
-  }, options);
-  if (isSetupChoiceBackResult(providerResult)) {
-    return providerResult;
-  }
-  const provider = setupChoiceSelectedValue(providerResult);
-  const model = await promptSetupStringWithDefault(
-    prompt,
-    setupPromptLabel(locale, setupCopyText(locale, "setupEditor.prompt.vision.model")),
-    current.model ?? "fal-ai/imagen4/preview"
-  );
-  const apiKeyEnv = await promptSetupStringWithDefault(
-    prompt,
-    setupPromptLabel(locale, setupCopyText(locale, "setupEditor.prompt.vision.apiKeyEnv")),
-    current.apiKeyEnv ?? "FAL_KEY"
-  );
-  const useGateway = await promptSetupChoice(prompt, {
-    title: setupCopyText(locale, "setupModules.vision.title"),
-    message: `${setupCopyText(locale, "setupEditor.prompt.vision.useGateway")}?\n`,
-    choices: [
-      { id: "gateway-no", label: "No", value: false },
-      { id: "gateway-yes", label: "Yes", value: true },
-    ],
-    defaultValue: current.useGateway ?? false,
-  });
+  let defaultProviderSelection = defaultProvider;
+  while (true) {
+    const providerResult = await promptSetupChoiceMaybeBack<ImageGenerationProvider>(prompt, {
+      title: setupCopyText(locale, "setupModules.vision.title"),
+      message: `${setupCopyText(locale, "setupEditor.prompt.vision.summary")}\n`,
+      columns: setupChoiceColumns(locale),
+      tableDirection: setupChoiceTableDirection(locale),
+      tableWidth: setupChoiceTableWidth(locale),
+      tableMaxWidth: setupChoiceTableMaxWidth(locale),
+      tableAlign: setupChoiceTableAlign(locale),
+      showColumnHeaders: false,
+      statusLines: setupCurrentStatusLines(locale, currentVisionRoute),
+      showCurrentBadge: currentVisionRoute === undefined ? undefined : false,
+      choices: imageProviders.map((candidate) => ({
+        id: candidate,
+        label: setupCopyText(locale, imageProviderLabelKey(candidate)),
+        description: setupCopyText(locale, imageProviderDescriptionKey(candidate)),
+        current: current.provider === candidate,
+        value: candidate,
+      })),
+      defaultValue: defaultProviderSelection,
+    }, options);
+    if (isSetupChoiceBackResult(providerResult)) {
+      return providerResult;
+    }
+    const provider = setupChoiceSelectedValue(providerResult);
+    defaultProviderSelection = provider;
+    const providerCurrent = current.provider === provider;
+    const modelResult = await promptSetupChoiceMaybeBack<string>(prompt, {
+      title: setupCopyText(locale, "setupEditor.prompt.vision.model.title"),
+      message: `${formatSetupCopy(locale, "setupEditor.prompt.vision.model.body", {
+        provider: setupCopyText(locale, imageProviderLabelKey(provider)),
+      })}\n`,
+      columns: setupChoiceColumns(locale),
+      tableDirection: setupChoiceTableDirection(locale),
+      tableWidth: setupChoiceTableWidth(locale),
+      tableMaxWidth: setupChoiceTableMaxWidth(locale),
+      tableAlign: setupChoiceTableAlign(locale),
+      showColumnHeaders: false,
+      statusLines: setupCurrentStatusLines(locale, currentVisionRoute),
+      showCurrentBadge: currentVisionRoute === undefined ? undefined : false,
+      choices: imageModelChoices(locale, provider, providerCurrent ? current.model : undefined),
+      defaultValue: resolveImageModel(provider, providerCurrent ? current.model : undefined) ?? defaultImageModel(provider),
+    }, options);
+    if (isSetupChoiceBackResult(modelResult)) {
+      continue;
+    }
+    const model = setupChoiceSelectedValue(modelResult);
+    const apiKeyEnv = providerCurrent && current.apiKeyEnv !== undefined
+      ? current.apiKeyEnv
+      : defaultImageApiKeyEnv(provider);
+    const baseUrl = (providerCurrent ? current.baseUrl : undefined) ?? defaultImageBaseUrl(provider);
 
-  return {
-    provider,
-    model,
-    apiKeyEnv,
-    useGateway,
-  };
+    return {
+      provider,
+      model,
+      apiKeyEnv,
+      baseUrl,
+      useGateway: current.useGateway ?? false,
+    };
+  }
+}
+
+function imageModelChoices(locale: SetupCopyLocale, provider: ImageGenerationProvider, currentModel: string | undefined): readonly SetupChoice<string>[] {
+  const resolvedCurrent = resolveImageModel(provider, currentModel);
+  const choices: SetupChoice<string>[] = IMAGE_MODEL_OPTIONS[provider].map((model) => ({
+    id: `image-model-${model.id}`,
+    label: model.label,
+    description: setupCopyText(locale, imageModelDescriptionKey(model.id)),
+    technical: true,
+    badges: model.id === defaultImageModel(provider) ? [setupCopyText(locale, "setupEditor.prompt.vision.model.badge.default")] : undefined,
+    current: resolvedCurrent === model.id,
+    value: model.id,
+  }));
+  if (currentModel !== undefined && currentModel.trim().length > 0 && !choices.some((choice) => choice.value === resolvedCurrent)) {
+    choices.push({
+      id: `image-model-current-${currentModel}`,
+      label: currentModel,
+      description: setupCopyText(locale, "setupEditor.prompt.vision.model.currentCustom.description"),
+      technical: true,
+      current: true,
+      value: currentModel,
+    });
+  }
+  return choices;
+}
+
+function imageModelDescriptionKey(modelId: string): SetupCopyKey {
+  switch (modelId) {
+    case "fal-ai/flux-2/klein/9b":
+      return "setupEditor.prompt.vision.model.falFlux2Klein.description";
+    case "fal-ai/flux-2-pro":
+      return "setupEditor.prompt.vision.model.falFlux2Pro.description";
+    case "fal-ai/z-image/turbo":
+      return "setupEditor.prompt.vision.model.falZImageTurbo.description";
+    case "fal-ai/nano-banana-pro":
+      return "setupEditor.prompt.vision.model.falNanoBananaPro.description";
+    case "fal-ai/gpt-image-1.5":
+      return "setupEditor.prompt.vision.model.falGptImage15.description";
+    case "fal-ai/gpt-image-2":
+      return "setupEditor.prompt.vision.model.falGptImage2.description";
+    case "fal-ai/ideogram/v3":
+      return "setupEditor.prompt.vision.model.falIdeogramV3.description";
+    case "fal-ai/recraft/v4/pro/text-to-image":
+      return "setupEditor.prompt.vision.model.falRecraftV4Pro.description";
+    case "fal-ai/qwen-image":
+      return "setupEditor.prompt.vision.model.falQwenImage.description";
+    case "fal-ai/krea/v2/medium/text-to-image":
+      return "setupEditor.prompt.vision.model.falKrea2Medium.description";
+    case "fal-ai/krea/v2/large/text-to-image":
+      return "setupEditor.prompt.vision.model.falKrea2Large.description";
+    case "seedream-5-0-260128":
+      return "setupEditor.prompt.vision.model.seedream5.description";
+    case "seedream-5-0-lite-260128":
+      return "setupEditor.prompt.vision.model.seedream5Lite.description";
+    case "seedream-4-5-251128":
+      return "setupEditor.prompt.vision.model.seedream45.description";
+    case "seedream-4-0-250828":
+      return "setupEditor.prompt.vision.model.seedream40.description";
+    case "gpt-image-2-low":
+      return "setupEditor.prompt.vision.model.openaiGptImage2Low.description";
+    case "gpt-image-2-medium":
+      return "setupEditor.prompt.vision.model.openaiGptImage2Medium.description";
+    case "gpt-image-2-high":
+      return "setupEditor.prompt.vision.model.openaiGptImage2High.description";
+    default:
+      return "setupEditor.prompt.vision.model.falFlux.description";
+  }
+}
+
+function imageProviderLabelKey(provider: ImageGenerationProvider): SetupCopyKey {
+  if (provider === "byteplus") return "setupEditor.prompt.vision.provider.byteplus";
+  if (provider === "openai") return "setupEditor.prompt.vision.provider.openai";
+  return "setupEditor.prompt.vision.provider.fal";
+}
+
+function imageProviderDescriptionKey(provider: ImageGenerationProvider): SetupCopyKey {
+  if (provider === "byteplus") return "setupEditor.prompt.vision.provider.byteplus.description";
+  if (provider === "openai") return "setupEditor.prompt.vision.provider.openai.description";
+  return "setupEditor.prompt.vision.provider.fal.description";
 }
 
 export function promptBrowserCapability(
@@ -1956,7 +2052,7 @@ const ttsProviders: readonly TtsProvider[] = ["edge", "elevenlabs", "openai", "m
 type SetupEditorSttProvider = "local" | "groq" | "openai" | "mistral" | "xai";
 
 const sttProviders: readonly SetupEditorSttProvider[] = ["local", "groq", "openai", "mistral", "xai"];
-const imageProviders: readonly ImageGenerationProvider[] = ["fal", "byteplus"];
+const imageProviders: readonly ImageGenerationProvider[] = ["fal", "byteplus", "openai"];
 
 function ttsProviderLabel(provider: TtsProvider): string {
   switch (provider) {

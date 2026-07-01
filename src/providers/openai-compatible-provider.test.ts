@@ -272,6 +272,32 @@ describe("createOpenAICompatibleProvider timeout classification", () => {
 });
 
 describe("buildOpenAICompatibleRequest", () => {
+  it("uses endpoint headers without adding provider-specific attribution in the adapter", () => {
+    const prepared = buildOpenAICompatibleRequest(DEFAULT_ENDPOINT, {
+      model: "openrouter/auto",
+      messages: [{ role: "user", content: "Hello" }]
+    }, undefined, "openrouter");
+
+    expect(prepared.headers).not.toHaveProperty("HTTP-Referer");
+    expect(prepared.headers).not.toHaveProperty("X-Title");
+  });
+
+  it("passes configured endpoint headers through to requests", () => {
+    const prepared = buildOpenAICompatibleRequest({
+      ...DEFAULT_ENDPOINT,
+      headers: {
+        "HTTP-Referer": "https://estacoda.kemetresearch.com",
+        "X-Title": "EstaCoda"
+      }
+    }, {
+      model: "openrouter/auto",
+      messages: [{ role: "user", content: "Hello" }]
+    }, undefined, "openrouter");
+
+    expect(prepared.headers["HTTP-Referer"]).toBe("https://estacoda.kemetresearch.com");
+    expect(prepared.headers["X-Title"]).toBe("EstaCoda");
+  });
+
   it("uses max_completion_tokens for direct OpenAI Chat Completions", () => {
     const prepared = buildOpenAICompatibleRequest(DEFAULT_ENDPOINT, {
       model: "gpt-5",
@@ -341,42 +367,10 @@ describe("buildOpenAICompatibleRequest", () => {
   });
 
   it("serializes assistant native tool calls for tested Chat Completions providers", () => {
-    const prepared = buildOpenAICompatibleRequest(DEFAULT_ENDPOINT, {
-      model: "gpt-4o",
-      messages: [{
-        role: "assistant",
-        content: "",
-        toolCalls: [{
-          id: "call_1",
-          name: "read_file",
-          argumentsText: "{\"path\":\"src/index.ts\"}"
-        }]
-      }, {
-        role: "tool",
-        content: "file contents",
-        toolCallId: "call_1"
-      }]
-    }, undefined, "openai");
-
-    expect(bodyMessages(prepared)[0]).toEqual({
-      role: "assistant",
-      content: null,
-      tool_calls: [{
-        id: "call_1",
-        type: "function",
-        function: {
-          name: "read_file",
-          arguments: "{\"path\":\"src/index.ts\"}"
-        }
-      }]
-    });
-  });
-
-  it("serializes matching native tool results", () => {
-    const prepared = buildOpenAICompatibleRequest(DEFAULT_ENDPOINT, {
-      model: "gpt-4o",
-      messages: [
-        {
+    for (const provider of ["openai", "openrouter"] as const) {
+      const prepared = buildOpenAICompatibleRequest(DEFAULT_ENDPOINT, {
+        model: provider === "openrouter" ? "openai/gpt-4o" : "gpt-4o",
+        messages: [{
           role: "assistant",
           content: "",
           toolCalls: [{
@@ -384,20 +378,56 @@ describe("buildOpenAICompatibleRequest", () => {
             name: "read_file",
             argumentsText: "{\"path\":\"src/index.ts\"}"
           }]
-        },
-        {
+        }, {
           role: "tool",
           content: "file contents",
           toolCallId: "call_1"
-        }
-      ]
-    }, undefined, "openai");
+        }]
+      }, undefined, provider);
 
-    expect(bodyMessages(prepared)[1]).toEqual({
-      role: "tool",
-      content: "file contents",
-      tool_call_id: "call_1"
-    });
+      expect(bodyMessages(prepared)[0]).toEqual({
+        role: "assistant",
+        content: null,
+        tool_calls: [{
+          id: "call_1",
+          type: "function",
+          function: {
+            name: "read_file",
+            arguments: "{\"path\":\"src/index.ts\"}"
+          }
+        }]
+      });
+    }
+  });
+
+  it("serializes matching native tool results", () => {
+    for (const provider of ["openai", "openrouter"] as const) {
+      const prepared = buildOpenAICompatibleRequest(DEFAULT_ENDPOINT, {
+        model: provider === "openrouter" ? "openai/gpt-4o" : "gpt-4o",
+        messages: [
+          {
+            role: "assistant",
+            content: "",
+            toolCalls: [{
+              id: "call_1",
+              name: "read_file",
+              argumentsText: "{\"path\":\"src/index.ts\"}"
+            }]
+          },
+          {
+            role: "tool",
+            content: "file contents",
+            toolCallId: "call_1"
+          }
+        ]
+      }, undefined, provider);
+
+      expect(bodyMessages(prepared)[1]).toEqual({
+        role: "tool",
+        content: "file contents",
+        tool_call_id: "call_1"
+      });
+    }
   });
 
   it("serializes assistant content plus native tool calls", () => {
