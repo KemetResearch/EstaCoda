@@ -70,7 +70,7 @@ export type WhatsAppDmPolicy = "disabled" | "allowlist" | "pairing" | "open";
 export type WhatsAppGroupPolicy = "disabled" | "allowlist" | "open";
 export type TtsProvider = "edge" | "elevenlabs" | "openai" | "minimax" | "mistral" | "gemini" | "xai" | "neutts" | "kittentts";
 export type SttProvider = "local" | "groq" | "openai" | "mistral" | "xai";
-export type ImageGenerationProvider = "fal" | "byteplus";
+export type ImageGenerationProvider = "fal" | "byteplus" | "openai";
 export type BrowserEngineKind = "cdp" | "agent-browser" | "auto";
 export type BrowserCloudSpendApproval = "pending" | boolean;
 export type BrowserSnapshotSummarizeMode = "auto" | boolean;
@@ -285,6 +285,13 @@ export type ImageGenerationConfig = {
     base_url?: string;
   };
   byteplus?: {
+    model?: string;
+    apiKeyEnv?: string;
+    api_key_env?: string;
+    baseUrl?: string;
+    base_url?: string;
+  };
+  openai?: {
     model?: string;
     apiKeyEnv?: string;
     api_key_env?: string;
@@ -1951,7 +1958,7 @@ function normalizeTtsConfig(value: EstaCodaConfig["tts"]): LoadedRuntimeConfig["
 }
 
 function normalizeImageGenerationConfig(value: EstaCodaConfig["imageGen"]): LoadedRuntimeConfig["imageGen"] {
-  const provider = value?.provider === "byteplus" ? "byteplus" : "fal";
+  const provider = isImageGenerationProvider(value?.provider) ? value.provider : "fal";
   const configuredModel = value?.model ?? value?.[provider]?.model;
   const model = resolveImageModel(provider, configuredModel) ?? defaultImageModel(provider);
   const topLevelApiKeyEnv = value?.apiKeyEnv ?? value?.api_key_env;
@@ -1976,8 +1983,17 @@ function normalizeImageGenerationConfig(value: EstaCodaConfig["imageGen"]): Load
       model: value?.byteplus?.model ?? (provider === "byteplus" ? model : defaultImageModel("byteplus")),
       apiKeyEnv: value?.byteplus?.apiKeyEnv ?? value?.byteplus?.api_key_env ?? (provider === "byteplus" ? topLevelApiKeyEnv : undefined) ?? defaultImageApiKeyEnv("byteplus"),
       baseUrl: value?.byteplus?.baseUrl ?? value?.byteplus?.base_url ?? defaultImageBaseUrl("byteplus")
+    },
+    openai: {
+      model: value?.openai?.model ?? (provider === "openai" ? model : defaultImageModel("openai")),
+      apiKeyEnv: value?.openai?.apiKeyEnv ?? value?.openai?.api_key_env ?? (provider === "openai" ? topLevelApiKeyEnv : undefined) ?? defaultImageApiKeyEnv("openai"),
+      baseUrl: value?.openai?.baseUrl ?? value?.openai?.base_url ?? defaultImageBaseUrl("openai")
     }
   };
+}
+
+function isImageGenerationProvider(value: unknown): value is ImageGenerationProvider {
+  return value === "fal" || value === "byteplus" || value === "openai";
 }
 
 function mergeImageGenerationConfig(left: EstaCodaConfig["imageGen"], right: EstaCodaConfig["imageGen"]): EstaCodaConfig["imageGen"] {
@@ -1988,7 +2004,8 @@ function mergeImageGenerationConfig(left: EstaCodaConfig["imageGen"], right: Est
     ...(left ?? {}),
     ...(right ?? {}),
     fal: { ...(left?.fal ?? {}), ...(right?.fal ?? {}) },
-    byteplus: { ...(left?.byteplus ?? {}), ...(right?.byteplus ?? {}) }
+    byteplus: { ...(left?.byteplus ?? {}), ...(right?.byteplus ?? {}) },
+    openai: { ...(left?.openai ?? {}), ...(right?.openai ?? {}) }
   };
 }
 
@@ -3481,8 +3498,8 @@ function validateVoiceSetupInput(input: VoiceSetupInput): void {
 }
 
 function validateImageGenerationSetupInput(input: ImageGenerationSetupInput): void {
-  if (input.provider !== undefined && input.provider !== "fal" && input.provider !== "byteplus") {
-    throw new Error("Expected image provider fal or byteplus");
+  if (input.provider !== undefined && input.provider !== "fal" && input.provider !== "byteplus" && input.provider !== "openai") {
+    throw new Error("Expected image provider fal, byteplus, or openai");
   }
   if (input.model !== undefined) {
     requireNonEmpty(input.model, "model");

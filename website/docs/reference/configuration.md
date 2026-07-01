@@ -334,7 +334,7 @@ Image generation provider and model.
 }
 ```
 
-Supported providers: `fal`, `byteplus`.
+Supported providers: `fal`, `byteplus`, `openai`.
 
 ### tts
 

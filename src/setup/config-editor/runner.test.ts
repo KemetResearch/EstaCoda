@@ -748,6 +748,10 @@ describe("runConfigEditor", () => {
     expect(imageProviderInput?.options.find((option) => option.id === "byteplus")?.description).toBe(
       "Use BytePlus Seedream image models. Requires an Ark API key."
     );
+    expect(imageProviderInput?.options.find((option) => option.id === "openai")?.label).toBe("OpenAI");
+    expect(imageProviderInput?.options.find((option) => option.id === "openai")?.description).toBe(
+      "Use OpenAI GPT Image models. Requires an OpenAI API key."
+    );
     expect(imageModelInput?.body).toBe("Choose the fal.ai image model for generation and editing, when supported.");
     expect(imageModelInput?.options.find((option) => option.id === "image-model-fal-ai/flux-2/klein/9b")?.description).toBe(
       "Fast default FAL model with crisp text rendering."
@@ -3738,7 +3742,7 @@ describe("runConfigEditor", () => {
     });
 
     expect(imageResult.completed).toBe(true);
-    expect(imageOptionLabels[0]).toEqual(["fal.ai", "BytePlus / ModelArk", "Back"]);
+    expect(imageOptionLabels[0]).toEqual(["fal.ai", "BytePlus / ModelArk", "OpenAI", "Back"]);
     expect(imageOptionLabels.some((labels) => labels.includes("Configure"))).toBe(false);
     expect(imageResult.reviewManifest).toBeUndefined();
   });

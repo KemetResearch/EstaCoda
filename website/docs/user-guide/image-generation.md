@@ -16,8 +16,9 @@ It is not a built-in model capability. You need a provider account, an API key, 
 |----------|---------------|-----------------|----------|
 | FAL | `fal-ai/flux-2/klein/9b` | `FAL_KEY` | `https://fal.run` |
 | BytePlus / Seedream | `seedream-5-0-260128` | `BYTEPLUS_ARK_API_KEY` | `https://ark.ap-southeast.bytepluses.com/api/v3` |
+| OpenAI | `gpt-image-2-medium` | `OPENAI_API_KEY` | `https://api.openai.com/v1` |
 
-FAL is the default provider. BytePlus model access is version-specific; the model must be activated in your Ark Console account before use. EstaCoda also recognizes an existing BytePlus `ARK_API_KEY` credential during reviewed setup, matching BytePlus examples.
+FAL is the default provider. BytePlus model access is version-specific; the model must be activated in your Ark Console account before use. EstaCoda also recognizes an existing BytePlus `ARK_API_KEY` credential during reviewed setup, matching BytePlus examples. OpenAI image generation can reuse an existing selected-profile OpenAI credential env var, including the primary model route's OpenAI key reference.
 
 FAL model choices shown by setup are:
 
@@ -40,6 +41,12 @@ BytePlus model choices shown by setup are:
 - `seedream-4-5-251128` (`seedream-4.5`)
 - `seedream-4-0-250828` (`seedream-4`)
 
+OpenAI model choices shown by setup are virtual GPT Image 2 quality tiers:
+
+- `gpt-image-2-low`
+- `gpt-image-2-medium` (`gpt-image-2`)
+- `gpt-image-2-high`
+
 ## Setup
 
 Configure the provider in the selected profile:
@@ -47,6 +54,7 @@ Configure the provider in the selected profile:
 ```bash
 estacoda image setup --provider fal --model fal-ai/flux-2/klein/9b --api-key-env FAL_KEY
 estacoda image setup --provider byteplus --model-version seedream-5 --api-key-env BYTEPLUS_ARK_API_KEY
+estacoda image setup --provider openai --model-version gpt-image-2-medium --api-key-env OPENAI_API_KEY
 estacoda image setup --provider byteplus --api-key <key>
 ```
 
@@ -70,6 +78,7 @@ List available models and aliases:
 ```bash
 estacoda image models --provider fal
 estacoda image models --provider byteplus
+estacoda image models --provider openai
 ```
 
 ## Configuration file
@@ -97,10 +106,10 @@ Example:
 }
 ```
 
-- `provider`: `fal` or `byteplus`.
+- `provider`: `fal`, `byteplus`, or `openai`.
 - `model`: exact provider model id or an alias resolved during setup and runtime tool calls.
 - `useGateway`: legacy config field. Image generation currently uses direct provider calls.
-- Provider blocks (`fal`, `byteplus`) can override `model`, `apiKeyEnv`, and `baseUrl`.
+- Provider blocks (`fal`, `byteplus`, `openai`) can override `model`, `apiKeyEnv`, and `baseUrl`.
 
 ## Tool behavior
 
@@ -113,19 +122,21 @@ Parameters:
 | `prompt` | `string` | yes | The text prompt. |
 | `aspectRatio` | `string` | no | `square`, `landscape`, or `portrait`. Defaults to square. |
 | `model` | `string` | no | Overrides the configured model for this request. |
-| `seed` | `number` | no | Optional seed for FAL requests. BytePlus requests omit this field because it is not documented by ModelArk Seedream. |
+| `seed` | `number` | no | Optional seed for FAL requests. BytePlus and OpenAI requests omit this field. |
 
 Aspect ratio mapping:
 
-| Aspect | FAL | BytePlus |
-|--------|-----|----------|
-| `square` | `square_hd` | `1920x1920` |
-| `landscape` | `landscape_16_9` | `2560x1440` |
-| `portrait` | `portrait_16_9` | `1440x2560` |
+| Aspect | FAL | BytePlus | OpenAI |
+|--------|-----|----------|--------|
+| `square` | `square_hd` | `1920x1920` | `1024x1024` |
+| `landscape` | `landscape_16_9` | `2560x1440` | `1536x1024` |
+| `portrait` | `portrait_16_9` | `1440x2560` | `1024x1536` |
 
 FAL requests use the cataloged payload shape for the selected model. Some FAL models use `image_size`, some use `aspect_ratio`, and GPT Image 1.5 uses literal dimensions. EstaCoda filters outgoing FAL payload fields against the catalog so models do not receive unsupported keys.
 
 BytePlus requests use ModelArk's OpenAI-compatible endpoint with `response_format: "url"`, `output_format: "png"`, and `watermark: false`. EstaCoda can also consume BytePlus `b64_json` responses if a provider or future configuration returns them.
+
+OpenAI requests use `/v1/images/generations` with the actual API model `gpt-image-2`. The selected EstaCoda model controls the OpenAI `quality` value: `low`, `medium`, or `high`.
 
 ### Image editing
 
@@ -135,6 +146,8 @@ For BytePlus, the tool sends the documented `image` request field with one HTTPS
 
 For FAL, the tool is enabled only when the selected catalog entry has an `editEndpoint`. It calls that endpoint with the documented `image_urls` field and any cataloged defaults supported by that edit endpoint.
 
+OpenAI image editing is not enabled in this release.
+
 Parameters:
 
 | Parameter | Type | Required | Notes |
@@ -143,7 +156,7 @@ Parameters:
 | `sourceImages` | `string[]` | yes, unless `sourceImage` is set | HTTPS image URLs, `artifact://` references, or artifact ids for prior generated images that include `sourceUrl` metadata. |
 | `sourceImage` | `string` | yes, unless `sourceImages` is set | Convenience single-image input. |
 | `aspectRatio` | `string` | no | `square`, `landscape`, or `portrait`. Defaults to square. |
-| `model` | `string` | no | Overrides the configured BytePlus model for this request. |
+| `model` | `string` | no | Overrides the configured provider model for this request. |
 
 Local image paths are not uploaded by this tool. Use an HTTPS image URL or a prior generated artifact that still has provider `sourceUrl` metadata.
 
@@ -159,11 +172,12 @@ Result:
 | Symptom | Likely cause | Recovery |
 |---------|--------------|----------|
 | Missing provider key | The env var referenced by `apiKeyEnv` is absent. | Add the key to the selected profile `.env` and retry. |
-| Unsupported provider | Only `fal` and `byteplus` are implemented. | Select a supported provider. |
+| Unsupported provider | The configured provider is not implemented for image generation. | Select `fal`, `byteplus`, or `openai`. |
 | Remote provider error | HTTP 4xx/5xx, auth failure, or model not activated. | Check provider status, credentials, and model activation. |
 | Generated URL download failed | Provider returned a URL that could not be fetched. | Retry the request; transient network issues are possible. |
 | Local source image rejected by `image.edit` | Editing currently accepts safe HTTPS source URLs or artifacts with provider source URLs. | Use an HTTPS image URL or a prior generated artifact with `sourceUrl` metadata. |
 | FAL model does not support `image.edit` | The selected cataloged FAL model has no edit endpoint. | Choose an edit-capable FAL model with `estacoda image models --provider fal`. |
+| OpenAI image editing is not enabled | OpenAI is configured for generation only in this release. | Use `image.generate`, or choose an edit-capable FAL or BytePlus model. |
 | Invalid output path | Cache directory missing or unwritable. | EstaCoda creates the directory recursively; check filesystem permissions. |
 | Safety / provider refusal | Provider rejected the prompt for policy reasons. | Rephrase the prompt or check provider content policies. |
 | BytePlus `ModelNotOpen` | The Seedream model is not activated for your account. | Activate it in the Ark Console, or choose another model with `estacoda image models --provider byteplus`. |

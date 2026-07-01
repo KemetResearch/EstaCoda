@@ -871,6 +871,7 @@ function imageCredentialEnvCandidates(input: {
     input.currentApiKeyEnv,
     input.baseContext.vision?.apiKeyEnv,
     defaultImageApiKeyEnv(input.provider),
+    ...(input.provider === "openai" ? providerCredentialEnvCandidates(input.baseContext, "openai") : []),
     input.provider === "byteplus" ? "ARK_API_KEY" : undefined,
   ].filter((value): value is string => typeof value === "string" && value.trim().length > 0);
   return [...new Set(candidates)];
@@ -1206,7 +1207,7 @@ function sttProviderValue(value: unknown): SttProvider | undefined {
 }
 
 function imageProviderValue(value: unknown): ImageGenerationProvider | undefined {
-  return value === "fal" || value === "byteplus" ? value : undefined;
+  return value === "fal" || value === "byteplus" || value === "openai" ? value : undefined;
 }
 
 function browserBackendValue(value: unknown): BrowserBackendKind | undefined {

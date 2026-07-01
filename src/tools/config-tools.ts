@@ -681,9 +681,9 @@ export function createConfigTools(options: ConfigToolsOptions): RegisteredTool[]
       inputSchema: {
         type: "object",
         properties: {
-          provider: { type: "string", enum: ["fal", "byteplus"] },
+          provider: { type: "string", enum: ["fal", "byteplus", "openai"] },
           model: { type: "string" },
-          modelVersion: { type: "string", description: "Friendly model alias such as flux-2, flux-2-pro, seedream-5, seedream-4.5, or seedream-4." },
+          modelVersion: { type: "string", description: "Friendly model alias such as flux-2, flux-2-pro, seedream-5, seedream-4.5, or gpt-image-2-medium." },
           apiKeyEnv: { type: "string" },
           apiKey: { type: "string" },
           baseUrl: { type: "string" },

@@ -2399,9 +2399,11 @@ async function image(options: CliOptions, args: string[]): Promise<CliCommandRes
         "  estacoda image status",
         "  estacoda image models --provider fal",
         "  estacoda image models --provider byteplus",
+        "  estacoda image models --provider openai",
         "  estacoda image verify",
         "  estacoda image setup --provider fal --model fal-ai/flux-2/klein/9b --api-key-env FAL_KEY",
         "  estacoda image setup --provider byteplus --model-version seedream-5 --api-key-env BYTEPLUS_ARK_API_KEY",
+        "  estacoda image setup --provider openai --model-version gpt-image-2-medium --api-key-env OPENAI_API_KEY",
         "  estacoda image setup --provider fal --api-key <key>",
         "",
         "Defaults:",
@@ -2504,7 +2506,7 @@ function renderImageVerification(verification: ImageGenerationVerification): str
 }
 
 function renderImageModels(provider?: ImageGenerationProvider): string {
-  const providers: readonly ImageGenerationProvider[] = provider === undefined ? ["fal", "byteplus"] : [provider];
+  const providers: readonly ImageGenerationProvider[] = provider === undefined ? ["fal", "byteplus", "openai"] : [provider];
   const lines = ["EstaCoda image model options"];
   for (const current of providers) {
     lines.push("", `${current}:`);
@@ -2541,9 +2543,9 @@ function renderImageStatus(config: Awaited<ReturnType<typeof loadRuntimeConfig>>
 }
 
 function imageApiKeyEnv(provider: ImageGenerationProvider, config: Awaited<ReturnType<typeof loadRuntimeConfig>>): string {
-  return provider === "byteplus"
-    ? config.imageGen.byteplus?.apiKeyEnv ?? defaultImageApiKeyEnv("byteplus")
-    : config.imageGen.fal?.apiKeyEnv ?? defaultImageApiKeyEnv("fal");
+  if (provider === "byteplus") return config.imageGen.byteplus?.apiKeyEnv ?? defaultImageApiKeyEnv("byteplus");
+  if (provider === "openai") return config.imageGen.openai?.apiKeyEnv ?? defaultImageApiKeyEnv("openai");
+  return config.imageGen.fal?.apiKeyEnv ?? defaultImageApiKeyEnv("fal");
 }
 
 async function renderVoiceStatus(
@@ -3810,10 +3812,10 @@ function parseImageArgs(args: string[]): ImageGenerationSetupInput {
 }
 
 function parseImageProvider(value: string | undefined): ImageGenerationProvider {
-  if (value === "fal" || value === "byteplus") {
+  if (value === "fal" || value === "byteplus" || value === "openai") {
     return value;
   }
-  throw new Error("Expected --provider fal or byteplus");
+  throw new Error("Expected --provider fal, byteplus, or openai");
 }
 
 function parseTtsProvider(value: string | undefined): VoiceSetupInput["ttsProvider"] {

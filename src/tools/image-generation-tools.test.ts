@@ -13,11 +13,13 @@ describe("image generation tools", () => {
     tempDir = await mkdtemp(join(tmpdir(), "estacoda-image-generation-"));
     process.env.BYTEPLUS_ARK_API_KEY = "byteplus-secret";
     process.env.FAL_KEY = "fal-secret";
+    process.env.OPENAI_API_KEY = "openai-secret";
   });
 
   afterEach(async () => {
     delete process.env.BYTEPLUS_ARK_API_KEY;
     delete process.env.FAL_KEY;
+    delete process.env.OPENAI_API_KEY;
     await rm(tempDir, { recursive: true, force: true });
   });
 
@@ -426,6 +428,73 @@ describe("image generation tools", () => {
       requiredSecret: "BYTEPLUS_ARK_API_KEY"
     });
   });
+
+  it("sends OpenAI generation payloads with virtual GPT Image 2 quality tiers", async () => {
+    const imageBytes = Buffer.from("openai-png");
+    const requests: Array<{ url: string; init?: Parameters<ImageGenerationFetchLike>[1] }> = [];
+    const fetcher: ImageGenerationFetchLike = async (url, init) => {
+      requests.push({ url, init });
+      return jsonResponse({
+        data: [{ b64_json: imageBytes.toString("base64") }]
+      });
+    };
+
+    const tool = createImageGenerationTools({
+      imageCacheRoot: tempDir,
+      artifactStore: new ArtifactStore({ id: () => "artifact-openai" }),
+      imageGen: openAIImageGen(),
+      fetch: fetcher,
+      id: () => "openai-generated"
+    })[0]!;
+
+    const result = await tool.run({
+      prompt: "draw a crisp product label",
+      aspectRatio: "landscape",
+      model: "high",
+      seed: 12345
+    });
+
+    expect(result.ok).toBe(true);
+    expect(result.content).toContain("Model: gpt-image-2-high");
+    expect(result.content).not.toContain("Seed:");
+    expect(requests).toHaveLength(1);
+    expect(requests[0]?.url).toBe("https://api.openai.com/v1/images/generations");
+    expect(requests[0]?.init?.headers).toMatchObject({
+      authorization: "Bearer openai-secret",
+      "content-type": "application/json"
+    });
+    expect(JSON.parse(requests[0]?.init?.body ?? "{}")).toEqual({
+      model: "gpt-image-2",
+      prompt: "draw a crisp product label",
+      size: "1536x1024",
+      n: 1,
+      quality: "high"
+    });
+    await expect(readFile(join(tempDir, "openai-generated.png"))).resolves.toEqual(imageBytes);
+  });
+
+  it("reports OpenAI image editing as not enabled without calling the provider", async () => {
+    const requests: string[] = [];
+    const tool = createImageGenerationTools({
+      imageCacheRoot: tempDir,
+      artifactStore: new ArtifactStore({ id: () => "artifact-openai-edit" }),
+      imageGen: openAIImageGen(),
+      fetch: async (url) => {
+        requests.push(url);
+        return jsonResponse({ data: [] });
+      },
+      id: () => "openai-edit"
+    }).find((candidate) => candidate.name === "image.edit")!;
+
+    const result = await tool.run({
+      prompt: "change the background",
+      sourceImages: ["https://images.example/source.png"]
+    });
+
+    expect(result.ok).toBe(false);
+    expect(result.content).toContain("OpenAI image editing is not enabled yet");
+    expect(requests).toEqual([]);
+  });
 });
 
 function bytePlusImageGen(): LoadedRuntimeConfig["imageGen"] {
@@ -454,6 +523,21 @@ function falImageGen(model = "fal-ai/flux-2/klein/9b"): LoadedRuntimeConfig["ima
       model,
       apiKeyEnv: "FAL_KEY",
       baseUrl: "https://fal.run"
+    }
+  };
+}
+
+function openAIImageGen(model = "gpt-image-2-medium"): LoadedRuntimeConfig["imageGen"] {
+  return {
+    provider: "openai",
+    model,
+    useGateway: false,
+    apiKeyEnv: "OPENAI_API_KEY",
+    baseUrl: "https://api.openai.com/v1",
+    openai: {
+      model,
+      apiKeyEnv: "OPENAI_API_KEY",
+      baseUrl: "https://api.openai.com/v1"
     }
   };
 }

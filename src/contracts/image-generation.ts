@@ -2,12 +2,15 @@ import type { ImageGenerationProvider } from "../config/runtime-config.js";
 
 export const DEFAULT_FAL_IMAGE_MODEL = "fal-ai/flux-2/klein/9b";
 export const DEFAULT_BYTEPLUS_IMAGE_MODEL = "seedream-5-0-260128";
+export const DEFAULT_OPENAI_IMAGE_MODEL = "gpt-image-2-medium";
 export const BYTEPLUS_IMAGE_BASE_URL = "https://ark.ap-southeast.bytepluses.com/api/v3";
 export const FAL_IMAGE_BASE_URL = "https://fal.run";
+export const OPENAI_IMAGE_BASE_URL = "https://api.openai.com/v1";
 
 export type ImageAspectKey = "square" | "landscape" | "portrait";
 export type FalImageSizeStyle = "image_size_preset" | "aspect_ratio" | "gpt_literal";
 export type FalPayloadValue = string | number | boolean;
+export type OpenAIImageQuality = "low" | "medium" | "high";
 
 export type ImageModelOption = {
   id: string;
@@ -22,6 +25,12 @@ export type ImageModelOption = {
     editEndpoint?: string;
     editSupports?: readonly string[];
     maxReferenceImages?: number;
+  };
+  openai?: {
+    apiModel: string;
+    quality: OpenAIImageQuality;
+    sizes: Record<ImageAspectKey, string>;
+    supports: readonly string[];
   };
 };
 
@@ -274,19 +283,63 @@ export const IMAGE_MODEL_OPTIONS: Record<ImageGenerationProvider, readonly Image
       aliases: ["seedream-4", "seedream-4.0", "seedream4", "4"],
       description: "Older Seedream generation model; accounts may need explicit activation."
     }
+  ],
+  openai: [
+    {
+      id: "gpt-image-2-low",
+      label: "GPT Image 2 Low",
+      aliases: ["gpt-image-2-low", "gpt-image-low", "openai-fast", "low"],
+      description: "Fastest OpenAI GPT Image 2 generation tier.",
+      openai: {
+        apiModel: "gpt-image-2",
+        quality: "low",
+        sizes: { landscape: "1536x1024", square: "1024x1024", portrait: "1024x1536" },
+        supports: ["prompt", "size", "n", "quality"]
+      }
+    },
+    {
+      id: DEFAULT_OPENAI_IMAGE_MODEL,
+      label: "GPT Image 2 Medium",
+      aliases: ["gpt-image-2", "gpt-image-2-medium", "gpt-image-medium", "openai-default", "medium"],
+      description: "Balanced OpenAI GPT Image 2 generation tier.",
+      openai: {
+        apiModel: "gpt-image-2",
+        quality: "medium",
+        sizes: { landscape: "1536x1024", square: "1024x1024", portrait: "1024x1536" },
+        supports: ["prompt", "size", "n", "quality"]
+      }
+    },
+    {
+      id: "gpt-image-2-high",
+      label: "GPT Image 2 High",
+      aliases: ["gpt-image-2-high", "gpt-image-high", "openai-high", "high"],
+      description: "Highest-fidelity OpenAI GPT Image 2 generation tier.",
+      openai: {
+        apiModel: "gpt-image-2",
+        quality: "high",
+        sizes: { landscape: "1536x1024", square: "1024x1024", portrait: "1024x1536" },
+        supports: ["prompt", "size", "n", "quality"]
+      }
+    }
   ]
 };
 
 export function defaultImageModel(provider: ImageGenerationProvider): string {
-  return provider === "byteplus" ? DEFAULT_BYTEPLUS_IMAGE_MODEL : DEFAULT_FAL_IMAGE_MODEL;
+  if (provider === "byteplus") return DEFAULT_BYTEPLUS_IMAGE_MODEL;
+  if (provider === "openai") return DEFAULT_OPENAI_IMAGE_MODEL;
+  return DEFAULT_FAL_IMAGE_MODEL;
 }
 
 export function defaultImageApiKeyEnv(provider: ImageGenerationProvider): string {
-  return provider === "byteplus" ? "BYTEPLUS_ARK_API_KEY" : "FAL_KEY";
+  if (provider === "byteplus") return "BYTEPLUS_ARK_API_KEY";
+  if (provider === "openai") return "OPENAI_API_KEY";
+  return "FAL_KEY";
 }
 
 export function defaultImageBaseUrl(provider: ImageGenerationProvider): string {
-  return provider === "byteplus" ? BYTEPLUS_IMAGE_BASE_URL : FAL_IMAGE_BASE_URL;
+  if (provider === "byteplus") return BYTEPLUS_IMAGE_BASE_URL;
+  if (provider === "openai") return OPENAI_IMAGE_BASE_URL;
+  return FAL_IMAGE_BASE_URL;
 }
 
 export function resolveImageModel(provider: ImageGenerationProvider, value: string | undefined): string | undefined {

@@ -16,8 +16,9 @@ sidebar_position: 13
 |--------|-------------------|------------------------|-------------------|
 | FAL | `fal-ai/flux-2/klein/9b` | `FAL_KEY` | `https://fal.run` |
 | BytePlus / Seedream | `seedream-5-0-260128` | `BYTEPLUS_ARK_API_KEY` | `https://ark.ap-southeast.bytepluses.com/api/v3` |
+| OpenAI | `gpt-image-2-medium` | `OPENAI_API_KEY` | `https://api.openai.com/v1` |
 
-FAL هو المزود الافتراضي. الوصول إلى نماذج BytePlus يعتمد على الإصدار؛ يجب تفعيل النموذج في حساب Ark Console قبل الاستخدام. يتعرّف إعداد EstaCoda المراجع أيضًا على متغير `ARK_API_KEY` الموجود مسبقًا عند إعداد BytePlus.
+FAL هو المزود الافتراضي. الوصول إلى نماذج BytePlus يعتمد على الإصدار؛ يجب تفعيل النموذج في حساب Ark Console قبل الاستخدام. يتعرّف إعداد EstaCoda المراجع أيضًا على متغير `ARK_API_KEY` الموجود مسبقًا عند إعداد BytePlus. يستطيع إعداد OpenAI لتوليد الصور إعادة استخدام مرجع متغير بيئة OpenAI موجود في الملف الشخصي المحدد، بما في ذلك مرجع مفتاح مسار النموذج الأساسي.
 
 خيارات نماذج FAL التي يعرضها الإعداد هي:
 
@@ -40,6 +41,12 @@ FAL هو المزود الافتراضي. الوصول إلى نماذج BytePlu
 - `seedream-4-5-251128` (`seedream-4.5`)
 - `seedream-4-0-250828` (`seedream-4`)
 
+خيارات نماذج OpenAI التي يعرضها الإعداد هي طبقات جودة افتراضية لـ GPT Image 2:
+
+- `gpt-image-2-low`
+- `gpt-image-2-medium` (`gpt-image-2`)
+- `gpt-image-2-high`
+
 ## الإعداد
 
 اضبط المزود في الملف الشخصي المحدد:
@@ -47,6 +54,7 @@ FAL هو المزود الافتراضي. الوصول إلى نماذج BytePlu
 ```bash
 estacoda image setup --provider fal --model fal-ai/flux-2/klein/9b --api-key-env FAL_KEY
 estacoda image setup --provider byteplus --model-version seedream-5 --api-key-env BYTEPLUS_ARK_API_KEY
+estacoda image setup --provider openai --model-version gpt-image-2-medium --api-key-env OPENAI_API_KEY
 estacoda image setup --provider byteplus --api-key <key>
 ```
 
@@ -70,6 +78,7 @@ estacoda image verify --skip-provider-check
 ```bash
 estacoda image models --provider fal
 estacoda image models --provider byteplus
+estacoda image models --provider openai
 ```
 
 ## ملف الإعدادات
@@ -97,10 +106,10 @@ estacoda image models --provider byteplus
 }
 ```
 
-- `provider`: `fal` أو `byteplus`.
+- `provider`: `fal` أو `byteplus` أو `openai`.
 - `model`: معرف نموذج المزود الدقيق أو اسم مستعار يُحل أثناء الإعداد ووقت تشغيل الأداة.
 - `useGateway`: حقل إعداد قديم. توليد الصور يستخدم حاليًا استدعاءات مباشرة للمزود.
-- كتل المزود (`fal`، `byteplus`) يمكن أن تُجاوز `model` و `apiKeyEnv` و `baseUrl`.
+- كتل المزود (`fal`، `byteplus`، `openai`) يمكن أن تُجاوز `model` و `apiKeyEnv` و `baseUrl`.
 
 ## سلوك الأداة
 
@@ -113,19 +122,21 @@ estacoda image models --provider byteplus
 | `prompt` | `string` | نعم | المطالبة النصية. |
 | `aspectRatio` | `string` | لا | `square`، `landscape`، أو `portrait`. الافتراضي square. |
 | `model` | `string` | لا | يُجاوز النموذج المُعد لهذا الطلب. |
-| `seed` | `number` | لا | بذرة اختيارية لإعادة الإنتاج. |
+| `seed` | `number` | لا | بذرة اختيارية لطلبات FAL. طلبات BytePlus وOpenAI تحذف هذا الحقل. |
 
 تعيين نسبة العرض إلى الارتفاع:
 
-| النسبة | FAL | BytePlus |
-|--------|-----|----------|
-| `square` | `square_hd` | `1920x1920` |
-| `landscape` | `landscape_16_9` | `2560x1440` |
-| `portrait` | `portrait_16_9` | `1440x2560` |
+| النسبة | FAL | BytePlus | OpenAI |
+|--------|-----|----------|--------|
+| `square` | `square_hd` | `1920x1920` | `1024x1024` |
+| `landscape` | `landscape_16_9` | `2560x1440` | `1536x1024` |
+| `portrait` | `portrait_16_9` | `1440x2560` | `1024x1536` |
 
 تستخدم طلبات FAL شكل الحمولة المحدد في الكتالوج للنموذج المختار. بعض نماذج FAL تستخدم `image_size`، وبعضها يستخدم `aspect_ratio`، ويستخدم GPT Image 1.5 أبعادًا حرفية. ترشح EstaCoda حقول حمولة FAL وفق كتالوج النموذج حتى لا تُرسل مفاتيح غير مدعومة.
 
 تستخدم طلبات BytePlus نقطة نهاية ModelArk المتوافقة مع OpenAI مع `response_format: "url"` و `output_format: "png"` و `watermark: false`. وتستطيع EstaCoda أيضًا قراءة استجابات BytePlus بصيغة `b64_json` إذا أرجعها المزود أو إعداد مستقبلي.
+
+تستخدم طلبات OpenAI نقطة `/v1/images/generations` مع نموذج API الفعلي `gpt-image-2`. يحدد نموذج EstaCoda المحدد قيمة `quality` في OpenAI: `low` أو `medium` أو `high`.
 
 ### تعديل الصور
 
@@ -135,6 +146,8 @@ estacoda image models --provider byteplus
 
 في FAL، لا تُفعّل الأداة إلا إذا كان إدخال الكتالوج للنموذج المحدد يحتوي على `editEndpoint`. تستدعي الأداة نقطة النهاية هذه باستخدام الحقل الموثق `image_urls` وأي قيم افتراضية موثقة يدعمها مسار التعديل.
 
+تعديل الصور عبر OpenAI غير مفعّل في هذا الإصدار.
+
 المعاملات:
 
 | المعامل | النوع | مطلوب | ملاحظات |
@@ -143,7 +156,7 @@ estacoda image models --provider byteplus
 | `sourceImages` | `string[]` | نعم، إلا إذا استُخدم `sourceImage` | عناوين HTTPS للصور، أو مراجع `artifact://`، أو معرفات artifacts لصور أُنشئت سابقًا وتحتوي على بيانات `sourceUrl`. |
 | `sourceImage` | `string` | نعم، إلا إذا استُخدم `sourceImages` | إدخال مختصر لصورة واحدة. |
 | `aspectRatio` | `string` | لا | `square`، `landscape`، أو `portrait`. الافتراضي square. |
-| `model` | `string` | لا | يُجاوز نموذج BytePlus المُعد لهذا الطلب. |
+| `model` | `string` | لا | يُجاوز نموذج المزود المُعد لهذا الطلب. |
 
 لا ترفع هذه الأداة مسارات الصور المحلية. استخدم عنوان صورة HTTPS أو artifact أُنشئ سابقًا ولا يزال يحتوي على بيانات `sourceUrl` من المزود.
 
@@ -159,11 +172,12 @@ estacoda image models --provider byteplus
 | العرض | السبب المحتمل | الاستعادة |
 |-------|---------------|-----------|
 | مفتاح المزود مفقود | متغير البيئة المُشار إليه في `apiKeyEnv` غير موجود. | أضف المفتاح إلى `.env` الخاص بالملف الشخصي وأعد المحاولة. |
-| مزود غير مدعوم | فقط `fal` و `byteplus` مُنفذان. | اختر مزودًا مدعومًا. |
+| مزود غير مدعوم | المزود المُعد غير مُنفذ لتوليد الصور. | اختر `fal` أو `byteplus` أو `openai`. |
 | خطأ من المزود البعيد | HTTP 4xx/5xx، فشل مصادقة، أو نموذج غير مُفعّل. | تحقق من حالة المزود، والبيانات الاعتماد، وتفعيل النموذج. |
 | فشل تنزيل عنوان URL المُنشأ | أرجع المزود عنوان URL لا يمكن جلبه. | أعد طلب الطلب؛ قد تحدث مشكلات شبكة عابرة. |
 | رفض مسار صورة محلية في `image.edit` | التعديل يقبل حاليًا عناوين HTTPS آمنة أو artifacts تحتوي على عناوين مصدر من المزود. | استخدم عنوان صورة HTTPS أو artifact أُنشئ سابقًا ويحتوي على بيانات `sourceUrl`. |
 | نموذج FAL لا يدعم `image.edit` | نموذج FAL المحدد في الكتالوج لا يملك نقطة نهاية للتعديل. | اختر نموذج FAL يدعم التعديل باستخدام `estacoda image models --provider fal`. |
+| تعديل الصور عبر OpenAI غير مفعّل | OpenAI مُعد للتوليد فقط في هذا الإصدار. | استخدم `image.generate`، أو اختر نموذج FAL أو BytePlus يدعم التعديل. |
 | مسار إخراج غير صالح | مجلد ذاكرة التخزين المؤقت مفقود أو غير قابل للكتابة. | تنشئ EstaCoda المجلد بشكل متكرر؛ تحقق من أذونات نظام الملفات. |
 | رفض المزود / السلامة | رفض المزود المطالبة لأسباب سياسية. | أعد صياغة المطالبة أو تحقق من سياسات المحتوى للمزود. |
 | BytePlus `ModelNotOpen` | نموذج Seedream غير مُفعّل لحسابك. | فعّله في Ark Console، أو اختر نموذجًا آخر باستخدام `estacoda image models --provider byteplus`. |

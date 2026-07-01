@@ -27,6 +27,7 @@ describe("optional Search capability flow", () => {
     vi.restoreAllMocks();
     delete process.env.BRAVE_SEARCH_API_KEY;
     delete process.env.OPENAI_API_KEY;
+    delete process.env.CUSTOM_OPENAI_KEY;
     delete process.env.BYTEPLUS_ARK_API_KEY;
     delete process.env.ARK_API_KEY;
     await rm(tempDir, { recursive: true, force: true });
@@ -234,6 +235,36 @@ describe("optional Search capability flow", () => {
       });
       expect(collected.pendingCredentialWrites).toEqual([]);
       expect(JSON.stringify(collected)).not.toContain("existing-byteplus-secret");
+      expect(JSON.stringify(collected)).not.toContain("should-not-be-read");
+    }
+  });
+
+  it("reuses an existing primary OpenAI credential env for OpenAI image generation", async () => {
+    process.env.CUSTOM_OPENAI_KEY = "existing-openai-secret";
+
+    const collected = await collectOptionalCapabilityContext(options({
+      values: ["openai", "gpt-image-2-medium", "existing"],
+      secret: "should-not-be-read",
+    }), baseContext({
+      provider: {
+        id: "openai",
+        model: "gpt-5",
+        credentialEnv: "CUSTOM_OPENAI_KEY",
+      },
+    }), visionSetupModule);
+
+    expect(collected.kind).toBe("configured");
+    if (collected.kind === "configured") {
+      expect(collected.context.vision).toMatchObject({
+        provider: "openai",
+        model: "gpt-image-2-medium",
+        apiKeyEnv: "CUSTOM_OPENAI_KEY",
+        credentialSurface: "image-generation",
+        credentialEnvVars: ["CUSTOM_OPENAI_KEY"],
+        credentialReady: true,
+      });
+      expect(collected.pendingCredentialWrites).toEqual([]);
+      expect(JSON.stringify(collected)).not.toContain("existing-openai-secret");
       expect(JSON.stringify(collected)).not.toContain("should-not-be-read");
     }
   });

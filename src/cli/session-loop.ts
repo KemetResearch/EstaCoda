@@ -2225,7 +2225,9 @@ async function maybeHandleSetupNeeded(input: {
     };
   }
 
-  const provider = setup.provider === "byteplus" ? "byteplus" : "fal";
+  const provider = setup.provider === "byteplus" || setup.provider === "openai" || setup.provider === "fal"
+    ? setup.provider
+    : "fal";
   const model = typeof setup.model === "string" && setup.model.length > 0
     ? setup.model
     : defaultImageModel(provider);

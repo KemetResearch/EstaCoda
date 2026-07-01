@@ -227,7 +227,9 @@ async function generateImage(input: {
   const fetcher = input.fetch ?? globalImageFetch;
   const generated = provider === "byteplus"
     ? await submitBytePlusRequest(input, fetcher)
-    : await submitFalRequest(input, fetcher);
+    : provider === "openai"
+      ? await submitOpenAIRequest(input, fetcher)
+      : await submitFalRequest(input, fetcher);
   if (!generated.ok) {
     return generated;
   }
@@ -239,7 +241,7 @@ async function generateImage(input: {
       mimeType: generated.mimeType,
       model: generated.model,
       aspectRatio: input.aspectRatio,
-      seed: provider === "byteplus" ? undefined : generated.seed ?? input.seed
+      seed: provider === "fal" ? generated.seed ?? input.seed : undefined
     };
   }
 
@@ -262,7 +264,7 @@ async function generateImage(input: {
     mimeType: mimeFromImageDownload(generated.url, imageBytes.headers?.get("content-type") ?? undefined),
     model: generated.model,
     aspectRatio: input.aspectRatio,
-    seed: provider === "byteplus" ? undefined : generated.seed ?? input.seed,
+    seed: provider === "fal" ? generated.seed ?? input.seed : undefined,
     sourceUrl: generated.url
   };
 }
@@ -281,6 +283,15 @@ async function editImage(input: {
 > {
   const provider = input.imageGen.provider;
   const fetcher = input.fetch ?? globalImageFetch;
+  if (provider === "openai") {
+    const model = resolveImageModel("openai", input.model ?? input.imageGen.openai?.model ?? input.imageGen.model)
+      ?? defaultImageModel("openai");
+    return {
+      ok: false,
+      content: "OpenAI image editing is not enabled yet. Use image.generate, or choose an edit-capable fal.ai or BytePlus model.",
+      metadata: { provider: "openai", model, reason: "unsupported-edit-provider" }
+    };
+  }
   const generated = provider === "byteplus"
     ? await submitBytePlusRequest({
       prompt: input.prompt,
@@ -491,6 +502,50 @@ async function submitBytePlusRequest(
   return parseImageResponse(response, "byteplus", model);
 }
 
+async function submitOpenAIRequest(
+  input: {
+    prompt: string;
+    aspectRatio: ImageAspect;
+    model?: string;
+    seed?: number;
+    imageGen: LoadedRuntimeConfig["imageGen"];
+    signal?: AbortSignal;
+  },
+  fetcher: ImageGenerationFetchLike
+): Promise<GeneratedImageReference | { ok: false; content: string; metadata?: Record<string, unknown> }> {
+  const model = resolveImageModel("openai", input.model ?? input.imageGen.openai?.model ?? input.imageGen.model)
+    ?? defaultImageModel("openai");
+  const option = imageModelOption("openai", model);
+  const metadata = option?.openai;
+  const apiKeyEnv = input.imageGen.openai?.apiKeyEnv ?? input.imageGen.apiKeyEnv ?? defaultImageApiKeyEnv("openai");
+  const apiKey = process.env[apiKeyEnv];
+  if (apiKey === undefined || apiKey.length === 0) {
+    return imageSetupNeeded({
+      provider: "openai",
+      model,
+      requiredSecret: apiKeyEnv
+    });
+  }
+
+  const baseUrl = (input.imageGen.openai?.baseUrl ?? input.imageGen.baseUrl ?? defaultImageBaseUrl("openai")).replace(/\/$/, "");
+  const response = await fetchWithTransientRetry(fetcher, `${baseUrl}/images/generations`, {
+    method: "POST",
+    headers: {
+      authorization: `Bearer ${apiKey}`,
+      "content-type": "application/json"
+    },
+    body: JSON.stringify({
+      model: metadata?.apiModel ?? "gpt-image-2",
+      prompt: input.prompt,
+      size: metadata?.sizes[input.aspectRatio] ?? openAIImageSize(input.aspectRatio),
+      n: 1,
+      quality: metadata?.quality ?? "medium"
+    }),
+    signal: input.signal
+  });
+  return parseImageResponse(response, "openai", model);
+}
+
 async function fetchWithTransientRetry(
   fetcher: ImageGenerationFetchLike,
   url: string,
@@ -665,6 +720,12 @@ function bytePlusSize(aspectRatio: ImageAspect): string {
   if (aspectRatio === "landscape") return "2560x1440";
   if (aspectRatio === "portrait") return "1440x2560";
   return "1920x1920";
+}
+
+function openAIImageSize(aspectRatio: ImageAspect): string {
+  if (aspectRatio === "landscape") return "1536x1024";
+  if (aspectRatio === "portrait") return "1024x1536";
+  return "1024x1024";
 }
 
 function imageGenerationFailureMessage(
@@ -865,12 +926,17 @@ function defaultImageGen(): LoadedRuntimeConfig["imageGen"] {
       model: defaultImageModel("byteplus"),
       apiKeyEnv: defaultImageApiKeyEnv("byteplus"),
       baseUrl: defaultImageBaseUrl("byteplus")
+    },
+    openai: {
+      model: defaultImageModel("openai"),
+      apiKeyEnv: defaultImageApiKeyEnv("openai"),
+      baseUrl: defaultImageBaseUrl("openai")
     }
   };
 }
 
 function imageSetupNeeded(input: {
-  provider: "fal" | "byteplus";
+  provider: "fal" | "byteplus" | "openai";
   model: string;
   requiredSecret: string;
   resumeIntent?: string;
@@ -885,7 +951,7 @@ function imageSetupNeeded(input: {
     metadata: setupNeeded({
       kind: "setup_needed",
       capability: "image_generation",
-      providerOptions: ["fal", "byteplus"],
+      providerOptions: ["fal", "byteplus", "openai"],
       requiredSecret: input.requiredSecret,
       resumeIntent: input.resumeIntent ?? "image.generate",
       suggestedCommand: `estacoda image setup --provider ${input.provider} --model ${input.model} --api-key-env ${input.requiredSecret}`,

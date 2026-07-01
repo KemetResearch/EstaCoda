@@ -1772,21 +1772,27 @@ function imageModelDescriptionKey(modelId: string): SetupCopyKey {
       return "setupEditor.prompt.vision.model.seedream45.description";
     case "seedream-4-0-250828":
       return "setupEditor.prompt.vision.model.seedream40.description";
+    case "gpt-image-2-low":
+      return "setupEditor.prompt.vision.model.openaiGptImage2Low.description";
+    case "gpt-image-2-medium":
+      return "setupEditor.prompt.vision.model.openaiGptImage2Medium.description";
+    case "gpt-image-2-high":
+      return "setupEditor.prompt.vision.model.openaiGptImage2High.description";
     default:
       return "setupEditor.prompt.vision.model.falFlux.description";
   }
 }
 
 function imageProviderLabelKey(provider: ImageGenerationProvider): SetupCopyKey {
-  return provider === "byteplus"
-    ? "setupEditor.prompt.vision.provider.byteplus"
-    : "setupEditor.prompt.vision.provider.fal";
+  if (provider === "byteplus") return "setupEditor.prompt.vision.provider.byteplus";
+  if (provider === "openai") return "setupEditor.prompt.vision.provider.openai";
+  return "setupEditor.prompt.vision.provider.fal";
 }
 
 function imageProviderDescriptionKey(provider: ImageGenerationProvider): SetupCopyKey {
-  return provider === "byteplus"
-    ? "setupEditor.prompt.vision.provider.byteplus.description"
-    : "setupEditor.prompt.vision.provider.fal.description";
+  if (provider === "byteplus") return "setupEditor.prompt.vision.provider.byteplus.description";
+  if (provider === "openai") return "setupEditor.prompt.vision.provider.openai.description";
+  return "setupEditor.prompt.vision.provider.fal.description";
 }
 
 export function promptBrowserCapability(
@@ -2046,7 +2052,7 @@ const ttsProviders: readonly TtsProvider[] = ["edge", "elevenlabs", "openai", "m
 type SetupEditorSttProvider = "local" | "groq" | "openai" | "mistral" | "xai";
 
 const sttProviders: readonly SetupEditorSttProvider[] = ["local", "groq", "openai", "mistral", "xai"];
-const imageProviders: readonly ImageGenerationProvider[] = ["fal", "byteplus"];
+const imageProviders: readonly ImageGenerationProvider[] = ["fal", "byteplus", "openai"];
 
 function ttsProviderLabel(provider: TtsProvider): string {
   switch (provider) {

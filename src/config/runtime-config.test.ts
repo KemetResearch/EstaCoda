@@ -2832,6 +2832,35 @@ describe("loadRuntimeConfig media boundary", () => {
     await rm(workspace, { recursive: true, force: true });
   });
 
+  it("normalizes OpenAI image generation virtual model aliases and default credential env refs", async () => {
+    const workspace = await mkdtemp(join(tmpdir(), "estacoda-config-test-"));
+    await mkdir(dirname(profileConfigPath(workspace)), { recursive: true });
+    await writeFile(profileConfigPath(workspace), JSON.stringify({
+      model: { provider: "openai", id: "gpt-4o" },
+      imageGen: {
+        enabled: true,
+        provider: "openai",
+        model: "gpt-image-2"
+      }
+    }));
+
+    const loaded = await loadRuntimeConfig({
+      workspaceRoot: workspace,
+      homeDir: workspace
+    });
+
+    expect(loaded.imageGen.provider).toBe("openai");
+    expect(loaded.imageGen.model).toBe("gpt-image-2-medium");
+    expect(loaded.imageGen.apiKeyEnv).toBe("OPENAI_API_KEY");
+    expect(loaded.imageGen.openai?.model).toBe("gpt-image-2-medium");
+    expect(loaded.imageGen.openai?.apiKeyEnv).toBe("OPENAI_API_KEY");
+    expect(loaded.imageGen.openai?.baseUrl).toBe("https://api.openai.com/v1");
+    expect(loaded.imageGen.byteplus?.apiKeyEnv).toBe("BYTEPLUS_ARK_API_KEY");
+    expect(loaded.imageGen.fal?.apiKeyEnv).toBe("FAL_KEY");
+
+    await rm(workspace, { recursive: true, force: true });
+  });
+
   it("resolves image model-version aliases only for the selected provider", async () => {
     const workspace = await mkdtemp(join(tmpdir(), "estacoda-config-test-"));
     await mkdir(dirname(profileConfigPath(workspace)), { recursive: true });

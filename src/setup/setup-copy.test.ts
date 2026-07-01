@@ -438,6 +438,8 @@ const SETUP_EDITOR_KEYS = [
   "setupEditor.prompt.vision.provider.fal.description",
   "setupEditor.prompt.vision.provider.byteplus",
   "setupEditor.prompt.vision.provider.byteplus.description",
+  "setupEditor.prompt.vision.provider.openai",
+  "setupEditor.prompt.vision.provider.openai.description",
   "setupEditor.prompt.vision.model.title",
   "setupEditor.prompt.vision.model.body",
   "setupEditor.prompt.vision.model.badge.default",
@@ -446,6 +448,9 @@ const SETUP_EDITOR_KEYS = [
   "setupEditor.prompt.vision.model.seedream5Lite.description",
   "setupEditor.prompt.vision.model.seedream45.description",
   "setupEditor.prompt.vision.model.seedream40.description",
+  "setupEditor.prompt.vision.model.openaiGptImage2Low.description",
+  "setupEditor.prompt.vision.model.openaiGptImage2Medium.description",
+  "setupEditor.prompt.vision.model.openaiGptImage2High.description",
   "setupEditor.prompt.vision.model.currentCustom.description",
   "setupEditor.prompt.vision.apiKeyEnv",
   "setupEditor.prompt.vision.secretValue",
@@ -814,10 +819,14 @@ describe("setup copy", () => {
     expect(resolveSetupCopy("ar", "setupEditor.prompt.vision.provider.byteplus.description")).toContain(isolateLtr("BytePlus"));
     expect(resolveSetupCopy("ar", "setupEditor.prompt.vision.provider.byteplus.description")).toContain(isolateLtr("Seedream"));
     expect(resolveSetupCopy("ar", "setupEditor.prompt.vision.provider.byteplus.description")).toContain(isolateLtr("Ark API"));
+    expect(resolveSetupCopy("ar", "setupEditor.prompt.vision.provider.openai.description")).toContain(isolateLtr("OpenAI"));
+    expect(resolveSetupCopy("ar", "setupEditor.prompt.vision.provider.openai.description")).toContain(isolateLtr("GPT"));
+    expect(resolveSetupCopy("ar", "setupEditor.prompt.vision.provider.openai.description")).toContain(isolateLtr("API"));
     expect(formatSetupCopy("ar", "setupEditor.prompt.vision.model.body", {
       provider: setupTechnicalToken("ar", "fal.ai"),
     })).toContain(isolateLtr("fal.ai"));
     expect(resolveSetupCopy("ar", "setupEditor.prompt.vision.model.seedream5.description")).toContain(isolateLtr("ModelArk"));
+    expect(resolveSetupCopy("ar", "setupEditor.prompt.vision.model.openaiGptImage2Medium.description")).toContain(isolateLtr("GPT Image 2"));
     expect(formatSetupCopy("ar", "setupEditor.prompt.vision.secretValue", {
       envVar: setupTechnicalToken("ar", "BYTEPLUS_ARK_API_KEY"),
     })).toContain(isolateLtr("BYTEPLUS_ARK_API_KEY"));
