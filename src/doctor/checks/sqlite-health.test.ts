@@ -56,7 +56,69 @@ describe("diagnoseSQLiteHealth", () => {
     expect(diagnostic.sessionsCount).toBe(1);
     expect(diagnostic.schemaValid).toBe(true);
     expect(diagnostic.ftsHealthy).toBe(true);
+    expect(diagnostic.ftsWriteHealthy).toBe("not-run");
     expect(diagnostic.warnings).toEqual([]);
+  });
+
+  it("keeps normal diagnostics read-only for an existing session database", async () => {
+    const homeDir = await tempHome();
+    const sessionPath = resolveGlobalStateHome({ homeDir }).sessionsSqlitePath;
+    await mkdir(dirname(sessionPath), { recursive: true });
+    const sessionDb = new SQLiteSessionDB({ path: sessionPath });
+    try {
+      await sessionDb.createSession({ id: "session-1", profileId: "default" });
+      await sessionDb.appendMessage({
+        id: "message-1",
+        sessionId: "session-1",
+        role: "user",
+        content: "doctor sqlite health"
+      });
+    } finally {
+      sessionDb.close();
+    }
+    const before = await sessionCounts(sessionPath);
+
+    const diagnostic = await diagnoseSQLiteHealth({ homeDir });
+
+    expect(diagnostic.status).toBe("ready");
+    expect(diagnostic.ftsWriteHealthy).toBe("not-run");
+    await expect(sessionCounts(sessionPath)).resolves.toEqual(before);
+  });
+
+  it("blocks and plans repair when the opt-in FTS write probe fails", async () => {
+    const homeDir = await tempHome();
+    const sessionPath = resolveGlobalStateHome({ homeDir }).sessionsSqlitePath;
+    await mkdir(dirname(sessionPath), { recursive: true });
+    const sessionDb = new SQLiteSessionDB({ path: sessionPath });
+    try {
+      await sessionDb.createSession({ id: "session-1", profileId: "default" });
+      await sessionDb.appendMessage({
+        id: "message-1",
+        sessionId: "session-1",
+        role: "user",
+        content: "doctor sqlite health"
+      });
+    } finally {
+      sessionDb.close();
+    }
+
+    const diagnostic = await diagnoseSQLiteHealth({
+      homeDir,
+      includeWriteProbe: true,
+      writeHealthProbe: () => ({ ok: false, reason: "synthetic write failure" })
+    });
+
+    expect(diagnostic.status).toBe("blocked");
+    expect(diagnostic.schemaValid).toBe(true);
+    expect(diagnostic.ftsHealthy).toBe(true);
+    expect(diagnostic.ftsWriteHealthy).toBe(false);
+    expect(diagnostic.warnings).toContain("SQLite session DB FTS write probe failed: synthetic write failure");
+    expect(diagnostic.repairPlan).toEqual({
+      reason: "write-probe",
+      backupRequired: true,
+      command: "estacoda doctor --repair-sessions",
+      details: ["SQLite session DB FTS write probe failed: synthetic write failure"]
+    });
   });
 
   it("blocks when an existing sessions database is missing core tables", async () => {
@@ -80,6 +142,11 @@ describe("diagnoseSQLiteHealth", () => {
       expect.stringContaining("SQLite session DB schema is missing required tables:"),
       expect.stringContaining("SQLite session DB schema is missing required columns:")
     ]));
+    expect(diagnostic.repairPlan).toEqual(expect.objectContaining({
+      reason: "schema",
+      backupRequired: true,
+      command: "estacoda doctor --repair-sessions"
+    }));
   });
 
   it("reports a missing sessions table as schema failure instead of generic open failure", async () => {
@@ -145,5 +212,19 @@ describe("diagnoseSQLiteHealth", () => {
     expect(diagnostic.warnings).toEqual(expect.arrayContaining([
       expect.stringContaining("SQLite session DB schema is missing auxiliary tables:")
     ]));
+    expect(diagnostic.repairPlan).toBeUndefined();
   });
 });
+
+async function sessionCounts(path: string): Promise<{ sessions: number; messages: number; fts: number }> {
+  const db = await openSQLiteDatabase({ path, readonly: true });
+  try {
+    return {
+      sessions: db.query<{ count: number }>("select count(*) as count from sessions").get()?.count ?? 0,
+      messages: db.query<{ count: number }>("select count(*) as count from messages").get()?.count ?? 0,
+      fts: db.query<{ count: number }>("select count(*) as count from messages_fts").get()?.count ?? 0
+    };
+  } finally {
+    db.close();
+  }
+}

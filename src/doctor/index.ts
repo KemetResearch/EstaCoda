@@ -376,7 +376,12 @@ function buildDoctorReport(input: BuildDoctorReportInput): DoctorReport {
   }
 
   const verdict = doctorVerdict(checks, input.locale);
-  const actions = [...new Set(input.warnings)].map((warning, index) => warningAction(warning, index, input.locale));
+  const actions = [...new Set(input.warnings)]
+    .filter((warning) => !isSQLiteRepairWarning(warning, input.sqliteHealth))
+    .map((warning, index) => warningAction(warning, index, input.locale));
+  if (input.sqliteHealth.repairPlan !== undefined) {
+    actions.push(sqliteRepairAction(input.sqliteHealth, input.locale));
+  }
   if (input.npmAudit.status === "not-run") {
     actions.push({
       id: "dependency-audit",
@@ -471,6 +476,7 @@ function sqliteSummary(diagnostic: SQLiteHealthDiagnostic, locale: DoctorLocale)
   if (diagnostic.status === "blocked") {
     if (!diagnostic.schemaValid) return locale === "ar" ? "المخطط غير صالح" : "schema invalid";
     if (!diagnostic.ftsHealthy) return locale === "ar" ? "فهرس FTS غير متاح" : "FTS unavailable";
+    if (diagnostic.ftsWriteHealthy === false) return locale === "ar" ? "فشل اختبار كتابة FTS" : "FTS write probe failed";
   }
   if (!diagnostic.schemaValid) return locale === "ar" ? "انحراف في المخطط" : "schema drift";
   const count = diagnostic.sessionsCount ?? 0;
@@ -620,7 +626,7 @@ function warningAction(warning: string, index: number, locale: DoctorLocale): Do
 }
 
 function warningSeverity(warning: string): DoctorAction["severity"] {
-  return /Config syntax error|Provider setup is incomplete|Provider route primary is unavailable|not writable|blocked|SQLite session DB (?:could not be opened|schema is missing required|FTS index is unavailable|path is not a file)/iu.test(warning)
+  return /Config syntax error|Provider setup is incomplete|Provider route primary is unavailable|not writable|blocked|SQLite session DB (?:could not be opened|schema is missing required|FTS index is unavailable|FTS write probe failed|path is not a file)/iu.test(warning)
     ? "blocked"
     : "warning";
 }
@@ -694,6 +700,7 @@ function localizeWarningTitle(warning: string, locale: DoctorLocale): string {
   if (/SQLite session DB schema is missing required columns/iu.test(warning)) return "قاعدة بيانات الجلسات تنقصها أعمدة مطلوبة";
   if (/SQLite session DB schema is missing auxiliary columns/iu.test(warning)) return "قاعدة بيانات الجلسات تنقصها أعمدة إضافية";
   if (/SQLite session DB FTS index is unavailable/iu.test(warning)) return "فهرس بحث قاعدة بيانات الجلسات غير متاح";
+  if (/SQLite session DB FTS write probe failed/iu.test(warning)) return "فشل اختبار كتابة فهرس بحث قاعدة بيانات الجلسات";
   if (/SQLite session DB WAL is large/iu.test(warning)) return "ملف WAL لقاعدة بيانات الجلسات كبير";
   if (/SQLite session DB could not be opened/iu.test(warning)) return "تعذر فتح قاعدة بيانات الجلسات";
   if (/SQLite session DB path is not a file/iu.test(warning)) return "مسار قاعدة بيانات الجلسات ليس ملفًا";
@@ -704,6 +711,25 @@ function localizeWarningTitle(warning: string, locale: DoctorLocale): string {
   if (/State backup not ready/iu.test(warning)) return "نسخ الحالة الاحتياطي غير جاهز";
   if (/Configured model context window is below 64K tokens/iu.test(warning)) return "نافذة سياق النموذج أقل من 64K رمز";
   return warning;
+}
+
+function isSQLiteRepairWarning(warning: string, diagnostic: SQLiteHealthDiagnostic): boolean {
+  return diagnostic.repairPlan !== undefined &&
+    /^SQLite session DB (?:could not be opened|path is not a file|schema is missing required|FTS index is unavailable|FTS write probe failed)/iu.test(warning);
+}
+
+function sqliteRepairAction(diagnostic: SQLiteHealthDiagnostic, locale: DoctorLocale): DoctorAction {
+  const plan = diagnostic.repairPlan;
+  if (plan === undefined) {
+    throw new Error("SQLite repair action requested without a repair plan");
+  }
+  return {
+    id: "sqlite-session-repair",
+    severity: "blocked",
+    title: locale === "ar" ? "قاعدة بيانات الجلسات تحتاج إصلاحًا" : "SQLite session DB needs repair",
+    detailLines: [locale === "ar" ? "يلزم أخذ نسخة احتياطية قبل الإصلاح" : "Backup required before repair"],
+    command: plan.command
+  };
 }
 
 function label(locale: DoctorLocale, key: DoctorLabelKey): string {

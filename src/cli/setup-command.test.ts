@@ -10,6 +10,7 @@ import { WorkspaceTrustStore } from "../security/workspace-trust-store.js";
 import { resolveGlobalStateHome, resolveProfileStateHome } from "../config/profile-home.js";
 import { runInitCommand } from "./init-command.js";
 import { CURRENT_OAUTH_STORE_VERSION } from "../providers/oauth/oauth-types.js";
+import { openSQLiteDatabase } from "../storage/factory.js";
 
 async function makeTempDir(): Promise<string> {
   return mkdtemp(join(tmpdir(), "estacoda-cli-setup-test-"));
@@ -637,6 +638,46 @@ describe("cli setup command", () => {
         severity: "warning"
       })
     ]));
+  });
+
+  it("doctor --json surfaces a backup-gated SQLite repair action for blocked session DBs", async () => {
+    const workspaceRoot = join(tempDir, "workspace");
+    await writeUserConfig(tempDir, localReadyConfig());
+    const sessionPath = resolveGlobalStateHome({ homeDir: tempDir }).sessionsSqlitePath;
+    await mkdir(dirname(sessionPath), { recursive: true });
+    const db = await openSQLiteDatabase({ path: sessionPath });
+    try {
+      db.exec("create table sessions (id text primary key)");
+    } finally {
+      db.close();
+    }
+
+    const result = await runCliCommand({
+      argv: ["doctor", "--json"],
+      workspaceRoot,
+      homeDir: tempDir,
+      interactive: false,
+    });
+    const report = JSON.parse(result.output) as {
+      sections: Array<{ checks: Array<{ id: string; severity: string; summary?: string }> }>;
+      actions: Array<{ id: string; title: string; command?: string; detailLines?: string[]; severity: string }>;
+    };
+    const sessionsCheck = report.sections.flatMap((section) => section.checks).find((check) => check.id === "sessions");
+
+    expect(sessionsCheck).toEqual(expect.objectContaining({
+      severity: "blocked",
+      summary: "schema invalid"
+    }));
+    expect(report.actions).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        id: "sqlite-session-repair",
+        title: "SQLite session DB needs repair",
+        detailLines: ["Backup required before repair"],
+        command: "estacoda doctor --repair-sessions",
+        severity: "blocked"
+      })
+    ]));
+    expect(report.actions.filter((action) => action.id === "sqlite-session-repair")).toHaveLength(1);
   });
 
   it("doctor --fix creates only safe local state skeleton repairs", async () => {

@@ -5,6 +5,21 @@ import type { SQLiteDatabase } from "../../storage/sqlite.js";
 
 export type SQLiteHealthStatus = "ready" | "not-initialized" | "warning" | "blocked";
 
+export type SQLiteRepairPlanReason = "schema" | "fts" | "write-probe" | "open" | "path";
+
+export type SQLiteRepairPlan = {
+  readonly reason: SQLiteRepairPlanReason;
+  readonly backupRequired: true;
+  readonly command: "estacoda doctor --repair-sessions";
+  readonly details: readonly string[];
+};
+
+export type SQLiteWriteHealthProbeResult =
+  | { readonly ok: true }
+  | { readonly ok: false; readonly reason: string };
+
+export type SQLiteWriteHealthProbe = (db: SQLiteDatabase) => SQLiteWriteHealthProbeResult;
+
 export type SQLiteHealthDiagnostic = {
   readonly path: string;
   readonly status: SQLiteHealthStatus;
@@ -12,10 +27,12 @@ export type SQLiteHealthDiagnostic = {
   readonly walSizeBytes: number;
   readonly schemaValid: boolean;
   readonly ftsHealthy: boolean;
+  readonly ftsWriteHealthy: boolean | "not-run";
   readonly missingTables: readonly string[];
   readonly missingColumns: readonly string[];
   readonly warnings: readonly string[];
   readonly notes: readonly string[];
+  readonly repairPlan?: SQLiteRepairPlan;
 };
 
 const WAL_INFO_THRESHOLD_BYTES = 10 * 1024 * 1024;
@@ -49,6 +66,8 @@ export async function diagnoseSQLiteHealth(options: {
   readonly homeDir?: string;
   readonly walInfoThresholdBytes?: number;
   readonly walWarningThresholdBytes?: number;
+  readonly includeWriteProbe?: boolean;
+  readonly writeHealthProbe?: SQLiteWriteHealthProbe;
 } = {}): Promise<SQLiteHealthDiagnostic> {
   const globalPaths = resolveGlobalStateHome({ homeDir: options.homeDir });
   const path = globalPaths.sessionsSqlitePath;
@@ -66,6 +85,7 @@ export async function diagnoseSQLiteHealth(options: {
       walSizeBytes,
       schemaValid: false,
       ftsHealthy: false,
+      ftsWriteHealthy: "not-run",
       missingTables: [],
       missingColumns: [],
       warnings,
@@ -74,12 +94,12 @@ export async function diagnoseSQLiteHealth(options: {
   }
 
   if (!dbFile.isFile()) {
-    return blocked(path, walSizeBytes, [`SQLite session DB path is not a file: ${path}`], notes);
+    return blocked(path, walSizeBytes, [`SQLite session DB path is not a file: ${path}`], notes, "path");
   }
 
   let db: SQLiteDatabase | undefined;
   try {
-    db = await openSQLiteDatabase({ path, readonly: true, timeoutMs: 250 });
+    db = await openSQLiteDatabase({ path, readonly: options.includeWriteProbe !== true, timeoutMs: 250 });
     db.query("select 1 as ok").get();
     const schema = inspectSchema(db);
     const sessionsCount = schema.missingTables.includes("sessions")
@@ -107,6 +127,12 @@ export async function diagnoseSQLiteHealth(options: {
     if (!ftsHealthy) {
       warnings.push("SQLite session DB FTS index is unavailable.");
     }
+    const writeHealth = options.includeWriteProbe === true && ftsHealthy && !schemaBlocked
+      ? runWriteHealthProbe(db, options.writeHealthProbe ?? defaultWriteHealthProbe)
+      : undefined;
+    if (writeHealth?.ok === false) {
+      warnings.push(`SQLite session DB FTS write probe failed: ${writeHealth.reason}`);
+    }
     if (walSizeBytes >= walWarningThresholdBytes) {
       warnings.push(`SQLite session DB WAL is large: ${formatBytes(walSizeBytes)}`);
     } else if (walSizeBytes >= walInfoThresholdBytes) {
@@ -114,20 +140,29 @@ export async function diagnoseSQLiteHealth(options: {
     }
 
     const schemaValid = schema.missingTables.length === 0 && schema.missingColumns.length === 0;
+    const blockedReason = schemaBlocked
+      ? "schema"
+      : !ftsHealthy
+        ? "fts"
+        : writeHealth?.ok === false
+          ? "write-probe"
+          : undefined;
     return {
       path,
-      status: schemaBlocked || !ftsHealthy ? "blocked" : warnings.length > 0 ? "warning" : "ready",
+      status: blockedReason !== undefined ? "blocked" : warnings.length > 0 ? "warning" : "ready",
       sessionsCount,
       walSizeBytes,
       schemaValid,
       ftsHealthy,
+      ftsWriteHealthy: writeHealth === undefined ? "not-run" : writeHealth.ok,
       missingTables: schema.missingTables,
       missingColumns: schema.missingColumns,
       warnings,
-      notes
+      notes,
+      repairPlan: blockedReason === undefined ? undefined : sqliteRepairPlan(blockedReason, warnings)
     };
   } catch (error) {
-    return blocked(path, walSizeBytes, [`SQLite session DB could not be opened: ${errorMessage(error)}`], notes);
+    return blocked(path, walSizeBytes, [`SQLite session DB could not be opened: ${errorMessage(error)}`], notes, "open");
   } finally {
     db?.close();
   }
@@ -176,11 +211,66 @@ function checkFtsHealth(db: SQLiteDatabase, missingTables: readonly string[]): b
   }
 }
 
+function defaultWriteHealthProbe(db: SQLiteDatabase): SQLiteWriteHealthProbeResult {
+  const now = new Date().toISOString();
+  const id = `doctor-sqlite-write-probe-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  try {
+    db.exec("savepoint doctor_sqlite_write_probe");
+    db.query(
+      `insert into sessions (
+        id,
+        profile_id,
+        created_at,
+        updated_at
+      ) values (?, ?, ?, ?)`
+    ).run(id, "__doctor__", now, now);
+    db.query(
+      `insert into messages (
+        id,
+        session_id,
+        role,
+        content,
+        created_at
+      ) values (?, ?, ?, ?, ?)`
+    ).run(`${id}-message`, id, "system", "doctor sqlite write probe", now);
+    db.query("insert into messages_fts(rowid, message_id, content) values ((select rowid from messages where id = ?), ?, ?)")
+      .run(`${id}-message`, `${id}-message`, "doctor sqlite write probe");
+    db.exec("rollback to doctor_sqlite_write_probe");
+    db.exec("release doctor_sqlite_write_probe");
+    return { ok: true };
+  } catch (error) {
+    rollbackWriteProbe(db);
+    return { ok: false, reason: errorMessage(error) };
+  }
+}
+
+function runWriteHealthProbe(db: SQLiteDatabase, probe: SQLiteWriteHealthProbe): SQLiteWriteHealthProbeResult {
+  try {
+    return probe(db);
+  } catch (error) {
+    return { ok: false, reason: errorMessage(error) };
+  }
+}
+
+function rollbackWriteProbe(db: SQLiteDatabase): void {
+  try {
+    db.exec("rollback to doctor_sqlite_write_probe");
+  } catch {
+    // The savepoint may not exist if the probe failed before it was created.
+  }
+  try {
+    db.exec("release doctor_sqlite_write_probe");
+  } catch {
+    // Keep the original probe failure as the actionable diagnostic.
+  }
+}
+
 function blocked(
   path: string,
   walSizeBytes: number,
   warnings: readonly string[],
-  notes: readonly string[]
+  notes: readonly string[],
+  reason: SQLiteRepairPlanReason
 ): SQLiteHealthDiagnostic {
   return {
     path,
@@ -188,10 +278,21 @@ function blocked(
     walSizeBytes,
     schemaValid: false,
     ftsHealthy: false,
+    ftsWriteHealthy: "not-run",
     missingTables: [],
     missingColumns: [],
     warnings,
-    notes
+    notes,
+    repairPlan: sqliteRepairPlan(reason, warnings)
+  };
+}
+
+function sqliteRepairPlan(reason: SQLiteRepairPlanReason, details: readonly string[]): SQLiteRepairPlan {
+  return {
+    reason,
+    backupRequired: true,
+    command: "estacoda doctor --repair-sessions",
+    details
   };
 }
 
