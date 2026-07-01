@@ -7,6 +7,7 @@ import { formatInlineToolTrailRow } from "./inlineToolTrailSurface.js";
 import type { InlineToolTrailEntry } from "./operatorConsoleState.js";
 import {
   type OperatorConsoleStyle,
+  styleBold,
   styleColor,
 } from "./operatorConsoleStyle.js";
 
@@ -234,7 +235,7 @@ function contentWidthFor(width: number): number {
 }
 
 function styleTitle(title: string, style: OperatorConsoleStyle | undefined): string {
-  return styleColor(style, title, style?.tokens.contract.palette.brand ?? "");
+  return styleColor(style, styleBold(style, title), style?.tokens.contract.palette.brand ?? "");
 }
 
 function normalizeDimension(value: number): number {
