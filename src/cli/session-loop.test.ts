@@ -1965,13 +1965,21 @@ function withModelRoute<T extends Runtime>(
   };
 }
 
-function compactResult(didCompress: boolean, postTokens: number): CompactResult {
+function compactResult(
+  didCompress: boolean,
+  postTokens: number,
+  diagnostics: Partial<CompactResult["diagnostics"]> = {},
+  messageCount = 0
+): CompactResult {
   return {
     didCompress,
     originalSessionId: "test-session",
     activeSessionId: "test-session",
     rotated: false,
-    messages: [],
+    messages: Array.from({ length: messageCount }, (_, index) => ({
+      role: "system",
+      content: `compacted message ${index + 1}`,
+    })),
     diagnostics: {
       shouldCompress: didCompress,
       reason: didCompress ? "compressed" : "nothing-to-compress",
@@ -1996,6 +2004,7 @@ function compactResult(didCompress: boolean, postTokens: number): CompactResult 
       scopeKey: "test",
       ineffectiveCompressionCount: 0,
       eventWarnings: [],
+      ...diagnostics,
     },
   };
 }
@@ -4325,6 +4334,120 @@ describe("runSessionLoop — active turn spinner", () => {
     const resetRail = rendered.split("\n").find((line) => line.includes("context 5.0k/128k") && line.includes("idle"));
     expect(resetRail).toBeDefined();
     expect(resetRail).not.toContain("⧖");
+  });
+
+  it("keeps a Papyrus live frame during manual compaction and renders the completion card", async () => {
+    const outputChunks: string[] = [];
+    const output = {
+      write(chunk: string | Uint8Array): boolean {
+        outputChunks.push(String(chunk));
+        return true;
+      },
+      isTTY: true,
+      columns: 120,
+    } as unknown as NodeJS.WritableStream;
+    const runtime = withModelInfo({
+      ...createMockRuntime(),
+      compactSession: async () => compactResult(true, 6_923, {
+        preTokens: 8_248,
+        estimatedSavingsTokens: 1_325,
+        estimatedSavingsRatio: 0.16,
+        sourceMessageCount: 39,
+        prunedToolResults: 2,
+        fallbackUsed: true,
+        warnings: ["summarizer warning"],
+        eventWarnings: ["event write warning"],
+      }, 29),
+    });
+
+    let promptIndex = 0;
+    await runSessionLoop({
+      runtime,
+      output,
+      capabilities: interactiveCaps({ supportsAnimation: false }),
+      operatorConsole: {
+        enabled: true,
+        runtimeHost: createOperatorConsoleRuntimeHost(),
+      },
+      prompt: Object.assign(
+        async () => {
+          const values = ["/compact", "/exit"];
+          return values[promptIndex++] ?? "/exit";
+        },
+        { close: () => {} }
+      ),
+      close: () => {},
+    });
+
+    const rendered = stripAnsi(outputChunks.join(""));
+    expect(rendered).toContain("compacting transcript");
+    expect(rendered).toContain("Compacting session history... Ctrl+C to cancel");
+    expect(rendered).toContain("𓂀 Context Compacted");
+    expect(rendered).toContain("│ Messages   39 → 29");
+    expect(rendered).toContain("│ Tokens     8,248 → 6,923");
+    expect(rendered).toContain("│ Saved      ~1,325 tokens · 16%");
+    expect(rendered).toContain("│ Note       2 older tool results were omitted.");
+    expect(rendered).toContain("│ Warning    3 compaction warnings were recorded.");
+    expect(rendered).not.toContain("Warning: tool result");
+    expect(rendered).not.toContain("summarizer warning");
+    expect(rendered).not.toContain("event write warning");
+  });
+
+  it("renders manual compaction unavailable, cancelled, and failure states as Papyrus cards", async () => {
+    const renderCompact = async (runtime: Runtime): Promise<string> => {
+      const outputChunks: string[] = [];
+      const output = {
+        write(chunk: string | Uint8Array): boolean {
+          outputChunks.push(String(chunk));
+          return true;
+        },
+        isTTY: true,
+        columns: 120,
+      } as unknown as NodeJS.WritableStream;
+      let promptIndex = 0;
+      await runSessionLoop({
+        runtime,
+        output,
+        capabilities: interactiveCaps({ supportsAnimation: false }),
+        operatorConsole: {
+          enabled: true,
+          runtimeHost: createOperatorConsoleRuntimeHost(),
+        },
+        prompt: Object.assign(
+          async () => {
+            const values = ["/compact", "/exit"];
+            return values[promptIndex++] ?? "/exit";
+          },
+          { close: () => {} }
+        ),
+        close: () => {},
+      });
+      return stripAnsi(outputChunks.join(""));
+    };
+
+    const unavailable = await renderCompact(createMockRuntime());
+    const failed = await renderCompact(createMockRuntime({
+      compactSession: async () => {
+        throw new Error("provider timed out");
+      },
+    }));
+    const cancelled = await renderCompact(createMockRuntime({
+      compactSession: async () => {
+        const error = new Error("The operation was aborted");
+        error.name = "AbortError";
+        throw error;
+      },
+    }));
+
+    expect(unavailable).toContain("𓂀 Context Compaction Unavailable");
+    expect(unavailable).toContain("│ Status     Compaction is unavailable in this runtime.");
+    expect(cancelled).toContain("𓂀 Context Compaction Cancelled");
+    expect(cancelled).toContain("│ Status     Compaction was cancelled.");
+    expect(cancelled).not.toContain("𓂀 Context Compaction Failed");
+    expect(failed).toContain("𓂀 Context Compaction Failed");
+    expect(failed).toContain("│ Status     Compaction failed.");
+    expect(failed).toContain("│ Detail     provider timed out");
+    expect(failed).not.toContain("Session compaction failed:");
   });
 
   it("reuses the last known context total when compaction resets without model context window", async () => {

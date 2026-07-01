@@ -34,6 +34,7 @@ export type LiveOperatorConsoleControllerOptions = {
   readonly streamingRefreshIntervalMs?: number;
   readonly getStatus: () => StatusRailState;
   readonly turnStartedAtMs?: number;
+  readonly promptPlaceholder?: string;
   readonly now?: () => number;
 };
 
@@ -52,6 +53,7 @@ export class LiveOperatorConsoleController {
   readonly #streamingRefreshIntervalMs: number;
   readonly #getStatus: () => StatusRailState;
   readonly #turnStartedAtMs: number | undefined;
+  readonly #promptPlaceholder: string | undefined;
   readonly #now: () => number;
   #activeWork: ToolActivityState = createActiveWorkRuntimeState();
   #activeWorkFrameIndex = 0;
@@ -84,6 +86,7 @@ export class LiveOperatorConsoleController {
     );
     this.#getStatus = options.getStatus;
     this.#turnStartedAtMs = options.turnStartedAtMs;
+    this.#promptPlaceholder = options.promptPlaceholder;
     this.#now = options.now ?? Date.now;
     this.#transcript = [...options.runtimeHost.getState().transcript];
     this.#renderLoop = new RawPromptRenderLoop(options.output, {
@@ -243,6 +246,7 @@ export class LiveOperatorConsoleController {
         streaming: this.#streamingSnapshotForRender(),
         steer: this.#steer,
         promptMode: steerVisible ? "steer" : "prompt",
+        ...(this.#promptPlaceholder === undefined ? {} : { placeholder: this.#promptPlaceholder }),
       },
     });
     this.#lastTimerRefreshAtMs = Date.now();

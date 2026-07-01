@@ -8,7 +8,10 @@ import type { ToolResult } from "../contracts/tool.js";
 import type { ProviderExecutionSummary, ProviderId } from "../contracts/provider.js";
 import type { ModelSwitchContext } from "../providers/model-switch-resolver.js";
 import { renderSessionRecallResult } from "../session/session-recall-service.js";
-import { renderSessionCompactionResult } from "../prompt/session-compression-service.js";
+import {
+  renderSessionCompactionResult as renderLegacySessionCompactionResult,
+  type CompactResult,
+} from "../prompt/session-compression-service.js";
 import { createProviderModelSelectionFlow, type FlowEngine } from "../providers/provider-model-selection-flow.js";
 import {
   applyModelSwitchPrimaryRoute,
@@ -54,9 +57,13 @@ import {
   createOperatorConsoleRuntimeHost,
   createOperatorConsoleStyle,
   mapStartupDashboardViewModelToOperatorConsoleState,
+  renderContextCompactionSurface,
+  renderContextCompactionStatusSurface,
   renderCompletedActiveWorkSurface,
   renderOperatorConsoleLines,
   routeSteerKey,
+  type ContextCompactionStatusSurfaceState,
+  type ContextCompactionSurfaceState,
   type OperatorConsoleStyle,
   type OperatorConsoleRuntimeHost,
   type QueuedSteerState,
@@ -142,6 +149,7 @@ export type SessionLoopOptions = {
 };
 
 const OPERATOR_CONSOLE_ACTIVE_WORK_TERMINAL_HEIGHT = 16;
+const COMPACTION_PROMPT_PLACEHOLDER = "Compacting session history... Ctrl+C to cancel";
 
 type ContextUsageSource = Extract<RuntimeEvent, { kind: "context-usage" }>["source"];
 type StatusRailTimerMode = "idle" | "active-turn" | "last-turn";
@@ -153,6 +161,15 @@ type SubmittedCliInput = {
   echoedText: string;
   clearSubmittedPrompt: boolean;
 };
+
+type SessionCompactionResultRenderer = (
+  result: CompactResult,
+  options?: { readonly focusTopic?: string }
+) => string;
+
+type SessionCompactionStatusRenderer = (
+  status: ContextCompactionStatusSurfaceState
+) => string;
 
 async function buildSessionStartupViewModel(runtime: Runtime): Promise<ViewModel> {
   const legacyStartup = runtime.getStartup();
@@ -291,6 +308,7 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
   });
   let activeTurn: AbortController | undefined;
   let clearActiveTurnChrome: () => void = () => undefined;
+  let activeTurnCancelMessage = "Cancelling current turn. Press Ctrl+C again or type /exit to leave.";
   const operatorConsoleEnabled = options.operatorConsole?.enabled === true
     && renderer.capabilities.isTTY
     && !renderer.capabilities.isCI
@@ -359,7 +377,7 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
     if (activeTurn !== undefined) {
       clearActiveTurnChrome();
       activeTurn.abort("SIGINT");
-      output.write("\nCancelling current turn. Press Ctrl+C again or type /exit to leave.\n");
+      output.write(`\n${activeTurnCancelMessage}\n`);
       return;
     }
 
@@ -477,6 +495,30 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
       }
 
       if (text.startsWith("/")) {
+        let slashLiveFrame: LiveOperatorConsoleController | undefined;
+        let slashAbortController: AbortController | undefined;
+        if (operatorConsoleRuntimeHost !== undefined && isCompactSlashCommand(text)) {
+          slashAbortController = new AbortController();
+          activeTurn = slashAbortController;
+          activeTurnCancelMessage = "Cancelling compaction. Press Ctrl+C again or type /exit to leave.";
+          slashLiveFrame = new LiveOperatorConsoleController({
+            output,
+            runtimeHost: operatorConsoleRuntimeHost,
+            terminal: {
+              width: termWidth,
+              height: OPERATOR_CONSOLE_ACTIVE_WORK_TERMINAL_HEIGHT,
+              isTty: renderer.capabilities.isTTY,
+            },
+            capabilities: {
+              supportsAnimation: renderer.capabilities.supportsAnimation,
+            },
+            getStatus: getOperatorConsoleStatus,
+            turnStartedAtMs: now(),
+            promptPlaceholder: COMPACTION_PROMPT_PLACEHOLDER,
+          });
+          clearActiveTurnChrome = () => slashLiveFrame?.clear();
+          slashLiveFrame.setTurnActivity({ phase: "background", backgroundKind: "compactingTranscript" });
+        }
         const slashPrompt = operatorConsoleEnabled
           ? withSetupConsolePrompt(prompt, {
               input: cliInput as unknown as Readable,
@@ -499,13 +541,39 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
             workspaceRoot: options.workspaceRoot,
             homeDir: options.homeDir,
             cronRuntimeFactory: options.cronRuntimeFactory,
+            renderSessionCompactionResult: operatorConsoleEnabled
+              ? (result, renderOptions) => renderPapyrusSessionCompactionResult(result, {
+                  width: termWidth,
+                  style: operatorConsoleStyle,
+                  ...(renderOptions?.focusTopic === undefined ? {} : { focusTopic: renderOptions.focusTopic }),
+                })
+              : undefined,
+            renderSessionCompactionStatus: operatorConsoleEnabled
+              ? (status) => renderPapyrusSessionCompactionStatus(status, {
+                  width: termWidth,
+                  style: operatorConsoleStyle,
+                })
+              : undefined,
+            ...(slashAbortController === undefined ? {} : { signal: slashAbortController.signal }),
+            onBeforeSessionCompactionOutput: () => {
+              slashLiveFrame?.clear();
+              slashLiveFrame = undefined;
+            },
             onSessionCompacted: ({ postTokens }) => applyCompactionRailReset(postTokens)
           });
         } catch (error) {
+          slashLiveFrame?.clear();
           if (isSetupConsoleExit(error)) {
             continue;
           }
           throw error;
+        } finally {
+          slashLiveFrame?.clear();
+          if (activeTurn === slashAbortController) {
+            activeTurn = undefined;
+            activeTurnCancelMessage = "Cancelling current turn. Press Ctrl+C again or type /exit to leave.";
+            clearActiveTurnChrome = () => undefined;
+          }
         }
 
         if (typeof shouldExit !== "boolean") {
@@ -544,6 +612,7 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
       let steeringRetryUsed = false;
       while (retryText !== undefined) {
         activeTurn = new AbortController();
+        activeTurnCancelMessage = "Cancelling current turn. Press Ctrl+C again or type /exit to leave.";
         activeTurnContextUsageSource = undefined;
         const turnStartedAtMs = now();
         activeTurnStartedAtMs = turnStartedAtMs;
@@ -1087,6 +1156,11 @@ function buildSteeredRetryText(originalText: string, note: string): string {
   return `${originalText}\n\n[Steering note while previous turn was interrupted]\n${note}`;
 }
 
+function isCompactSlashCommand(text: string): boolean {
+  const [command = ""] = text.slice(1).trim().split(/\s+/u);
+  return commandRegistry.resolve(command)?.name === "compact";
+}
+
 async function playCliResponseIfEnabled(input: {
   runtime: Runtime;
   text: string;
@@ -1135,6 +1209,10 @@ export async function handleSlashCommand(input: {
   workspaceRoot?: string;
   homeDir?: string;
   cronRuntimeFactory?: CronRuntimeFactory;
+  renderSessionCompactionResult?: SessionCompactionResultRenderer;
+  renderSessionCompactionStatus?: SessionCompactionStatusRenderer;
+  signal?: AbortSignal;
+  onBeforeSessionCompactionOutput?: () => void;
   onSessionCompacted?: (result: { readonly postTokens: number }) => void;
 }): Promise<boolean | { runtime: Runtime; notice: (runtime: Runtime) => string }> {
   const [command = "", ...args] = input.text.slice(1).trim().split(/\s+/u);
@@ -1378,10 +1456,17 @@ export async function handleSlashCommand(input: {
       return false;
     case "compact":
       {
-        const result = await renderSessionCompaction(input.runtime, args.join(" "));
+        const result = await renderSessionCompaction(
+          input.runtime,
+          args.join(" "),
+          input.renderSessionCompactionResult,
+          input.renderSessionCompactionStatus,
+          input.signal
+        );
         if (result.didCompress && result.postTokens !== undefined) {
           input.onSessionCompacted?.({ postTokens: result.postTokens });
         }
+        input.onBeforeSessionCompactionOutput?.();
         input.output.write(`${result.output}\n\n`);
       }
       return false;
@@ -2543,30 +2628,127 @@ async function renderSessionRecall(runtime: Runtime, query: string): Promise<str
 
 async function renderSessionCompaction(
   runtime: Runtime,
-  focusTopic: string
+  focusTopic: string,
+  renderResult: SessionCompactionResultRenderer = renderLegacySessionCompactionResult,
+  renderStatus: SessionCompactionStatusRenderer = renderLegacySessionCompactionStatus,
+  signal?: AbortSignal
 ): Promise<{ readonly output: string; readonly didCompress: boolean; readonly postTokens?: number }> {
   const topic = focusTopic.trim();
   if (runtime.compactSession === undefined) {
-    return { output: "Session compaction is not available in this runtime.", didCompress: false };
+    return { output: renderStatus({ kind: "unavailable" }), didCompress: false };
   }
 
   try {
     const normalizedTopic = topic.length === 0 ? undefined : topic;
     const result = await runtime.compactSession({
       focusTopic: normalizedTopic,
-      preserveTranscript: false
+      preserveTranscript: false,
+      ...(signal === undefined ? {} : { signal })
     });
     return {
-      output: renderSessionCompactionResult(result, { focusTopic: normalizedTopic }),
+      output: renderResult(result, { focusTopic: normalizedTopic }),
       didCompress: result.didCompress,
       postTokens: result.diagnostics.postTokens
     };
   } catch (error) {
+    if (isCompactionAbort(error, signal)) {
+      return {
+        output: renderStatus({ kind: "cancelled" }),
+        didCompress: false
+      };
+    }
     return {
-      output: `Session compaction failed: ${error instanceof Error ? error.message : String(error)}`,
+      output: renderStatus({
+        kind: "failed",
+        detail: formatUnknownError(error)
+      }),
       didCompress: false
     };
   }
+}
+
+function renderLegacySessionCompactionStatus(status: ContextCompactionStatusSurfaceState): string {
+  if (status.kind === "unavailable") {
+    return "Session compaction is not available in this runtime.";
+  }
+  if (status.kind === "cancelled") {
+    return "Session compaction cancelled.";
+  }
+  return `Session compaction failed: ${status.detail ?? "unknown error"}`;
+}
+
+function renderPapyrusSessionCompactionResult(
+  result: CompactResult,
+  options: {
+    readonly focusTopic?: string;
+    readonly width: number;
+    readonly style?: OperatorConsoleStyle;
+  }
+): string {
+  return renderContextCompactionSurface(compactResultToContextCompactionSurfaceState(
+    result,
+    options.focusTopic === undefined ? {} : { focusTopic: options.focusTopic }
+  ), {
+    width: options.width,
+    style: options.style,
+  }).join("\n");
+}
+
+function renderPapyrusSessionCompactionStatus(
+  status: ContextCompactionStatusSurfaceState,
+  options: {
+    readonly width: number;
+    readonly style?: OperatorConsoleStyle;
+  }
+): string {
+  return renderContextCompactionStatusSurface(status, {
+    width: options.width,
+    style: options.style,
+  }).join("\n");
+}
+
+function compactResultToContextCompactionSurfaceState(
+  result: CompactResult,
+  options: { readonly focusTopic?: string } = {}
+): ContextCompactionSurfaceState {
+  return {
+    didCompress: result.didCompress,
+    tone: result.diagnostics.fallbackUsed ? "warning" : "brand",
+    messagesBefore: result.diagnostics.sourceMessageCount,
+    messagesAfter: result.messages.length,
+    tokensBefore: result.diagnostics.preTokens,
+    tokensAfter: result.diagnostics.postTokens,
+    savedTokens: Math.max(0, Math.round(result.diagnostics.estimatedSavingsTokens)),
+    savingsPercent: Math.max(0, Math.round(result.diagnostics.estimatedSavingsRatio * 100)),
+    omittedToolResults: Math.max(0, Math.round(result.diagnostics.prunedToolResults)),
+    warningCount: compactionWarningCount(result),
+    skippedReason: result.diagnostics.reason,
+    ...(options.focusTopic === undefined ? {} : { focusTopic: options.focusTopic }),
+    ...(result.rotated ? { activeSessionId: result.activeSessionId } : {}),
+  };
+}
+
+function compactionWarningCount(result: CompactResult): number {
+  const warnings = new Set<string>([
+    ...(result.diagnostics.fallbackUsed ? ["fallback-summary-used"] : []),
+    ...result.diagnostics.warnings,
+    ...result.diagnostics.eventWarnings,
+  ]);
+  return warnings.size;
+}
+
+function formatUnknownError(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+function isCompactionAbort(error: unknown, signal: AbortSignal | undefined): boolean {
+  if (signal?.aborted === true) return true;
+  if (error instanceof Error && error.name === "AbortError") return true;
+  const message = formatUnknownError(error).trim().toLowerCase();
+  return message === "sigint"
+    || message.includes("aborted")
+    || message.includes("cancelled")
+    || message.includes("canceled");
 }
 
 async function runtimeProfileId(runtime: Runtime): Promise<string> {
