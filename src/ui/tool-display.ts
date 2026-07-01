@@ -51,6 +51,7 @@ export const TOOL_DISPLAY_LABELS: Readonly<Record<string, ToolDisplayLabelSet>> 
   "voice.speak": { en: "Speak", ar: "نطق" },
   "voice.transcribe": { en: "Transcribe", ar: "تفريغ صوتي" },
   "image.generate": { en: "Generate Image", ar: "توليد صورة" },
+  "image.edit": { en: "Edit Image", ar: "تعديل صورة" },
   "vision.analyze": { en: "Analyze Image", ar: "تحليل صورة" },
   "process.start": { en: "Start Process", ar: "بدء عملية" },
   "process.list": { en: "List Processes", ar: "عرض العمليات" },

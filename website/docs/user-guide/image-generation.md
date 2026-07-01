@@ -6,7 +6,7 @@ sidebar_position: 13
 
 # Image Generation
 
-Image generation is a provider-backed tool workflow. The agent calls `image.generate` with a text prompt; the configured provider returns an image URL; EstaCoda downloads, caches, and records the result as a local artifact.
+Image generation is a provider-backed tool workflow. The agent calls `image.generate` with a text prompt; the configured provider returns an image URL; EstaCoda downloads, caches, and records the result as a local artifact. When BytePlus is configured, the agent can also call `image.edit` to edit or blend source images with a text instruction.
 
 It is not a built-in model capability. You need a provider account, an API key, and a selected profile configured to use it.
 
@@ -111,6 +111,22 @@ Aspect ratio mapping:
 
 BytePlus requests use ModelArk's OpenAI-compatible endpoint with `response_format: "url"`, `output_format: "png"`, and `watermark: false`. EstaCoda can also consume BytePlus `b64_json` responses if a provider or future configuration returns them.
 
+### BytePlus image editing
+
+`image.edit` uses the same BytePlus configuration, API key, model, and ModelArk endpoint as `image.generate`; there is no separate editing setup step. The tool sends the documented BytePlus `image` request field with one HTTPS source image URL or an array of HTTPS source image URLs, and sets `sequential_image_generation: "disabled"` for a single edited result.
+
+Parameters:
+
+| Parameter | Type | Required | Notes |
+|-----------|------|----------|-------|
+| `prompt` | `string` | yes | The edit instruction. |
+| `sourceImages` | `string[]` | yes, unless `sourceImage` is set | HTTPS image URLs, `artifact://` references, or artifact ids for prior generated images that include `sourceUrl` metadata. |
+| `sourceImage` | `string` | yes, unless `sourceImages` is set | Convenience single-image input. |
+| `aspectRatio` | `string` | no | `square`, `landscape`, or `portrait`. Defaults to square. |
+| `model` | `string` | no | Overrides the configured BytePlus model for this request. |
+
+Local image paths are not uploaded by this tool. Use an HTTPS image URL or a prior generated artifact that still has provider `sourceUrl` metadata.
+
 Result:
 
 - The image is written to `~/.estacoda/profiles/<id>/image-cache/`.
@@ -126,6 +142,7 @@ Result:
 | Unsupported provider | Only `fal` and `byteplus` are implemented. | Select a supported provider. |
 | Remote provider error | HTTP 4xx/5xx, auth failure, or model not activated. | Check provider status, credentials, and model activation. |
 | Generated URL download failed | Provider returned a URL that could not be fetched. | Retry the request; transient network issues are possible. |
+| Local source image rejected by `image.edit` | BytePlus editing currently accepts safe HTTPS source URLs or artifacts with provider source URLs. | Use an HTTPS image URL or a prior generated artifact with `sourceUrl` metadata. |
 | Invalid output path | Cache directory missing or unwritable. | EstaCoda creates the directory recursively; check filesystem permissions. |
 | Safety / provider refusal | Provider rejected the prompt for policy reasons. | Rephrase the prompt or check provider content policies. |
 | BytePlus `ModelNotOpen` | The Seedream model is not activated for your account. | Activate it in the Ark Console, or choose another model with `estacoda image models --provider byteplus`. |

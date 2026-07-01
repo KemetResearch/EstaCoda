@@ -2,6 +2,14 @@ import { mkdir, stat, writeFile } from "node:fs/promises";
 import { extname, join } from "node:path";
 import { randomUUID } from "node:crypto";
 import type { ArtifactStore } from "../artifacts/artifact-store.js";
+import {
+  isAlwaysBlockedUrl,
+  isPrivateOrInternalIp,
+  normalizeHostname,
+  normalizeIpForChecks,
+  parseHttpUrl,
+  scanUrlForSecrets
+} from "../browser/url-safety.js";
 import { setupNeeded } from "../capabilities/capability-setup.js";
 import type { LoadedRuntimeConfig } from "../config/runtime-config.js";
 import { defaultImageApiKeyEnv, defaultImageBaseUrl, defaultImageModel, resolveImageModel } from "../contracts/image-generation.js";
@@ -75,16 +83,7 @@ export function createImageGenerationTools(options: ImageGenerationToolOptions):
         return result;
       }
 
-      await mkdir(options.imageCacheRoot, { recursive: true });
-      const fileName = `${safeId(options.id?.() ?? randomUUID())}.${extensionForMime(result.mimeType)}`;
-      const filePath = join(options.imageCacheRoot, fileName);
-      await writeFile(filePath, result.bytes);
-      const fileStat = await stat(filePath);
-      const artifact = options.artifactStore.record({
-        path: filePath,
-        kind: "image",
-        bytes: fileStat.size,
-        mimeType: result.mimeType,
+      const artifact = await storeImageArtifact(options, result, {
         summary: truncateSummary(`Image generated from prompt: ${prompt}`),
         metadata: {
           provider: imageGen.provider,
@@ -103,6 +102,86 @@ export function createImageGenerationTools(options: ImageGenerationToolOptions):
           `Model: ${result.model}`,
           `Aspect ratio: ${result.aspectRatio}`,
           result.seed === undefined ? undefined : `Seed: ${result.seed}`,
+          result.sourceUrl === undefined ? undefined : `Source URL: ${result.sourceUrl}`,
+          `Artifact: ${artifact.id}`
+        ].filter((line) => line !== undefined).join("\n"),
+        metadata: artifact
+      };
+    }
+  }, {
+    name: "image.edit",
+    description: "Edit or blend one or more source images with BytePlus Seedream using a text instruction.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        prompt: { type: "string" },
+        sourceImages: {
+          type: "array",
+          items: { type: "string" },
+          minItems: 1,
+          description: "HTTPS image URLs, artifact:// references, or artifact ids for prior generated images with source URLs."
+        },
+        sourceImage: {
+          type: "string",
+          description: "Single HTTPS image URL, artifact:// reference, or artifact id."
+        },
+        aspectRatio: { type: "string", enum: ["square", "landscape", "portrait"] },
+        model: { type: "string" }
+      },
+      required: ["prompt"]
+    },
+    riskClass: "external-side-effect",
+    toolsets: ["media", "telegram"],
+    progressLabel: "editing image",
+    maxResultSizeChars: 4000,
+    isAvailable: () => true,
+    run: async (input: { prompt?: string; sourceImages?: string[]; sourceImage?: string; aspectRatio?: string; model?: string }, context) => {
+      const prompt = input.prompt?.trim();
+      if (prompt === undefined || prompt.length === 0) {
+        return { ok: false, content: "image.edit requires a prompt." };
+      }
+      const aspectRatio = normalizeAspectRatio(input.aspectRatio);
+      if (aspectRatio === undefined) {
+        return { ok: false, content: "image.edit aspectRatio must be square, landscape, or portrait." };
+      }
+
+      const sourceImages = resolveSourceImages(input, options.artifactStore);
+      if (!sourceImages.ok) {
+        return sourceImages;
+      }
+
+      const result = await editImage({
+        prompt,
+        sourceImages: sourceImages.urls,
+        aspectRatio,
+        model: input.model,
+        imageGen,
+        fetch: options.fetch,
+        signal: context?.signal
+      });
+      if (!result.ok) {
+        return result;
+      }
+
+      const artifact = await storeImageArtifact(options, result, {
+        summary: truncateSummary(`Image edited from ${sourceImages.urls.length} source image(s): ${prompt}`),
+        metadata: {
+          provider: imageGen.provider,
+          model: result.model,
+          aspectRatio: result.aspectRatio,
+          sourceImages: sourceImages.urls,
+          sourceUrl: result.sourceUrl
+        }
+      });
+
+      return {
+        ok: true,
+        content: [
+          `Edited image: ${artifact.path}`,
+          `Provider: ${imageGen.provider}`,
+          `Model: ${result.model}`,
+          `Aspect ratio: ${result.aspectRatio}`,
+          `Source images: ${sourceImages.urls.length}`,
           result.sourceUrl === undefined ? undefined : `Source URL: ${result.sourceUrl}`,
           `Artifact: ${artifact.id}`
         ].filter((line) => line !== undefined).join("\n"),
@@ -188,6 +267,72 @@ async function generateImage(input: {
   };
 }
 
+async function editImage(input: {
+  prompt: string;
+  sourceImages: string[];
+  aspectRatio: ImageAspect;
+  model?: string;
+  imageGen: LoadedRuntimeConfig["imageGen"];
+  fetch?: ImageGenerationFetchLike;
+  signal?: AbortSignal;
+}): Promise<
+  | { ok: true; bytes: Buffer; mimeType: string; model: string; aspectRatio: ImageAspect; sourceUrl?: string }
+  | { ok: false; content: string; metadata?: Record<string, unknown> }
+> {
+  if (input.imageGen.provider !== "byteplus") {
+    return {
+      ok: false,
+      content: "image.edit currently supports BytePlus image generation only. Configure BytePlus with estacoda image setup --provider byteplus, then retry."
+    };
+  }
+
+  const fetcher = input.fetch ?? globalImageFetch;
+  const generated = await submitBytePlusRequest({
+    prompt: input.prompt,
+    sourceImages: input.sourceImages,
+    resumeIntent: "image.edit",
+    aspectRatio: input.aspectRatio,
+    model: input.model,
+    imageGen: input.imageGen,
+    signal: input.signal
+  }, fetcher);
+  if (!generated.ok) {
+    return generated;
+  }
+
+  if ("bytes" in generated) {
+    return {
+      ok: true,
+      bytes: generated.bytes,
+      mimeType: generated.mimeType,
+      model: generated.model,
+      aspectRatio: input.aspectRatio
+    };
+  }
+
+  const imageBytes = await fetcher(generated.url, { signal: input.signal });
+  if (!imageBytes.ok) {
+    return {
+      ok: false,
+      content: `Edited image URL could not be downloaded: ${imageBytes.status} ${imageBytes.statusText}`,
+      metadata: {
+        provider: "byteplus",
+        model: generated.model,
+        url: generated.url
+      }
+    };
+  }
+
+  return {
+    ok: true,
+    bytes: Buffer.from(await imageBytes.arrayBuffer()),
+    mimeType: mimeFromImageDownload(generated.url, imageBytes.headers?.get("content-type") ?? undefined),
+    model: generated.model,
+    aspectRatio: input.aspectRatio,
+    sourceUrl: generated.url
+  };
+}
+
 async function submitFalRequest(
   input: {
     prompt: string;
@@ -231,6 +376,8 @@ async function submitBytePlusRequest(
   input: {
     prompt: string;
     aspectRatio: ImageAspect;
+    sourceImages?: string[];
+    resumeIntent?: string;
     model?: string;
     seed?: number;
     imageGen: LoadedRuntimeConfig["imageGen"];
@@ -246,25 +393,32 @@ async function submitBytePlusRequest(
     return imageSetupNeeded({
       provider: "byteplus",
       model,
-      requiredSecret: apiKeyEnv
+      requiredSecret: apiKeyEnv,
+      resumeIntent: input.resumeIntent
     });
   }
 
   const baseUrl = (input.imageGen.byteplus?.baseUrl ?? input.imageGen.baseUrl ?? defaultImageBaseUrl("byteplus")).replace(/\/$/, "");
+  const body: Record<string, unknown> = {
+    model,
+    prompt: input.prompt,
+    size: bytePlusSize(input.aspectRatio),
+    output_format: "png",
+    response_format: "url",
+    watermark: false
+  };
+  if (input.sourceImages !== undefined && input.sourceImages.length > 0) {
+    body.image = input.sourceImages.length === 1 ? input.sourceImages[0] : input.sourceImages;
+    body.sequential_image_generation = "disabled";
+  }
+
   const response = await fetchWithTransientRetry(fetcher, `${baseUrl}/images/generations`, {
     method: "POST",
     headers: {
       authorization: `Bearer ${apiKey}`,
       "content-type": "application/json"
     },
-    body: JSON.stringify({
-      model,
-      prompt: input.prompt,
-      size: bytePlusSize(input.aspectRatio),
-      output_format: "png",
-      response_format: "url",
-      watermark: false
-    }),
+    body: JSON.stringify(body),
     signal: input.signal
   });
   return parseImageResponse(response, "byteplus", model);
@@ -452,6 +606,100 @@ function extensionForMime(mimeType: string): string {
   return "png";
 }
 
+async function storeImageArtifact(
+  options: ImageGenerationToolOptions,
+  image: { bytes: Buffer; mimeType: string },
+  details: {
+    summary: string;
+    metadata: Record<string, unknown>;
+  }
+) {
+  await mkdir(options.imageCacheRoot, { recursive: true });
+  const fileName = `${safeId(options.id?.() ?? randomUUID())}.${extensionForMime(image.mimeType)}`;
+  const filePath = join(options.imageCacheRoot, fileName);
+  await writeFile(filePath, image.bytes);
+  const fileStat = await stat(filePath);
+  return options.artifactStore.record({
+    path: filePath,
+    kind: "image",
+    bytes: fileStat.size,
+    mimeType: image.mimeType,
+    summary: details.summary,
+    metadata: details.metadata
+  });
+}
+
+function resolveSourceImages(
+  input: { sourceImages?: string[]; sourceImage?: string },
+  artifactStore: ArtifactStore
+): { ok: true; urls: string[] } | { ok: false; content: string; metadata?: Record<string, unknown> } {
+  const requested = [
+    ...(Array.isArray(input.sourceImages) ? input.sourceImages : []),
+    input.sourceImage
+  ].filter((source): source is string => typeof source === "string" && source.trim().length > 0);
+
+  if (requested.length === 0) {
+    return {
+      ok: false,
+      content: "image.edit requires at least one source image URL, artifact:// reference, or artifact id."
+    };
+  }
+
+  const urls: string[] = [];
+  for (const source of requested) {
+    const resolved = resolveSourceImage(source.trim(), artifactStore);
+    if (!resolved.ok) return resolved;
+    urls.push(resolved.url);
+  }
+
+  return { ok: true, urls };
+}
+
+function resolveSourceImage(
+  source: string,
+  artifactStore: ArtifactStore
+): { ok: true; url: string } | { ok: false; content: string; metadata?: Record<string, unknown> } {
+  if (isSafeRemoteImageUrl(source)) {
+    return { ok: true, url: source };
+  }
+
+  const artifactId = source.startsWith("artifact://") ? source.slice("artifact://".length) : source;
+  const artifact = artifactStore.list().find((candidate) => candidate.id === artifactId || candidate.path === source);
+  const sourceUrl = typeof artifact?.metadata?.sourceUrl === "string" ? artifact.metadata.sourceUrl : undefined;
+  if (sourceUrl !== undefined && isSafeRemoteImageUrl(sourceUrl)) {
+    return { ok: true, url: sourceUrl };
+  }
+
+  if (artifact !== undefined) {
+    return {
+      ok: false,
+      content: [
+        `image.edit cannot send artifact ${artifact.id} to BytePlus because it does not have a safe HTTPS source URL.`,
+        "Use an image URL, or first generate/select an image artifact that includes provider sourceUrl metadata."
+      ].join("\n"),
+      metadata: { artifactId: artifact.id }
+    };
+  }
+
+  return {
+    ok: false,
+    content: "image.edit source images must be safe HTTPS URLs, artifact:// references, or artifact ids with source URL metadata.",
+    metadata: { reason: "invalid-source-image" }
+  };
+}
+
+function isSafeRemoteImageUrl(value: string): boolean {
+  const parsed = parseHttpUrl(value);
+  if (parsed === undefined || parsed.protocol !== "https:") return false;
+  if (parsed.username.length > 0 || parsed.password.length > 0) return false;
+  if (scanUrlForSecrets(value) !== undefined || isAlwaysBlockedUrl(value)) return false;
+
+  const hostname = normalizeHostname(parsed.hostname);
+  if (hostname === "localhost" || hostname.endsWith(".localhost")) return false;
+  const literalIp = normalizeIpForChecks(hostname);
+  return literalIp === undefined || !isPrivateOrInternalIp(literalIp);
+}
+
 function safeId(value: string): string {
   return value.replace(/[^a-zA-Z0-9_-]/g, "-").slice(0, 80) || "image";
 }
@@ -490,6 +738,7 @@ function imageSetupNeeded(input: {
   provider: "fal" | "byteplus";
   model: string;
   requiredSecret: string;
+  resumeIntent?: string;
 }): { ok: false; content: string; metadata: Record<string, unknown> } {
   return {
     ok: false,
@@ -503,7 +752,7 @@ function imageSetupNeeded(input: {
       capability: "image_generation",
       providerOptions: ["fal", "byteplus"],
       requiredSecret: input.requiredSecret,
-      resumeIntent: "image.generate",
+      resumeIntent: input.resumeIntent ?? "image.generate",
       suggestedCommand: `estacoda image setup --provider ${input.provider} --model ${input.model} --api-key-env ${input.requiredSecret}`,
       suggestedTool: "config.image.setup",
       provider: input.provider,
