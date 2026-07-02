@@ -625,6 +625,48 @@ describe("cli setup command", () => {
     expect(config.providers?.local?.baseUrl).toBe("http://localhost:11434/v1");
   });
 
+  it("doctor --ack stores advisory acknowledgements under the selected profile", async () => {
+    const workspaceRoot = join(tempDir, "workspace");
+    const researchPaths = resolveProfileStateHome({ homeDir: tempDir, profileId: "research" });
+    const defaultPaths = resolveProfileStateHome({ homeDir: tempDir, profileId: "default" });
+
+    const result = await runCliCommand({
+      argv: ["doctor", "--ack", "GHSA-abcd-1234"],
+      workspaceRoot,
+      homeDir: tempDir,
+      profileId: "research",
+      interactive: false,
+    });
+    const ackFile = JSON.parse(await readFile(researchPaths.advisoriesAckedPath, "utf8")) as {
+      acknowledgements: Array<{ id: string }>;
+    };
+
+    expect(result.handled).toBe(true);
+    expect(result.exitCode).toBe(0);
+    expect(result.output).toContain("EstaCoda Doctor Advisory");
+    expect(result.output).toContain("Advisory acknowledgement recorded");
+    expect(result.output).toContain("Profile:         research");
+    expect(ackFile.acknowledgements).toEqual([
+      expect.objectContaining({ id: "GHSA-abcd-1234" })
+    ]);
+    await expect(readFile(defaultPaths.advisoriesAckedPath, "utf8")).rejects.toThrow();
+  });
+
+  it("doctor --ack requires an advisory id", async () => {
+    const workspaceRoot = join(tempDir, "workspace");
+
+    const result = await runCliCommand({
+      argv: ["doctor", "--ack="],
+      workspaceRoot,
+      homeDir: tempDir,
+      interactive: false,
+    });
+
+    expect(result.handled).toBe(true);
+    expect(result.exitCode).toBe(1);
+    expect(result.output).toBe("Usage: estacoda doctor --ack <advisory-id>\n");
+  });
+
   it("doctor --json marks OAuth primary route failures as provider blockers", async () => {
     const workspaceRoot = join(tempDir, "workspace");
     await writeUserConfig(tempDir, {

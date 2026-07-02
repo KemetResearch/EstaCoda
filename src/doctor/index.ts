@@ -16,6 +16,8 @@ import {
 } from "../config/provider-diagnostics.js";
 import type { ProviderDiagnostic, ProviderLiveDiagnostic } from "../config/provider-diagnostics.js";
 import { PackRegistry } from "../packs/pack-registry.js";
+import { renderDoctorAdvisoryAckReport } from "./advisory-renderer.js";
+import { AdvisoryAckStore } from "./advisory-store.js";
 import { diagnoseBackupReadiness } from "./checks/backup-readiness.js";
 import { diagnoseConfigDrift, type ConfigDriftDiagnostic } from "./checks/config-drift.js";
 import { diagnoseConfigHygiene, type ConfigHygieneDiagnostic } from "./checks/config-hygiene.js";
@@ -50,6 +52,41 @@ import type {
 } from "./types.js";
 
 export async function runDoctor(options: CliOptions, args: string[] = []): Promise<CliCommandResult> {
+  const advisoryAckId = flagValue(args, "--ack");
+  if (advisoryAckId !== undefined || hasFlag(args, "--ack") || hasFlagAssignment(args, "--ack")) {
+    if (advisoryAckId === undefined) {
+      return {
+        handled: true,
+        exitCode: 1,
+        output: "Usage: estacoda doctor --ack <advisory-id>\n"
+      };
+    }
+    const activeProfile = readActiveProfileForDoctor({ homeDir: options.homeDir });
+    const selectedProfile = options.profileId ?? activeProfile.profileId;
+    const profilePaths = resolveProfileStateHome({ homeDir: options.homeDir, profileId: selectedProfile });
+    const globalPaths = resolveGlobalStateHome({ homeDir: options.homeDir });
+    const locale = await detectDoctorLocale({ ...options, profileId: selectedProfile });
+    try {
+      const result = await new AdvisoryAckStore({ path: profilePaths.advisoriesAckedPath }).acknowledge(advisoryAckId);
+      return {
+        handled: true,
+        exitCode: 0,
+        output: renderDoctorAdvisoryAckReport({
+          locale,
+          profile: selectedProfile,
+          home: globalPaths.stateRoot,
+          result
+        })
+      };
+    } catch (error) {
+      return {
+        handled: true,
+        exitCode: 1,
+        output: `Doctor advisory acknowledgement failed: ${errorMessage(error)}\n`
+      };
+    }
+  }
+
   if (hasFlag(args, "--repair-sessions")) {
     const activeProfile = readActiveProfileForDoctor({ homeDir: options.homeDir });
     const selectedProfile = options.profileId ?? activeProfile.profileId;
@@ -1025,6 +1062,25 @@ function errorMessage(error: unknown): string {
 
 function hasFlag(args: string[], ...flags: string[]): boolean {
   return args.some((arg) => flags.includes(arg));
+}
+
+function hasFlagAssignment(args: string[], flag: string): boolean {
+  return args.some((arg) => arg.startsWith(`${flag}=`));
+}
+
+function flagValue(args: string[], flag: string): string | undefined {
+  for (let index = 0; index < args.length; index += 1) {
+    const arg = args[index];
+    if (arg === flag) {
+      const value = args[index + 1];
+      return value === undefined || value.startsWith("--") ? undefined : value;
+    }
+    if (arg.startsWith(`${flag}=`)) {
+      const value = arg.slice(flag.length + 1);
+      return value.length === 0 ? undefined : value;
+    }
+  }
+  return undefined;
 }
 
 function doctorConsoleStyle(): OperatorConsoleStyle {
