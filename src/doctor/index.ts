@@ -17,6 +17,7 @@ import {
 import type { ProviderDiagnostic, ProviderLiveDiagnostic } from "../config/provider-diagnostics.js";
 import { PackRegistry } from "../packs/pack-registry.js";
 import { diagnoseBackupReadiness } from "./checks/backup-readiness.js";
+import { diagnoseConfigDrift, type ConfigDriftDiagnostic } from "./checks/config-drift.js";
 import { diagnoseConfigHygiene, type ConfigHygieneDiagnostic } from "./checks/config-hygiene.js";
 import {
   diagnoseDirectoryStructure,
@@ -150,6 +151,11 @@ export async function runDoctor(options: CliOptions, args: string[] = []): Promi
     configSyntaxError = error instanceof Error ? error.message : String(error);
   }
   const configHygiene = await diagnoseConfigHygiene(selectedProfilePaths.configPath);
+  const configDrift = await diagnoseConfigDrift({
+    configPath: selectedProfilePaths.configPath,
+    envPath: selectedProfilePaths.envPath,
+    loadedConfig: config
+  });
   const mcpSecurity = diagnoseMcpSecurity(config);
   const pythonEnvironments = await safeDoctorDiagnostic(
     "python environments",
@@ -213,7 +219,8 @@ export async function runDoctor(options: CliOptions, args: string[] = []): Promi
   warnings.push(...npmAudit.warnings);
   warnings.push(...pythonEnvironments.warnings);
   warnings.push(...providerChain.warnings);
-  warnings.push(...configHygiene.warnings);
+  warnings.push(...configHygieneWarnings(configHygiene, configDrift));
+  warnings.push(...configDrift.warnings);
   warnings.push(...providerDiagnostic.warnings);
   warnings.push(...(liveProviderDiagnostic?.warnings ?? []));
   warnings.push(...(liveToolDiagnostic?.warnings ?? []));
@@ -280,6 +287,7 @@ export async function runDoctor(options: CliOptions, args: string[] = []): Promi
     liveToolDiagnostic,
     configSyntaxError,
     configHygiene,
+    configDrift,
     directoryDiagnostic,
     sqliteHealth,
     oauthStatus,
@@ -327,6 +335,7 @@ type BuildDoctorReportInput = {
   readonly liveToolDiagnostic?: LiveToolDiagnostic;
   readonly configSyntaxError?: string;
   readonly configHygiene: ConfigHygieneDiagnostic;
+  readonly configDrift: ConfigDriftDiagnostic;
   readonly directoryDiagnostic: DirectoryStructureDiagnostic;
   readonly sqliteHealth: SQLiteHealthDiagnostic;
   readonly oauthStatus: OAuthStatusDiagnostic;
@@ -525,7 +534,8 @@ function configSeverity(input: BuildDoctorReportInput): DoctorCheckSeverity {
     input.activeProfileMissing ||
     input.selectedProfileConfigMissing ||
     input.missingProfileEnv.length > 0 ||
-    input.configHygiene.warnings.length > 0
+    input.configHygiene.warnings.length > 0 ||
+    input.configDrift.warnings.length > 0
   ) return "warning";
   return "healthy";
 }
@@ -534,6 +544,9 @@ function configSummary(input: BuildDoctorReportInput): string | undefined {
   if (input.configSyntaxError !== undefined) return `Config syntax error: ${input.configSyntaxError}`;
   if (input.selectedProfileConfigMissing) return "selected profile config missing";
   if (input.activeProfileMissing) return "active profile missing";
+  if (input.configDrift.status === "blocked") return "config drift planning blocked";
+  const configDriftCount = input.configDrift.staleRootKeys.length + input.configDrift.envGhosts.length;
+  if (configDriftCount > 0) return `${configDriftCount} config drift item(s)`;
   if (input.configHygiene.staleRootKeys.length > 0) return "stale config keys";
   if (input.configHygiene.circularFallbacks.length > 0) return "circular fallback route";
   if (input.configHygiene.missingSections.length > 0) return "missing recommended sections";
@@ -673,6 +686,14 @@ function firstOrReady(warnings: readonly string[], locale: DoctorLocale): string
   return locale === "ar" ? "جاهز" : "ready";
 }
 
+function configHygieneWarnings(
+  hygiene: ConfigHygieneDiagnostic,
+  drift: ConfigDriftDiagnostic
+): readonly string[] {
+  if (drift.staleRootKeys.length === 0) return hygiene.warnings;
+  return hygiene.warnings.filter((warning) => !/^Profile config has stale root keys:/u.test(warning));
+}
+
 function diagnosticFailed(warnings: readonly string[]): boolean {
   return warnings.some((warning) => /^Doctor .* diagnostic failed:/u.test(warning));
 }
@@ -730,12 +751,20 @@ function warningAction(warning: string, index: number, locale: DoctorLocale): Do
 }
 
 function warningSeverity(warning: string): DoctorAction["severity"] {
-  return /Config syntax error|Provider setup is incomplete|Provider route primary is unavailable|not writable|blocked|SQLite session DB (?:could not be opened|schema is missing required|FTS index is unavailable|FTS write probe failed|path is not a file)/iu.test(warning)
+  return /Config syntax error|Config drift could not be planned|Provider setup is incomplete|Provider route primary is unavailable|not writable|blocked|SQLite session DB (?:could not be opened|schema is missing required|FTS index is unavailable|FTS write probe failed|path is not a file)/iu.test(warning)
     ? "blocked"
     : "warning";
 }
 
 function warningDetailLines(warning: string, locale: DoctorLocale): readonly string[] | undefined {
+  const staleConfigKey = /^Config contains stale root-level key: (.+)$/iu.exec(warning)?.[1];
+  if (staleConfigKey !== undefined) {
+    return [staleConfigKey.replace("->", "→")];
+  }
+  const envGhost = /^Profile \.env contains unreferenced credential key: (.+)$/iu.exec(warning)?.[1];
+  if (envGhost !== undefined) {
+    return [locale === "ar" ? `المتغير: ${envGhost}` : `Env: ${envGhost}`];
+  }
   const missingEnv = /missing required values: (.+)$/iu.exec(warning)?.[1];
   if (missingEnv !== undefined) {
     return [locale === "ar" ? `المتغيرات: ${missingEnv}` : `Env: ${missingEnv}`];
@@ -753,6 +782,8 @@ function warningDetailLines(warning: string, locale: DoctorLocale): readonly str
 
 function warningCommand(warning: string): string | undefined {
   if (/Config syntax error/iu.test(warning)) return "estacoda setup --interactive";
+  if (/Config drift could not be planned/iu.test(warning)) return "estacoda setup --interactive";
+  if (/Config contains stale root-level key|Profile \.env contains unreferenced credential key/iu.test(warning)) return "estacoda doctor --fix-config";
   if (/OAuth credentials are expired/iu.test(warning)) return "estacoda model setup";
   if (/Provider route .*(?:missing (?:env var|apiKeyEnv|OAuth credentials)|OAuth credentials expired|provider setup incomplete)/iu.test(warning)) return "estacoda model setup";
   if (/Provider setup is incomplete|missing required values|Missing API key/iu.test(warning)) return "estacoda model setup";
@@ -770,8 +801,15 @@ function pythonCapabilityFromWarning(warning: string): string | undefined {
 }
 
 function localizeWarningTitle(warning: string, locale: DoctorLocale): string {
-  if (locale !== "ar") return warning;
+  if (locale !== "ar") {
+    if (/Config contains stale root-level key/iu.test(warning)) return "Config contains stale root-level key";
+    if (/Profile \.env contains unreferenced credential key/iu.test(warning)) return "Profile .env contains unreferenced credential key";
+    return warning;
+  }
   if (/Config syntax error/iu.test(warning)) return warning.replace(/^Config syntax error:/iu, "خطأ في صياغة الإعدادات:");
+  if (/Config drift could not be planned/iu.test(warning)) return "تعذر تخطيط انحراف الإعدادات";
+  if (/Config contains stale root-level key/iu.test(warning)) return "الإعدادات تحتوي مفتاحًا قديمًا في الجذر";
+  if (/Profile \.env contains unreferenced credential key/iu.test(warning)) return "ملف .env يحتوي مفتاح اعتماد غير مستخدم";
   if (/Provider setup is incomplete/iu.test(warning)) return "إعداد المزوّد غير مكتمل";
   if (/Selected profile .env is missing required values/iu.test(warning)) return "ملف أسرار الملف الشخصي تنقصه قيم مطلوبة";
   if (/Active profile is missing/iu.test(warning)) return "الملف الشخصي النشط غير موجود";

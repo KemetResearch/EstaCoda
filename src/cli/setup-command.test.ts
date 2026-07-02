@@ -552,6 +552,49 @@ describe("cli setup command", () => {
     ]));
   });
 
+  it("doctor --json reports config drift with a future safe fix command", async () => {
+    const workspaceRoot = join(tempDir, "workspace");
+    const profilePaths = resolveProfileStateHome({ homeDir: tempDir, profileId: "default" });
+    await writeUserConfig(tempDir, {
+      ...(localReadyConfig() as Record<string, unknown>),
+      provider: "local",
+      baseUrl: "http://legacy.local/v1"
+    });
+    await writeFile(profilePaths.envPath, "UNUSED_API_KEY=ghost-secret\n", "utf8");
+
+    const result = await runCliCommand({
+      argv: ["doctor", "--json"],
+      workspaceRoot,
+      homeDir: tempDir,
+      interactive: false,
+    });
+    const report = JSON.parse(result.output) as {
+      sections: Array<{ checks: Array<{ id: string; severity: string; summary?: string }> }>;
+      actions: Array<{ title: string; detailLines?: string[]; command?: string; severity: string }>;
+    };
+    const configurationCheck = report.sections.flatMap((section) => section.checks).find((check) => check.id === "configuration");
+
+    expect(configurationCheck).toEqual(expect.objectContaining({
+      severity: "warning",
+      summary: "3 config drift item(s)"
+    }));
+    expect(report.actions).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        title: "Config contains stale root-level key",
+        detailLines: ["provider → model.provider"],
+        command: "estacoda doctor --fix-config",
+        severity: "warning"
+      }),
+      expect.objectContaining({
+        title: "Profile .env contains unreferenced credential key",
+        detailLines: ["Env: UNUSED_API_KEY"],
+        command: "estacoda doctor --fix-config",
+        severity: "warning"
+      })
+    ]));
+    expect(result.output).not.toContain("ghost-secret");
+  });
+
   it("doctor --json marks OAuth primary route failures as provider blockers", async () => {
     const workspaceRoot = join(tempDir, "workspace");
     await writeUserConfig(tempDir, {
