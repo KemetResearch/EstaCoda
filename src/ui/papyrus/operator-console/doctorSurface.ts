@@ -395,7 +395,7 @@ function doctorSurfaceCopy(locale: DoctorLocale): DoctorSurfaceCopy {
     model: "Model",
     checks: "Checks",
     providerRoutes: "Provider Routes",
-    verdict: "𓂀  Verdict",
+    verdict: "🩺  Verdict",
     actions: "Actions",
     notes: "Notes",
     noteMarker: "•",

@@ -66,9 +66,9 @@ describe("renderDoctorReport", () => {
     }), { style });
 
     expect(stripAnsi(output)).toContain("𓂀  EstaCoda Doctor");
-    expect(stripAnsi(output)).toContain("𓂀  Verdict");
+    expect(stripAnsi(output)).toContain("🩺  Verdict");
     expect(output).toContain(`${ansiFg(tokens.contract.severity.ok)}\x1b[1m𓂀  EstaCoda Doctor\x1b[0m\x1b[0m`);
-    expect(output).toContain(`${ansiFg(tokens.contract.palette.brand)}\x1b[1m𓂀  Verdict\x1b[0m\x1b[0m`);
+    expect(output).toContain(`${ansiFg(tokens.contract.palette.brand)}\x1b[1m🩺  Verdict\x1b[0m\x1b[0m`);
     expect(output).toContain(`${ansiFg(tokens.contract.palette.accent)}\x1b[1m◇ Checks\x1b[0m\x1b[0m`);
     expect(output).toContain(`${ansiFg(tokens.contract.severity.ok)}✓\x1b[0m`);
     expect(output).toContain(`${ansiFg(tokens.contract.palette.caution)}▲\x1b[0m`);
