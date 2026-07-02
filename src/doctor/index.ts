@@ -7,8 +7,9 @@ import { resolveTokens } from "../theme/token-resolver.js";
 import { detectTerminalCapabilities } from "../ui/terminal-capabilities.js";
 import { createOperatorConsoleStyle } from "../ui/papyrus/operator-console/operatorConsoleStyle.js";
 import type { OperatorConsoleStyle } from "../ui/papyrus/operator-console/operatorConsoleStyle.js";
-import { defaultProfileId, readActiveProfile, resolveProfileStateHome } from "../config/profile-home.js";
+import { defaultProfileId, readActiveProfile, resolveGlobalStateHome, resolveProfileStateHome } from "../config/profile-home.js";
 import { collectSetupEntryState, type SetupEntryState } from "../setup/setup-entry-state.js";
+import { repairSQLiteSchema } from "../storage/repair.js";
 import {
   diagnoseProviderConfig,
   diagnoseProviderLive
@@ -34,6 +35,7 @@ import { diagnoseSQLiteHealth, type SQLiteHealthDiagnostic } from "./checks/sqli
 import { renderDoctorJsonReport, renderDoctorReport } from "./cli-renderer.js";
 import { runDoctorFix } from "./fix-engine.js";
 import { renderDoctorFixReport } from "./fix-renderer.js";
+import { renderDoctorSessionRepairReport } from "./session-repair-renderer.js";
 import type {
   DoctorAction,
   DoctorCheck,
@@ -45,6 +47,24 @@ import type {
 } from "./types.js";
 
 export async function runDoctor(options: CliOptions, args: string[] = []): Promise<CliCommandResult> {
+  if (hasFlag(args, "--repair-sessions")) {
+    const activeProfile = readActiveProfileForDoctor({ homeDir: options.homeDir });
+    const selectedProfile = options.profileId ?? activeProfile.profileId;
+    const globalPaths = resolveGlobalStateHome({ homeDir: options.homeDir });
+    const locale = await detectDoctorLocale({ ...options, profileId: selectedProfile });
+    const repairReport = await repairSQLiteSchema({ path: globalPaths.sessionsSqlitePath });
+    return {
+      handled: true,
+      exitCode: repairReport.status === "blocked" ? 1 : 0,
+      output: renderDoctorSessionRepairReport({
+        locale,
+        profile: selectedProfile,
+        home: globalPaths.stateRoot,
+        report: repairReport
+      })
+    };
+  }
+
   if (hasFlag(args, "--fix")) {
     const fixResult = await runDoctorFix({
       homeDir: options.homeDir,

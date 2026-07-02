@@ -680,6 +680,45 @@ describe("cli setup command", () => {
     expect(report.actions.filter((action) => action.id === "sqlite-session-repair")).toHaveLength(1);
   });
 
+  it("doctor --repair-sessions backs up and rebuilds broken SQLite FTS", async () => {
+    const workspaceRoot = join(tempDir, "workspace");
+    await writeUserConfig(tempDir, localReadyConfig());
+    const sessionPath = resolveGlobalStateHome({ homeDir: tempDir }).sessionsSqlitePath;
+    await createBrokenFtsSessionDb(sessionPath);
+
+    const result = await runCliCommand({
+      argv: ["doctor", "--repair-sessions"],
+      workspaceRoot,
+      homeDir: tempDir,
+      interactive: false,
+    });
+
+    expect(result.handled).toBe(true);
+    expect(result.exitCode).toBe(0);
+    expect(result.output).toContain("EstaCoda Doctor Repair");
+    expect(result.output).toContain("Repaired session database");
+    expect(result.output).toContain("Backup");
+    await expect(ftsSearch(sessionPath, "repairable")).resolves.toEqual(["message-1"]);
+  });
+
+  it("doctor --fix does not repair broken SQLite FTS", async () => {
+    const workspaceRoot = join(tempDir, "workspace");
+    await writeUserConfig(tempDir, localReadyConfig());
+    const sessionPath = resolveGlobalStateHome({ homeDir: tempDir }).sessionsSqlitePath;
+    await createBrokenFtsSessionDb(sessionPath);
+
+    const result = await runCliCommand({
+      argv: ["doctor", "--fix"],
+      workspaceRoot,
+      homeDir: tempDir,
+      interactive: false,
+    });
+
+    expect(result.handled).toBe(true);
+    expect(result.exitCode).toBe(0);
+    await expect(ftsSearch(sessionPath, "repairable")).rejects.toThrow();
+  });
+
   it("doctor --fix creates only safe local state skeleton repairs", async () => {
     const workspaceRoot = join(tempDir, "workspace");
     const globalPaths = resolveGlobalStateHome({ homeDir: tempDir });
@@ -959,6 +998,49 @@ async function trustWorkspace(homeDir: string, workspaceRoot: string): Promise<v
   await new WorkspaceTrustStore({
     path: join(homeDir, ".estacoda", "trust.json"),
   }).grant(workspaceRoot, { label: "test" });
+}
+
+async function createBrokenFtsSessionDb(path: string): Promise<void> {
+  await mkdir(dirname(path), { recursive: true });
+  const db = await openSQLiteDatabase({ path });
+  try {
+    db.exec(`
+      create table sessions (
+        id text primary key,
+        profile_id text not null default 'default',
+        created_at text not null,
+        updated_at text not null
+      );
+      create table messages (
+        id text primary key,
+        session_id text not null,
+        role text not null,
+        content text not null,
+        created_at text not null
+      );
+      create table messages_fts (
+        message_id text,
+        content text
+      );
+      insert into sessions (id, profile_id, created_at, updated_at)
+      values ('session-1', 'default', '2026-07-02T00:00:00.000Z', '2026-07-02T00:00:00.000Z');
+      insert into messages (id, session_id, role, content, created_at)
+      values ('message-1', 'session-1', 'user', 'repairable search needle', '2026-07-02T00:00:00.000Z');
+    `);
+  } finally {
+    db.close();
+  }
+}
+
+async function ftsSearch(path: string, query: string): Promise<readonly string[]> {
+  const db = await openSQLiteDatabase({ path, readonly: true });
+  try {
+    return db.query<{ message_id: string }>(
+      "select message_id from messages_fts where messages_fts match ? order by rowid"
+    ).all(query).map((row) => row.message_id);
+  } finally {
+    db.close();
+  }
 }
 
 function localReadyConfig(modelId = "local-test-model"): unknown {
