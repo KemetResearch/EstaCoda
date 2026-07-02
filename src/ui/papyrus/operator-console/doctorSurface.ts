@@ -275,26 +275,26 @@ function localizeDynamicText(value: string, locale: DoctorLocale): string {
 }
 
 function translateDoctorDynamicText(value: string): string | undefined {
-  const memoryFile = /^Memory file will be created on first write: (.+)$/u.exec(value)?.[1];
+  const memoryFile = firstCapture(value, /^Memory file will be created on first write: (.+)$/u);
   if (memoryFile !== undefined) {
     return isolateRtl(`سيتم إنشاء ملف الذاكرة عند أول كتابة: ${isolateLtr(memoryFile)}`);
   }
-  const memoryState = /^Memory supporting state will be created by doctor --fix: (.+)$/u.exec(value)?.[1];
+  const memoryState = firstCapture(value, /^Memory supporting state will be created by doctor --fix: (.+)$/u);
   if (memoryState !== undefined) {
     return isolateRtl(`سيتم إنشاء حالة الذاكرة المساندة عبر ${isolateLtr("doctor --fix")}: ${isolateLtr(memoryState)}`);
   }
-  const sqlitePath = /^SQLite session DB is not initialized: (.+)$/u.exec(value)?.[1];
+  const sqlitePath = firstCapture(value, /^SQLite session DB is not initialized: (.+)$/u);
   if (sqlitePath !== undefined) {
     return isolateRtl(`قاعدة بيانات الجلسات غير مهيأة: ${isolateLtr(sqlitePath)}`);
   }
-  const optionalPython = /^Optional managed Python capabilities not installed: (.+)$/u.exec(value)?.[1];
+  const optionalPython = firstCapture(value, /^Optional managed Python capabilities not installed: (.+)$/u);
   if (optionalPython !== undefined) {
     return isolateRtl(`قدرات Python المُدارة الاختيارية غير مثبتة: ${isolateLtr(optionalPython)}`);
   }
   if (value === "Dependency audit not run.") {
     return isolateRtl("لم يتم تشغيل فحص أمان الاعتماديات.");
   }
-  const advisoryAcks = /^(\d+) security advisory acknowledgement\(s\) active\.$/u.exec(value)?.[1];
+  const advisoryAcks = firstCapture(value, /^(\d+) security advisory acknowledgement\(s\) active\.$/u);
   if (advisoryAcks !== undefined) {
     return isolateRtl(`${isolateLtr(advisoryAcks)} تأكيدات تنبيه أمني نشطة.`);
   }
@@ -307,15 +307,19 @@ function translateDoctorDynamicText(value: string): string | undefined {
   if (value === "pack registry: no packs installed") {
     return isolateRtl("سجل الحزم: لا توجد حزم مثبتة");
   }
-  const packInstalled = /^pack registry: (\d+) installed$/u.exec(value)?.[1];
+  const packInstalled = firstCapture(value, /^pack registry: (\d+) installed$/u);
   if (packInstalled !== undefined) {
     return isolateRtl(`سجل الحزم: ${isolateLtr(packInstalled)} مثبتة`);
   }
-  const packsDisabled = /^(\d+) pack\(s\) disabled$/u.exec(value)?.[1];
+  const packsDisabled = firstCapture(value, /^(\d+) pack\(s\) disabled$/u);
   if (packsDisabled !== undefined) {
     return isolateRtl(`${isolateLtr(packsDisabled)} حزم معطلة`);
   }
   return undefined;
+}
+
+function firstCapture(value: string, pattern: RegExp): string | undefined {
+  return value.match(pattern)?.[1];
 }
 
 function clampWidth(width: number): number {
